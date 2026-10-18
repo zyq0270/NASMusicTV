@@ -28,7 +28,7 @@ import kotlin.math.roundToInt
  * 可视化画质/封面滤镜 → `VisualEffectsSettingsSection`，方案 §3 / Task 3）。
  *
  * [equalizerPresetName] 由 SettingsBranch 传当前预设显示名（只读），
- * Task 4 的均衡器卡呈现它；改预设本身在 EqualizerScreen 里做。
+ * Task 4 的均衡器卡以只读行呈现它；改预设本身在 EqualizerScreen 里做。
  */
 data class PlayerSettingsState(
     val settings: AppSettings,
@@ -59,7 +59,12 @@ data class PlayerSettingsActions(
     val onClearQualityOverrides: (() -> Unit)? = null,
 )
 
-/** 播放设置分区（原 SettingsScreen PLAYBACK 分支，逻辑逐行搬迁） */
+/**
+ * 播放设置分区（原 SettingsScreen PLAYBACK 分支，逻辑逐行搬迁；四卡构成见方案 §3.2）。
+ *
+ * ⚠️ Task 4 只做了「加一层卡片外壳」：行内排布一律未动 ——
+ * 卡②的 5 个时长按钮 Row 既不给宽度也没有选中态，属**线上既有缺陷**，由 T13 一并修。
+ */
 @OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
 internal fun PlayerSettingsSection(
@@ -68,134 +73,146 @@ internal fun PlayerSettingsSection(
 ) {
     Column {
         SectionTitle(stringResource(R.string.settings_playback))
-        SettingSwitch(label = stringResource(R.string.settings_auto_play), description = stringResource(R.string.settings_auto_play_desc), checked = state.settings.autoPlayNext, onClick = { actions.onToggleAutoPlayNext(!state.settings.autoPlayNext) })
-        PlayModeSelector(current = state.settings.defaultPlayMode, onSelect = { actions.onChangePlayMode(it) })
-        // F2-5：跨曲交叉淡入淡出
-        Spacer(modifier = Modifier.height(12.dp))
-        SettingSwitch(
-            label = stringResource(R.string.settings_crossfade),
-            description = stringResource(R.string.settings_crossfade_desc),
-            checked = state.crossfadeEnabled,
-            onClick = { actions.onToggleCrossfade(!state.crossfadeEnabled) }
-        )
-        if (state.crossfadeEnabled) {
-            // 时长档位 2/4/6/8/12 秒（TV 遥控适配的离散选择，比滑条更易 D-Pad 操作）
-            val durations = listOf(2, 4, 6, 8, 12)
-            androidx.compose.foundation.layout.Row(
-                modifier = Modifier.padding(start = 16.dp, top = 4.dp),
-                horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)
+        // 卡① 播放行为（§3.2）
+        SettingsGroupCard(title = stringResource(R.string.settings_group_play_behavior)) {
+            SettingSwitch(label = stringResource(R.string.settings_auto_play), description = stringResource(R.string.settings_auto_play_desc), checked = state.settings.autoPlayNext, onClick = { actions.onToggleAutoPlayNext(!state.settings.autoPlayNext) })
+            PlayModeSelector(current = state.settings.defaultPlayMode, onSelect = { actions.onChangePlayMode(it) })
+        }
+        // 卡② 过渡与音量（crossfade + 时长档位 + 应用内音量）
+        SettingsGroupCard(title = stringResource(R.string.settings_group_transition_volume)) {
+            SettingSwitch(
+                label = stringResource(R.string.settings_crossfade),
+                description = stringResource(R.string.settings_crossfade_desc),
+                checked = state.crossfadeEnabled,
+                onClick = { actions.onToggleCrossfade(!state.crossfadeEnabled) }
+            )
+            if (state.crossfadeEnabled) {
+                // 时长档位 2/4/6/8/12 秒（TV 遥控适配的离散选择，比滑条更易 D-Pad 操作）
+                // ⚠️ 原样搬：该 Row 既不设宽也无选中态（线上既有缺陷，T13 修排布）
+                val durations = listOf(2, 4, 6, 8, 12)
+                androidx.compose.foundation.layout.Row(
+                    modifier = Modifier.padding(start = 16.dp, top = 4.dp),
+                    horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)
+                ) {
+                    durations.forEach { sec ->
+                        SettingActionButton(
+                            label = "${sec}s",
+                            description = "",
+                            onClick = { actions.onChangeCrossfadeDuration(sec) }
+                        )
+                    }
+                }
+            }
+            // ── 应用内音量（应用级增益 0.0–1.0，独立于系统音量）──
+            // 仿封面滤镜的 AdjustButton 行：− [居中百分比] +，5% 步进（0–100）。
+            // 与封面滤镜的差异：百分比用 weight(1f) + 居中文本把 − / + 拉到整行两端，
+            // 视觉上是"一条音量条"而非"左侧一簇按钮"，D-Pad 左右各一格的节奏更明确。
+            Text(
+                text = stringResource(R.string.settings_app_volume),
+                color = NasMusicColors.TextPrimary,
+                fontSize = FontSize.button(),
+                modifier = Modifier.padding(start = 4.dp)
+            )
+            Text(
+                text = stringResource(R.string.settings_app_volume_desc),
+                color = NasMusicColors.TextSecondary,
+                fontSize = FontSize.small(),
+                modifier = Modifier.padding(start = 4.dp, top = 2.dp)
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                durations.forEach { sec ->
+                AdjustButton("-", onClick = {
+                    val pct = (state.appVolume * 100).roundToInt()
+                    actions.onChangeAppVolume((pct - 5).coerceAtLeast(0) / 100f)
+                })
+                Text(
+                    text = "${(state.appVolume * 100).roundToInt()}%",
+                    color = NasMusicColors.Primary,
+                    fontSize = FontSize.title(),
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.weight(1f).padding(horizontal = 8.dp)
+                )
+                AdjustButton("+", onClick = {
+                    val pct = (state.appVolume * 100).roundToInt()
+                    actions.onChangeAppVolume((pct + 5).coerceAtMost(100) / 100f)
+                })
+            }
+        }
+        // 卡③ 音质（全局档位 + 两条说明 + 清除逐曲覆盖）
+        SettingsGroupCard(title = stringResource(R.string.settings_group_quality)) {
+            // F2-6：音质分级（仅 Meting 网络源生效；NAS 原品质直传）
+            Text(
+                text = stringResource(R.string.settings_quality_tier),
+                color = NasMusicColors.TextSecondary,
+                fontSize = FontSize.button(),
+                modifier = Modifier.padding(start = 4.dp)
+            )
+            // v2.35.0 修复：改为**纵向列表**。
+            //
+            // 原实现把 5 个档位放在 `Row` 里，但 `SettingActionButton` 内部是
+            // `Modifier.fillMaxWidth()`（设置页纵向列表的既定样式）—— 在 Row 中第一个按钮
+            // 会撑满整行宽度，后续按钮被挤成 0 宽，用户只看到「自动」一个选项
+            // （实测反馈："网络源音质选项中，只有一个自动"）。该缺陷在 v2.35.0 之前就存在。
+            //
+            // 纵向列表同时解决了另外两个问题：
+            // ① 该组件右侧会渲染固定的「确定」文案，横向排列时 5 个「确定」很易误读；
+            // ② 手机竖屏宽度有限，5 个按钮横排必然溢出（与码率面板同类问题）。
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 16.dp, top = 4.dp)
+            ) {
+                // 遍历单一真相源（含 192 档），避免"常量加了 UI 忘了加"的漂移
+                QualityTiers.all.forEach { tier ->
+                    val label = stringResource(QualityTiers.labelResOf(tier))
                     SettingActionButton(
-                        label = "${sec}s",
-                        description = "",
-                        onClick = { actions.onChangeCrossfadeDuration(sec) }
+                        label = if (state.qualityTier == tier) "▶ $label" else label,
+                        description = if (tier == QualityTiers.AUTO) {
+                            stringResource(R.string.quality_tier_auto_desc)
+                        } else {
+                            QualityTiers.descriptionOf(tier)
+                        },
+                        onClick = { actions.onChangeQualityTier(tier) }
                     )
                 }
             }
-        }
-        // ── 应用内音量（应用级增益 0.0–1.0，独立于系统音量）──
-        // 仿封面滤镜的 AdjustButton 行：− [居中百分比] +，5% 步进（0–100）。
-        // 与封面滤镜的差异：百分比用 weight(1f) + 居中文本把 − / + 拉到整行两端，
-        // 视觉上是"一条音量条"而非"左侧一簇按钮"，D-Pad 左右各一格的节奏更明确。
-        Spacer(modifier = Modifier.height(12.dp))
-        Text(
-            text = stringResource(R.string.settings_app_volume),
-            color = NasMusicColors.TextPrimary,
-            fontSize = FontSize.button(),
-            modifier = Modifier.padding(start = 4.dp)
-        )
-        Text(
-            text = stringResource(R.string.settings_app_volume_desc),
-            color = NasMusicColors.TextSecondary,
-            fontSize = FontSize.small(),
-            modifier = Modifier.padding(start = 4.dp, top = 2.dp)
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            AdjustButton("-", onClick = {
-                val pct = (state.appVolume * 100).roundToInt()
-                actions.onChangeAppVolume((pct - 5).coerceAtLeast(0) / 100f)
-            })
+            // v2.35.0 多码率（§5.3）：两条说明文案，降低用户困惑
+            Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text = "${(state.appVolume * 100).roundToInt()}%",
-                color = NasMusicColors.Primary,
-                fontSize = FontSize.title(),
-                textAlign = TextAlign.Center,
-                modifier = Modifier.weight(1f).padding(horizontal = 8.dp)
+                text = stringResource(R.string.quality_tier_hint_lossless),
+                color = NasMusicColors.TextSecondary,
+                fontSize = FontSize.small(),
+                modifier = Modifier.padding(start = 4.dp)
             )
-            AdjustButton("+", onClick = {
-                val pct = (state.appVolume * 100).roundToInt()
-                actions.onChangeAppVolume((pct + 5).coerceAtMost(100) / 100f)
-            })
+            Text(
+                text = stringResource(R.string.quality_tier_hint_scope),
+                color = NasMusicColors.TextSecondary,
+                fontSize = FontSize.small(),
+                modifier = Modifier.padding(start = 4.dp, top = 2.dp)
+            )
+            // v2.35.0 多码率：清除全部单曲音质覆盖（方案 §5.3）
+            Spacer(modifier = Modifier.height(8.dp))
+            SettingActionButton(
+                label = stringResource(R.string.quality_override_clear),
+                description = stringResource(R.string.quality_override_clear_desc),
+                onClick = { actions.onClearQualityOverrides?.invoke() }
+            )
         }
-        // F2-6：音质分级（仅 Meting 网络源生效；NAS 原品质直传）
-        Spacer(modifier = Modifier.height(12.dp))
-        Text(
-            text = stringResource(R.string.settings_quality_tier),
-            color = NasMusicColors.TextSecondary,
-            fontSize = FontSize.button(),
-            modifier = Modifier.padding(start = 4.dp)
-        )
-        // v2.35.0 修复：改为**纵向列表**。
-        //
-        // 原实现把 5 个档位放在 `Row` 里，但 `SettingActionButton` 内部是
-        // `Modifier.fillMaxWidth()`（设置页纵向列表的既定样式）—— 在 Row 中第一个按钮
-        // 会撑满整行宽度，后续按钮被挤成 0 宽，用户只看到「自动」一个选项
-        // （实测反馈："网络源音质选项中，只有一个自动"）。该缺陷在 v2.35.0 之前就存在。
-        //
-        // 纵向列表同时解决了另外两个问题：
-        // ① 该组件右侧会渲染固定的「确定」文案，横向排列时 5 个「确定」很易误读；
-        // ② 手机竖屏宽度有限，5 个按钮横排必然溢出（与码率面板同类问题）。
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = 16.dp, top = 4.dp)
-        ) {
-            // 遍历单一真相源（含 192 档），避免"常量加了 UI 忘了加"的漂移
-            QualityTiers.all.forEach { tier ->
-                val label = stringResource(QualityTiers.labelResOf(tier))
-                SettingActionButton(
-                    label = if (state.qualityTier == tier) "▶ $label" else label,
-                    description = if (tier == QualityTiers.AUTO) {
-                        stringResource(R.string.quality_tier_auto_desc)
-                    } else {
-                        QualityTiers.descriptionOf(tier)
-                    },
-                    onClick = { actions.onChangeQualityTier(tier) }
-                )
-            }
+        // 卡④ 均衡器：入口 + 当前预设名（只读；改预设在 EqualizerScreen）
+        SettingsGroupCard(title = stringResource(R.string.settings_group_equalizer)) {
+            SettingActionButton(
+                label = stringResource(R.string.settings_equalizer),
+                description = stringResource(R.string.settings_equalizer_desc),
+                onClick = { actions.onOpenEqualizer?.invoke() }
+            )
+            SettingsInfoRow(
+                label = stringResource(R.string.settings_equalizer),
+                value = state.equalizerPresetName
+            )
         }
-        // v2.35.0 多码率（§5.3）：两条说明文案，降低用户困惑
-        Spacer(modifier = Modifier.height(4.dp))
-        Text(
-            text = stringResource(R.string.quality_tier_hint_lossless),
-            color = NasMusicColors.TextSecondary,
-            fontSize = FontSize.small(),
-            modifier = Modifier.padding(start = 4.dp)
-        )
-        Text(
-            text = stringResource(R.string.quality_tier_hint_scope),
-            color = NasMusicColors.TextSecondary,
-            fontSize = FontSize.small(),
-            modifier = Modifier.padding(start = 4.dp, top = 2.dp)
-        )
-        Spacer(modifier = Modifier.height(12.dp))
-        SettingActionButton(
-            label = stringResource(R.string.settings_equalizer),
-            description = stringResource(R.string.settings_equalizer_desc),
-            onClick = { actions.onOpenEqualizer?.invoke() }
-        )
-        // v2.35.0 多码率：清除全部单曲音质覆盖（方案 §5.3）
-        Spacer(modifier = Modifier.height(8.dp))
-        SettingActionButton(
-            label = stringResource(R.string.quality_override_clear),
-            description = stringResource(R.string.quality_override_clear_desc),
-            onClick = { actions.onClearQualityOverrides?.invoke() }
-        )
     }
 }

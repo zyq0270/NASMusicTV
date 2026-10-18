@@ -92,7 +92,8 @@ class HqDiagnosticsGateTest {
             "ui/viewmodel/VocalSeparationViewModel.kt" to "val hqErrorDetail: StateFlow<String?> = playerManager.hqErrorDetail",
             "ui/components/branches/SettingsBranch.kt" to "hqErrorDetail = hqErrorDetail,",
             "ui/screens/SettingsScreen.kt" to "hqErrorDetail: String? = null,",
-            "ui/screens/settings/PlayerSettingsSection.kt" to "state.hqErrorDetail?.let",
+            // T3 起详情面板随人声分离域迁入 LyricsKaraokeSettingsSection（方案 §3）
+            "ui/screens/settings/LyricsKaraokeSettingsSection.kt" to "state.hqErrorDetail?.let",
             // 横幅判空的锚点必须是短文案：详情长期留存，拿它判空横幅就再也关不掉
             "ui/components/branches/NowPlayingBranch.kt" to "hqError = if (hqError != null) (hqErrorDetail ?: hqError) else null,",
         )

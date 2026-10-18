@@ -22,6 +22,9 @@ class SettingsGroupCoverageTest {
 
     private val migrated = listOf(
         "GeneralSettingsSection.kt",
+        "PlayerSettingsSection.kt",
+        "LyricsKaraokeSettingsSection.kt",
+        "VisualEffectsSettingsSection.kt",
     )
 
     private val rowCalls = listOf("SettingSwitch(", "SettingActionButton(", "SettingsInfoRow(")

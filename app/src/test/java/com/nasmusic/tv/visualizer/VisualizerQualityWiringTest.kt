@@ -75,13 +75,14 @@ class VisualizerQualityWiringTest {
 
     @Test
     fun `选择器必须遍历 VisualQuality entries 三档`() {
-        val section = read("ui/screens/settings/PlayerSettingsSection.kt")
+        // T3 起画质选择器随视觉特效域迁入 VisualEffectsSettingsSection（方案 §3）
+        val section = read("ui/screens/settings/VisualEffectsSettingsSection.kt")
         assertTrue(
-            "PlayerSettingsSection 必须遍历 VisualQuality.entries（防三档文案漂移）",
+            "VisualEffectsSettingsSection 必须遍历 VisualQuality.entries（防三档文案漂移）",
             Regex("""VisualQuality\s*\.\s*entries""").containsMatchIn(section)
         )
         assertTrue(
-            "PlayerSettingsActions 必须声明 onChangeVisualizerQuality",
+            "VisualEffectsActions 必须声明 onChangeVisualizerQuality",
             section.contains("onChangeVisualizerQuality")
         )
     }

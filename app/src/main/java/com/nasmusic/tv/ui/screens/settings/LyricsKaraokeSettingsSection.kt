@@ -54,8 +54,10 @@ data class LyricsKaraokeActions(
 /**
  * 歌词与 K 歌分区（人声分离模式 + 分离模型管理；歌词显示卡由 T10 追加）。
  *
- * ⚠️ 本文件当前是**纯搬迁**：UI 逐行来自原 `PlayerSettingsSection.kt` 的分离模式 +
- * 模型块，一处不加；卡片化（SubSectionTitle → `SettingsGroupCard`）在 Task 4 做。
+ * 卡片构成（方案 §3.2，编号此后不再变）：卡②人声分离 / 卡③分离模型；
+ * 卡①歌词显示在 T10 直接以 `SettingsGroupCard` 落地。
+ *
+ * ⚠️ Task 4 只加卡片外壳：卡内行级排布逐行未动（原 `PlayerSettingsSection.kt` 搬迁产物）。
  */
 @OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
@@ -65,144 +67,145 @@ internal fun LyricsKaraokeSettingsSection(
 ) {
     Column {
         SectionTitle(stringResource(R.string.settings_lyrics_karaoke))
-        // ── 人声分离模式 ──
-        SubSectionTitle(stringResource(R.string.settings_separation_mode_title))
-        run {
-            val isHq = state.separationMode == SeparationMode.HIGH_QUALITY
-            val hqLabel = if (state.modelDownloaded) stringResource(R.string.settings_hq_mode_downloaded) else stringResource(R.string.settings_hq_mode_not_downloaded)
-            val hqDesc = when {
-                !state.modelDownloaded -> stringResource(R.string.settings_download_model_hint)
-                isHq -> stringResource(R.string.settings_onnx_inference)
-                else -> stringResource(R.string.settings_dsp_inference)
-            }
-            SettingSwitch(
-                label = hqLabel,
-                description = hqDesc,
-                checked = isHq,
-                enabled = state.modelDownloaded,
-                onClick = { actions.onChangeSeparationMode?.invoke(if (isHq) SeparationMode.FAST else SeparationMode.HIGH_QUALITY) }
-            )
-        }
-        // 模型下载区
-        Spacer(modifier = Modifier.height(12.dp))
-        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
-            if (state.modelDownloading) {
-                // 下载中：进度条
-                Text(
-                    text = stringResource(R.string.settings_downloading_model) + "：${(state.modelDownloadProgress * 100).toInt()}%  (${state.modelDownloadedMB}MB / ${state.modelTotalMB}MB)",
-                    color = NasMusicColors.TextPrimary,
-                    fontSize = FontSize.body()
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(8.dp)
-                        .clip(RoundedCornerShape(4.dp))
-                        .background(NasMusicColors.SurfaceVariant)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth(state.modelDownloadProgress.coerceIn(0f, 1f))
-                            .height(8.dp)
-                            .background(NasMusicColors.Primary, RoundedCornerShape(4.dp))
-                    )
+        // 卡② 人声分离
+        SettingsGroupCard(title = stringResource(R.string.settings_group_separation)) {
+            run {
+                val isHq = state.separationMode == SeparationMode.HIGH_QUALITY
+                val hqLabel = if (state.modelDownloaded) stringResource(R.string.settings_hq_mode_downloaded) else stringResource(R.string.settings_hq_mode_not_downloaded)
+                val hqDesc = when {
+                    !state.modelDownloaded -> stringResource(R.string.settings_download_model_hint)
+                    isHq -> stringResource(R.string.settings_onnx_inference)
+                    else -> stringResource(R.string.settings_dsp_inference)
                 }
-            } else if (state.modelDownloaded) {
-                // 已下载：显示路径 + 大小 + 删除按钮
-                Column {
+                SettingSwitch(
+                    label = hqLabel,
+                    description = hqDesc,
+                    checked = isHq,
+                    enabled = state.modelDownloaded,
+                    onClick = { actions.onChangeSeparationMode?.invoke(if (isHq) SeparationMode.FAST else SeparationMode.HIGH_QUALITY) }
+                )
+            }
+        }
+        // 卡③ 分离模型（下载中进度 / 已下载路径+删除 / 未下载下载按钮，三态互斥）
+        SettingsGroupCard(title = stringResource(R.string.settings_group_model)) {
+            Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
+                if (state.modelDownloading) {
+                    // 下载中：进度条
                     Text(
-                        text = stringResource(R.string.settings_model_downloaded_size, state.modelSizeMB),
+                        text = stringResource(R.string.settings_downloading_model) + "：${(state.modelDownloadProgress * 100).toInt()}%  (${state.modelDownloadedMB}MB / ${state.modelTotalMB}MB)",
                         color = NasMusicColors.TextPrimary,
                         fontSize = FontSize.body()
                     )
-                    Text(
-                        text = stringResource(R.string.settings_model_path, state.modelPath),
-                        color = NasMusicColors.TextSecondary,
-                        fontSize = FontSize.small()
-                    )
                     Spacer(modifier = Modifier.height(8.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(8.dp)
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(NasMusicColors.SurfaceVariant)
                     ) {
-                        Box(modifier = Modifier.weight(1f)) {
-                            SettingActionButton(
-                                label = stringResource(R.string.settings_delete_model),
-                                description = stringResource(R.string.settings_delete_model_desc),
-                                onClick = { actions.onDeleteModel?.invoke() }
-                            )
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth(state.modelDownloadProgress.coerceIn(0f, 1f))
+                                .height(8.dp)
+                                .background(NasMusicColors.Primary, RoundedCornerShape(4.dp))
+                        )
+                    }
+                } else if (state.modelDownloaded) {
+                    // 已下载：显示路径 + 大小 + 删除按钮
+                    Column {
+                        Text(
+                            text = stringResource(R.string.settings_model_downloaded_size, state.modelSizeMB),
+                            color = NasMusicColors.TextPrimary,
+                            fontSize = FontSize.body()
+                        )
+                        Text(
+                            text = stringResource(R.string.settings_model_path, state.modelPath),
+                            color = NasMusicColors.TextSecondary,
+                            fontSize = FontSize.small()
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Box(modifier = Modifier.weight(1f)) {
+                                SettingActionButton(
+                                    label = stringResource(R.string.settings_delete_model),
+                                    description = stringResource(R.string.settings_delete_model_desc),
+                                    onClick = { actions.onDeleteModel?.invoke() }
+                                )
+                            }
+                            Box(modifier = Modifier.weight(1f)) {
+                                SettingActionButton(
+                                    label = stringResource(R.string.settings_scan_upload_model),
+                                    description = stringResource(R.string.settings_scan_upload_model_desc),
+                                    onClick = { actions.onScanTransferModel?.invoke() }
+                                )
+                            }
                         }
-                        Box(modifier = Modifier.weight(1f)) {
-                            SettingActionButton(
-                                label = stringResource(R.string.settings_scan_upload_model),
-                                description = stringResource(R.string.settings_scan_upload_model_desc),
-                                onClick = { actions.onScanTransferModel?.invoke() }
-                            )
+                    }
+                } else {
+                    // 未下载：显示下载按钮 + 路径 + 扫码上传
+                    Column {
+                        Text(
+                            text = stringResource(R.string.settings_network_model_not_downloaded),
+                            color = NasMusicColors.TextSecondary,
+                            fontSize = FontSize.body()
+                        )
+                        Text(
+                            text = stringResource(R.string.settings_storage_path, state.modelPath),
+                            color = NasMusicColors.TextSecondary,
+                            fontSize = FontSize.small()
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Box(modifier = Modifier.weight(1f)) {
+                                SettingActionButton(
+                                    label = stringResource(R.string.settings_download_separation_model),
+                                    description = stringResource(R.string.settings_download_separation_model_desc),
+                                    onClick = { actions.onDownloadModel?.invoke() }
+                                )
+                            }
+                            Box(modifier = Modifier.weight(1f)) {
+                                SettingActionButton(
+                                    label = stringResource(R.string.settings_scan_upload_model),
+                                    description = stringResource(R.string.settings_scan_upload_model_desc),
+                                    onClick = { actions.onScanTransferModel?.invoke() }
+                                )
+                            }
                         }
                     }
                 }
-            } else {
-                // 未下载：显示下载按钮 + 路径 + 扫码上传
-                Column {
-                    Text(
-                        text = stringResource(R.string.settings_network_model_not_downloaded),
-                        color = NasMusicColors.TextSecondary,
-                        fontSize = FontSize.body()
-                    )
-                    Text(
-                        text = stringResource(R.string.settings_storage_path, state.modelPath),
-                        color = NasMusicColors.TextSecondary,
-                        fontSize = FontSize.small()
-                    )
+                state.modelDownloadError?.let { err ->
                     Spacer(modifier = Modifier.height(8.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Box(modifier = Modifier.weight(1f)) {
-                            SettingActionButton(
-                                label = stringResource(R.string.settings_download_separation_model),
-                                description = stringResource(R.string.settings_download_separation_model_desc),
-                                onClick = { actions.onDownloadModel?.invoke() }
-                            )
-                        }
-                        Box(modifier = Modifier.weight(1f)) {
-                            SettingActionButton(
-                                label = stringResource(R.string.settings_scan_upload_model),
-                                description = stringResource(R.string.settings_scan_upload_model_desc),
-                                onClick = { actions.onScanTransferModel?.invoke() }
-                            )
-                        }
-                    }
+                    Text(text = err, color = NasMusicColors.Danger, fontSize = FontSize.small())
                 }
             }
-            state.modelDownloadError?.let { err ->
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(text = err, color = NasMusicColors.Danger, fontSize = FontSize.small())
-            }
-        }
-        // ── 高质量分离失败详情（本轮长期留存，供用户对着屏幕截图回传）──
-        state.hqErrorDetail?.let { detail ->
-            Spacer(modifier = Modifier.height(16.dp))
-            Text(
-                text = stringResource(R.string.settings_hq_failure_detail_title),
-                color = NasMusicColors.Danger,
-                fontSize = FontSize.body()
-            )
-            Spacer(modifier = Modifier.height(6.dp))
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(NasMusicColors.SurfaceVariant)
-                    .padding(horizontal = 12.dp, vertical = 10.dp)
-            ) {
+            // ── 高质量分离失败详情（本轮长期留存，供用户对着屏幕截图回传）──
+            state.hqErrorDetail?.let { detail ->
                 Text(
-                    text = detail,
-                    color = NasMusicColors.TextPrimary,
-                    fontSize = FontSize.small()
+                    text = stringResource(R.string.settings_hq_failure_detail_title),
+                    color = NasMusicColors.Danger,
+                    fontSize = FontSize.body()
                 )
+                Spacer(modifier = Modifier.height(6.dp))
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(NasMusicColors.SurfaceVariant)
+                        .padding(horizontal = 12.dp, vertical = 10.dp)
+                ) {
+                    Text(
+                        text = detail,
+                        color = NasMusicColors.TextPrimary,
+                        fontSize = FontSize.small()
+                    )
+                }
             }
         }
     }

@@ -239,6 +239,14 @@
     <string name="settings_group_theme">外观与动效</string>
     <string name="settings_group_language">界面语言</string>
     <string name="settings_group_orientation">屏幕方向</string>
+    <string name="settings_group_play_behavior">播放行为</string>
+    <string name="settings_group_transition_volume">过渡与音量</string>
+    <string name="settings_group_quality">音质</string>
+    <string name="settings_group_equalizer">均衡器</string>
+    <string name="settings_group_separation">人声分离</string>
+    <string name="settings_group_model">分离模型</string>
+    <string name="settings_group_visualizer">可视化</string>
+    <string name="settings_group_cover_filter">封面滤镜</string>
     <string name="settings_playback">播放</string>
     <string name="settings_lyrics_karaoke">歌词与 K 歌</string>
     <string name="settings_visual_effects">视觉特效</string>

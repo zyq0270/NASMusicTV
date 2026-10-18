@@ -236,6 +236,14 @@
     <string name="settings_group_theme">Appearance &amp; motion</string>
     <string name="settings_group_language">Language</string>
     <string name="settings_group_orientation">Screen orientation</string>
+    <string name="settings_group_play_behavior">Playback Behavior</string>
+    <string name="settings_group_transition_volume">Transition &amp; Volume</string>
+    <string name="settings_group_quality">Audio Quality</string>
+    <string name="settings_group_equalizer">Equalizer</string>
+    <string name="settings_group_separation">Vocal Separation</string>
+    <string name="settings_group_model">Separation Model</string>
+    <string name="settings_group_visualizer">Visualizer</string>
+    <string name="settings_group_cover_filter">Cover Filter</string>
     <string name="settings_playback">Playback</string>
     <string name="settings_lyrics_karaoke">Lyrics &amp; Karaoke</string>
     <string name="settings_visual_effects">Visual Effects</string>
