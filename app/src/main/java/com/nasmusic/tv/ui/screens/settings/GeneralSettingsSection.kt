@@ -1,11 +1,9 @@
 package com.nasmusic.tv.ui.screens.settings
 
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -53,104 +51,100 @@ internal fun GeneralSettingsSection(
 ) {
     Column {
         SectionTitle(stringResource(R.string.settings_general))
-        SubSectionTitle(stringResource(R.string.settings_language))
-        Text(
-            text = stringResource(R.string.settings_language_desc),
-            color = NasMusicColors.TextSecondary,
-            fontSize = FontSize.small(),
-            modifier = Modifier.padding(start = 4.dp, bottom = 8.dp)
-        )
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.CenterVertically
+        // 卡① 界面语言：说明升格为卡片 description（§4.3：SubSectionTitle 由卡片头取代）
+        SettingsGroupCard(
+            title = stringResource(R.string.settings_group_language),
+            description = stringResource(R.string.settings_language_desc),
         ) {
-            listOf(
-                "system" to stringResource(R.string.settings_language_system),
-                "zh" to stringResource(R.string.settings_language_zh),
-                "en" to stringResource(R.string.settings_language_en)
-            ).forEach { (value, label) ->
-                val selected = state.language == value
-                FocusableSurface(
-                    onClick = { actions.onChangeLanguage?.invoke(value) },
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(10.dp),
-                    containerColor = if (selected) NasMusicColors.Primary.copy(alpha = 0.18f) else androidx.compose.ui.graphics.Color.Transparent,
-                    contentColor = if (selected) NasMusicColors.Primary else NasMusicColors.TextPrimary,
-                    focusedContainerColor = if (selected) NasMusicColors.Primary.copy(alpha = 0.3f) else NasMusicColors.SurfaceVariant,
-                    focusedContentColor = if (selected) NasMusicColors.Primary else NasMusicColors.TextPrimary,
-                    focusedScale = 1.05f
-                ) {
-                    Text(
-                        text = label,
-                        color = LocalFocusableContentColor.current,
-                        fontSize = FontSize.body(),
-                        fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
-                    )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                listOf(
+                    "system" to stringResource(R.string.settings_language_system),
+                    "zh" to stringResource(R.string.settings_language_zh),
+                    "en" to stringResource(R.string.settings_language_en)
+                ).forEach { (value, label) ->
+                    val selected = state.language == value
+                    FocusableSurface(
+                        onClick = { actions.onChangeLanguage?.invoke(value) },
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(10.dp),
+                        containerColor = if (selected) NasMusicColors.Primary.copy(alpha = 0.18f) else androidx.compose.ui.graphics.Color.Transparent,
+                        contentColor = if (selected) NasMusicColors.Primary else NasMusicColors.TextPrimary,
+                        focusedContainerColor = if (selected) NasMusicColors.Primary.copy(alpha = 0.3f) else NasMusicColors.SurfaceVariant,
+                        focusedContentColor = if (selected) NasMusicColors.Primary else NasMusicColors.TextPrimary,
+                        focusedScale = 1.05f
+                    ) {
+                        Text(
+                            text = label,
+                            color = LocalFocusableContentColor.current,
+                            fontSize = FontSize.body(),
+                            fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
+                        )
+                    }
                 }
             }
         }
-        Spacer(modifier = Modifier.height(8.dp))
-        SettingSwitch(label = stringResource(R.string.settings_dark_theme), description = stringResource(R.string.settings_dark_theme_desc), checked = state.settings.darkTheme, onClick = { actions.onToggleDarkTheme(!state.settings.darkTheme) })
-        SettingSwitch(label = stringResource(R.string.settings_animations), description = stringResource(R.string.settings_animations_desc), checked = state.settings.animationsEnabled, onClick = { actions.onToggleAnimations(!state.settings.animationsEnabled) })
-        SubSectionTitle(stringResource(R.string.settings_font_size))
-        // 字体字号调整（在当前Theme档位基础上增减）
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            AdjustButton("-", onClick = { actions.onChangeFontAdjustment((state.fontAdjustment - 1).coerceAtLeast(-8)) })
-            Text(
-                text = if (state.fontAdjustment == 0) stringResource(R.string.settings_font_standard) else if (state.fontAdjustment > 0) "+${state.fontAdjustment}" else "${state.fontAdjustment}",
-                color = NasMusicColors.Primary,
-                fontSize = FontSize.title(),
-                modifier = Modifier.widthIn(min = 100.dp).padding(horizontal = 8.dp),
-                textAlign = TextAlign.Center
-            )
-            AdjustButton("+", onClick = { actions.onChangeFontAdjustment((state.fontAdjustment + 1).coerceAtMost(8)) })
+        // 卡② 外观与动效：暗色主题 / 动画效果 / 字号调整（原 settings_font_size 小节并入）
+        SettingsGroupCard(title = stringResource(R.string.settings_group_theme)) {
+            SettingSwitch(label = stringResource(R.string.settings_dark_theme), description = stringResource(R.string.settings_dark_theme_desc), checked = state.settings.darkTheme, onClick = { actions.onToggleDarkTheme(!state.settings.darkTheme) })
+            SettingSwitch(label = stringResource(R.string.settings_animations), description = stringResource(R.string.settings_animations_desc), checked = state.settings.animationsEnabled, onClick = { actions.onToggleAnimations(!state.settings.animationsEnabled) })
+            // 字体字号调整（在当前Theme档位基础上增减）
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                AdjustButton("-", onClick = { actions.onChangeFontAdjustment((state.fontAdjustment - 1).coerceAtLeast(-8)) })
+                Text(
+                    text = if (state.fontAdjustment == 0) stringResource(R.string.settings_font_standard) else if (state.fontAdjustment > 0) "+${state.fontAdjustment}" else "${state.fontAdjustment}",
+                    color = NasMusicColors.Primary,
+                    fontSize = FontSize.title(),
+                    modifier = Modifier.widthIn(min = 100.dp).padding(horizontal = 8.dp),
+                    textAlign = TextAlign.Center
+                )
+                AdjustButton("+", onClick = { actions.onChangeFontAdjustment((state.fontAdjustment + 1).coerceAtMost(8)) })
+            }
         }
-        Spacer(modifier = Modifier.height(12.dp))
-        // v2.36.0：屏幕方向（L1 全局策略）—— 「自动」只能从这里进入（L2 顶部栏按钮只在竖/横间循环）
-        SubSectionTitle(stringResource(R.string.settings_display_orientation))
-        Text(
-            text = stringResource(R.string.settings_orientation_hint),
-            color = NasMusicColors.TextSecondary,
-            fontSize = FontSize.small(),
-            modifier = Modifier.padding(start = 4.dp, bottom = 8.dp)
-        )
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.CenterVertically
+        // 卡③ 屏幕方向：说明升格为卡片 description
+        SettingsGroupCard(
+            title = stringResource(R.string.settings_group_orientation),
+            description = stringResource(R.string.settings_orientation_hint),
         ) {
-            listOf(
-                "auto" to stringResource(R.string.settings_orientation_auto),
-                "portrait" to stringResource(R.string.settings_orientation_portrait),
-                "landscape" to stringResource(R.string.settings_orientation_landscape)
-            ).forEach { (value, label) ->
-                val selected = state.screenOrientation == value
-                FocusableSurface(
-                    onClick = { actions.onChangeScreenOrientation?.invoke(value) },
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(10.dp),
-                    containerColor = if (selected) NasMusicColors.Primary.copy(alpha = 0.18f) else androidx.compose.ui.graphics.Color.Transparent,
-                    contentColor = if (selected) NasMusicColors.Primary else NasMusicColors.TextPrimary,
-                    focusedContainerColor = if (selected) NasMusicColors.Primary.copy(alpha = 0.3f) else NasMusicColors.SurfaceVariant,
-                    focusedContentColor = if (selected) NasMusicColors.Primary else NasMusicColors.TextPrimary,
-                    focusedScale = 1.05f
-                ) {
-                    Text(
-                        text = label,
-                        color = LocalFocusableContentColor.current,
-                        fontSize = FontSize.body(),
-                        fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
-                    )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                listOf(
+                    "auto" to stringResource(R.string.settings_orientation_auto),
+                    "portrait" to stringResource(R.string.settings_orientation_portrait),
+                    "landscape" to stringResource(R.string.settings_orientation_landscape)
+                ).forEach { (value, label) ->
+                    val selected = state.screenOrientation == value
+                    FocusableSurface(
+                        onClick = { actions.onChangeScreenOrientation?.invoke(value) },
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(10.dp),
+                        containerColor = if (selected) NasMusicColors.Primary.copy(alpha = 0.18f) else androidx.compose.ui.graphics.Color.Transparent,
+                        contentColor = if (selected) NasMusicColors.Primary else NasMusicColors.TextPrimary,
+                        focusedContainerColor = if (selected) NasMusicColors.Primary.copy(alpha = 0.3f) else NasMusicColors.SurfaceVariant,
+                        focusedContentColor = if (selected) NasMusicColors.Primary else NasMusicColors.TextPrimary,
+                        focusedScale = 1.05f
+                    ) {
+                        Text(
+                            text = label,
+                            color = LocalFocusableContentColor.current,
+                            fontSize = FontSize.body(),
+                            fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
+                        )
+                    }
                 }
             }
         }
-        Spacer(modifier = Modifier.height(12.dp))
     }
 }

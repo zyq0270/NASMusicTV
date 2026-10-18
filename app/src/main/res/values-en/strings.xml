@@ -233,6 +233,9 @@
 
     <!-- Settings -->
     <string name="settings_general">General</string>
+    <string name="settings_group_theme">Appearance &amp; motion</string>
+    <string name="settings_group_language">Language</string>
+    <string name="settings_group_orientation">Screen orientation</string>
     <string name="settings_playback">Playback</string>
 
     <!-- Photo wall section -->

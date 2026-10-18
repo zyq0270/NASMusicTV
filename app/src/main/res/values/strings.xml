@@ -236,6 +236,9 @@
 
     <!-- Settings -->
     <string name="settings_general">通用</string>
+    <string name="settings_group_theme">外观与动效</string>
+    <string name="settings_group_language">界面语言</string>
+    <string name="settings_group_orientation">屏幕方向</string>
     <string name="settings_playback">播放</string>
 
     <!-- 照片墙分区（§7.2） -->
