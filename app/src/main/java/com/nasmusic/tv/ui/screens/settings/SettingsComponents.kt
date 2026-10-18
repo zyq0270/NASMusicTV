@@ -1,9 +1,11 @@
 package com.nasmusic.tv.ui.screens.settings
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -18,6 +20,7 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -49,6 +52,60 @@ internal fun SectionTitle(text: String) {
         fontSize = FontSize.subtitle(),
         modifier = Modifier.padding(bottom = 12.dp, start = 4.dp)
     )
+}
+
+/**
+ * 设置分组卡片：卡片头 + 内部留白；行组件保持原样嵌入（方案 §4.1/§4.2）。
+ *
+ * ⛔ 卡片**不可聚焦**（不加 `FocusableSurface`）：TV 上焦点必须逐行落在真实控件上，
+ * 卡片参与聚焦会多出一跳、破坏既有 `navFocusRequesters` 节奏（§4.6）。
+ */
+@Composable
+internal fun SettingsGroupCard(
+    title: String,
+    modifier: Modifier = Modifier,
+    description: String? = null,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(bottom = SettingsTokens.cardGap)
+            .clip(SettingsTokens.cardShape)
+            .background(NasMusicColors.Surface.copy(alpha = 0.45f))
+            .border(1.dp, NasMusicColors.Border, SettingsTokens.cardShape)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .width(3.dp).height(14.dp)
+                    .background(NasMusicColors.Primary, RoundedCornerShape(2.dp))
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = title,
+                color = NasMusicColors.Primary,
+                fontSize = FontSize.button(),
+                fontWeight = FontWeight.Bold
+            )
+        }
+        if (description != null) {
+            Text(
+                text = description,
+                color = NasMusicColors.TextSecondary,
+                fontSize = FontSize.small(),
+                modifier = Modifier.padding(start = 27.dp, end = 16.dp, bottom = 6.dp)
+            )
+        }
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = SettingsTokens.cardInnerHPadding).padding(bottom = SettingsTokens.cardInnerHPadding),
+            verticalArrangement = Arrangement.spacedBy(SettingsTokens.rowGap),
+            content = content
+        )
+    }
 }
 
 /** 分区内的分组小标题（用于"网盘"下区分百度/其他） */
