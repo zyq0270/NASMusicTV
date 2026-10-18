@@ -26,6 +26,7 @@ class SettingsGroupCoverageTest {
         "LyricsKaraokeSettingsSection.kt",
         "VisualEffectsSettingsSection.kt",
         "PhotoWallSettingsSection.kt",
+        "DownloadSettingsSection.kt",
     )
 
     private val rowCalls = listOf("SettingSwitch(", "SettingActionButton(", "SettingsInfoRow(")
