@@ -364,6 +364,11 @@
     <string name="settings_network">网络检测</string>
     <string name="settings_network_advanced">网络高级</string>
     <string name="settings_about">关于</string>
+    <!-- 关于分区四卡标题（T8） -->
+    <string name="settings_group_version">版本信息</string>
+    <string name="settings_group_connection_info">连接信息</string>
+    <string name="settings_group_capabilities">能力说明</string>
+    <string name="settings_group_opensource">开源与许可</string>
     <string name="settings_dark_theme">暗色主题</string>
     <string name="settings_dark_theme_desc">使用深色背景保护视力</string>
     <string name="settings_animations">界面动画</string>
@@ -383,11 +388,20 @@
     <string name="settings_clear_cover_cache">清除封面缓存</string>
     <string name="settings_cache_switch">缓存开关</string>
     <string name="settings_cache_clear">缓存清理</string>
+    <!-- 缓存分区两卡标题（T8；占用一览卡由 T8b 建） -->
+    <string name="settings_group_cache_policy">缓存策略</string>
+    <string name="settings_group_cache_clear">占用与清理</string>
     <string name="settings_clear_mv_cache">清除 MV 缓存</string>
     <string name="settings_clear_mv_cache_desc">删除所有已缓存的 MV 搜索结果（bvid）</string>
     <string name="settings_network_test">测试网络</string>
     <string name="settings_network_testing">测试中...</string>
     <string name="settings_network_test_desc">测试设备是否能访问互联网</string>
+    <!-- 网络分区五卡标题（T8） -->
+    <string name="settings_group_connectivity">连通性</string>
+    <string name="settings_group_search_endpoints">音乐搜索端点</string>
+    <string name="settings_group_mv_endpoints">MV 端点</string>
+    <string name="settings_group_lyrics_endpoints">歌词端点</string>
+    <string name="settings_group_weather_key">天气 API Key</string>
     <string name="settings_network_search">网络搜索</string>
     <string name="settings_meting_api_url">Meting-API 端点</string>
     <string name="settings_meting_api_url_desc">网络搜索所用 API 地址，可自建或替换为其他公共端点</string>
@@ -422,6 +436,10 @@
     <string name="settings_cover_blur_radius">模糊强度: %dpx</string>
     <string name="settings_cover_dark_overlay">暗色遮罩: %d%%</string>
     <string name="settings_data">数据管理</string>
+    <!-- 数据分区三卡标题（T8） -->
+    <string name="settings_group_backup">备份与恢复</string>
+    <string name="settings_group_playlist_import">歌单导入</string>
+    <string name="settings_group_play_stats">播放统计</string>
     <string name="settings_data_desc">导出或恢复收藏、歌单、播放统计等数据</string>
     <string name="settings_export_backup">导出备份</string>
     <string name="settings_export_backup_desc">将收藏、歌单、播放统计等数据导出到本地文件</string>

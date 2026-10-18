@@ -1,5 +1,6 @@
 package com.nasmusic.tv.ui.screens.settings
 
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -39,7 +40,13 @@ data class DataSettingsActions(
     val onConsumePlaylistImportMessage: (() -> Unit)? = null,
 )
 
-/** 数据管理分区（原 SettingsScreen DATA 分支，逻辑逐行搬迁） */
+/**
+ * 数据管理分区（原 SettingsScreen DATA 分支，逻辑逐行搬迁；三卡构成见方案 §3.2 / Task 8）。
+ *
+ * ⚠️ Task 8 只做「裸 `Text` / `SubSectionTitle` 标题 → `SettingsGroupCard` 卡片头」。
+ * ⚠️ 播放统计入口按方案 §3.2 从原第三位上移到分区**末尾独立成卡**（①备份与恢复
+ * ②歌单导入 ③播放统计），其余行级排布与条件渲染逐行未动。
+ */
 @OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
 internal fun DataSettingsSection(
@@ -47,7 +54,7 @@ internal fun DataSettingsSection(
     actions: DataSettingsActions,
     onDeleteRequested: (BackupFileUtils.BackupFile) -> Unit
 ) {
-    androidx.compose.foundation.layout.Column {
+    Column {
         SectionTitle(stringResource(R.string.settings_data))
         Text(
             text = stringResource(R.string.settings_data_desc),
@@ -70,86 +77,91 @@ internal fun DataSettingsSection(
                 modifier = Modifier.padding(start = 4.dp, bottom = 12.dp)
             )
         }
-        // 导出备份
-        if (actions.onExportBackup != null) {
-            SettingActionButton(
-                label = stringResource(R.string.settings_export_backup),
-                description = stringResource(R.string.settings_export_backup_desc),
-                onClick = { actions.onExportBackup?.invoke() }
+        // 卡① 备份与恢复：导出、扫码传输、备份文件列表（方案 §3.2）
+        SettingsGroupCard(title = stringResource(R.string.settings_group_backup)) {
+            // 导出备份
+            if (actions.onExportBackup != null) {
+                SettingActionButton(
+                    label = stringResource(R.string.settings_export_backup),
+                    description = stringResource(R.string.settings_export_backup_desc),
+                    onClick = { actions.onExportBackup?.invoke() }
+                )
+            }
+            // 扫码传输（手机下载/上传备份）
+            if (actions.onScanTransferBackup != null) {
+                SettingActionButton(
+                    label = stringResource(R.string.settings_scan_transfer),
+                    description = stringResource(R.string.settings_scan_transfer_desc),
+                    onClick = { actions.onScanTransferBackup?.invoke() }
+                )
+            }
+            // 备份文件列表
+            Text(
+                text = stringResource(R.string.settings_backup_list),
+                color = NasMusicColors.Primary,
+                fontSize = FontSize.subtitle(),
+                modifier = Modifier.padding(bottom = 8.dp, start = 4.dp)
             )
+            if (state.backupFiles.isEmpty()) {
+                Text(
+                    text = stringResource(R.string.settings_backup_empty),
+                    color = NasMusicColors.TextSecondary,
+                    fontSize = FontSize.body(),
+                    modifier = Modifier.padding(start = 4.dp)
+                )
+            } else {
+                state.backupFiles.forEach { file ->
+                    BackupFileRow(
+                        file = file,
+                        onRestore = { actions.onImportBackup?.invoke(file.uri) },
+                        onDelete = { onDeleteRequested(file) }
+                    )
+                }
+            }
+            // 从备份列表恢复（电视无系统文件选择器，恢复入口即上方备份文件列表）
+            // ⚠️ 备份结果消息已上移到分区顶部，见上文 —— 不要在这里再加一份。
         }
-        // 扫码传输（手机下载/上传备份）
-        if (actions.onScanTransferBackup != null) {
-            SettingActionButton(
-                label = stringResource(R.string.settings_scan_transfer),
-                description = stringResource(R.string.settings_scan_transfer_desc),
-                onClick = { actions.onScanTransferBackup?.invoke() }
-            )
+        // 卡② 歌单导入：导入入口、最近导入记录（方案 §3.2；2026-09-18 新增：§4.4.2）
+        SettingsGroupCard(title = stringResource(R.string.settings_group_playlist_import)) {
+            if (actions.onImportPlaylistFile != null) {
+                SettingActionButton(
+                    label = stringResource(R.string.settings_import_playlist),
+                    description = stringResource(R.string.settings_import_playlist_desc),
+                    onClick = { actions.onImportPlaylistFile?.invoke() }
+                )
+            }
+            // 最近导入记录（无删除操作；点击打开 → 「我的」，2026-09-18 用户决策）
+            if (state.playlistImportHistory.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(24.dp))
+                SubSectionTitle(stringResource(R.string.settings_playlist_import_history))
+                state.playlistImportHistory.forEach { item ->
+                    ImportedPlaylistRow(
+                        item = item,
+                        onOpen = { actions.onOpenImportedPlaylist?.invoke(item.playlistId) }
+                    )
+                }
+            }
+            // 导入结果消息
+            if (state.playlistImportMessage != null) {
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(
+                    text = state.playlistImportMessage.text,
+                    color = if (state.playlistImportMessage.isError)
+                        NasMusicColors.Warning else NasMusicColors.Primary,
+                    fontSize = FontSize.button(),
+                    modifier = Modifier.padding(start = 4.dp)
+                )
+            }
         }
-        // F2-1：播放统计面板入口
+        // 卡③ 播放统计：入口（F2-1；方案 §3.2 上移到分区末尾独立成卡）
         if (actions.onOpenPlayStats != null) {
-            SettingActionButton(
-                label = stringResource(R.string.pstats_title),
-                description = stringResource(R.string.pstats_entry_desc),
-                onClick = { actions.onOpenPlayStats?.invoke() }
-            )
-        }
-        // ── 歌单导入（2026-09-18 新增：§4.4.2）──
-        if (actions.onImportPlaylistFile != null) {
-            Spacer(modifier = Modifier.height(8.dp))
-            SettingActionButton(
-                label = stringResource(R.string.settings_import_playlist),
-                description = stringResource(R.string.settings_import_playlist_desc),
-                onClick = { actions.onImportPlaylistFile?.invoke() }
-            )
-        }
-        // 最近导入记录（无删除操作；点击打开 → 「我的」，2026-09-18 用户决策）
-        if (state.playlistImportHistory.isNotEmpty()) {
-            Spacer(modifier = Modifier.height(24.dp))
-            SubSectionTitle(stringResource(R.string.settings_playlist_import_history))
-            state.playlistImportHistory.forEach { item ->
-                ImportedPlaylistRow(
-                    item = item,
-                    onOpen = { actions.onOpenImportedPlaylist?.invoke(item.playlistId) }
+            SettingsGroupCard(title = stringResource(R.string.settings_group_play_stats)) {
+                SettingActionButton(
+                    label = stringResource(R.string.pstats_title),
+                    description = stringResource(R.string.pstats_entry_desc),
+                    onClick = { actions.onOpenPlayStats?.invoke() }
                 )
             }
         }
-        // 导入结果消息
-        if (state.playlistImportMessage != null) {
-            Spacer(modifier = Modifier.height(16.dp))
-            Text(
-                text = state.playlistImportMessage.text,
-                color = if (state.playlistImportMessage.isError)
-                    NasMusicColors.Warning else NasMusicColors.Primary,
-                fontSize = FontSize.button(),
-                modifier = Modifier.padding(start = 4.dp)
-            )
-        }
-        // 备份文件列表
-        Spacer(modifier = Modifier.height(24.dp))
-        Text(
-            text = stringResource(R.string.settings_backup_list),
-            color = NasMusicColors.Primary,
-            fontSize = FontSize.subtitle(),
-            modifier = Modifier.padding(bottom = 8.dp, start = 4.dp)
-        )
-        if (state.backupFiles.isEmpty()) {
-            Text(
-                text = stringResource(R.string.settings_backup_empty),
-                color = NasMusicColors.TextSecondary,
-                fontSize = FontSize.body(),
-                modifier = Modifier.padding(start = 4.dp)
-            )
-        } else {
-            state.backupFiles.forEach { file ->
-                BackupFileRow(
-                    file = file,
-                    onRestore = { actions.onImportBackup?.invoke(file.uri) },
-                    onDelete = { onDeleteRequested(file) }
-                )
-            }
-        }
-        // 从备份列表恢复（电视无系统文件选择器，恢复入口即上方备份文件列表）
-        // ⚠️ 备份结果消息已上移到分区顶部，见上文 —— 不要在这里再加一份。
     }
 }

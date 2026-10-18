@@ -361,6 +361,11 @@
     <string name="settings_network">Network Test</string>
     <string name="settings_network_advanced">Advanced Network</string>
     <string name="settings_about">About</string>
+    <!-- About section four card titles (T8) -->
+    <string name="settings_group_version">Version Info</string>
+    <string name="settings_group_connection_info">Connection Info</string>
+    <string name="settings_group_capabilities">Capabilities</string>
+    <string name="settings_group_opensource">Open Source &amp; License</string>
     <string name="settings_dark_theme">Dark Theme</string>
     <string name="settings_dark_theme_desc">Use dark background to protect eyes</string>
     <string name="settings_animations">Animations</string>
@@ -380,11 +385,20 @@
     <string name="settings_clear_cover_cache">Clear Cover Cache</string>
     <string name="settings_cache_switch">Cache Switch</string>
     <string name="settings_cache_clear">Cache Cleanup</string>
+    <!-- Cache section two card titles (T8; the usage card is built in T8b) -->
+    <string name="settings_group_cache_policy">Cache Policy</string>
+    <string name="settings_group_cache_clear">Usage &amp; Cleanup</string>
     <string name="settings_clear_mv_cache">Clear MV Cache</string>
     <string name="settings_clear_mv_cache_desc">Delete all cached MV search results (bvid)</string>
     <string name="settings_network_test">Test Network</string>
     <string name="settings_network_testing">Testing…</string>
     <string name="settings_network_test_desc">Test if device can access the Internet</string>
+    <!-- Network section five card titles (T8) -->
+    <string name="settings_group_connectivity">Connectivity</string>
+    <string name="settings_group_search_endpoints">Music Search Endpoints</string>
+    <string name="settings_group_mv_endpoints">MV Endpoints</string>
+    <string name="settings_group_lyrics_endpoints">Lyrics Endpoints</string>
+    <string name="settings_group_weather_key">Weather API Key</string>
     <string name="settings_network_search">Network Search</string>
     <string name="settings_meting_api_url">Meting-API Endpoint</string>
     <string name="settings_meting_api_url_desc">API address for network search, can self-host or use other public endpoints</string>
@@ -419,6 +433,10 @@
     <string name="settings_cover_blur_radius">Blur Strength: %dpx</string>
     <string name="settings_cover_dark_overlay">Dark Overlay: %d%%</string>
     <string name="settings_data">Data Management</string>
+    <!-- Data section three card titles (T8) -->
+    <string name="settings_group_backup">Backup &amp; Restore</string>
+    <string name="settings_group_playlist_import">Playlist Import</string>
+    <string name="settings_group_play_stats">Play Stats</string>
     <string name="settings_data_desc">Export or restore favorites, playlists, play statistics, etc.</string>
     <string name="settings_export_backup">Export Backup</string>
     <string name="settings_export_backup_desc">Export favorites, playlists, play statistics, etc. to local file</string>
