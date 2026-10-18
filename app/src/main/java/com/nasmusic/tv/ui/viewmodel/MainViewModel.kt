@@ -65,6 +65,7 @@ import com.nasmusic.tv.data.model.MusicSourceType
 import com.nasmusic.tv.data.model.MvInfo
 import com.nasmusic.tv.data.model.MvCandidate
 import com.nasmusic.tv.data.model.MvSearchResult
+import com.nasmusic.tv.data.model.NetworkSource
 import com.nasmusic.tv.data.model.RadioStation
 import com.nasmusic.tv.data.model.isRadioSong
 import com.nasmusic.tv.ui.screens.LibraryTab
@@ -565,6 +566,19 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
                 searchVM.searchNetworkSongs(kw)
             }
         }
+    }
+
+    /**
+     * 改**网络搜索默认源**（方案 §6-10 / Task 7：设置页 SOURCES 卡⑤暴露）。
+     *
+     * 与 [selectMusicSource]（当前选中的音乐平台，旧 `searchNetworkPlatform` 兼容态）
+     * 是两回事：本项写 `keyDefaultNetworkSource` ⇒ `appSettings.defaultNetworkSource`
+     * Flow 实时刷新，搜索侧经 `defaultSourceProvider`（NasMusicApp:343）读取。
+     * 判据只认 `appSettings` Flow（`DefaultNetworkSourcePrefTest`），⛔ 不断言
+     * `getDefaultNetworkSourceSync()` 的收敛时序（ProviderMirrorTest 5997380 教训）。
+     */
+    fun updateDefaultNetworkSource(source: NetworkSource) {
+        viewModelScope.launch { prefs.setDefaultNetworkSource(source) }
     }
 
     // ================= 天气电台（R-1：逻辑已迁至 WeatherRadioViewModel，以上为转发） =================

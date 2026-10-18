@@ -48,6 +48,7 @@ import androidx.tv.material3.Text
 import com.nasmusic.tv.R
 import com.nasmusic.tv.data.model.AppSettings
 import com.nasmusic.tv.data.model.BaiduFile
+import com.nasmusic.tv.data.model.NetworkSource
 import com.nasmusic.tv.data.model.PlayMode
 import com.nasmusic.tv.data.model.VisualQuality
 import com.nasmusic.tv.ui.components.BaiduDirPickerDialog
@@ -263,6 +264,8 @@ fun SettingsScreen(
     onListBaiduDirs: (suspend (String) -> List<BaiduFile>)? = null,
     onRebuildBaiduIndex: (() -> Unit)? = null,
     onNavigateToServerConnect: (() -> Unit)? = null,
+    // T7：改网络搜索默认源（SOURCES 卡⑤，写 DataStore）
+    onChangeDefaultNetworkSource: (NetworkSource) -> Unit = {},
     // v2.36.0 竖屏两级页（方案 §4.6 / §8.7）：当前进入的分区（null = 一级列表）
     selectedSection: SettingsSection? = null,
     onOpenSection: (SettingsSection) -> Unit = {},
@@ -660,6 +663,7 @@ var activeSection by remember { mutableStateOf(SettingsSection.GENERAL) }
                             onStartBaiduDeviceCode = onStartBaiduDeviceCode,
                             onLogoutBaidu = onLogoutBaidu,
                             onRebuildBaiduIndex = onRebuildBaiduIndex,
+                            onChangeDefaultNetworkSource = onChangeDefaultNetworkSource,
                         ),
                         dialogs = SourcesDialogActions(
                             onShowBaiduAuthDialog = { showBaiduAuthDialog = true },

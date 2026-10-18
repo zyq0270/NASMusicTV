@@ -328,6 +328,13 @@
     <!-- 本地音乐分区（§五，权限瘦身方案）：总开关 = 音乐权限的唯一申请触发点 -->
     <string name="settings_local_music">本地音乐</string>
     <string name="settings_sources">音乐来源</string>
+    <!-- 来源分区五卡标题（T7）：NAS 卡说明走 description，不进 tab 标题 -->
+    <string name="settings_group_nas_server">NAS 服务器</string>
+    <string name="settings_group_nas_server_desc">服务器地址与账号在连接页填写，本页只做开关与断开</string>
+    <string name="settings_group_local_music">本地曲库</string>
+    <string name="settings_group_netdisk_index">索引与封面</string>
+    <string name="settings_group_default_source">网络搜索默认源</string>
+    <string name="settings_default_source_desc">搜索与点播优先使用的网络音乐来源</string>
     <string name="settings_local_music_source">本地音乐源</string>
     <string name="settings_local_music_source_desc">扫描本机与 U 盘上的音乐；打开后才会申请音乐权限</string>
     <string name="settings_local_music_rescan">重新扫描</string>
@@ -426,8 +433,6 @@
     <string name="settings_delete_backup_confirm_message">确定删除备份文件「%1$s」吗？此操作不可恢复。</string>
     <string name="settings_netdisk">网盘</string>
     <string name="settings_netdisk_group_baidu">百度网盘</string>
-    <string name="settings_netdisk_group_others">其他网盘</string>
-    <string name="settings_netdisk_group_others_desc">即将支持，敬请期待</string>
     <string name="settings_netdisk_enable">启用百度网盘</string>
     <string name="settings_netdisk_enable_desc">开启后可从网盘播放音乐（需登录）</string>
     <string name="settings_netdisk_login">登录百度网盘</string>

@@ -27,6 +27,7 @@ class SettingsGroupCoverageTest {
         "VisualEffectsSettingsSection.kt",
         "PhotoWallSettingsSection.kt",
         "DownloadSettingsSection.kt",
+        "SourcesSettingsSection.kt",
     )
 
     private val rowCalls = listOf("SettingSwitch(", "SettingActionButton(", "SettingsInfoRow(")

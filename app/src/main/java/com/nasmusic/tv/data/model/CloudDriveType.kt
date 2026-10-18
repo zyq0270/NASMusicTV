@@ -6,7 +6,12 @@ import com.nasmusic.tv.R
 /**
  * 网盘类型枚举（可扩展）
  *
- * 首批仅实现百度网盘，阿里云盘/123 网盘/夸克网盘为占位（设置页灰显"敬请期待"）。
+ * v2.39.0 起设置页只渲染百度网盘一项（方案 §6-4，用户 2026-10-18 确认删除
+ * 「其他网盘」占位分组）⇒ 原 `IMPLEMENTED` / `PLACEHOLDER` 两个集合随
+ * `PlaceholderRow` 一并删除。四个枚举条目、`key`、`displayNameRes` 与
+ * [fromKey] **必须保留**：`aliyun` / `123` / `quark` 三个 key 仍可能出现在
+ * 旧 `CloudDriveConfig` JSON 里，`fromKey` 要能解析（删了等于老用户的
+ * 配置读不出来）。
  *
  * @param key         AppPreferences 存储键（与 sourceId 一致）
  * @param displayName 设置页显示名（中文原值，数据用途）
@@ -24,11 +29,6 @@ enum class CloudDriveType(
     QUARK("quark", R.string.cloud_drive_quark, "夸克网盘");
 
     companion object {
-        /** 首批已实现的网盘类型 */
-        val IMPLEMENTED: Set<CloudDriveType> = setOf(BAIDU)
-        /** 占位未实现的（设置页灰显"敬请期待"） */
-        val PLACEHOLDER: Set<CloudDriveType> = entries.toSet() - IMPLEMENTED
-
         fun fromKey(key: String?): CloudDriveType? = entries.find { it.key == key }
     }
 }

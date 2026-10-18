@@ -45,6 +45,54 @@ class SettingsSectionWiringGateTest {
             !en.contains("""name="settings_bogus_section""""))
     }
 
+    /**
+     * 凭据负向断言（§3.3 / Task 7）：设置页**不得内嵌任何凭据输入框** ——
+     * 服务器地址/账号/密码/API Token/访问码一律在独立的 `ServerConnectScreen` 里填
+     * （五条硬依据见 §3.3：HTTP 服务生命周期、焦点域冲突、BACK 栈、竖屏层级、整屏宽度）。
+     * 密码类三件套出现在设置页源码里 = 有人把表单搬进来了，必须当场拦下。
+     */
+    @Test
+    fun `设置页不得内嵌凭据输入框`() {
+        val offenders = settingsKtFiles().flatMap { f ->
+            credentialBanned.filter { f.readText(Charsets.UTF_8).contains(it) }
+                .map { "${f.name}: $it" }
+        }
+        assertTrue(
+            "设置页源码里出现了凭据输入框三件套（凭据一律在 ServerConnectScreen 填，§3.3）：\n" +
+                offenders.joinToString("\n"),
+            offenders.isEmpty(),
+        )
+        // 空转自证：确实扫到了分区源文件
+        assertTrue("设置源码目录里没有 .kt 文件？门禁在空转", settingsKtFiles().isNotEmpty())
+    }
+
+    /** 负向自证：把 TextFieldValue 塞进样例文本，判据必须判负。 */
+    @Test
+    fun `凭据判据不是空转`() {
+        val sample = "val v = TextFieldValue(\"\")"
+        assertTrue(
+            "护栏失效：样例里的 TextFieldValue 没被判为违禁",
+            credentialBanned.any { sample.contains(it) },
+        )
+    }
+
+    private val credentialBanned = listOf(
+        "TextFieldValue",
+        "PasswordVisualTransformation",
+        "KeyboardType.Password",
+    )
+
+    private fun settingsKtFiles(): Array<File> {
+        val candidates = listOf(
+            File("src/main/java/com/nasmusic/tv/ui/screens/settings"),
+            File("app/src/main/java/com/nasmusic/tv/ui/screens/settings"),
+            File("../app/src/main/java/com/nasmusic/tv/ui/screens/settings"),
+        )
+        val found = candidates.firstOrNull { it.isDirectory }
+        assertTrue("找不到设置源码目录（user.dir=${File("").absolutePath}）", found != null)
+        return found!!.listFiles { f -> f.isFile && f.extension == "kt" } ?: emptyArray()
+    }
+
     private fun enumEntries(src: String): List<String> =
         Regex("""^\s{4}([A-Z][A-Z_]+)\(R\.string\.""", RegexOption.MULTILINE)
             .findAll(src).map { it.groupValues[1] }.toList()

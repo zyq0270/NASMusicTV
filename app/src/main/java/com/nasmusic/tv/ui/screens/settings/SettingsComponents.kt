@@ -120,25 +120,6 @@ internal fun SubSectionTitle(text: String) {
     )
 }
 
-/** 未支持网盘占位行（灰显"敬请期待"，不可聚焦） */
-@Composable
-internal fun PlaceholderRow(name: String) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 24.dp, vertical = 12.dp)
-            .background(NasMusicColors.Surface.copy(alpha = 0.4f), RoundedCornerShape(8.dp)),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(text = name, color = NasMusicColors.TextSecondary, fontSize = FontSize.button(), modifier = Modifier.weight(1f))
-        Text(
-            text = stringResource(R.string.settings_netdisk_group_others_desc),
-            color = NasMusicColors.TextSecondary.copy(alpha = 0.7f),
-            fontSize = FontSize.body()
-        )
-    }
-}
-
 @OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
 internal fun SettingSwitch(

@@ -325,6 +325,13 @@
     <!-- Local music section (§5, permission-slim plan): master switch = the only trigger for music permission request -->
     <string name="settings_local_music">Local Music</string>
     <string name="settings_sources">Music Sources</string>
+    <!-- Sources section five card titles (T7); NAS card note lives in card description -->
+    <string name="settings_group_nas_server">NAS Server</string>
+    <string name="settings_group_nas_server_desc">Enter the server address and account on the connect page; this page only has the switch and disconnect</string>
+    <string name="settings_group_local_music">Local Library</string>
+    <string name="settings_group_netdisk_index">Index &amp; Covers</string>
+    <string name="settings_group_default_source">Default Network Search Source</string>
+    <string name="settings_default_source_desc">Preferred source for searching and playing online music</string>
     <string name="settings_local_music_source">Local music source</string>
     <string name="settings_local_music_source_desc">Scan music on this device and USB drives; enabling this asks for music permission</string>
     <string name="settings_local_music_rescan">Rescan</string>
@@ -423,8 +430,6 @@
     <string name="settings_delete_backup_confirm_message">Delete backup file \"%1$s\"? This cannot be undone.</string>
     <string name="settings_netdisk">Netdisk</string>
     <string name="settings_netdisk_group_baidu">Baidu Netdisk</string>
-    <string name="settings_netdisk_group_others">Other Netdisks</string>
-    <string name="settings_netdisk_group_others_desc">Coming soon</string>
     <string name="settings_netdisk_enable">Enable Baidu Netdisk</string>
     <string name="settings_netdisk_enable_desc">Enable to play music from netdisk (login required)</string>
     <string name="settings_netdisk_login">Login to Baidu Netdisk</string>

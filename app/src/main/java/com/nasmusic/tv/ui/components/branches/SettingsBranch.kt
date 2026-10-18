@@ -222,6 +222,8 @@ internal fun SettingsBranch(
                         onListBaiduDirs = { viewModel.listBaiduDirs(it) },
                         onRebuildBaiduIndex = { viewModel.netVM.rebuildBaiduIndex() },
                         onNavigateToServerConnect = { viewModel.navVM.navigateTo(Screen.ServerConnect) },
+                        // T7：默认网络搜索源（写 DataStore，方案 §6-10）
+                        onChangeDefaultNetworkSource = { viewModel.updateDefaultNetworkSource(it) },
                         // 服务器连接设置
                         serverConfig = serverConfig,
                         isConnected = isConnected,
