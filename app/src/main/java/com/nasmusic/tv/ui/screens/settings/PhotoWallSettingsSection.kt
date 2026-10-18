@@ -170,6 +170,13 @@ data class PhotoWallSettingsActions(
     val onReselectPhotos: (() -> Unit)? = null,
 )
 
+/**
+ * 照片墙分区（五卡构成见方案 §3.2 / Task 5）。
+ *
+ * ⚠️ Task 5 把 5 个 `SubSectionTitle` 换成 `SettingsGroupCard`（标题**复用原字符串**，
+ * 不新增 key）。卡内行级排布逐行未动 —— `OptionChip` 同排宽度陷阱等既有缺陷按
+ * 方案留到 T13 修；⛔ 「打开图库开关才申请权限」（§6.2）的 onClick 语义原样保留。
+ */
 @OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
 internal fun PhotoWallSettingsSection(
@@ -185,285 +192,280 @@ internal fun PhotoWallSettingsSection(
 
     Column {
         SectionTitle(stringResource(R.string.settings_photo_wall))
+        // 卡片：照片来源（标题复用原 SubSectionTitle 字符串，方案 T5）
+        SettingsGroupCard(title = stringResource(R.string.settings_photo_wall_sources)) {
+            // 「图库」行**仅手机**渲染（§7.3）：电视没有系统相册，显示它是误导。
+            if (!state.isTV) {
+                // ⛔ 打开图库开关**才**申请权限（§6.2）。`null`（尚未查到）按「需要申请」处理：
+                //    宁可多弹一次说明，也不要静默打开一个没有权限的开关。
+                val needsGrant = runtime.permissionState
+                    ?.let { PhotoWallAccessPolicy.needsPermissionRequest(it) } ?: true
+                SettingSwitch(
+                    label = stringResource(R.string.settings_photo_wall_gallery),
+                    description = stringResource(R.string.settings_photo_wall_gallery_desc),
+                    checked = s.photoWallGalleryEnabled,
+                    onClick = {
+                        when {
+                            s.photoWallGalleryEnabled -> actions.onToggleGallery?.invoke(false)
+                            needsGrant -> showGalleryIntro = true
+                            else -> actions.onToggleGallery?.invoke(true)
+                        }
+                    }
+                )
 
-        // ── 照片来源 ────────────────────────────────────────────────────────
-        SubSectionTitle(stringResource(R.string.settings_photo_wall_sources))
+                // Android 14+「仅选择照片」：说明当前范围 + 给「重新选择照片」入口（§9.6 规则 3）。
+                // 没有这个入口，用户想回到「允许全部」只能自己去系统设置里翻。
+                val isPartial = runtime.permissionState
+                    ?.let { PhotoWallAccessPolicy.isPartial(it) } ?: false
+                if (s.photoWallGalleryEnabled && isPartial) {
+                    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
+                        SettingsInfoRow(
+                            stringResource(R.string.settings_photo_wall_gallery),
+                            stringResource(R.string.settings_photo_wall_gallery_partial)
+                        )
+                    }
+                    SettingActionButton(
+                        label = stringResource(R.string.settings_photo_wall_reselect),
+                        description = stringResource(R.string.settings_photo_wall_reselect_desc),
+                        onClick = { actions.onReselectPhotos?.invoke() }
+                    )
+                }
+            }
 
-        // 「图库」行**仅手机**渲染（§7.3）：电视没有系统相册，显示它是误导。
-        if (!state.isTV) {
-            // ⛔ 打开图库开关**才**申请权限（§6.2）。`null`（尚未查到）按「需要申请」处理：
-            //    宁可多弹一次说明，也不要静默打开一个没有权限的开关。
-            val needsGrant = runtime.permissionState
-                ?.let { PhotoWallAccessPolicy.needsPermissionRequest(it) } ?: true
             SettingSwitch(
-                label = stringResource(R.string.settings_photo_wall_gallery),
-                description = stringResource(R.string.settings_photo_wall_gallery_desc),
-                checked = s.photoWallGalleryEnabled,
-                onClick = {
-                    when {
-                        s.photoWallGalleryEnabled -> actions.onToggleGallery?.invoke(false)
-                        needsGrant -> showGalleryIntro = true
-                        else -> actions.onToggleGallery?.invoke(true)
+                label = stringResource(R.string.settings_photo_wall_external),
+                description = stringResource(R.string.settings_photo_wall_external_desc),
+                checked = s.photoWallExternalEnabled,
+                onClick = { actions.onToggleExternal?.invoke(!s.photoWallExternalEnabled) }
+            )
+
+            // 目录与「仅扫常见目录」只在「外接存储」开启时才出现 —— 关着的时候它们无从作用。
+            if (s.photoWallExternalEnabled) {
+                SettingActionButton(
+                    label = stringResource(R.string.settings_photo_wall_pick_dir),
+                    description = if (s.photoWallDirUri.isBlank()) {
+                        stringResource(R.string.settings_photo_wall_pick_dir_desc)
+                    } else {
+                        s.photoWallDirUri
+                    },
+                    onClick = { actions.onPickDirectory?.invoke() }
+                )
+                // ⛔ 选到内部存储必须**当场给理由**（§6.3）：SAF 选择器无法限制可选范围，
+                //    用户点进来一路选到内部存储是常态，不解释就成了「点了没反应」。
+                runtime.directoryReject?.let { reason ->
+                    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
+                        SettingsInfoRow(
+                            stringResource(R.string.settings_photo_wall_pick_dir),
+                            stringResource(rejectTextRes(reason))
+                        )
                     }
                 }
-            )
-
-            // Android 14+「仅选择照片」：说明当前范围 + 给「重新选择照片」入口（§9.6 规则 3）。
-            // 没有这个入口，用户想回到「允许全部」只能自己去系统设置里翻。
-            val isPartial = runtime.permissionState
-                ?.let { PhotoWallAccessPolicy.isPartial(it) } ?: false
-            if (s.photoWallGalleryEnabled && isPartial) {
-                Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
-                    SettingsInfoRow(
-                        stringResource(R.string.settings_photo_wall_gallery),
-                        stringResource(R.string.settings_photo_wall_gallery_partial)
-                    )
-                }
-                SettingActionButton(
-                    label = stringResource(R.string.settings_photo_wall_reselect),
-                    description = stringResource(R.string.settings_photo_wall_reselect_desc),
-                    onClick = { actions.onReselectPhotos?.invoke() }
+                SettingSwitch(
+                    label = stringResource(R.string.settings_photo_wall_common_dirs),
+                    description = stringResource(R.string.settings_photo_wall_common_dirs_desc),
+                    checked = s.photoWallCommonDirsOnly,
+                    onClick = { actions.onToggleCommonDirsOnly?.invoke(!s.photoWallCommonDirsOnly) }
                 )
             }
-        }
 
-        SettingSwitch(
-            label = stringResource(R.string.settings_photo_wall_external),
-            description = stringResource(R.string.settings_photo_wall_external_desc),
-            checked = s.photoWallExternalEnabled,
-            onClick = { actions.onToggleExternal?.invoke(!s.photoWallExternalEnabled) }
-        )
-
-        // 目录与「仅扫常见目录」只在「外接存储」开启时才出现 —— 关着的时候它们无从作用。
-        if (s.photoWallExternalEnabled) {
-            SettingActionButton(
-                label = stringResource(R.string.settings_photo_wall_pick_dir),
-                description = if (s.photoWallDirUri.isBlank()) {
-                    stringResource(R.string.settings_photo_wall_pick_dir_desc)
-                } else {
-                    s.photoWallDirUri
-                },
-                onClick = { actions.onPickDirectory?.invoke() }
-            )
-            // ⛔ 选到内部存储必须**当场给理由**（§6.3）：SAF 选择器无法限制可选范围，
-            //    用户点进来一路选到内部存储是常态，不解释就成了「点了没反应」。
-            runtime.directoryReject?.let { reason ->
-                Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
-                    SettingsInfoRow(
-                        stringResource(R.string.settings_photo_wall_pick_dir),
-                        stringResource(rejectTextRes(reason))
-                    )
-                }
-            }
             SettingSwitch(
-                label = stringResource(R.string.settings_photo_wall_common_dirs),
-                description = stringResource(R.string.settings_photo_wall_common_dirs_desc),
-                checked = s.photoWallCommonDirsOnly,
-                onClick = { actions.onToggleCommonDirsOnly?.invoke(!s.photoWallCommonDirsOnly) }
+                label = stringResource(R.string.settings_photo_wall_source_balance),
+                description = stringResource(R.string.settings_photo_wall_source_balance_desc),
+                checked = s.photoWallSourceBalance,
+                onClick = { actions.onToggleSourceBalance?.invoke(!s.photoWallSourceBalance) }
             )
-        }
 
-        SettingSwitch(
-            label = stringResource(R.string.settings_photo_wall_source_balance),
-            description = stringResource(R.string.settings_photo_wall_source_balance_desc),
-            checked = s.photoWallSourceBalance,
-            onClick = { actions.onToggleSourceBalance?.invoke(!s.photoWallSourceBalance) }
-        )
-
-        SettingSwitch(
-            label = stringResource(R.string.settings_photo_wall_jellyfin),
-            description = stringResource(R.string.settings_photo_wall_jellyfin_desc),
-            checked = s.photoWallJellyfinEnabled,
-            // 未连接 NAS 时置灰（§7.3）
-            enabled = state.nasConnected,
-            onClick = { actions.onToggleJellyfin?.invoke(!s.photoWallJellyfinEnabled) }
-        )
-
-        // 运行时可派生信息（阶段 9/10 才会有真实数字）
-        Spacer(modifier = Modifier.height(8.dp))
-        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
-            SettingsInfoRow(
-                stringResource(R.string.settings_photo_wall_enabled_sources),
-                enabledSourcesText(s)
+            SettingSwitch(
+                label = stringResource(R.string.settings_photo_wall_jellyfin),
+                description = stringResource(R.string.settings_photo_wall_jellyfin_desc),
+                checked = s.photoWallJellyfinEnabled,
+                // 未连接 NAS 时置灰（§7.3）
+                enabled = state.nasConnected,
+                onClick = { actions.onToggleJellyfin?.invoke(!s.photoWallJellyfinEnabled) }
             )
-            SettingsInfoRow(
-                stringResource(R.string.settings_photo_wall_counts),
-                stringResource(
-                    R.string.settings_photo_wall_counts_value,
-                    runtime.galleryCount,
-                    runtime.externalCount,
-                    runtime.jellyfinCount
-                )
-            )
-            SettingsInfoRow(
-                stringResource(R.string.settings_photo_wall_merged),
-                stringResource(R.string.settings_photo_wall_count_unit, runtime.mergedCount)
-            )
-            // ⛔ 只在「仅显示含人像」真的生效时（开关打开 **且** 扫描已完成）才多这一行 ——
-            //   否则它会与「合并后」一模一样，纯属噪音（`PhotoWallController.filterByFaces`
-            //   的生效条件与这里**必须一致**，否则计数与实际展示会对不上）
-            if (s.photoWallFacesOnly && s.photoWallFaceScanDone) {
-                SettingsInfoRow(
-                    stringResource(R.string.settings_photo_wall_faces_only_count),
-                    stringResource(R.string.settings_photo_wall_count_unit, runtime.displayCount)
-                )
-            }
-        }
-        Spacer(modifier = Modifier.height(8.dp))
-        SettingActionButton(
-            label = stringResource(R.string.settings_photo_wall_rescan),
-            description = stringResource(R.string.settings_photo_wall_rescan_desc),
-            onClick = { actions.onRescan?.invoke() }
-        )
 
-        // ── 显示筛选 ────────────────────────────────────────────────────────
-        Spacer(modifier = Modifier.height(12.dp))
-        SubSectionTitle(stringResource(R.string.settings_photo_wall_filter))
-        // ⛔ T11.4：低画质档 / 模型不可用 ⇒ 人脸功能整体置灰（开关也一起灰，
-        //   因为开着它等于「照片墙变空」—— 没有检测结果就没有照片可显示）
-        val faceEnabled = runtime.faceScanSupported
-        SettingSwitch(
-            label = stringResource(R.string.settings_photo_wall_faces_only),
-            description = stringResource(R.string.settings_photo_wall_faces_only_desc),
-            checked = s.photoWallFacesOnly,
-            enabled = faceEnabled,
-            onClick = { actions.onToggleFacesOnly?.invoke(!s.photoWallFacesOnly) }
-        )
-        val running = runtime.faceScanPhase == FaceScanManager.Phase.RUNNING
-        SettingActionButton(
-            label = stringResource(
-                if (running) R.string.settings_photo_wall_face_scan_stop
-                else R.string.settings_photo_wall_face_scan
-            ),
-            description = stringResource(
-                if (running) R.string.settings_photo_wall_face_scan_stop_desc
-                else R.string.settings_photo_wall_face_scan_desc
-            ),
-            enabled = faceEnabled,
-            onClick = {
-                if (running) actions.onStopFaceScan?.invoke() else actions.onStartFaceScan?.invoke()
-            }
-        )
-        if (runtime.faceScanTotal > 0) {
+            // 运行时可派生信息（阶段 9/10 才会有真实数字）
+            Spacer(modifier = Modifier.height(8.dp))
             Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
                 SettingsInfoRow(
-                    stringResource(R.string.settings_photo_wall_face_scan),
+                    stringResource(R.string.settings_photo_wall_enabled_sources),
+                    enabledSourcesText(s)
+                )
+                SettingsInfoRow(
+                    stringResource(R.string.settings_photo_wall_counts),
                     stringResource(
-                        R.string.settings_photo_wall_face_scan_progress,
-                        runtime.faceScanDone,
-                        runtime.faceScanTotal
+                        R.string.settings_photo_wall_counts_value,
+                        runtime.galleryCount,
+                        runtime.externalCount,
+                        runtime.jellyfinCount
                     )
                 )
-            }
-        }
-        if (runtime.faceScanPhase == FaceScanManager.Phase.UNAVAILABLE) {
-            Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
                 SettingsInfoRow(
-                    stringResource(R.string.settings_photo_wall_face_scan),
-                    stringResource(R.string.settings_photo_wall_face_unavailable)
+                    stringResource(R.string.settings_photo_wall_merged),
+                    stringResource(R.string.settings_photo_wall_count_unit, runtime.mergedCount)
                 )
+                // ⛔ 只在「仅显示含人像」真的生效时（开关打开 **且** 扫描已完成）才多这一行 ——
+                //   否则它会与「合并后」一模一样，纯属噪音（`PhotoWallController.filterByFaces`
+                //   的生效条件与这里**必须一致**，否则计数与实际展示会对不上）
+                if (s.photoWallFacesOnly && s.photoWallFaceScanDone) {
+                    SettingsInfoRow(
+                        stringResource(R.string.settings_photo_wall_faces_only_count),
+                        stringResource(R.string.settings_photo_wall_count_unit, runtime.displayCount)
+                    )
+                }
             }
+            Spacer(modifier = Modifier.height(8.dp))
+            SettingActionButton(
+                label = stringResource(R.string.settings_photo_wall_rescan),
+                description = stringResource(R.string.settings_photo_wall_rescan_desc),
+                onClick = { actions.onRescan?.invoke() }
+            )
         }
-        SettingActionButton(
-            label = stringResource(R.string.settings_photo_wall_face_clear),
-            description = stringResource(R.string.settings_photo_wall_face_clear_desc),
-            enabled = faceEnabled,
-            onClick = { actions.onClearFaceScan?.invoke() }
-        )
-
-        // ── 转场效果 ────────────────────────────────────────────────────────
-        Spacer(modifier = Modifier.height(12.dp))
-        SubSectionTitle(stringResource(R.string.settings_photo_wall_transition))
-        SettingSwitch(
-            label = stringResource(R.string.settings_photo_wall_random_transition),
-            description = stringResource(R.string.settings_photo_wall_random_transition_desc),
-            checked = s.photoWallRandomTransition,
-            onClick = { actions.onToggleRandomTransition?.invoke(!s.photoWallRandomTransition) }
-        )
-        // 「指定转场效果」只在随机关闭时才出现（§7.2）
-        if (!s.photoWallRandomTransition) {
+        // 卡片：显示筛选（标题复用原 SubSectionTitle 字符串，方案 T5）
+        SettingsGroupCard(title = stringResource(R.string.settings_photo_wall_filter)) {
+            // ⛔ T11.4：低画质档 / 模型不可用 ⇒ 人脸功能整体置灰（开关也一起灰，
+            //   因为开着它等于「照片墙变空」—— 没有检测结果就没有照片可显示）
+            val faceEnabled = runtime.faceScanSupported
+            SettingSwitch(
+                label = stringResource(R.string.settings_photo_wall_faces_only),
+                description = stringResource(R.string.settings_photo_wall_faces_only_desc),
+                checked = s.photoWallFacesOnly,
+                enabled = faceEnabled,
+                onClick = { actions.onToggleFacesOnly?.invoke(!s.photoWallFacesOnly) }
+            )
+            val running = runtime.faceScanPhase == FaceScanManager.Phase.RUNNING
+            SettingActionButton(
+                label = stringResource(
+                    if (running) R.string.settings_photo_wall_face_scan_stop
+                    else R.string.settings_photo_wall_face_scan
+                ),
+                description = stringResource(
+                    if (running) R.string.settings_photo_wall_face_scan_stop_desc
+                    else R.string.settings_photo_wall_face_scan_desc
+                ),
+                enabled = faceEnabled,
+                onClick = {
+                    if (running) actions.onStopFaceScan?.invoke() else actions.onStartFaceScan?.invoke()
+                }
+            )
+            if (runtime.faceScanTotal > 0) {
+                Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
+                    SettingsInfoRow(
+                        stringResource(R.string.settings_photo_wall_face_scan),
+                        stringResource(
+                            R.string.settings_photo_wall_face_scan_progress,
+                            runtime.faceScanDone,
+                            runtime.faceScanTotal
+                        )
+                    )
+                }
+            }
+            if (runtime.faceScanPhase == FaceScanManager.Phase.UNAVAILABLE) {
+                Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
+                    SettingsInfoRow(
+                        stringResource(R.string.settings_photo_wall_face_scan),
+                        stringResource(R.string.settings_photo_wall_face_unavailable)
+                    )
+                }
+            }
+            SettingActionButton(
+                label = stringResource(R.string.settings_photo_wall_face_clear),
+                description = stringResource(R.string.settings_photo_wall_face_clear_desc),
+                enabled = faceEnabled,
+                onClick = { actions.onClearFaceScan?.invoke() }
+            )
+        }
+        // 卡片：转场效果（标题复用原 SubSectionTitle 字符串，方案 T5）
+        SettingsGroupCard(title = stringResource(R.string.settings_photo_wall_transition)) {
+            SettingSwitch(
+                label = stringResource(R.string.settings_photo_wall_random_transition),
+                description = stringResource(R.string.settings_photo_wall_random_transition_desc),
+                checked = s.photoWallRandomTransition,
+                onClick = { actions.onToggleRandomTransition?.invoke(!s.photoWallRandomTransition) }
+            )
+            // 「指定转场效果」只在随机关闭时才出现（§7.2）
+            if (!s.photoWallRandomTransition) {
+                Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 8.dp)) {
+                    Text(
+                        text = stringResource(R.string.settings_photo_wall_fixed_transition),
+                        color = NasMusicColors.TextPrimary,
+                        fontSize = FontSize.button()
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    PhotoTransitionChips(
+                        selected = s.photoWallFixedTransition,
+                        onSelect = { actions.onChangeFixedTransition?.invoke(it) }
+                    )
+                }
+            }
+            DurationRow(
+                label = stringResource(R.string.settings_photo_wall_transition_ms),
+                valueMs = s.photoWallTransitionMs,
+                stepMs = TRANSITION_STEP_MS,
+                range = TRANSITION_RANGE_MS,
+                onChange = actions.onChangeTransitionMs
+            )
+        }
+        // 卡片：停留期运动（标题复用原 SubSectionTitle 字符串，方案 T5）
+        SettingsGroupCard(title = stringResource(R.string.settings_photo_wall_motion)) {
+            DurationRow(
+                label = stringResource(R.string.settings_photo_wall_hold_ms),
+                valueMs = s.photoWallHoldMs,
+                stepMs = HOLD_STEP_MS,
+                range = HOLD_RANGE_MS,
+                onChange = actions.onChangeHoldMs
+            )
             Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 8.dp)) {
                 Text(
-                    text = stringResource(R.string.settings_photo_wall_fixed_transition),
+                    text = stringResource(R.string.settings_photo_wall_scale_mode),
                     color = NasMusicColors.TextPrimary,
                     fontSize = FontSize.button()
                 )
                 Spacer(modifier = Modifier.height(8.dp))
-                PhotoTransitionChips(
-                    selected = s.photoWallFixedTransition,
-                    onSelect = { actions.onChangeFixedTransition?.invoke(it) }
-                )
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    OptionChip(
+                        label = stringResource(R.string.settings_photo_wall_scale_crop),
+                        selected = s.photoWallScaleMode == PhotoScaleMode.CROP,
+                        onClick = { actions.onChangeScaleMode?.invoke(PhotoScaleMode.CROP) }
+                    )
+                    OptionChip(
+                        label = stringResource(R.string.settings_photo_wall_scale_fit),
+                        selected = s.photoWallScaleMode == PhotoScaleMode.FIT,
+                        onClick = { actions.onChangeScaleMode?.invoke(PhotoScaleMode.FIT) }
+                    )
+                }
             }
-        }
-        DurationRow(
-            label = stringResource(R.string.settings_photo_wall_transition_ms),
-            valueMs = s.photoWallTransitionMs,
-            stepMs = TRANSITION_STEP_MS,
-            range = TRANSITION_RANGE_MS,
-            onChange = actions.onChangeTransitionMs
-        )
-        DurationRow(
-            label = stringResource(R.string.settings_photo_wall_hold_ms),
-            valueMs = s.photoWallHoldMs,
-            stepMs = HOLD_STEP_MS,
-            range = HOLD_RANGE_MS,
-            onChange = actions.onChangeHoldMs
-        )
-        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 8.dp)) {
-            Text(
-                text = stringResource(R.string.settings_photo_wall_scale_mode),
-                color = NasMusicColors.TextPrimary,
-                fontSize = FontSize.button()
+            SettingSwitch(
+                label = stringResource(R.string.settings_photo_wall_ken_burns),
+                description = stringResource(R.string.settings_photo_wall_ken_burns_desc),
+                checked = s.photoWallKenBurns,
+                onClick = { actions.onToggleKenBurns?.invoke(!s.photoWallKenBurns) }
             )
-            Spacer(modifier = Modifier.height(8.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                OptionChip(
-                    label = stringResource(R.string.settings_photo_wall_scale_crop),
-                    selected = s.photoWallScaleMode == PhotoScaleMode.CROP,
-                    onClick = { actions.onChangeScaleMode?.invoke(PhotoScaleMode.CROP) }
-                )
-                OptionChip(
-                    label = stringResource(R.string.settings_photo_wall_scale_fit),
-                    selected = s.photoWallScaleMode == PhotoScaleMode.FIT,
-                    onClick = { actions.onChangeScaleMode?.invoke(PhotoScaleMode.FIT) }
-                )
-            }
         }
-
-        // ── 停留期运动 ──────────────────────────────────────────────────────
-        Spacer(modifier = Modifier.height(12.dp))
-        SubSectionTitle(stringResource(R.string.settings_photo_wall_motion))
-        SettingSwitch(
-            label = stringResource(R.string.settings_photo_wall_ken_burns),
-            description = stringResource(R.string.settings_photo_wall_ken_burns_desc),
-            checked = s.photoWallKenBurns,
-            onClick = { actions.onToggleKenBurns?.invoke(!s.photoWallKenBurns) }
-        )
-
-        // ── 音频反应（默认关） ───────────────────────────────────────────────
-        Spacer(modifier = Modifier.height(12.dp))
-        SubSectionTitle(stringResource(R.string.settings_photo_wall_audio))
-        SettingSwitch(
-            label = stringResource(R.string.settings_photo_wall_audio_reactive),
-            description = stringResource(R.string.settings_photo_wall_audio_reactive_desc),
-            checked = s.photoWallAudioReactive,
-            onClick = { actions.onToggleAudioReactive?.invoke(!s.photoWallAudioReactive) }
-        )
-        // 下面两项**受上一项控制**：总开关关着时置灰（值本身保留，§7.3）
-        SettingSwitch(
-            label = stringResource(R.string.settings_photo_wall_pulse_zoom),
-            description = stringResource(R.string.settings_photo_wall_pulse_zoom_desc),
-            checked = s.photoWallPulseZoom,
-            enabled = s.photoWallAudioReactive,
-            onClick = { actions.onTogglePulseZoom?.invoke(!s.photoWallPulseZoom) }
-        )
-        SettingSwitch(
-            label = stringResource(R.string.settings_photo_wall_breathe),
-            description = stringResource(R.string.settings_photo_wall_breathe_desc),
-            checked = s.photoWallBreathe,
-            enabled = s.photoWallAudioReactive,
-            onClick = { actions.onToggleBreathe?.invoke(!s.photoWallBreathe) }
-        )
+        // 卡片：音频反应（标题复用原 SubSectionTitle 字符串，方案 T5）
+        SettingsGroupCard(title = stringResource(R.string.settings_photo_wall_audio)) {
+            SettingSwitch(
+                label = stringResource(R.string.settings_photo_wall_audio_reactive),
+                description = stringResource(R.string.settings_photo_wall_audio_reactive_desc),
+                checked = s.photoWallAudioReactive,
+                onClick = { actions.onToggleAudioReactive?.invoke(!s.photoWallAudioReactive) }
+            )
+            // 下面两项**受上一项控制**：总开关关着时置灰（值本身保留，§7.3）
+            SettingSwitch(
+                label = stringResource(R.string.settings_photo_wall_pulse_zoom),
+                description = stringResource(R.string.settings_photo_wall_pulse_zoom_desc),
+                checked = s.photoWallPulseZoom,
+                enabled = s.photoWallAudioReactive,
+                onClick = { actions.onTogglePulseZoom?.invoke(!s.photoWallPulseZoom) }
+            )
+            SettingSwitch(
+                label = stringResource(R.string.settings_photo_wall_breathe),
+                description = stringResource(R.string.settings_photo_wall_breathe_desc),
+                checked = s.photoWallBreathe,
+                enabled = s.photoWallAudioReactive,
+                onClick = { actions.onToggleBreathe?.invoke(!s.photoWallBreathe) }
+            )
+        }
     }
 
     // 图库授权说明弹窗（§9.4「建议先弹一句说明再触发系统对话框」）
