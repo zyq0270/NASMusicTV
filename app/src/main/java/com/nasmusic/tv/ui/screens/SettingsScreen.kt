@@ -49,7 +49,6 @@ import com.nasmusic.tv.R
 import com.nasmusic.tv.data.model.AppSettings
 import com.nasmusic.tv.data.model.BaiduFile
 import com.nasmusic.tv.data.model.PlayMode
-import com.nasmusic.tv.data.model.VisualizerTheme
 import com.nasmusic.tv.data.model.VisualQuality
 import com.nasmusic.tv.ui.components.BaiduDirPickerDialog
 import com.nasmusic.tv.ui.components.ConfirmDialog
@@ -59,10 +58,6 @@ import com.nasmusic.tv.ui.components.responsiveDialogSize
 import com.nasmusic.tv.ui.screens.netdisk.BaiduAuthDialog
 import com.nasmusic.tv.ui.screens.settings.AboutSettingsSection
 import com.nasmusic.tv.ui.screens.settings.AboutSettingsState
-import com.nasmusic.tv.ui.screens.settings.BaiduPanDialogActions
-import com.nasmusic.tv.ui.screens.settings.BaiduPanSettingsActions
-import com.nasmusic.tv.ui.screens.settings.BaiduPanSettingsSection
-import com.nasmusic.tv.ui.screens.settings.BaiduPanSettingsState
 import com.nasmusic.tv.ui.screens.settings.CacheSettingsActions
 import com.nasmusic.tv.ui.screens.settings.CacheSettingsSection
 import com.nasmusic.tv.ui.screens.settings.CacheSettingsState
@@ -75,9 +70,9 @@ import com.nasmusic.tv.ui.screens.settings.DownloadSettingsState
 import com.nasmusic.tv.ui.screens.settings.GeneralSettingsActions
 import com.nasmusic.tv.ui.screens.settings.GeneralSettingsSection
 import com.nasmusic.tv.ui.screens.settings.GeneralSettingsState
-import com.nasmusic.tv.ui.screens.settings.LocalMusicSettingsActions
-import com.nasmusic.tv.ui.screens.settings.LocalMusicSettingsSection
-import com.nasmusic.tv.ui.screens.settings.LocalMusicSettingsState
+import com.nasmusic.tv.ui.screens.settings.LyricsKaraokeActions
+import com.nasmusic.tv.ui.screens.settings.LyricsKaraokeSettingsSection
+import com.nasmusic.tv.ui.screens.settings.LyricsKaraokeSettingsState
 import com.nasmusic.tv.ui.screens.settings.NetworkMusicDialogActions
 import com.nasmusic.tv.ui.screens.settings.NetworkMusicSection
 import com.nasmusic.tv.ui.screens.settings.NetworkMusicSettingsActions
@@ -89,12 +84,16 @@ import com.nasmusic.tv.ui.screens.settings.PhotoWallRuntimeState
 import com.nasmusic.tv.ui.screens.settings.PhotoWallSettingsActions
 import com.nasmusic.tv.ui.screens.settings.PhotoWallSettingsSection
 import com.nasmusic.tv.ui.screens.settings.PhotoWallSettingsState
-import com.nasmusic.tv.ui.screens.settings.ServerSettingsActions
-import com.nasmusic.tv.ui.screens.settings.ServerSettingsSection
-import com.nasmusic.tv.ui.screens.settings.ServerSettingsState
+import com.nasmusic.tv.ui.screens.settings.SourcesActions
+import com.nasmusic.tv.ui.screens.settings.SourcesDialogActions
+import com.nasmusic.tv.ui.screens.settings.SourcesSettingsSection
+import com.nasmusic.tv.ui.screens.settings.SourcesSettingsState
 import com.nasmusic.tv.ui.screens.settings.SettingsSection
 import com.nasmusic.tv.ui.screens.settings.SettingsSectionBackHeader
 import com.nasmusic.tv.ui.screens.settings.SettingsSectionList
+import com.nasmusic.tv.ui.screens.settings.VisualEffectsActions
+import com.nasmusic.tv.ui.screens.settings.VisualEffectsSettingsSection
+import com.nasmusic.tv.ui.screens.settings.VisualEffectsSettingsState
 import com.nasmusic.tv.ui.theme.FontSize
 import com.nasmusic.tv.ui.theme.LocalUiMode
 import com.nasmusic.tv.ui.theme.NasMusicColors
@@ -129,7 +128,6 @@ fun SettingsScreen(
     onChangePlayMode: (PlayMode) -> Unit,
     onToggleCacheLyrics: (Boolean) -> Unit,
     onToggleCacheCover: (Boolean) -> Unit,
-    onChangeLyricsOffset: (Long) -> Unit,
     onClearLyricsCache: (() -> Unit)? = null,
     onClearCoverCache: (() -> Unit)? = null,
     onClearMvCache: (() -> Unit)? = null,
@@ -213,12 +211,11 @@ fun SettingsScreen(
     onDeleteModel: (() -> Unit)? = null,
     onRefreshModelStatus: (() -> Unit)? = null,
     onScanTransferModel: (() -> Unit)? = null,
-    // 可视化频谱主题
-    visualizerTheme: VisualizerTheme = VisualizerTheme.Default,
     // T1.6.4（§十三 裁决项 9=A）：可视化画质三档（低/中/高）
     visualizerQuality: VisualQuality = VisualQuality.Default,
     onChangeVisualizerQuality: (VisualQuality) -> Unit = {},
-    onChangeVisualizerTheme: (VisualizerTheme) -> Unit = {},
+    /** 当前均衡器预设显示名（只读；PLAYBACK 卡④呈现，改预要在 EqualizerScreen） */
+    equalizerPresetName: String = "",
     // 数据管理（备份/恢复）
     backupFiles: List<com.nasmusic.tv.util.BackupFileUtils.BackupFile> = emptyList(),
     backupMessage: com.nasmusic.tv.data.model.BackupMessage? = null,
@@ -290,11 +287,13 @@ fun SettingsScreen(
      */
     photoWallRuntime: PhotoWallRuntimeState = PhotoWallRuntimeState(),
     /**
-     * 本地音乐分区（§5.6 权限瘦身）：开关值在 [settings]（localMusicEnabled）里，
-     * 这里传运行时计数（Room 已入库数，不落盘）。
+     * 本地音乐（SOURCES 卡②，§5.6 权限瘦身）：开关值在 [settings]（localMusicEnabled）里，
+     * 这里只传运行时计数（Room 已入库数，不落盘）与两个动作 ——
+     * v2.39.0 起三个旧分区并为 SOURCES，不再需要 LocalMusicSettingsState/Actions 载体。
      */
-    localMusicState: LocalMusicSettingsState = LocalMusicSettingsState(),
-    localMusicActions: LocalMusicSettingsActions = LocalMusicSettingsActions(),
+    localMusicLibraryCount: Int = 0,
+    onSetLocalMusicEnabled: (Boolean) -> Unit = {},
+    onRescanLocalMusic: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
 var activeSection by remember { mutableStateOf(SettingsSection.GENERAL) }
@@ -322,7 +321,23 @@ var activeSection by remember { mutableStateOf(SettingsSection.GENERAL) }
     // 方案：内容区声明为 focusGroup，向左越界（exit）时强制聚焦左侧导航栏当前分区项。
     // 每个分区项持有自己的 FocusRequester；activeSection 变化时重新解析目标项。
     val navFocusRequesters = remember { mutableMapOf<SettingsSection, FocusRequester>() }
-    SettingsSection.entries.forEach { section ->
+    // ⚠️ G3 接线门禁（SettingsSectionWiringGateTest）要求每个分区在 SettingsScreen 里
+    //    以 `SettingsSection.X` 字面出现 ≥2 次（when 分支 + 这里）。上面的泛型
+    //    `entries.forEach` 不产字面 ⇒ 这里显式列举，新增枚举值漏登记会被门禁抓住。
+    //    ⛔ 不要改回 entries.forEach：那会让门禁对每个新分区退化成「只剩 when 一处」。
+    listOf(
+        SettingsSection.GENERAL,
+        SettingsSection.PLAYBACK,
+        SettingsSection.LYRICS_KARAOKE,
+        SettingsSection.VISUAL_EFFECTS,
+        SettingsSection.PHOTO_WALL,
+        SettingsSection.SOURCES,
+        SettingsSection.DOWNLOAD,
+        SettingsSection.CACHE,
+        SettingsSection.NETWORK,
+        SettingsSection.DATA,
+        SettingsSection.ABOUT,
+    ).forEach { section ->
         navFocusRequesters.getOrPut(section) { remember { FocusRequester() } }
     }
 
@@ -542,21 +557,6 @@ var activeSection by remember { mutableStateOf(SettingsSection.GENERAL) }
                     PlayerSettingsSection(
                         state = PlayerSettingsState(
                             settings = settings,
-                        visualizerTheme = visualizerTheme,
-                        visualizerQuality = visualizerQuality,
-                        separationMode = separationMode,
-                            modelDownloaded = modelDownloaded,
-                            modelDownloading = modelDownloading,
-                            modelDownloadProgress = modelDownloadProgress,
-                            modelDownloadedMB = modelDownloadedMB,
-                            modelTotalMB = modelTotalMB,
-                            modelSizeMB = modelSizeMB,
-                            modelDownloadError = modelDownloadError,
-                            modelPath = modelPath,
-                            hqErrorDetail = hqErrorDetail,
-                            coverFilterEnabled = coverFilterEnabled,
-                            coverFilterBlurRadius = coverFilterBlurRadius,
-                            coverFilterDarkOverlay = coverFilterDarkOverlay,
                             // F2-5：crossfade
                             crossfadeEnabled = crossfadeEnabled,
                             crossfadeDurationSec = crossfadeDurationSec,
@@ -564,20 +564,12 @@ var activeSection by remember { mutableStateOf(SettingsSection.GENERAL) }
                             appVolume = appVolume,
                             // F2-6：音质档位
                             qualityTier = qualityTier,
+                            equalizerPresetName = equalizerPresetName,
                         ),
                         actions = PlayerSettingsActions(
                             onToggleAutoPlayNext = onToggleAutoPlayNext,
-                            onChangeVisualizerTheme = onChangeVisualizerTheme,
-                            onChangeVisualizerQuality = onChangeVisualizerQuality,
                             onChangePlayMode = onChangePlayMode,
                             onOpenEqualizer = onOpenEqualizer,
-                            onChangeSeparationMode = onChangeSeparationMode,
-                            onDownloadModel = onDownloadModel,
-                            onDeleteModel = onDeleteModel,
-                            onScanTransferModel = onScanTransferModel,
-                            onToggleCoverFilter = onToggleCoverFilter,
-                            onChangeCoverBlurRadius = onChangeCoverBlurRadius,
-                            onChangeCoverDarkOverlay = onChangeCoverDarkOverlay,
                             onToggleCrossfade = onToggleCrossfade,
                             onChangeCrossfadeDuration = onChangeCrossfadeDuration,
                             onChangeAppVolume = onChangeAppVolume,
@@ -600,10 +592,80 @@ var activeSection by remember { mutableStateOf(SettingsSection.GENERAL) }
                         actions = photoWallActions,
                     )
                 }
-                SettingsSection.LOCAL_MUSIC -> item {
-                    LocalMusicSettingsSection(
-                        state = localMusicState,
-                        actions = localMusicActions,
+                SettingsSection.LYRICS_KARAOKE -> item {
+                    LyricsKaraokeSettingsSection(
+                        state = LyricsKaraokeSettingsState(
+                            settings = settings,
+                            separationMode = separationMode,
+                            modelDownloaded = modelDownloaded,
+                            modelDownloading = modelDownloading,
+                            modelDownloadProgress = modelDownloadProgress,
+                            modelDownloadedMB = modelDownloadedMB,
+                            modelTotalMB = modelTotalMB,
+                            modelSizeMB = modelSizeMB,
+                            modelDownloadError = modelDownloadError,
+                            modelPath = modelPath,
+                            hqErrorDetail = hqErrorDetail,
+                        ),
+                        actions = LyricsKaraokeActions(
+                            onChangeSeparationMode = onChangeSeparationMode,
+                            onDownloadModel = onDownloadModel,
+                            onDeleteModel = onDeleteModel,
+                            onScanTransferModel = onScanTransferModel,
+                        )
+                    )
+                }
+                SettingsSection.VISUAL_EFFECTS -> item {
+                    VisualEffectsSettingsSection(
+                        state = VisualEffectsSettingsState(
+                            settings = settings,
+                            visualizerQuality = visualizerQuality,
+                            coverFilterEnabled = coverFilterEnabled,
+                            coverFilterBlurRadius = coverFilterBlurRadius,
+                            coverFilterDarkOverlay = coverFilterDarkOverlay,
+                        ),
+                        actions = VisualEffectsActions(
+                            onChangeVisualizerQuality = onChangeVisualizerQuality,
+                            onToggleCoverFilter = onToggleCoverFilter,
+                            onChangeCoverBlurRadius = onChangeCoverBlurRadius,
+                            onChangeCoverDarkOverlay = onChangeCoverDarkOverlay,
+                        )
+                    )
+                }
+                SettingsSection.SOURCES -> item {
+                    SourcesSettingsSection(
+                        state = SourcesSettingsState(
+                            isConnected = isConnected,
+                            serverDisplayName = serverDisplayName,
+                            settings = settings,
+                            libraryCount = localMusicLibraryCount,
+                            baiduEnabled = baiduEnabled,
+                            baiduLoggedIn = baiduLoggedIn,
+                            baiduConnectionState = baiduConnectionState,
+                            baiduMusicRootDirLocal = baiduMusicRootLocal,
+                            baiduMvDirLocal = baiduMvDirLocal,
+                            baiduIndexScanned = baiduIndexScanned,
+                            baiduIndexScanning = baiduIndexScanning,
+                            baiduApicExtracting = baiduApicExtracting,
+                            baiduApicExtracted = baiduApicExtracted,
+                            baiduApicTotal = baiduApicTotal,
+                            defaultNetworkSource = settings.defaultNetworkSource,
+                        ),
+                        actions = SourcesActions(
+                            onNavigateToServerConnect = onNavigateToServerConnect,
+                            onDisconnect = onDisconnect,
+                            onSetEnabled = onSetLocalMusicEnabled,
+                            onRescan = onRescanLocalMusic,
+                            onToggleBaiduEnabled = onToggleBaiduEnabled,
+                            onStartBaiduDeviceCode = onStartBaiduDeviceCode,
+                            onLogoutBaidu = onLogoutBaidu,
+                            onRebuildBaiduIndex = onRebuildBaiduIndex,
+                        ),
+                        dialogs = SourcesDialogActions(
+                            onShowBaiduAuthDialog = { showBaiduAuthDialog = true },
+                            onShowMusicRootDialog = { showBaiduMusicRootDialog = true },
+                            onShowMvDirDialog = { showBaiduMvDirDialog = true },
+                        )
                     )
                 }
                 SettingsSection.DOWNLOAD -> item {
@@ -629,18 +691,6 @@ var activeSection by remember { mutableStateOf(SettingsSection.GENERAL) }
                         onClearAllDownloadsRequested = { showClearDownloadsConfirm = true }
                     )
                 }
-                SettingsSection.SERVER -> item {
-                    ServerSettingsSection(
-                        state = ServerSettingsState(
-                            isConnected = isConnected,
-                            serverDisplayName = serverDisplayName,
-                        ),
-                        actions = ServerSettingsActions(
-                            onNavigateToServerConnect = onNavigateToServerConnect,
-                            onDisconnect = onDisconnect,
-                        )
-                    )
-                }
                 SettingsSection.ABOUT -> item {
                     AboutSettingsSection(
                         state = AboutSettingsState(
@@ -661,33 +711,6 @@ var activeSection by remember { mutableStateOf(SettingsSection.GENERAL) }
                             onClearCoverCache = onClearCoverCache,
                             onClearMvCache = onClearMvCache,
                             onClearAccompanimentCache = onClearAccompanimentCache,
-                        )
-                    )
-                }
-                SettingsSection.NETDISK -> item {
-                    BaiduPanSettingsSection(
-                        state = BaiduPanSettingsState(
-                            baiduEnabled = baiduEnabled,
-                            baiduLoggedIn = baiduLoggedIn,
-                            baiduConnectionState = baiduConnectionState,
-                            baiduMusicRootDirLocal = baiduMusicRootLocal,
-                            baiduMvDirLocal = baiduMvDirLocal,
-                            baiduIndexScanned = baiduIndexScanned,
-                            baiduIndexScanning = baiduIndexScanning,
-                            baiduApicExtracting = baiduApicExtracting,
-                            baiduApicExtracted = baiduApicExtracted,
-                            baiduApicTotal = baiduApicTotal,
-                        ),
-                        actions = BaiduPanSettingsActions(
-                            onToggleBaiduEnabled = onToggleBaiduEnabled,
-                            onStartBaiduDeviceCode = onStartBaiduDeviceCode,
-                            onLogoutBaidu = onLogoutBaidu,
-                            onRebuildBaiduIndex = onRebuildBaiduIndex,
-                        ),
-                        dialogs = BaiduPanDialogActions(
-                            onShowBaiduAuthDialog = { showBaiduAuthDialog = true },
-                            onShowMusicRootDialog = { showBaiduMusicRootDialog = true },
-                            onShowMvDirDialog = { showBaiduMvDirDialog = true },
                         )
                     )
                 }

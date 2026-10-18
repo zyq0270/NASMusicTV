@@ -4,6 +4,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.res.stringResource
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -89,6 +90,8 @@ internal fun SettingsBranch(
                     val playlistImportMessage by viewModel.playlistImportVM.importMessage.collectAsState(initial = null)
                     // 本地音乐（§5.6）：Room 已入库曲目数 —— 含已下载曲，不受总开关影响（D2）
                     val localMusicSongs by viewModel.localSongs.collectAsState(initial = emptyList())
+                    // v2.39.0：当前均衡器预设（PLAYBACK 卡④只读呈现，改预要在 EqualizerScreen）
+                    val equalizerPreset by viewModel.equalizerPreset.collectAsState(initial = com.nasmusic.tv.data.model.EqualizerPreset.NORMAL)
                     // v2.36.0 竖屏设置两级页：当前进入的分区（null = 一级列表）。
                     // 状态归 NavigationViewModel —— AppRoot 的 BACK handler 需要读它（方案 §6.2 / K2）
                     val settingsSection by viewModel.navVM.settingsSection.collectAsState(initial = null)
@@ -126,7 +129,6 @@ internal fun SettingsBranch(
                         onChangePlayMode = { viewModel.updateDefaultPlayMode(it) },
                         onToggleCacheLyrics = { viewModel.updateCacheLyrics(it) },
                         onToggleCacheCover = { viewModel.updateCacheCover(it) },
-                        onChangeLyricsOffset = { viewModel.updateLyricsOffset(it) },
                         onClearLyricsCache = { viewModel.clearLyricsCache() },
                         onClearCoverCache = { viewModel.clearCoverCache() },
                         onClearMvCache = { viewModel.clearMvPersistentCache() },
@@ -144,6 +146,7 @@ internal fun SettingsBranch(
                         // F2-6：音质档位接线
                         qualityTier = qualityTier,
                         onChangeQualityTier = { viewModel.setQualityTier(it) },
+                        equalizerPresetName = stringResource(equalizerPreset.displayNameRes),
                         onClearQualityOverrides = { viewModel.clearAllQualityOverrides() },
                         onChangeMetingApiBaseUrl = { viewModel.updateMetingApiBaseUrl(it) },
                         mvApiBaseUrl = settings.mvApiBaseUrl,
@@ -157,8 +160,6 @@ internal fun SettingsBranch(
                         onChangeJamendoClientId = { viewModel.updateJamendoClientId(it) },
                         weatherApiKey = weatherApiKey,
                         onChangeWeatherApiKey = { viewModel.updateWeatherApiKey(it) },
-                        visualizerTheme = settings.visualizerTheme,
-                        onChangeVisualizerTheme = { viewModel.updateVisualizerTheme(it) },
                         // T1.6.4（§十三 裁决项 9=A）：接已有的 setQuality（写 DataStore ⇒ 立即生效）。
                         // ⛔ 不走 MainViewModel.updateVisualizerQuality（它没有降档回退主题的逻辑）。
                         visualizerQuality = settings.visualizerQuality,
@@ -353,14 +354,9 @@ internal fun SettingsBranch(
                     ),
                     // 本地音乐（§5.6）：开关是音乐权限的**唯一触发点**（§5.5）——
                     // 「已授权直接开 / 未授权先申请、被拒回弹」全在 MainViewModel 里判。
-                    localMusicState = LocalMusicSettingsState(
-                        settings = settings,
-                        libraryCount = localMusicSongs.size,
-                    ),
-                    localMusicActions = LocalMusicSettingsActions(
-                        onSetEnabled = { v -> viewModel.setLocalMusicEnabled(v) },
-                        onRescan = { viewModel.refreshLocalMusic() },
-                    ),
+                    localMusicLibraryCount = localMusicSongs.size,
+                    onSetLocalMusicEnabled = { v -> viewModel.setLocalMusicEnabled(v) },
+                    onRescanLocalMusic = { viewModel.refreshLocalMusic() },
                     )
                     // 扫码传输备份弹窗
                     if (showBackupTransferDialog) {

@@ -2,10 +2,12 @@ package com.nasmusic.tv.ui.screens.settings
 
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Audiotrack
+import androidx.compose.material.icons.filled.AutoFilmed
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.LibraryMusic
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Settings
@@ -28,32 +30,36 @@ import com.nasmusic.tv.R
  * 都是 public 成员，暴露 internal 类型会编译失败（`'public' function exposes its
  * 'internal' parameter type`）。模块内无外部消费方，公开无实际风险。
  *
+ * ⚠️ **v2.39.0 重分类**（方案 §3，用户 2026-10-18 裁决「按内容归属划分，不追求各 tab
+ * 条数均衡」）：SERVER / NETDISK / LOCAL_MUSIC 三个 tab 并为 **SOURCES**（它们都是
+ * 「曲库从哪来」的一种来源）；PLAYBACK 里的可视化画质 + 封面滤镜独立为 **VISUAL_EFFECTS**；
+ * 人声分离 + 模型管理独立为 **LYRICS_KARAOKE**；DOWNLOAD / CACHE 因域不同**保持独立 tab**。
+ *
  * ⚠️ 播放统计（`onOpenPlayStats`）、均衡器（`onOpenEqualizer`）**不是分区**，
  * 是 PLAYBACK / GENERAL 分区内的入口按钮，行为不变。
+ *
+ * ⚠️ 本项目**没有**持久化「分区顺序」，也没有任何测试断言 `entries` 的顺序
+ * ⇒ 插入与重排安全（既有结论，重分类后仍成立）。
  */
 enum class SettingsSection(val titleRes: Int, val icon: ImageVector) {
-    GENERAL(R.string.settings_general, Icons.Default.Settings),
-    PLAYBACK(R.string.settings_playback, Icons.Default.Audiotrack),
-    /**
-     * 照片墙（§7.1 / §7.2）。
-     *
-     * ⚠️ 插在 PLAYBACK 之后而非追加到末尾：可视化效果本身就在 PLAYBACK 分区里，
-     * 「效果主题」与「照片墙」相邻符合用户预期。本项目**没有**持久化「分区顺序」，
-     * 也没有任何测试断言 `entries` 的顺序 ⇒ 插入是安全的。
-     */
+    GENERAL(R.string.settings_general, Icons.Default.Settings),           // 外观 · 语言 · 方向
+    PLAYBACK(R.string.settings_playback, Icons.Default.Audiotrack),       // 播放行为 · 过渡音量 · 音质 · 均衡器
+    /** 新增：歌词显示（字号/高亮，T10）+ K 歌人声分离与模型管理 */
+    LYRICS_KARAOKE(R.string.settings_lyrics_karaoke, Icons.Default.Mic),
+    /** 新增：可视化画质与效果主题 + 封面滤镜 */
+    VISUAL_EFFECTS(R.string.settings_visual_effects, Icons.Default.AutoFilmed),
+    /** 照片墙（§7.1 / §7.2），原地不动 */
     PHOTO_WALL(R.string.settings_photo_wall, Icons.Default.PhotoLibrary),
-    /**
-     * 本地音乐（§5.6 权限瘦身）：总开关（唯一触发音乐权限申请的入口）+ 重扫。
-     * ⚠️ 插在 PHOTO_WALL 与 DOWNLOAD 之间：与照片墙同为「本机媒体」域，且
-     * 「已下载」是它开关关闭时唯一保留的本地内容（D3），相邻符合语义。
-     * 同上：无持久化分区顺序、无 entries 顺序断言 ⇒ 插入安全。
-     */
-    LOCAL_MUSIC(R.string.settings_local_music, Icons.Default.LibraryMusic),
+    /** 新增：NAS 服务器 + 本地曲库 + 百度网盘 + 默认网络源，同为「曲库从哪来」 */
+    SOURCES(R.string.settings_sources, Icons.Default.Storage),
+    /** 离线副本的生命周期（开关/上限/位置/清除/导出），与「来源」「缓存」都是不同域 ⇒ 保持独立 */
     DOWNLOAD(R.string.settings_download, Icons.Default.Download),
-    SERVER(R.string.nav_server, Icons.Default.Storage),
+    /** 存储与缓存：缓存策略 + 占用与清理（T8b） */
     CACHE(R.string.settings_cache, Icons.Default.Tune),
-    NETWORK(R.string.settings_network, Icons.Default.Wifi),
-    NETDISK(R.string.settings_netdisk, Icons.Default.Cloud),
+    /** 端点与凭据配置（原 settings_network，重分类后改名「网络高级设置」） */
+    NETWORK(R.string.settings_network_advanced, Icons.Default.Wifi),
+    /** 备份 · 歌单导入 · 播放统计 */
     DATA(R.string.settings_data, Icons.Default.MusicNote),
-    ABOUT(R.string.settings_about, Icons.Default.Info)
+    /** 版本信息 · 连接信息 · 能力说明 · 开源与许可 */
+    ABOUT(R.string.settings_about, Icons.Default.Info),
 }

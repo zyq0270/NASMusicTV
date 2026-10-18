@@ -1,20 +1,15 @@
 package com.nasmusic.tv.ui.screens.settings
 
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.foundation.background
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -24,67 +19,44 @@ import com.nasmusic.tv.R
 import com.nasmusic.tv.backend.network.QualityTiers
 import com.nasmusic.tv.data.model.AppSettings
 import com.nasmusic.tv.data.model.PlayMode
-import com.nasmusic.tv.data.model.VisualizerTheme
-import com.nasmusic.tv.data.model.VisualQuality
-import com.nasmusic.tv.data.prefs.AppPreferences
-import com.nasmusic.tv.player.SeparationMode
 import com.nasmusic.tv.ui.theme.FontSize
 import com.nasmusic.tv.ui.theme.NasMusicColors
 import kotlin.math.roundToInt
 
-/** 播放设置分区状态（自动播放/频谱/模式/分离/模型/封面滤镜） */
+/**
+ * 播放设置分区状态（v2.39.0 收窄：人声分离/模型 → `LyricsKaraokeSettingsSection`，
+ * 可视化画质/封面滤镜 → `VisualEffectsSettingsSection`，方案 §3 / Task 3）。
+ *
+ * [equalizerPresetName] 由 SettingsBranch 传当前预设显示名（只读），
+ * Task 4 的均衡器卡呈现它；改预设本身在 EqualizerScreen 里做。
+ */
 data class PlayerSettingsState(
     val settings: AppSettings,
-    val visualizerTheme: VisualizerTheme,
-    val separationMode: SeparationMode,
-    val modelDownloaded: Boolean,
-    val modelDownloading: Boolean,
-    val modelDownloadProgress: Float,
-    val modelDownloadedMB: Long,
-    val modelTotalMB: Long,
-    val modelSizeMB: Double,
-    val modelDownloadError: String?,
-    val modelPath: String,
-    val coverFilterEnabled: Boolean,
-    val coverFilterBlurRadius: Float,
-    val coverFilterDarkOverlay: Float,
-    // F2-5：跨曲交叉淡入淡出
+    /** F2-5：crossfade 开关/时长 */
     val crossfadeEnabled: Boolean = false,
     val crossfadeDurationSec: Int = 4,
-    // F2-7：应用内音量（应用级增益 0.0–1.0，独立于系统音量）
+    /** F2-7：应用内音量（应用级增益 0.0–1.0，独立于系统音量） */
     val appVolume: Float = 1f,
-    // F2-6：音质档位
+    /** F2-6：音质档位（AUTO=0/999/320/128） */
     val qualityTier: Int = 0,
-    // T1.6.4（§十三 裁决项 9=A）：可视化画质档位（此前无 UI 入口 ⇒ 恒 MEDIUM，ULTRA 三套不可达）
-    val visualizerQuality: VisualQuality = VisualQuality.Default,
-    // 高质量分离失败详情（含设备型号/内存/位宽诊断），设置页长期留存供用户截图回传
-    val hqErrorDetail: String? = null,
+    /** 当前均衡器预设显示名（只读） */
+    val equalizerPresetName: String = "",
 )
 
-/** 播放设置分区动作 */
+/** 播放设置分区动作（同上，已迁走域的回调一并删除） */
 data class PlayerSettingsActions(
     val onToggleAutoPlayNext: (Boolean) -> Unit,
-    val onChangeVisualizerTheme: (VisualizerTheme) -> Unit,
     val onChangePlayMode: (PlayMode) -> Unit,
     val onOpenEqualizer: (() -> Unit)?,
-    val onChangeSeparationMode: ((SeparationMode) -> Unit)?,
-    val onDownloadModel: (() -> Unit)?,
-    val onDeleteModel: (() -> Unit)?,
-    val onScanTransferModel: (() -> Unit)?,
-    val onToggleCoverFilter: (Boolean) -> Unit,
-    val onChangeCoverBlurRadius: (Float) -> Unit,
-    val onChangeCoverDarkOverlay: (Float) -> Unit,
     /** F2-5：crossfade 开关/时长 */
     val onToggleCrossfade: (Boolean) -> Unit = {},
     val onChangeCrossfadeDuration: (Int) -> Unit = {},
     /** F2-7：应用内音量（应用级增益 0.0–1.0，独立于系统音量） */
     val onChangeAppVolume: (Float) -> Unit = {},
+    /** F2-6：音质档位 */
+    val onChangeQualityTier: (Int) -> Unit = {},
     /** v2.35.0 多码率：清除全部单曲音质覆盖（方案 §5.3） */
     val onClearQualityOverrides: (() -> Unit)? = null,
-    /** F2-6：音质档位（AUTO=0/999/320/128） */
-    val onChangeQualityTier: (Int) -> Unit = {},
-    /** T1.6.4：可视化画质三档（SettingsBranch 接 visualizerVM.setQuality ⇒ 写 DataStore） */
-    val onChangeVisualizerQuality: (VisualQuality) -> Unit = {},
 )
 
 /** 播放设置分区（原 SettingsScreen PLAYBACK 分支，逻辑逐行搬迁） */
@@ -225,246 +197,5 @@ internal fun PlayerSettingsSection(
             description = stringResource(R.string.quality_override_clear_desc),
             onClick = { actions.onClearQualityOverrides?.invoke() }
         )
-        // ── T1.6.4（§十三 裁决项 9=A / §2.4 方案 A）：可视化画质三档 ──
-        // 背景：VisualQuality 此前无任何 UI 入口 ⇒ 恒 MEDIUM ⇒ E18 反馈残像 / E19 粒子文字 /
-        // E20 等离子流场（Tier.ULTRA → allowFramebuffer）被 supports() 永久过滤、从未渲染过。
-        // 接 VisualizerViewModel.setQuality() ⇒ 写 DataStore ⇒ VisualizerStage 的
-        // LaunchedEffect(theme, quality) 重新 sync ⇒ RendererSwapper 对现有渲染器重进 onEnter，
-        // **立即生效、无需重启**（§2.4 ④ 已核实 RendererSwapper.sync 支持仅画质变化的复用路径）。
-        Spacer(modifier = Modifier.height(24.dp))
-        SubSectionTitle(stringResource(R.string.settings_visualizer_quality))
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = 16.dp, top = 4.dp)
-        ) {
-            // 遍历单一真相源（三档），避免"档位加了 UI 忘了加"的漂移
-            VisualQuality.entries.forEach { q ->
-                val label = when (q) {
-                    VisualQuality.LOW -> stringResource(R.string.settings_visualizer_quality_low)
-                    VisualQuality.MEDIUM -> stringResource(R.string.settings_visualizer_quality_medium)
-                    VisualQuality.HIGH -> stringResource(R.string.settings_visualizer_quality_high)
-                }
-                val desc = when (q) {
-                    VisualQuality.LOW -> stringResource(R.string.settings_visualizer_quality_low_desc)
-                    VisualQuality.MEDIUM -> stringResource(R.string.settings_visualizer_quality_medium_desc)
-                    VisualQuality.HIGH -> stringResource(R.string.settings_visualizer_quality_high_desc)
-                }
-                SettingActionButton(
-                    label = if (state.visualizerQuality == q) "▶ $label" else label,
-                    description = desc,
-                    onClick = { actions.onChangeVisualizerQuality(q) }
-                )
-            }
-        }
-        // ── 人声分离模式 ──
-        Spacer(modifier = Modifier.height(24.dp))
-        SubSectionTitle(stringResource(R.string.settings_separation_mode_title))
-        run {
-            val isHq = state.separationMode == SeparationMode.HIGH_QUALITY
-            val hqLabel = if (state.modelDownloaded) stringResource(R.string.settings_hq_mode_downloaded) else stringResource(R.string.settings_hq_mode_not_downloaded)
-            val hqDesc = when {
-                !state.modelDownloaded -> stringResource(R.string.settings_download_model_hint)
-                isHq -> stringResource(R.string.settings_onnx_inference)
-                else -> stringResource(R.string.settings_dsp_inference)
-            }
-            SettingSwitch(
-                label = hqLabel,
-                description = hqDesc,
-                checked = isHq,
-                enabled = state.modelDownloaded,
-                onClick = { actions.onChangeSeparationMode?.invoke(if (isHq) SeparationMode.FAST else SeparationMode.HIGH_QUALITY) }
-            )
-        }
-        // 模型下载区
-        Spacer(modifier = Modifier.height(12.dp))
-        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
-            if (state.modelDownloading) {
-                // 下载中：进度条
-                Text(
-                    text = stringResource(R.string.settings_downloading_model) + "：${(state.modelDownloadProgress * 100).toInt()}%  (${state.modelDownloadedMB}MB / ${state.modelTotalMB}MB)",
-                    color = NasMusicColors.TextPrimary,
-                    fontSize = FontSize.body()
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(8.dp)
-                        .clip(RoundedCornerShape(4.dp))
-                        .background(NasMusicColors.SurfaceVariant)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth(state.modelDownloadProgress.coerceIn(0f, 1f))
-                            .height(8.dp)
-                            .background(NasMusicColors.Primary, RoundedCornerShape(4.dp))
-                    )
-                }
-            } else if (state.modelDownloaded) {
-                // 已下载：显示路径 + 大小 + 删除按钮
-                Column {
-                    Text(
-                        text = stringResource(R.string.settings_model_downloaded_size, state.modelSizeMB),
-                        color = NasMusicColors.TextPrimary,
-                        fontSize = FontSize.body()
-                    )
-                    Text(
-                        text = stringResource(R.string.settings_model_path, state.modelPath),
-                        color = NasMusicColors.TextSecondary,
-                        fontSize = FontSize.small()
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Box(modifier = Modifier.weight(1f)) {
-                            SettingActionButton(
-                                label = stringResource(R.string.settings_delete_model),
-                                description = stringResource(R.string.settings_delete_model_desc),
-                                onClick = { actions.onDeleteModel?.invoke() }
-                            )
-                        }
-                        Box(modifier = Modifier.weight(1f)) {
-                            SettingActionButton(
-                                label = stringResource(R.string.settings_scan_upload_model),
-                                description = stringResource(R.string.settings_scan_upload_model_desc),
-                                onClick = { actions.onScanTransferModel?.invoke() }
-                            )
-                        }
-                    }
-                }
-            } else {
-                // 未下载：显示下载按钮 + 路径 + 扫码上传
-                Column {
-                    Text(
-                        text = stringResource(R.string.settings_network_model_not_downloaded),
-                        color = NasMusicColors.TextSecondary,
-                        fontSize = FontSize.body()
-                    )
-                    Text(
-                        text = stringResource(R.string.settings_storage_path, state.modelPath),
-                        color = NasMusicColors.TextSecondary,
-                        fontSize = FontSize.small()
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Box(modifier = Modifier.weight(1f)) {
-                            SettingActionButton(
-                                label = stringResource(R.string.settings_download_separation_model),
-                                description = stringResource(R.string.settings_download_separation_model_desc),
-                                onClick = { actions.onDownloadModel?.invoke() }
-                            )
-                        }
-                        Box(modifier = Modifier.weight(1f)) {
-                            SettingActionButton(
-                                label = stringResource(R.string.settings_scan_upload_model),
-                                description = stringResource(R.string.settings_scan_upload_model_desc),
-                                onClick = { actions.onScanTransferModel?.invoke() }
-                            )
-                        }
-                    }
-                }
-            }
-            state.modelDownloadError?.let { err ->
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(text = err, color = NasMusicColors.Danger, fontSize = FontSize.small())
-            }
-        }
-        // ── 高质量分离失败详情（本轮长期留存，供用户对着屏幕截图回传）──
-        state.hqErrorDetail?.let { detail ->
-            Spacer(modifier = Modifier.height(16.dp))
-            Text(
-                text = stringResource(R.string.settings_hq_failure_detail_title),
-                color = NasMusicColors.Danger,
-                fontSize = FontSize.body()
-            )
-            Spacer(modifier = Modifier.height(6.dp))
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(NasMusicColors.SurfaceVariant)
-                    .padding(horizontal = 12.dp, vertical = 10.dp)
-            ) {
-                Text(
-                    text = detail,
-                    color = NasMusicColors.TextPrimary,
-                    fontSize = FontSize.small()
-                )
-            }
-        }
-        // ── 封面滤镜分组 ──
-        Spacer(modifier = Modifier.height(24.dp))
-        SubSectionTitle(stringResource(R.string.settings_cover))
-        SettingSwitch(
-            label = stringResource(R.string.settings_cover_filter),
-            description = stringResource(R.string.settings_cover_filter_desc),
-            checked = state.coverFilterEnabled,
-            onClick = { actions.onToggleCoverFilter(!state.coverFilterEnabled) }
-        )
-        if (state.coverFilterEnabled) {
-            Spacer(modifier = Modifier.height(16.dp))
-            Text(
-                text = stringResource(R.string.settings_cover_blur_radius, state.coverFilterBlurRadius.toInt()),
-                color = NasMusicColors.TextPrimary,
-                fontSize = FontSize.button(),
-                modifier = Modifier.padding(start = 4.dp)
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            // Blur radius buttons
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                AdjustButton("-", onClick = {
-                    val new = (state.coverFilterBlurRadius - 2f).coerceAtLeast(0f)
-                    actions.onChangeCoverBlurRadius(new)
-                })
-                Text(
-                    text = "%.0fpx".format(state.coverFilterBlurRadius),
-                    color = NasMusicColors.Primary,
-                    fontSize = FontSize.title(),
-                    modifier = Modifier.width(64.dp).padding(horizontal = 8.dp)
-                )
-                AdjustButton("+", onClick = {
-                    val new = (state.coverFilterBlurRadius + 2f).coerceAtMost(40f)
-                    actions.onChangeCoverBlurRadius(new)
-                })
-            }
-            Spacer(modifier = Modifier.height(20.dp))
-            Text(
-                text = stringResource(R.string.settings_cover_dark_overlay, (state.coverFilterDarkOverlay * 100).toInt()),
-                color = NasMusicColors.TextPrimary,
-                fontSize = FontSize.button(),
-                modifier = Modifier.padding(start = 4.dp)
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                AdjustButton("-", onClick = {
-                    val new = (state.coverFilterDarkOverlay - 0.1f).coerceAtLeast(0f)
-                    actions.onChangeCoverDarkOverlay(new)
-                })
-                Text(
-                    text = "${(state.coverFilterDarkOverlay * 100).toInt()}%",
-                    color = NasMusicColors.Primary,
-                    fontSize = FontSize.title(),
-                    modifier = Modifier.width(64.dp).padding(horizontal = 8.dp)
-                )
-                AdjustButton("+", onClick = {
-                    val new = (state.coverFilterDarkOverlay + 0.1f).coerceAtMost(1f)
-                    actions.onChangeCoverDarkOverlay(new)
-                })
-            }
-        }
     }
 }
