@@ -222,17 +222,25 @@ internal fun SourcesSettingsSection(
             }
 
             Spacer(modifier = Modifier.height(8.dp))
+            // §4.5 硬要求 3：路径是**当前值**，归 SettingsInfoRow 的值位；说明归 description。
+            // 此前路径直接塞进按钮的 description 里 —— 同一行既像说明又像值，是既有违例。
+            SettingsInfoRow(stringResource(R.string.settings_netdisk_music_root), state.baiduMusicRootDirLocal)
             SettingActionButton(
-                label = stringResource(R.string.settings_netdisk_music_root),
-                description = state.baiduMusicRootDirLocal,
+                label = stringResource(R.string.settings_netdisk_music_root_edit),
+                description = stringResource(R.string.settings_netdisk_music_root_desc),
                 onClick = { dialogs.onShowMusicRootDialog() },
                 // 打开路径编辑对话框（下一级）
                 trailing = Trail.Arrow,
             )
             Spacer(modifier = Modifier.height(8.dp))
+            SettingsInfoRow(
+                stringResource(R.string.settings_netdisk_mv_dir),
+                state.baiduMvDirLocal?.takeIf { it.isNotBlank() }
+                    ?: stringResource(R.string.common_not_set),
+            )
             SettingActionButton(
-                label = stringResource(R.string.settings_netdisk_mv_dir),
-                description = state.baiduMvDirLocal?.takeIf { it.isNotBlank() } ?: stringResource(R.string.settings_netdisk_mv_dir_desc),
+                label = stringResource(R.string.settings_netdisk_mv_dir_edit),
+                description = stringResource(R.string.settings_netdisk_mv_dir_desc),
                 onClick = { dialogs.onShowMvDirDialog() },
                 // 打开路径编辑对话框（下一级）
                 trailing = Trail.Arrow,
@@ -240,7 +248,11 @@ internal fun SourcesSettingsSection(
         }
 
         // ── ④ 索引与封面 ──
-        SettingsGroupCard(title = stringResource(R.string.settings_group_netdisk_index)) {
+        // §4.5：卡级说明说明"索引 / 封面提取"两件事的代价；APIC 没有独立按钮可挂（T8b 已裁决）
+        SettingsGroupCard(
+            title = stringResource(R.string.settings_group_netdisk_index),
+            description = stringResource(R.string.settings_netdisk_index_desc2),
+        ) {
             if (actions.onRebuildBaiduIndex != null) {
                 Text(
                     text = if (state.baiduIndexScanning) stringResource(R.string.settings_netdisk_index_scanning_progress, state.baiduIndexScanned)

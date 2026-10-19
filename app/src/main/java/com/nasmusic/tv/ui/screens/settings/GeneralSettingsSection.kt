@@ -76,6 +76,8 @@ internal fun GeneralSettingsSection(
             SettingSwitch(label = stringResource(R.string.settings_dark_theme), description = stringResource(R.string.settings_dark_theme_desc), checked = state.settings.darkTheme, onClick = { actions.onToggleDarkTheme(!state.settings.darkTheme) })
             SettingSwitch(label = stringResource(R.string.settings_animations), description = stringResource(R.string.settings_animations_desc), checked = state.settings.animationsEnabled, onClick = { actions.onToggleAnimations(!state.settings.animationsEnabled) })
             // 字体字号调整（在当前Theme档位基础上增减）
+            // 芯片/调整行的说明位走 SettingsHint（§4.5）—— 此前这行**没有任何说明**
+            SettingsHint(stringResource(R.string.settings_group_font_hint))
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),

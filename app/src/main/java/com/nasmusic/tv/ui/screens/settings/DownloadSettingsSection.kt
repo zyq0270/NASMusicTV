@@ -86,12 +86,7 @@ internal fun DownloadSettingsSection(
                     color = NasMusicColors.TextPrimary,
                     fontSize = FontSize.button()
                 )
-                Text(
-                    text = stringResource(R.string.settings_auto_download_limit_desc),
-                    color = NasMusicColors.TextSecondary,
-                    fontSize = FontSize.body()
-                )
-                Spacer(modifier = Modifier.height(8.dp))
+                SettingsHint(stringResource(R.string.settings_auto_download_limit_desc))
                 Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                     AdjustButton("-", onClick = {
                         actions.onChangeAutoDownloadLimit?.invoke((state.autoDownloadLimit - 10).coerceAtLeast(1))
@@ -111,12 +106,9 @@ internal fun DownloadSettingsSection(
                     color = NasMusicColors.TextPrimary,
                     fontSize = FontSize.button()
                 )
-                Text(
-                    text = stringResource(R.string.settings_download_location_desc),
-                    color = NasMusicColors.TextSecondary,
-                    fontSize = FontSize.body()
-                )
-                Spacer(modifier = Modifier.height(8.dp))
+                // §4.5 DOWNLOAD ②：说明写"换了目录会怎样"。旧文案「外接设备导出功能可在
+                // 「我的 → 下载」中使用」已过时 —— 导出入口现在就在本页卡④里。
+                SettingsHint(stringResource(R.string.settings_download_location_hint))
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     AdjustButton(stringResource(R.string.settings_download_btn_internal), onClick = { actions.onChangeDownloadLocation?.invoke("INTERNAL") })
                     AdjustButton(stringResource(R.string.settings_download_btn_external), onClick = { actions.onChangeDownloadLocation?.invoke("CUSTOM") })
@@ -147,6 +139,8 @@ internal fun DownloadSettingsSection(
         }
         // 卡④ 导出到外接设备（§8.8.9；标题复用原 settings_download_export）
         SettingsGroupCard(title = stringResource(R.string.settings_download_export)) {
+            // Desc-exempt: 本卡的 AdjustButton 是导出过程中的「取消 / 确定」，不是需要说明的
+            // 可选项；本卡唯一的可操作入口（导出按钮）自带 description，见下方 else 分支。
             Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
                 Text(
                     text = stringResource(R.string.settings_download_export_desc),
@@ -220,7 +214,9 @@ internal fun DownloadSettingsSection(
                         // Idle / Preparing → 显示导出按钮
                         SettingActionButton(
                             label = stringResource(R.string.settings_download_export),
-                            description = "",
+                            // 这个 key 一直存在（settings_download_export_desc）却没被引用，
+                            // 按钮此前给的是空串 ⇒ G6-A 一建门就红在这里。
+                            description = stringResource(R.string.settings_download_export_desc),
                             onClick = { actions.onExportToDevice?.invoke() },
                             // 走系统目录选择器（下一级）
                             trailing = Trail.Arrow,

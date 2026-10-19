@@ -2901,7 +2901,7 @@ private fun stripComments(src: String): String {
   2. **TV / 手机横屏逐字一致**（B1 回归）：同一份 APK 在 TV 上对照改版前截图，时长档仍是一行 5 枚、模型仍是一行两枚等宽。⛔ 只要 TV 上有任何一处布局变化就是 B1 违约，先回滚再查。
   3. `SettingsSectionList.kt`（竖屏一级分区列表，G7 豁免但 V16 必查）逐项目视分区名 + 计数是否折行。
 
-- [ ] **Step 9: 提交**
+- [x] **Step 9: 提交**（✅ 实做：`b88a539`，8 files / 837 insertions / 101 deletions）
 
 ```bash
 git commit -m "fix(settings): 时长档 0 宽塌陷与竖屏芯片挤压 —— 新增 SettingsChipRow 分行原语 + G8 宽度门"
@@ -2918,7 +2918,12 @@ git commit -m "fix(settings): 时长档 0 宽塌陷与竖屏芯片挤压 —— 
 - Produces: `PlayModeSelector(current: PlayMode, onSelect: (PlayMode) -> Unit, description: String)` —— **`description` 无默认值**，靠编译器强制调用方给说明
 - Consumes: T10–T13 之后所有分区文件的全部行（含新上线的歌词字号/高亮、模型自定义源，以及 T11 委托化后的 `SettingsTile`、T12 的 `SwitchTrack` / `Trail`）
 
-- [ ] **Step 1: 写失败的 G6 门禁**（追加到 `SettingsGroupCoverageTest.kt`，复用 T2 已有的 `groupCardSpans` / `stripComments` / `lineOffset` / `settingsRoot`）
+- [x] **Step 1: 写失败的 G6 门禁**（✅ 实做：5 例 —— A + C + 3 条自证。**两处对方案片段的修正**：
+  ① 豁免标记 `Desc-exempt:` 必须查**原文**而不是剥离后的文本（注释已被换成空格，永远查不到），
+  且允许写在调用上方 3 行内；② G6-C 除了 `SettingsHint(` 还接受**卡头自带非空 `description`** ——
+  方案的表把 `GENERAL ①/③` 标成 ✅「已有卡片 description」，片段却只认 `SettingsHint(`，两处自相矛盾。
+  另：触发名单加了 `DurationRow(` / `PhotoTransitionChips(` 两个渲染芯片的私有 helper，
+  否则 `PHOTO_WALL ③` 的 43 个芯片在门禁眼里不存在）
 
 ```kotlin
     // ─────────── G6：说明覆盖（§4.5） ───────────
@@ -3026,17 +3031,28 @@ git commit -m "fix(settings): 时长档 0 宽塌陷与竖屏芯片挤压 —— 
 
 > ⚠️ `Desc-exempt: <理由>` 只留给**确实不该有说明**的行（豁免必须写理由）；`SettingsInfoRow` / `AboutRow` 只读行**不在** G6 的扫描名单里（§4.5 规范：说明由所属卡片的 `description` 承担），不要把它们加进 `descViolations` 的调用名列表凑覆盖率。
 
-- [ ] **Step 2: 跑测试确认失败**（G6-A 应列出 §4.5 表里 🔧 项对应的调用点，G6-C 应列出含 `AdjustButton(` / `OptionChip(` 却没有 `SettingsHint(` 的卡；测试类本身能编译，因为它只读源码文本、不引用 `SettingsHint` 这个 composable）
+- [x] **Step 2: 跑测试确认失败**（✅ 实测红名单：G6-A 2 处 —— `DownloadSettingsSection:221`（`description = ""`，
+  `settings_download_export_desc` 这个 key 一直存在却没被引用）+ `PlayerSettingsSection:80`
+  （`PlayModeSelector` 无 description 形参）；G6-C 10 张卡，7 个文件）
 
-- [ ] **Step 3: 加组件**：`SettingsComponents.kt` 内新增 `SettingsHint`（§4.5 代码，`TextSecondary` + `FontSize.small()`，与 `SettingSwitch` 的 description 视觉同规格 :113-118）；`PlayModeSelector`（:129-156）签名加**必填** `description: String`，函数体首行渲染 `SettingsHint(description)`；全树 `PlayModeSelector(` 调用点随之被迫补参（编译器兜底，别加默认值）。
+- [x] **Step 3: 加组件**：`SettingsComponents.kt` 内新增 `SettingsHint`（§4.5 代码，`TextSecondary` + `FontSize.small()`，与 `SettingSwitch` 的 description 视觉同规格 :113-118）；`PlayModeSelector`（:129-156）签名加**必填** `description: String`，函数体首行渲染 `SettingsHint(description)`；全树 `PlayModeSelector(` 调用点随之被迫补参（编译器兜底，别加默认值）。（✅ 实做；`SettingsHint` 自带 `bottom = 8.dp`，调用方不要再补 `Spacer` —— 原来手写的灰字 `Text` + `Spacer` 组合已统一收进它）
 
-- [ ] **Step 4: 按 §4.5 表逐条补文案**（非 CACHE 的 **15 项文案 + 2 条卡片级 = 17 个 key**，中英各一份；key 名照表：`settings_group_font_hint`、`settings_play_mode_desc`、`settings_crossfade_duration_desc`、`settings_lyrics_scale_desc`、`settings_lyrics_highlight_desc`、`settings_model_size_desc`、`settings_model_custom_url_desc`、`settings_visualizer_theme_desc`、`settings_cover_blur_desc`、`settings_cover_dark_desc`、`settings_pw_transition_mode_desc`、`settings_pw_scale_desc`、`settings_netdisk_index_desc2`、`settings_default_source_desc`、`settings_download_location_hint`，另加两条卡片级 `settings_group_endpoint_risk_desc` / `settings_group_about_desc`；⛔ 不含 `settings_pw_source_desc` / `settings_local_music_desc` / `settings_baidu_apic_desc` —— 三处控件**已有** description 或没有可挂的按钮（§4.5 订正后为 ✅，v1.1 审校从原 18 项名单中删去）；⛔ 不含 `settings_karaoke_pitch_desc` / `settings_karaoke_speed_desc` —— 变调/倍速不进设置页，§6-13；⛔ **CACHE 页的 36 个 key 与两条复用槽位（`settings_cache_dir_size`、`settings_clear_all_cache_desc`）已由 T8b 落地**，本步不要重复改，只核对 G6 扫到那两个新按钮时它们确实带了非空 `description`；另注：§5.2 开关轨的 4 个 key（`settings_on` / `settings_off` / `settings_state_on` / `settings_state_off`）属 **T12**，不计入本步 17 个）
+- [x] **Step 4: 按 §4.5 表逐条补文案**（✅ 实做，见 §10.253。**与名单的两处出入**：
+  ① 新增 `settings_group_quality_desc`（PLAYBACK ③ 两条说明合并进卡片 description 的落点），
+  并删除被它取代的 `quality_tier_hint_lossless` / `quality_tier_hint_scope`；
+  ② 百度目录两行按 §4.5 硬要求 3 拆成 `SettingsInfoRow`（路径归值位）+ `SettingActionButton`
+  （说明归 description），新增 `settings_netdisk_music_root_desc` / `_music_root_edit` / `_mv_dir_edit`
+  三个 key，`settings_download_location_desc`（内容已过时："导出在「我的 → 下载」"）一并删除。
+  另：`settings_download_export_desc` **一直存在却零引用**，G6-A 一建门就红在这里 —— 已接线）（非 CACHE 的 **15 项文案 + 2 条卡片级 = 17 个 key**，中英各一份；key 名照表：`settings_group_font_hint`、`settings_play_mode_desc`、`settings_crossfade_duration_desc`、`settings_lyrics_scale_desc`、`settings_lyrics_highlight_desc`、`settings_model_size_desc`、`settings_model_custom_url_desc`、`settings_visualizer_theme_desc`、`settings_cover_blur_desc`、`settings_cover_dark_desc`、`settings_pw_transition_mode_desc`、`settings_pw_scale_desc`、`settings_netdisk_index_desc2`、`settings_default_source_desc`、`settings_download_location_hint`，另加两条卡片级 `settings_group_endpoint_risk_desc` / `settings_group_about_desc`；⛔ 不含 `settings_pw_source_desc` / `settings_local_music_desc` / `settings_baidu_apic_desc` —— 三处控件**已有** description 或没有可挂的按钮（§4.5 订正后为 ✅，v1.1 审校从原 18 项名单中删去）；⛔ 不含 `settings_karaoke_pitch_desc` / `settings_karaoke_speed_desc` —— 变调/倍速不进设置页，§6-13；⛔ **CACHE 页的 36 个 key 与两条复用槽位（`settings_cache_dir_size`、`settings_clear_all_cache_desc`）已由 T8b 落地**，本步不要重复改，只核对 G6 扫到那两个新按钮时它们确实带了非空 `description`；另注：§5.2 开关轨的 4 个 key（`settings_on` / `settings_off` / `settings_state_on` / `settings_state_off`）属 **T12**，不计入本步 17 个）
   - 顺带把 `BaiduPanSettingsSection` 里**用 `description` 显示当前根目录路径**的写法改成 `SettingsInfoRow`（§4.5 硬要求 3 的现存违例），路径行归值位、目录说明归 `description`。
   - PLAYBACK ③ 的两条档位说明 `Text`（PlayerSettingsSection:228-240）合并进「音质」卡 `description`，删除散落的两个 `Text`。
 
-- [ ] **Step 5: 逐条核对长度**：中文说明 ≤ 26 汉字（§4.5 硬要求 1）。超长的一律重写，不要靠 `FontSize.small()` 塞长段落、不要改成两行 `Text`。
+- [x] **Step 5: 逐条核对长度**：中文说明 ≤ 26 汉字（§4.5 硬要求 1）。超长的一律重写，不要靠 `FontSize.small()` 塞长段落、不要改成两行 `Text`。（✅ `logs_temp/t14_selfcheck.py` 第 [3] 组逐条量过：最长 25 字 `settings_model_size_desc`；§4.5 表里 `settings_group_font_hint` 的原始样稿 28 字**超标**，已提炼为 24 字版本）
 
-- [ ] **Step 6: 跑 G6 + 全量单测 + 编译 + 提交**
+  - 顺带把 `BaiduPanSettingsSection` 里**用 `description` 显示当前根目录路径**的写法改成 `SettingsInfoRow`（§4.5 硬要求 3 的现存违例），路径行归值位、目录说明归 `description`。（✅ 实做：音乐根目录与 MV 目录**两行同病同治**，各拆成「路径行（值位）+ 修改按钮（说明位）」）
+
+- [ ] **Step 6: 跑 G6 + 全量单测 + 编译 + 提交**（⏳ Gradle 部分待用户执行；✅ G6 等 6 个扫描门
+  已用独立编译通道跑过 53 例全绿，`logs_temp/t14_selfcheck.py` 105 项全过）
 
 ```bash
 git commit -am "feat(settings): 每个设置子项补一句说明文案，新增 SettingsHint 与说明覆盖门禁"

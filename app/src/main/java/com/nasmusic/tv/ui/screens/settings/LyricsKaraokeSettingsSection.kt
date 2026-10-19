@@ -105,13 +105,9 @@ internal fun LyricsKaraokeSettingsSection(
                 fontSize = FontSize.button(),
                 modifier = Modifier.padding(start = 4.dp)
             )
-            Text(
-                text = stringResource(R.string.settings_lyrics_scale_desc),
-                color = NasMusicColors.TextSecondary,
-                fontSize = FontSize.small(),
-                modifier = Modifier.padding(start = 4.dp, top = 2.dp)
-            )
-            Spacer(modifier = Modifier.height(8.dp))
+            // 说明位统一走 SettingsHint（§4.5）：芯片组没有 description 形参，
+            // 原来手写的两行灰字与 SettingSwitch 的 description 是同一规格，收成一个组件。
+            SettingsHint(stringResource(R.string.settings_lyrics_scale_desc))
             // 4 档与播放页 `LyricsSettingsDialog` 完全同源（0.7/1.0/1.3/1.6，复用同一批标签 key）
             Row(
                 modifier = Modifier.padding(start = 4.dp),
@@ -132,13 +128,7 @@ internal fun LyricsKaraokeSettingsSection(
                 fontSize = FontSize.button(),
                 modifier = Modifier.padding(start = 4.dp)
             )
-            Text(
-                text = stringResource(R.string.settings_lyrics_highlight_desc),
-                color = NasMusicColors.TextSecondary,
-                fontSize = FontSize.small(),
-                modifier = Modifier.padding(start = 4.dp, top = 2.dp)
-            )
-            Spacer(modifier = Modifier.height(8.dp))
+            SettingsHint(stringResource(R.string.settings_lyrics_highlight_desc))
             Row(
                 modifier = Modifier.padding(start = 4.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -175,7 +165,11 @@ internal fun LyricsKaraokeSettingsSection(
             }
         }
         // 卡③ 分离模型（下载中进度 / 已下载路径+删除 / 未下载下载按钮，三态互斥）
-        SettingsGroupCard(title = stringResource(R.string.settings_group_model)) {
+        // §4.5：三个按钮各自已有 description，这里补的是**卡级**说明（分离的代价与预期）
+        SettingsGroupCard(
+            title = stringResource(R.string.settings_group_model),
+            description = stringResource(R.string.settings_model_size_desc),
+        ) {
             Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
                 if (state.modelDownloading) {
                     // 下载中：进度条

@@ -84,7 +84,11 @@ internal fun NetworkMusicSection(
         }
 
         // 卡② 音乐搜索端点：Meting 预设 + 自定义、Jamendo Client ID（方案 §3.2 同卡）
-        SettingsGroupCard(title = stringResource(R.string.settings_group_search_endpoints)) {
+        // §4.5：把「自定义端点有风险」这句警示合并进卡片 description，不再另起一行灰字
+        SettingsGroupCard(
+            title = stringResource(R.string.settings_group_search_endpoints),
+            description = stringResource(R.string.settings_group_endpoint_risk_desc),
+        ) {
             // --- 网络搜索：Meting-API 端点配置 ---
             if (actions.onChangeMetingApiBaseUrl != null) {
                 Text(

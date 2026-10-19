@@ -389,7 +389,8 @@ internal fun PhotoWallSettingsSection(
                         color = NasMusicColors.TextPrimary,
                         fontSize = FontSize.button()
                     )
-                    Spacer(modifier = Modifier.height(8.dp))
+                    // §4.5：43 个转场芯片由 PhotoTransitionChips 渲染，它没有说明位 ⇒ 补在这里
+                    SettingsHint(stringResource(R.string.settings_pw_transition_mode_desc))
                     PhotoTransitionChips(
                         selected = s.photoWallFixedTransition,
                         onSelect = { actions.onChangeFixedTransition?.invoke(it) }
@@ -419,7 +420,8 @@ internal fun PhotoWallSettingsSection(
                     color = NasMusicColors.TextPrimary,
                     fontSize = FontSize.button()
                 )
-                Spacer(modifier = Modifier.height(8.dp))
+                // §4.5：画面适配两个芯片此前完全没有说明（"满屏/完整"看不出差在哪）
+                SettingsHint(stringResource(R.string.settings_pw_scale_desc))
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     SettingsChip(
                         label = stringResource(R.string.settings_photo_wall_scale_crop),

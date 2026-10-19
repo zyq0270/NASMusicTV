@@ -1,5 +1,6 @@
 package com.nasmusic.tv.ui
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
@@ -35,6 +36,19 @@ class SettingsGroupCoverageTest {
     )
 
     private val rowCalls = listOf("SettingSwitch(", "SettingActionButton(", "SettingsInfoRow(")
+
+    /**
+     * G6-C 的触发名单：出现任一即视为「本卡有芯片组 / 调整行，必须有说明」。
+     *
+     * 后两项是**渲染芯片与调整行的私有 helper**，不是芯片本身 —— 源码门禁只能看调用点，
+     * 不加它们，`PHOTO_WALL ③`（43 个转场芯片）在门禁眼里就是"没有芯片"。
+     */
+    private val chipRowCalls = listOf(
+        "AdjustButton(",
+        "SettingsChip(",
+        "DurationRow(",
+        "PhotoTransitionChips(",
+    )
 
     @Test
     fun `已迁移分区的每个设置行都必须位于 SettingsGroupCard 内`() {
@@ -275,6 +289,188 @@ class SettingsGroupCoverageTest {
             wifiStringHits("// 旧写法：R.string.settings_wifi_on").isEmpty())
     }
 
+    // ─────────── G6：说明覆盖（§4.5） ───────────
+
+    /**
+     * 扫一个分区源码，返回缺 `description` 的调用点 `文件:行 调用名`。
+     *
+     * G6-A（断言 A + B 合并：`PlayModeSelector` 加了必填 `description` 后仍要防人改回可选）
+     * 与负向自证**共用这一条路径** —— 自证必须走真实判据，否则它只证明了自己。
+     *
+     * ⚠️ 判据是「**实参区**含非空 `description =`」，不是单行 `contains`：
+     * 说明文案是 `stringResource(R.string.x)`，长参数会被 ktlint/IDE 折到下一行；
+     * 单行判据会在折行时假红，而 `contains("description")` 又会被 `description = ""` 骗过。
+     */
+    private fun descViolations(raw: String, label: String): List<String> {
+        val text = stripComments(raw)
+        val rawLines = raw.lines()
+        val out = mutableListOf<String>()
+        text.lines().forEachIndexed { idx, line ->
+            val call = listOf("SettingSwitch(", "SettingActionButton(", "PlayModeSelector(")
+                .firstOrNull { line.contains(it) } ?: return@forEachIndexed
+            if (line.contains("internal fun ") || line.contains("private fun ")) return@forEachIndexed
+            if (exemptAt(rawLines, idx)) return@forEachIndexed
+            val open = text.lineOffset(idx) + line.indexOf(call) + call.length - 1
+            val args = text.substring(open, argEnd(text, open))
+            val empty = args.contains("description = \"\"")
+            if (!args.contains("description =") || empty) out += "$label:${idx + 1} $call"
+        }
+        return out
+    }
+
+    private fun descCallCount(raw: String): Int {
+        val text = stripComments(raw)
+        val rawLines = raw.lines()
+        return text.lines().withIndex().count { (idx, line) ->
+            listOf("SettingSwitch(", "SettingActionButton(", "PlayModeSelector(").any { line.contains(it) } &&
+                !line.contains("internal fun ") && !line.contains("private fun ") &&
+                !exemptAt(rawLines, idx)
+        }
+    }
+
+    /**
+     * 该行（或向前 3 行内）有没有豁免标记。
+     *
+     * ⚠️ 两个都必须：① 标记写在**注释**里，而 `stripComments` 会把注释换成空格 ——
+     * 在剥离后的文本上找 `Desc-exempt:` 永远找不到（本门第一版就踩了这个坑）；
+     * ② 允许写在上方 3 行内，否则一段多行调用（参数一行一个）只能把标记塞进参数列表里。
+     */
+    private fun exemptAt(rawLines: List<String>, idx: Int): Boolean =
+        (maxOf(0, idx - 3)..idx).any { rawLines.getOrElse(it) { "" }.contains("Desc-exempt:") }
+
+    @Test
+    fun `每个开关、按钮与播放模式选择器都必须带非空 description`() {
+        val root = settingsRoot()
+        var scanned = 0
+        val missing = mutableListOf<String>()
+        for (f in root.listFiles { file -> file.name.endsWith("Section.kt") }.orEmpty()) {
+            val raw = f.readText()
+            scanned += descCallCount(raw)
+            missing += descViolations(raw, f.name)
+        }
+        assertTrue("扫描到 0 个调用点 —— G6-A 在空转", scanned > 0)
+        if (missing.isNotEmpty()) {
+            fail(
+                "以下设置行缺 description（§4.5：每个可操作项都要一句说明，≤26 汉字）：\n" +
+                    missing.joinToString("\n") { "  • $it" } +
+                    "\n\n确实不该有说明的行，在调用上方加 `// Desc-exempt: <理由>`。"
+            )
+        }
+    }
+
+    /**
+     * 芯片组 / 调整行所在的卡必须有一句说明 —— 满足任一条即可：
+     * ① 卡内有 `SettingsHint(`（芯片组与调整行没有 `description` 形参，这是它们的说明位）；
+     * ② 卡头自带非空 `description`（说明由卡片头承担，再加一条 `SettingsHint` 就是重复文案）。
+     *
+     * ⚠️ ② 是**对方案原文的修正**：方案 Step 1 的片段只认 `SettingsHint(`，但 §4.5 的表里
+     * `GENERAL ①/③` 标的是 ✅「已有卡片 description」—— 两处自相矛盾。按「说明写给人看、
+     * 不重复」的意图取并集。
+     *
+     * ⚠️ 触发名单除方案给的 `AdjustButton(` / `SettingsChip(` 外，还加了两个**渲染芯片/调整行
+     * 的私有 helper**：`PhotoTransitionChips(`（43 个转场芯片）与 `DurationRow(`（− / + 秒数行）。
+     * 不加这两个，`PHOTO_WALL ③` 那张卡的芯片在门禁眼里就是"不存在"—— 抓的是调用点而不是
+     * 渲染结果，这是源码门禁的固有盲区，能补一个是一个。
+     */
+    @Test
+    fun `芯片组与调整行所在卡片必须有 SettingsHint`() {
+        val root = settingsRoot()
+        var checkedCards = 0
+        val missing = mutableListOf<String>()
+        for (f in root.listFiles { file -> file.name.endsWith("Section.kt") }.orEmpty()) {
+            val raw = f.readText()
+            val rawLines = raw.lines()
+            val text = stripComments(raw)
+            for ((i, card) in groupCards(text).withIndex()) {
+                val (header, span) = card
+                // 豁免可写在卡头那几行（上方 3 行内）或卡内任意位置
+                val cardLine = raw.substring(0, span.first).count { it == '\n' }
+                if (exemptAt(rawLines, cardLine) || raw.substring(span).contains("Desc-exempt:")) continue
+                val body = text.substring(span)
+                if (chipRowCalls.none { body.contains(it) }) continue
+                checkedCards++
+                val hasCardDesc = header.contains("description =") && !header.contains("description = \"\"")
+                if (!body.contains("SettingsHint(") && !hasCardDesc) {
+                    missing += "${f.name} 第 ${i + 1} 张卡（有芯片/调整行，既无 SettingsHint 也无卡片 description）"
+                }
+            }
+        }
+        assertTrue("扫描到 0 张含芯片的卡片 —— G6-C 在空转", checkedCards > 0)
+        if (missing.isNotEmpty()) {
+            fail("芯片组/调整行缺说明（§4.5：芯片组也要一句说明）：\n" + missing.joinToString("\n") { "  • $it" })
+        }
+    }
+
+    /** 负向自证：缺 description 的行必须被同一条路径判负，有 description 的行不能误伤。 */
+    @Test
+    fun `缺 description 的开关必须判负`() {
+        val text = """
+            SettingsGroupCard(title = "x") {
+                SettingSwitch(label = "1", description = "ok")
+                SettingSwitch(label = "2")
+                SettingActionButton(label = "3", description = "")
+            }
+        """.trimIndent()
+        val v = descViolations(text, "sample")
+        assertTrue(
+            "负向用例失效：缺 description / 空 description 的行没被判负（实际命中 $v）",
+            v.any { it.contains(":3") } && v.any { it.contains(":4") }
+        )
+        assertTrue("误伤：带非空 description 的行被判负", v.none { it.contains(":2") })
+    }
+
+    /** 负向自证：`Desc-exempt` 必须真的能放行（否则标记形同虚设）。 */
+    @Test
+    fun `豁免标记必须能放行缺 description 的行`() {
+        val text = """
+            SettingsGroupCard(title = "x") {
+                // Desc-exempt: 这一行是导出过程的取消按钮，不需要说明
+                SettingActionButton(label = "3", description = "")
+            }
+        """.trimIndent()
+        assertTrue(
+            "豁免标记失效：加了 Desc-exempt 仍被判负",
+            descViolations(text, "sample").isEmpty(),
+        )
+    }
+
+    /** 负向自证：卡片既无 SettingsHint 也无卡片 description 时必须判负（判据与上面那条断言同源）。 */
+    @Test
+    fun `含芯片但无 SettingsHint 的卡片必须判负`() {
+        val text = """
+            SettingsGroupCard(title = "x") {
+                AdjustButton("-", onClick = {})
+            }
+        """.trimIndent()
+        val cards = groupCards(stripComments(text))
+        assertEquals("样例里应恰好解析出 1 张卡", 1, cards.size)
+        val (header, span) = cards[0]
+        val body = stripComments(text).substring(span)
+        val hasCardDesc = header.contains("description =") && !header.contains("description = \"\"")
+        assertTrue(
+            "护栏空转：既无 SettingsHint 也无卡片 description 的卡没被判负",
+            chipRowCalls.any { body.contains(it) } && !body.contains("SettingsHint(") && !hasCardDesc,
+        )
+    }
+
+    /** 从 `(` 的下标开始做括号配对，返回匹配 `)` **之后**的下标。字符串/字符字面量内的括号跳过。 */
+    private fun argEnd(text: String, openParen: Int): Int {
+        var depth = 0; var i = openParen; var inString = false; var inChar = false
+        while (i < text.length) {
+            val c = text[i]
+            when {
+                inString -> { if (c == '\\') i++ else if (c == '"') inString = false }
+                inChar -> { if (c == '\\') i++ else if (c == '\'') inChar = false }
+                c == '"' -> inString = true
+                c == '\'' -> inChar = true
+                c == '(' -> depth++
+                c == ')' -> { depth--; if (depth == 0) return i + 1 }
+            }
+            i++
+        }
+        return text.length
+    }
+
     // ─────────── 辅助 ───────────
 
     /** 返回每个 `SettingsGroupCard(` 尾随 lambda 体（大括号配对）的字符区间。 */
@@ -297,6 +493,39 @@ class SettingsGroupCoverageTest {
                 j++
             }
             if (end > brace) out += (brace + 1)..(end - 1)
+            i = at + 1
+        }
+        return out
+    }
+
+    /**
+     * 每张卡：(**实参区**文本, 尾随 lambda 体区间)。
+     *
+     * 与 [groupCardSpans] 的区别：这里把卡头实参一起返回，G6-C 才能判断"说明是否已由
+     * 卡片 `description` 承担"。两者由同一次遍历产出 ⇒ 下标天然对齐，不会出现
+     * "第 3 张卡的 body 配到第 2 张卡的 header"。
+     */
+    private fun groupCards(text: String): List<Pair<String, IntRange>> {
+        val out = mutableListOf<Pair<String, IntRange>>()
+        var i = 0
+        while (true) {
+            val at = text.indexOf("SettingsGroupCard(", startIndex = i)
+            if (at < 0) break
+            val open = at + "SettingsGroupCard".length
+            val argsEnd = argEnd(text, open)               // 匹配 `)` 之后
+            val brace = text.indexOf('{', argsEnd)
+            if (brace < 0) break
+            var depth = 0
+            var end = -1
+            var j = brace
+            while (j < text.length) {
+                when (text[j]) {
+                    '{' -> depth++
+                    '}' -> { depth--; if (depth == 0) { end = j; break } }
+                }
+                j++
+            }
+            if (end > brace) out += text.substring(open, argsEnd) to (brace + 1)..(end - 1)
             i = at + 1
         }
         return out

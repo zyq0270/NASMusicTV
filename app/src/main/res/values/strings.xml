@@ -270,6 +270,23 @@
     <string name="settings_lyrics_karaoke">歌词与 K 歌</string>
     <string name="settings_visual_effects">视觉特效</string>
 
+    <!-- §4.5 说明文案（v2.39.0 T14）：每个可操作项一句，≤26 汉字，写效果不写实现。
+         ⚠️ 中英必须同步 —— 只加一侧是运行期 getString 抛 IllegalArgumentException，编译不报错。 -->
+    <string name="settings_group_quality_desc">仅影响网络音乐；无损需曲库支持 FLAC</string>
+    <string name="settings_group_font_hint">在当前界面字号上整体放大或缩小（−8 到 +8）</string>
+    <string name="settings_play_mode_desc">当前队列按什么顺序继续播放</string>
+    <string name="settings_crossfade_duration_desc">切歌时新旧两首重叠的秒数，越长越平缓</string>
+    <string name="settings_model_size_desc">分离要本机跑模型，约 158 MB；电视较慢属正常</string>
+    <string name="settings_visualizer_theme_desc">在播放页全屏可视化里按方向键切换主题</string>
+    <string name="settings_cover_blur_desc">在播放页背景上生效，与画质无关</string>
+    <string name="settings_cover_dark_desc">压暗背景让歌词更清楚</string>
+    <string name="settings_pw_transition_mode_desc">转场效果的挑选方式，下方可选具体时长</string>
+    <string name="settings_pw_scale_desc">满屏会裁掉边缘，完整则上下留黑边</string>
+    <string name="settings_netdisk_index_desc2">索引决定曲库能否被搜到；封面提取耗时随曲数增长</string>
+    <string name="settings_download_location_hint">换目录不会自动搬迁已下载的歌曲</string>
+    <string name="settings_group_endpoint_risk_desc">自定义端点会直接替换官方地址，填错将无法联网</string>
+    <string name="settings_group_about_desc">这里只是版本与能力信息，不可修改</string>
+
     <!-- 照片墙分区（§7.2） -->
     <string name="settings_photo_wall">照片墙</string>
     <string name="settings_photo_wall_sources">照片来源</string>
@@ -378,7 +395,6 @@
     <string name="settings_download_location">下载位置</string>
     <string name="settings_download_location_internal">内部存储（默认）</string>
     <string name="settings_download_location_custom">外部存储（自定义）</string>
-    <string name="settings_download_location_desc">外接设备导出功能可在「我的 → 下载」中使用</string>
     <string name="settings_cache">缓存管理</string>
     <string name="settings_network">网络检测</string>
     <string name="settings_network_advanced">网络高级</string>
@@ -515,7 +531,10 @@
     <string name="netdisk_dir_missing">音乐根目录不存在</string>
     <string name="netdisk_dir_missing_desc">百度网盘已登录成功，但配置的音乐根目录不存在。请在下方重新设置音乐根目录。</string>
     <string name="settings_netdisk_music_root">音乐根目录</string>
+    <string name="settings_netdisk_music_root_edit">修改音乐根目录</string>
+    <string name="settings_netdisk_music_root_desc">改这里决定扫描网盘哪个目录</string>
     <string name="settings_netdisk_mv_dir">MV 目录</string>
+    <string name="settings_netdisk_mv_dir_edit">修改 MV 目录</string>
     <string name="settings_netdisk_mv_dir_desc">网盘中存放 MV 视频的目录（可选，默认同音乐目录）</string>
     <string name="settings_netdisk_index_desc">已扫描 %1$d 首歌曲</string>
     <string name="settings_netdisk_index_scanning_progress">索引扫描中…已发现 %1$d 首</string>
@@ -1188,9 +1207,6 @@
     <string name="quality_scope_label">生效范围</string>
     <string name="quality_scope_this_play_desc">仅当前这首歌使用该档位</string>
     <string name="quality_scope_all_songs_desc">所有网络歌曲都用该档位</string>
-    <!-- §5.3 设置页说明文案（降低用户困惑） -->
-    <string name="quality_tier_hint_lossless">无损仅限支持 FLAC 的曲库；不可用时自动降级并提示</string>
-    <string name="quality_tier_hint_scope">本档位仅影响网络音乐；NAS / 本地 / 网盘歌曲按其原始码率播放</string>
 
     <!-- ================= v2.36.0 手机竖屏 UI（docs/archive/phone-portrait-ui-plan.md）================= -->
     <!-- 设置 → 通用：屏幕方向（L1 全局策略，唯一真相之源） -->

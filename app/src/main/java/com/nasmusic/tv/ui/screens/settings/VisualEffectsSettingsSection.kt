@@ -1,19 +1,14 @@
 package com.nasmusic.tv.ui.screens.settings
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.tv.material3.ExperimentalTvMaterial3Api
@@ -91,9 +86,11 @@ internal fun VisualEffectsSettingsSection(
                 }
             }
             // 当前效果主题（只读）：主题切换在播放页全屏可视化里做（§1.2-✕15 的结论）
+            // §4.5：只读行本身不带功能说明，但这里必须告诉用户"去哪儿改"—— 否则这行看起来是坏的
             SettingsInfoRow(
                 stringResource(R.string.settings_visualizer_theme),
-                state.settings.visualizerTheme.displayName
+                state.settings.visualizerTheme.displayName,
+                description = stringResource(R.string.settings_visualizer_theme_desc),
             )
         }
         // 卡② 封面滤镜
@@ -111,7 +108,7 @@ internal fun VisualEffectsSettingsSection(
                     fontSize = FontSize.button(),
                     modifier = Modifier.padding(start = 4.dp)
                 )
-                Spacer(modifier = Modifier.height(8.dp))
+                SettingsHint(stringResource(R.string.settings_cover_blur_desc))
                 // Blur radius buttons
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
@@ -139,7 +136,7 @@ internal fun VisualEffectsSettingsSection(
                     fontSize = FontSize.button(),
                     modifier = Modifier.padding(start = 4.dp)
                 )
-                Spacer(modifier = Modifier.height(8.dp))
+                SettingsHint(stringResource(R.string.settings_cover_dark_desc))
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),

@@ -77,7 +77,11 @@ internal fun PlayerSettingsSection(
         // 卡① 播放行为（§3.2）
         SettingsGroupCard(title = stringResource(R.string.settings_group_play_behavior)) {
             SettingSwitch(label = stringResource(R.string.settings_auto_play), description = stringResource(R.string.settings_auto_play_desc), checked = state.settings.autoPlayNext, onClick = { actions.onToggleAutoPlayNext(!state.settings.autoPlayNext) })
-            PlayModeSelector(current = state.settings.defaultPlayMode, onSelect = { actions.onChangePlayMode(it) })
+            PlayModeSelector(
+                current = state.settings.defaultPlayMode,
+                onSelect = { actions.onChangePlayMode(it) },
+                description = stringResource(R.string.settings_play_mode_desc),
+            )
         }
         // 卡② 过渡与音量（crossfade + 时长档位 + 应用内音量）
         SettingsGroupCard(title = stringResource(R.string.settings_group_transition_volume)) {
@@ -93,6 +97,8 @@ internal fun PlayerSettingsSection(
                 // `fillMaxWidth()` ⇒ Row 给 wrap 子项的 maxWidth 是「行内剩余宽度」，
                 // 第一枚「2s」吃满整行、后四档被挤成 0 宽（线上既有缺陷，只有「2s」可见）。
                 // 竖屏 407dp 也放不下 5 枚 ⇒ 每行 3 枚（§4.8 A2）；TV / 手机横屏仍是一行 5 枚（B1）。
+                // 芯片组没有自带说明位 ⇒ 上方补 SettingsHint（§4.5）
+                SettingsHint(stringResource(R.string.settings_crossfade_duration_desc))
                 SettingsChipRow(
                     items = listOf(2, 4, 6, 8, 12),
                     tv = 5,
@@ -146,8 +152,13 @@ internal fun PlayerSettingsSection(
                 })
             }
         }
-        // 卡③ 音质（全局档位 + 两条说明 + 清除逐曲覆盖）
-        SettingsGroupCard(title = stringResource(R.string.settings_group_quality)) {
+        // 卡③ 音质（全局档位 + 卡片级说明 + 清除逐曲覆盖）
+        // §4.5：原来散落在卡内底部的两条说明 Text 已合并进卡片 description（≤26 汉字，
+        // 效果导向），不再在列表末尾追加两段灰字。
+        SettingsGroupCard(
+            title = stringResource(R.string.settings_group_quality),
+            description = stringResource(R.string.settings_group_quality_desc),
+        ) {
             // F2-6：音质分级（仅 Meting 网络源生效；NAS 原品质直传）
             Text(
                 text = stringResource(R.string.settings_quality_tier),
@@ -184,20 +195,6 @@ internal fun PlayerSettingsSection(
                     )
                 }
             }
-            // v2.35.0 多码率（§5.3）：两条说明文案，降低用户困惑
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = stringResource(R.string.quality_tier_hint_lossless),
-                color = NasMusicColors.TextSecondary,
-                fontSize = FontSize.small(),
-                modifier = Modifier.padding(start = 4.dp)
-            )
-            Text(
-                text = stringResource(R.string.quality_tier_hint_scope),
-                color = NasMusicColors.TextSecondary,
-                fontSize = FontSize.small(),
-                modifier = Modifier.padding(start = 4.dp, top = 2.dp)
-            )
             // v2.35.0 多码率：清除全部单曲音质覆盖（方案 §5.3）
             Spacer(modifier = Modifier.height(8.dp))
             SettingActionButton(

@@ -330,16 +330,49 @@ internal fun SettingSwitch(
     }
 }
 
+/**
+ * 芯片组 / 调整行上方的说明文本（§4.5）。
+ *
+ * 为什么需要它：`SettingSwitch` / `SettingActionButton` 都自带 `description` 形参，
+ * 而**芯片组**（`SettingsChip` 排成一行）与**调整行**（`AdjustButton − / +`）没有说明位 ——
+ * 分区里于是出现两种写法并存：有的卡用 `Text` 手写一行灰字，有的干脆没有。
+ * 本组件是这两类行的**唯一**说明位，规格与 `SettingSwitch` 的 description 完全一致
+ * （`TextSecondary` + `FontSize.small()`），保证同一张卡里两类行的说明看起来是一套。
+ *
+ * ⚠️ 自带 `bottom = 8.dp`：调用方**不要**再补 `Spacer(height = 8.dp)`，否则间距翻倍。
+ */
 @OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
-internal fun PlayModeSelector(current: PlayMode, onSelect: (PlayMode) -> Unit) {
+internal fun SettingsHint(text: String, modifier: Modifier = Modifier) {
+    Text(
+        text = text,
+        color = NasMusicColors.TextSecondary,
+        fontSize = FontSize.small(),
+        modifier = modifier.padding(start = 4.dp, bottom = 8.dp),
+    )
+}
+
+/**
+ * 播放模式选择器。
+ *
+ * @param description **必填、无默认值**（§4.5）：这个组件此前没有说明位，是"覆盖缺口"的源头之一。
+ *   靠编译器强制调用方给说明，而不是靠门禁事后补 —— 门禁只能发现"少给了"，发现不了"该不该给"。
+ */
+@OptIn(ExperimentalTvMaterial3Api::class)
+@Composable
+internal fun PlayModeSelector(
+    current: PlayMode,
+    onSelect: (PlayMode) -> Unit,
+    description: String,
+) {
     Column {
         Text(
             text = stringResource(R.string.settings_play_mode),
             color = NasMusicColors.TextPrimary,
             fontSize = FontSize.button(),
-            modifier = Modifier.padding(vertical = 8.dp)
+            modifier = Modifier.padding(start = 4.dp, top = 8.dp)
         )
+        SettingsHint(description)
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             PlayMode.values().forEach { mode ->
                 SettingsChip(

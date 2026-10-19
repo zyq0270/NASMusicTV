@@ -50,8 +50,11 @@ data class AboutSettingsState(
 internal fun AboutSettingsSection(state: AboutSettingsState) {
     Column {
         SectionTitle(stringResource(R.string.settings_about))
-        // 卡① 版本信息
-        SettingsGroupCard(title = stringResource(R.string.settings_group_version)) {
+        // 卡① 版本信息（§4.5：本页全是只读信息行，说明由卡片 description 承担）
+        SettingsGroupCard(
+            title = stringResource(R.string.settings_group_version),
+            description = stringResource(R.string.settings_group_about_desc),
+        ) {
             AboutRow(label = stringResource(R.string.settings_app_name), value = stringResource(R.string.app_name))
             AboutRow(label = stringResource(R.string.about_version), value = NasMusicVersion.DISPLAY)
             AboutRow(label = stringResource(R.string.settings_build_type), value = NasMusicVersion.BUILD_TYPE)

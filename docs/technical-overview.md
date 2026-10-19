@@ -16405,3 +16405,59 @@ Compose 侧改动仍须 `assembleRelease` 兜底（见 §10.250 的覆盖盲区�
 时长档/模型双按钮接线 + A4 + A1/A5 + `ImportedPlaylistRow` + `danger` 5 处 + 注释完整性 +
 括号配平 + LF）。
 
+### 10.253 v2.39.0 — 设置区整理 T14：每个可操作项一句说明 + G6 覆盖门（2026-10-19）
+
+**问题**：设置区「该不该有一句说明」此前全凭自觉 —— `SettingSwitch` / `SettingActionButton`
+有 `description` 形参但可以传空串；**芯片组**（`SettingsChip` 一排）与**调整行**
+（`AdjustButton − / +`）根本没有说明位，分区里出现了三种写法并存：手写灰字 `Text`、
+卡片 `description`、以及什么都没有。v2.38.x 的画面适配两个芯片（满屏/完整）就是
+"看不出差在哪"的实锤。
+
+**新增原语**：`SettingsHint(text)`（`TextSecondary` + `FontSize.small()`，自带 `bottom = 8.dp`
+—— 调用方 ⛔ 再补 `Spacer(8.dp)` 会翻倍）与 `PlayModeSelector(description)`（**必填无默认值**，
+靠编译器而非门禁强制）。全仓 6 个分区文件的手写灰字已统一收进 `SettingsHint`。
+
+**G6 门（`SettingsGroupCoverageTest` 追加 5 例，共 15）**：
+
+- **G6-A**：`*Section.kt` 里每个 `SettingSwitch(` / `SettingActionButton(` / `PlayModeSelector(`
+  调用的**实参区**（括号配对、跳过字符串字面量）必须含非空 `description =`。
+  判据落在实参区而不是单行 `contains`，因为长参数会被折行，单行判据会假红。
+- **G6-C**：含芯片/调整行的卡必须有说明 —— 满足 `SettingsHint(` **或**卡头非空 `description`
+  任一条。
+- 自证 3 条：负向（缺/空 description 必须判负、非空不误伤）、`Desc-exempt` 必须真的能放行、
+  G6-C 破坏样本必须判负。
+
+**建门红名单**（修复前）：G6-A **2 处**（`DownloadSettingsSection:221` 的 `description = ""` ——
+`settings_download_export_desc` 这个 key 一直存在却**零引用**；`PlayerSettingsSection:80` 的
+`PlayModeSelector`）、G6-C **10 张卡 / 7 个文件**。修复后 0。
+
+**三处对方案片段的修正（⛔ 不要按原文改回去）**：
+
+1. **`Desc-exempt:` 必须查原文**：注释已被 `stripComments` 换成空格，在剥离后的文本上找
+   这个标记永远找不到 —— 方案的豁免机制照抄是**死代码**。实现查原文的「本行或上方 3 行」
+   （口径同 G8），并在卡级检查里同时覆盖卡内与卡头。
+2. **G6-C 接受卡片 `description`**：方案的表把 `GENERAL ①/③` 标成 ✅「已有卡片 description」，
+   片段却只认 `SettingsHint(` —— 两处自相矛盾。按"说明写给人看、不重复"的意图取并集；
+   否则语言/方向两卡会被迫加一条与卡头重复的灰字。
+3. **触发名单补两个私有 helper**：`DurationRow(`（− / + 秒数行）与 `PhotoTransitionChips(`
+   （43 个转场芯片）。它们渲染芯片但不叫 `SettingsChip(` —— 源码门禁只认调用点，
+   不补这两个，`PHOTO_WALL ③` 那张卡在门禁眼里就是"没有芯片"。
+
+**文案落点（17 + 3 个 key，中英同批）**：§4.5 表的 15 项 + 2 条卡片级全部落地；
+另加 `settings_group_quality_desc`（PLAYBACK ③ 两条散落说明合并进卡片 `description` 的落点，
+原 `quality_tier_hint_lossless` / `quality_tier_hint_scope` 两 key 删除）与百度目录两行拆分所需
+的 3 个 key（`_music_root_edit` / `_music_root_desc` / `_mv_dir_edit`）。
+删除 3 个过时/被取代的 key：上述两条 + `settings_download_location_desc`
+（内容是「导出在『我的 → 下载』中使用」，导出入口进设置页后已失实）。
+
+**§4.5 硬要求 3 的存量违例**：百度网盘的「音乐根目录 / MV 目录」两行此前把**当前路径**
+塞进按钮的 `description` —— 同一行既像说明又像值。已拆成 `SettingsInfoRow`（路径归值位，
+未设置显示「未设置」）+ `SettingActionButton`（说明归 description，`Trail.Arrow` 进编辑对话框）。
+
+**长度口径**：`logs_temp/t14_selfcheck.py` 第 [3] 组逐条量 ≤26；§4.5 表自带的
+`settings_group_font_hint` 样稿 28 字超标，已提炼。
+
+**免 Gradle 自查**：`logs_temp/t14_selfcheck.py` 105 项（组件签名 + 中英对称 + 全 key 引用核对 +
+长度 + 接线清单 + 违例清零 + `SettingsHint` 落点 + 括号配平/LF）。G6 等 6 个扫描门
+经独立编译通道 53 例全绿；Compose 侧仍须用户跑 `assembleRelease` 兜底。
+
