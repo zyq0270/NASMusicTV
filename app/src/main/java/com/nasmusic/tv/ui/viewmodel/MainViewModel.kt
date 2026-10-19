@@ -157,6 +157,49 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
     val prefs = nasMusicApp.appPreferences
     /** 搜索历史（最近输入 + 最多搜索） */
     val searchHistory = prefs.history.searchHistory
+
+    // ⛔⛔ 以下三个 `by lazy` 声明**必须留在类顶部**（v2.39.3 补丁，2026-10-20）。
+    //
+    // 背景：它们原本声明在 1700+ 行，而构造期 init 块接线（`restoreBaiduIndexOnStart`
+    // 等）会在**主线程还没跑完构造**时触发 Default 协程去读它们 ⇒ 读到 null 委托字段
+    // ⇒ release 启动 NPE（`SynchronizedLazyImpl.getValue` on null，混淆栈的类名还会被
+    // R8 的 lambda 水平合并张冠李戴成不相关的 lambda）。v2.37.0 用 [constructorReady]
+    // 守卫挡住了大部分路径；2026-10-20 真机崩溃证明**守卫可被跳过**：R8 把多个挂起
+    // lambda 合并进同一个类、共享状态标签，链上前一个挂起点把标签置 1，合并后本
+    // lambda 的守卫派发读到陈旧值，`await()` 被绕过直插函数体。
+    //
+    // 修法从根上改：声明提前到类顶部 ⇒ 构造器最前面几条就赋值委托字段，之后任何
+    // 协程（哪怕守卫被 R8 合并绕过）读到的都不是 null。
+    // ⚠️ 新增「只被协程/回调读取」的字段时一律在此处声明，⛔ 不要挪回文件后部。
+    // 该顺序由 `MainViewModelConstructionOrderTest` 门禁把守。
+
+    /** 已解析的专辑封面缓存（albumId → coverUrl），跨 updateMergedData 保持 */
+    private val resolvedAlbumCovers: MutableMap<String, String> by lazy {
+        // 从持久缓存预加载已解析的专辑封面（跨会话复用，避免重复网络搜索）
+        // 2026-09-25 审查修复（7-1）：IO 线程解析回调写入 + Default 线程 updateMergedData 读取，
+        // 普通 HashMap 无 happens-before（坏情况扩容死循环），换 ConcurrentHashMap。
+        val m = java.util.concurrent.ConcurrentHashMap<String, String>()
+        nasMusicApp.coverUrlPersistentCache.exportAll().forEach { (k, v) ->
+            if (k.startsWith("album:")) m[k.removePrefix("album:")] = v
+        }
+        m
+    }
+
+    /** 已解析的艺术家封面缓存（artistId → coverUrl），跨 updateMergedData 保持 */
+    private val resolvedArtistCovers: MutableMap<String, String> by lazy {
+        // 从持久缓存预加载已解析的艺术家封面（跨会话复用，避免重复网络搜索）
+        // 2026-09-25 审查修复（7-1）：同 resolvedAlbumCovers，换 ConcurrentHashMap。
+        val m = java.util.concurrent.ConcurrentHashMap<String, String>()
+        nasMusicApp.coverUrlPersistentCache.exportAll().forEach { (k, v) ->
+            if (k.startsWith("artist:")) m[k.removePrefix("artist:")] = v
+        }
+        m
+    }
+
+    // --- 导出功能（§8.8）---
+    private val exportCoordinator by lazy {
+        (getApplication<NasMusicApp>()).exportCoordinator
+    }
     // --- 封面滤镜设置 ---
     private val _coverFilterEnabled = MutableStateFlow(false)
     val coverFilterEnabled: StateFlow<Boolean> = _coverFilterEnabled.asStateFlow()
@@ -229,6 +272,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
      * 修复：类体**最后一个** init 块 `complete()` 本信号；`updateMergedData()` 的
      * Default 协程体第一行 `await()`，保证合并逻辑只在构造完成后执行。
      * 构造期触发的调用一律挂起排队，不丢不重。
+     *
+     * ⚠️ v2.39.3 补丁（2026-10-20 真机 release 崩溃，崩因同上）：**本信号不是万能的**。
+     * R8 会把多个挂起 lambda 水平合并进同一个类、共用状态标签；合并后链上前一个
+     * 挂起点（`restoreBaiduIndexOnStart` 内的 `refreshBaiduConnectionState`）先把
+     * 标签置 1，本协程的守卫派发读到陈旧值 ⇒ `await()` 被绕过直插函数体 ⇒ 读到
+     * 尚未初始化的 `by lazy` 委托字段 ⇒ NPE（debug 包无 R8 合并故不复现）。
+     * 根上的修法是「易被并发读的字段声明提前到类顶部」（见类顶部三个 lazy 的注释），
+     * 让守卫失效时读到的也不是 null；本信号保留作纵深防御。
      */
     private val constructorReady = CompletableDeferred<Unit>()
 
@@ -1844,17 +1895,9 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
     private var coverResolveJob: kotlinx.coroutines.Job? = null
     private var artistCoverResolveJob: kotlinx.coroutines.Job? = null
 
-    /** 已解析的专辑封面缓存（albumId → coverUrl），跨 updateMergedData 保持 */
-    private val resolvedAlbumCovers: MutableMap<String, String> by lazy {
-    // 从持久缓存预加载已解析的专辑封面（跨会话复用，避免重复网络搜索）
-    // 2026-09-25 审查修复（7-1）：IO 线程解析回调写入 + Default 线程 updateMergedData 读取，
-    // 普通 HashMap 无 happens-before（坏情况扩容死循环），换 ConcurrentHashMap。
-    val m = java.util.concurrent.ConcurrentHashMap<String, String>()
-    nasMusicApp.coverUrlPersistentCache.exportAll().forEach { (k, v) ->
-        if (k.startsWith("album:")) m[k.removePrefix("album:")] = v
-    }
-    m
-}
+    // ⛔ `resolvedAlbumCovers` / `resolvedArtistCovers` 声明已移至**类顶部**
+    // （v2.39.3 补丁：构造期 null 委托 NPE 修复，R8 lambda 合并可绕过 constructorReady
+    // 守卫，理由见类顶部注释）。⛔ 勿挪回本处。
 
     /**
      * 专辑封面解析尝试次数（albumId → 次数）。
@@ -1870,16 +1913,7 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
     /** 单个专辑最多解析封面的次数（含首次），保留 1 次重试以容忍瞬时网络失败 */
     private val albumCoverMaxAttempts = 2
 
-    /** 已解析的艺术家封面缓存（artistId → coverUrl），跨 updateMergedData 保持 */
-    private val resolvedArtistCovers: MutableMap<String, String> by lazy {
-    // 从持久缓存预加载已解析的艺术家封面（跨会话复用，避免重复网络搜索）
-    // 2026-09-25 审查修复（7-1）：同 resolvedAlbumCovers，换 ConcurrentHashMap。
-    val m = java.util.concurrent.ConcurrentHashMap<String, String>()
-    nasMusicApp.coverUrlPersistentCache.exportAll().forEach { (k, v) ->
-        if (k.startsWith("artist:")) m[k.removePrefix("artist:")] = v
-    }
-    m
-}
+    // ⛔ `resolvedArtistCovers` 声明已移至**类顶部**（v2.39.3 补丁，同上）。勿挪回。
 
     /**
      * 艺术家封面解析尝试次数。收敛护栏：`updateMergedData()` 末尾会调 `resolveArtistCoversAsync()`，
@@ -3405,10 +3439,10 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
 
     /** 手动下载单曲（歌曲行 ⬇ 按钮）——已迁至 DownloadViewModel.downloadSong */
 
-    // --- 导出功能（§8.8） ---
-    private val exportCoordinator by lazy {
-        (getApplication<NasMusicApp>()).exportCoordinator
-    }
+    // --- 导出功能（§8.8）---
+    // ⛔ `exportCoordinator` 声明已移至**类顶部**（v2.39.3 补丁，构造期竞态防护，同上）。勿挪回。
+    // 注意：下方 `exportState` 读取该 lazy 会在此处（构造器内）触发其初始化，安全——
+    // 声明提前后委托字段早已赋值。
 
     /** 导出状态（供设置页 UI 订阅） */
     val exportState: StateFlow<ExportState> = exportCoordinator.state
@@ -3862,10 +3896,13 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
     }
 
     /**
-     * ⛔ 类体**最后一个** init 块：执行到此处时，本类所有属性（含 `resolvedAlbumCovers`
-     * 等 1700+ 行才声明的 `by lazy` 委托）均已初始化完毕。放行 [constructorReady]，
-     * 构造期排队等待的 `updateMergedData()` 协程从此处开始执行。
+     * ⛔ 类体**最后一个** init 块：执行到此处时，本类所有属性（含此前 1700+ 行才声明的
+     * `by lazy` 委托）均已初始化完毕。放行 [constructorReady]，构造期排队等待的
+     * `updateMergedData()` 协程从此处开始执行。
      * ⚠️ 不要把任何属性声明挪到本 init 块之后（会重新打开构造期竞态窗口）。
+     * ⛔ v2.39.3 补丁：**尤其不要把 `by lazy` 放后面**——R8 lambda 合并可让守卫失效，
+     * 晚声明的 lazy 委托字段会被并发协程读到 null。一律声明在类顶部，
+     * 由 `MainViewModelConstructionOrderTest` 门禁把守。
      */
     init {
         constructorReady.complete(Unit)
