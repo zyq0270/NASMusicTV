@@ -73,6 +73,10 @@ import com.nasmusic.tv.ui.screens.settings.GeneralSettingsState
 import com.nasmusic.tv.ui.screens.settings.LyricsKaraokeActions
 import com.nasmusic.tv.ui.screens.settings.LyricsKaraokeSettingsSection
 import com.nasmusic.tv.ui.screens.settings.LyricsKaraokeSettingsState
+import com.nasmusic.tv.ui.screens.settings.LogsSettingsActions
+import com.nasmusic.tv.ui.screens.settings.LogsSettingsSection
+import com.nasmusic.tv.ui.screens.settings.LogsSettingsState
+import com.nasmusic.tv.util.LogSnapshot
 import com.nasmusic.tv.ui.screens.settings.NetworkMusicDialogActions
 import com.nasmusic.tv.ui.screens.settings.NetworkMusicSection
 import com.nasmusic.tv.ui.screens.settings.NetworkMusicSettingsActions
@@ -313,6 +317,15 @@ fun SettingsScreen(
     localMusicLibraryCount: Int = 0,
     onSetLocalMusicEnabled: (Boolean) -> Unit = {},
     onRescanLocalMusic: () -> Unit = {},
+    /**
+     * v2.40.0：运行日志快照（LOGS 分区）。
+     *
+     * 数据来自 `LogStore` 的落盘文件，**重启后仍在**；与 [settings] 分开传
+     * ——它是运行时事实，不落盘、不进备份（同 [photoWallRuntime] 的口径）。
+     */
+    logs: LogSnapshot = LogSnapshot(),
+    onRefreshLogs: () -> Unit = {},
+    onClearLogs: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
 var activeSection by remember { mutableStateOf(SettingsSection.GENERAL) }
@@ -356,6 +369,7 @@ var activeSection by remember { mutableStateOf(SettingsSection.GENERAL) }
         SettingsSection.NETWORK,
         SettingsSection.DATA,
         SettingsSection.ABOUT,
+        SettingsSection.LOGS,
     ).forEach { section ->
         navFocusRequesters.getOrPut(section) { remember { FocusRequester() } }
     }
@@ -394,6 +408,12 @@ var activeSection by remember { mutableStateOf(SettingsSection.GENERAL) }
     // 竖屏==selectedSection，两端语义统一。
     LaunchedEffect(displaySection) {
         if (displaySection == SettingsSection.DATA) onRefreshBackupFiles?.invoke()
+    }
+
+    // v2.40.0：进入「日志」分区时刷新一次 —— 日志是外部（AppLog / 崩溃处理器）随时
+    // 追加的，不在进页时读一次，页面会一直停在进页前的旧快照上。
+    LaunchedEffect(displaySection) {
+        if (displaySection == SettingsSection.LOGS) onRefreshLogs()
     }
 
     // 备份操作结果消息显示后自动消费
@@ -922,6 +942,18 @@ var activeSection by remember { mutableStateOf(SettingsSection.GENERAL) }
                             onConsumePlaylistImportMessage = onConsumePlaylistImportMessage,
                         ),
                         onDeleteRequested = { file -> backupToDelete = file }
+                    )
+                }
+                SettingsSection.LOGS -> item {
+                    LogsSettingsSection(
+                        state = LogsSettingsState(
+                            entries = logs.entries,
+                            fileSizeBytes = logs.fileSizeBytes,
+                        ),
+                        actions = LogsSettingsActions(
+                            onRefresh = onRefreshLogs,
+                            onClear = onClearLogs,
+                        ),
                     )
                 }
             }

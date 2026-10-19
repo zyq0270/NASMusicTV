@@ -16629,3 +16629,56 @@ G7-C：3 处实底选中 → 0。⚠️ `ChipContentWidthScanTest` 的 `CALL` �
 **运维教训**：`lintDebug` 后台任务与后续单测互斥，**静默挂死 7h 零输出**（Gradle 锁等待）——
 长 Gradle 任务必须串行，且后台任务先确认无残留再启动；`tail` 管道会吞掉全部进度输出，
 "零输出"不能当作"还在正常跑"。
+
+### 10.258 设置页「日志」tab：运行期报错持久化（2026-10-19）
+
+**动机**：电视上没有 adb，用户报「刚才闪退了 / 一直加载不出来」时现场早已消失。
+`AppLog` 原来只在 debug 打 logcat、release 的 `w` 甚至是空操作 ⇒ 生产环境**零留痕**。
+本任务把「警告 + 错误」持久化到 `filesDir/logs/app.log`，设置页新增 **LOGS 分区**可反复回看
+（重启不丢）。
+
+**存储层 `LogStore`（纯 JVM，`util/LogStore.kt`）**
+- 格式 = 单行 TSV + 转义（`\\` `\t` `\n` `\r`）：追加永远 O(1)，**损坏一行不影响其余行**
+  （`decode` 返回 null 跳过）；畸形行/非法级别/非法时间戳都有单测覆盖。
+- 容量：单文件 256KB，超限**保留最新 400 行**重写（先写 `.tmp` 再替换，避免半截文件）。
+  ⛔ 轮转必须保最新 —— 宁可丢老日志，也不能丢刚发生的崩溃现场。
+- 线程：普通写入走单线程执行器（调用点可能在主线程，不能做同步磁盘 I/O）；
+  崩溃路径走 `appendBlocking`（进程马上终止，入队任务等不到执行）；
+  `snapshot` / `clear` 先排空队列，保证「刚记的能读到、刚清的真没了」。
+- **不依赖任何 Android 类型**（只收 `File`）⇒ `LogStoreTest` 能在免 Gradle 通道直接跑；
+  **不得调用 `AppLog`**（写入→打印→再写入 的无限递归），门禁锁死。
+
+**采集点**
+- `AppLog.w/e` 双写：`w` 始终落盘但 logcat 仍只在 debug 输出（保持原行为）；
+  `e` 落盘 + 始终 logcat。`d/i` **不落盘**（量太大且价值低，会把崩溃现场挤掉）。
+- `NasMusicApp.onCreate`：`LogStore.init(filesDir)` + 安装 `UncaughtExceptionHandler`
+  （进程级一次性，**委托原处理器**，⛔ 不吞异常）。安装位置在其余初始化之前，接得住启动期闪退。
+
+**UI（`LogsSettingsSection` + LOGS 分区）**
+- 分区排在最后（排障兜底入口，不是日常配置项）；图标 `BugReport` 已对照 icons 1.7.8 的 jar 实证存在。
+- 卡①「运行日志」：摘要（条数 + 占用）→ 刷新 / 清空两枚芯片（`SettingsChipRow`，
+  竖屏 1 列等宽、TV 2 列）→ 最近 100 条日志行。
+- 日志行 = 级别（E 红 / W 黄）+ 时间 + TAG + 正文（最多 3 行）+ **异常首行**
+  （完整堆栈不铺开：日志页是「扫一眼定位」，全文留给导出）。
+- 日志行**不进焦点序列**（纯文本不可点）——否则 TV 上要按几十次「下」才能到芯片。
+- 清空走 `ConfirmDialog(destructive = true)`；清空后 VM 立即重读快照，页面当场变空。
+- 进分区自动刷新（`LaunchedEffect(displaySection)`，与 DATA 的备份列表同款）。
+
+**门禁**
+- `LogStoreTest`（7 例）：编解码往返（含制表符/换行/反斜杠/回车）、无堆栈、畸形行、
+  倒序 + limit、清空、4000 条轮转保最新 + 轮转用例非空转自证。
+- `LogsTabWiringGateTest`（12 例）：枚举 + 中英标题、Screen 渲染 + 枚举 ≥2 次、进页刷新、
+  Branch 接线、`AppLog.w/e` 方法体内落盘（**按方法体而非全文**——KDoc 里提到 LogStore
+  会让全文匹配把门禁骗过去，T14 的 `Desc-exempt` 就是栽在注释错位上）、崩溃落盘、
+  `LogStore` 不反向依赖 `AppLog`；4 条负向自证（同一份谓词喂反例）。
+- `logs_temp/t18_selfcheck.py`：78 项字节级自查（XML 良构、12 键中英齐备且非空、无重复键、
+  LF 行尾、上述文本断言）+ `--selftest` 6 个负向/正向夹具。
+
+**验证实测**：`testDebugUnitTest --rerun-tasks` **220 份 XML / 2298 例 / 0 失败 / 0 错误**
+（基线 2279 + 本轮 19）；`assembleRelease` BUILD SUCCESSFUL，APK 25,790,778 B。
+
+**已知取舍 / 遗留**
+- 未做日志去重节流：若某处失败重试循环（如播放重连）每秒刷一条，会把页面刷屏并加速轮转。
+  出现这种现场时按「tag + message 相同且 1s 内重复」去重（⛔ 不要全局按 tag 去重，会掩盖真实变化）。
+- 日志不进备份、不受「清除缓存」影响（它在 `filesDir`，不是 `cacheDir`）——这是刻意的：
+  备份包里塞运行日志既增大体积又可能带出设备信息。

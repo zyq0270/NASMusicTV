@@ -87,6 +87,8 @@ import com.nasmusic.tv.lyrics.LrcParser
 import com.nasmusic.tv.player.PlayerManager
 import com.nasmusic.tv.player.ModelDownloadManager
 import com.nasmusic.tv.util.AppLog
+import com.nasmusic.tv.util.LogSnapshot
+import com.nasmusic.tv.util.LogStore
 import com.nasmusic.tv.util.PermissionHelper
 import com.nasmusic.tv.net.RemoteCallbacks
 import com.nasmusic.tv.net.RemoteControlServer
@@ -3315,6 +3317,33 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
             }
             _networkProbeStatus.value = result
             _networkProbeRunning.value = false
+        }
+    }
+
+    // ===================== v2.40.0：运行日志（设置页「日志」tab） =====================
+    // 数据源是 LogStore 落盘的 filesDir/logs/app.log（AppLog.w/e 与崩溃处理器写入）。
+    // 这里只负责「读快照 / 清空」，写入路径不经过 ViewModel —— 日志产生点遍布全应用，
+    // 不能反过来依赖 UI 层。
+
+    private val _logs = MutableStateFlow(LogSnapshot())
+
+    /** 最近日志（时间倒序）+ 文件占用；进入 LOGS 分区或点「刷新」时更新 */
+    val logs: StateFlow<LogSnapshot> = _logs.asStateFlow()
+
+    /** 重新读取日志文件（进入分区 / 手动刷新）。 */
+    fun refreshLogs() {
+        viewModelScope.launch {
+            _logs.value = withContext(Dispatchers.IO) { LogStore.snapshot() }
+        }
+    }
+
+    /** 清空日志文件并立即刷新快照（清空后页面立刻变空，不等下次进页）。 */
+    fun clearLogs() {
+        viewModelScope.launch {
+            _logs.value = withContext(Dispatchers.IO) {
+                LogStore.clear()
+                LogStore.snapshot()
+            }
         }
     }
 

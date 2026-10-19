@@ -40,6 +40,7 @@ import com.nasmusic.tv.data.prefs.AppPreferences
 import com.nasmusic.tv.player.ModelDownloadManager
 import com.nasmusic.tv.player.PlayerManager
 import com.nasmusic.tv.util.AppLog
+import com.nasmusic.tv.util.LogStore
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -62,6 +63,16 @@ import java.io.File
 class NasMusicApp : Application(), ImageLoaderFactory {
 
     companion object {
+        /**
+         * 崩溃处理器是否已安装（进程级一次性）。
+         *
+         * ⚠️ 必须在 companion 里而不是实例字段：Robolectric 每个测试方法都会新建
+         * Application，实例字段会让处理器一层层套娃（每个都包住上一个），
+         * 2000+ 用例跑下来栈会越堆越深。
+         */
+        @Volatile
+        private var crashLoggerInstalled = false
+
         /**
          * 读取系统当前 locale（不受 Application.updateConfiguration 影响）。
          *
@@ -285,6 +296,31 @@ val baiduOAuthClient: BaiduOAuthClient by lazy { BaiduOAuthClient(this, baiduOkH
      * 有了 handler，`handleCoroutineException` 命中它后**不再**回落到 platform handlers，
      * 异常因而不会变成 unhandled —— 测试那条红随之消失，而根因（后台恢复失败）仍被 AppLog 留痕。
      */
+    /**
+     * 安装未捕获异常记录器（进程级一次性，委托原处理器）。
+     *
+     * 电视上没有 adb，闪退后唯一的现场就是这条记录 —— 所以走
+     * [LogStore.appendBlocking]（同步写）而不是异步队列：进程马上就要终止，
+     * 入队的任务等不到执行。写完后**必须**把异常交还给原处理器，
+     * 保持系统默认的崩溃行为（⛔ 不要在这里吞掉异常）。
+     */
+    private fun installCrashLogger() {
+        if (crashLoggerInstalled) return
+        crashLoggerInstalled = true
+        val previous = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+            runCatching {
+                LogStore.appendBlocking(
+                    LogStore.LEVEL_ERROR,
+                    "CRASH",
+                    "未捕获异常（线程 ${thread.name}）",
+                    throwable,
+                )
+            }
+            previous?.uncaughtException(thread, throwable)
+        }
+    }
+
     val applicationScope: CoroutineScope = CoroutineScope(
         SupervisorJob() + Dispatchers.IO + CoroutineExceptionHandler { _, t ->
             AppLog.e("NasMusicApp", "applicationScope 未捕获异常（后台任务失败，不应影响应用）", t)
@@ -293,6 +329,10 @@ val baiduOAuthClient: BaiduOAuthClient by lazy { BaiduOAuthClient(this, baiduOkH
 
     override fun onCreate() {
         super.onCreate()
+        // v2.40.0：运行日志落盘（设置页「日志」tab）+ 崩溃留痕。
+        // ⚠️ 必须在其他初始化之前：越早装好，越能接住启动期的闪退。
+        LogStore.init(filesDir)
+        installCrashLogger()
         appPreferences = AppPreferences.getInstance(this)
         // v2.35.0 多码率：单曲覆盖存储（须在 networkMusicManager 构造前初始化，供 provider 闭包使用）
         qualityOverrides = com.nasmusic.tv.data.prefs.QualityOverrides(this)

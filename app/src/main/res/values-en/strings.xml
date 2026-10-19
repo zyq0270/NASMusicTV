@@ -500,6 +500,19 @@
     <string name="settings_cover_blur_radius">Blur Strength: %dpx</string>
     <string name="settings_cover_dark_overlay">Dark Overlay: %d%%</string>
     <string name="settings_data">Data Management</string>
+    <!-- Logs section (v2.40.0): persisted runtime warnings/errors, re-viewable after restart -->
+    <string name="settings_logs">Logs</string>
+    <string name="settings_logs_desc">Local record of runtime warnings and errors; survives restarts</string>
+    <string name="settings_group_runtime_logs">Runtime Logs</string>
+    <string name="settings_group_runtime_logs_desc">Warnings and errors only (including crashes), keeps the latest 400</string>
+    <string name="settings_logs_summary">Showing latest %1$d entries · %2$s</string>
+    <string name="settings_logs_empty">No entries yet. Warnings and errors are recorded here automatically.</string>
+    <string name="settings_logs_refresh">Refresh</string>
+    <string name="settings_logs_refresh_desc">Reload the local log file</string>
+    <string name="settings_logs_clear">Clear Logs</string>
+    <string name="settings_logs_clear_desc">Delete all recorded logs. This cannot be undone</string>
+    <string name="settings_logs_clear_confirm_title">Clear logs?</string>
+    <string name="settings_logs_clear_confirm_msg">This deletes all recorded runtime logs and cannot be undone.</string>
     <!-- Data section three card titles (T8) -->
     <string name="settings_group_backup">Backup &amp; Restore</string>
     <string name="settings_group_playlist_import">Playlist Import</string>
