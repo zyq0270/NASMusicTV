@@ -260,4 +260,52 @@ class BackupGsonTest {
             json.contains("\"photoWallScaleMode\":\"FIT\"")
         )
     }
+
+    // ── ⑦ 死配置清理（方案 §6 / T9）：旧备份可导入，新备份不再写出 ─────────────
+
+    /**
+     * 删字段**不能**删掉兼容性：用户在 v2.39.0 之前导出的备份里仍然带着
+     * `weatherEnabled` / `weatherManualCity` / `weatherAutoRefresh`（曾是 `BackupData` 的字段）。
+     * Gson 对未知字段默认宽容（跳过），所以只要 `BackupData` 里**没有** `@JsonAdapter`
+     * 之类的严格化改造，这些旧键就会被安静忽略 —— 本用例把这个前提钉住。
+     *
+     * 另塞两个**从未进过** `BackupData` 的键（`spectrumEnabled` / `lyricsOffsetMs`），
+     * 只为验证"任意未知键都不会让整份备份解析失败"这一宽容度，不代表历史格式。
+     */
+    @Test
+    fun `旧备份含已删除字段时必须仍能导入且忽略它们`() {
+        val legacyJson = """
+            {"version":2,
+             "weatherEnabled":true,"weatherManualCity":"北京","weatherAutoRefresh":false,
+             "spectrumEnabled":true,"lyricsOffsetMs":-800,
+             "appSettings":{"darkTheme":true,"animationsEnabled":false}}
+        """.trimIndent()
+        val data = backupGson.fromJson(legacyJson, AppPreferences.BackupData::class.java)
+        assertNotNull("含已删除字段的旧备份不得整体解析失败", data)
+        val settings = data.appSettings
+        assertNotNull("appSettings 必须被解析出来", settings)
+        assertEquals(true, settings!!.darkTheme)
+        assertEquals(false, settings.animationsEnabled)
+    }
+
+    /**
+     * 导出方向：被删掉的字段不得再出现在新备份里。
+     *
+     * ⚠️ 必须给 `appSettings` 一个**实例**：`BackupData()` 的默认值是 `null`，
+     * 那样 `lyricsOffsetMs`（`AppSettings` 里刚删掉的那个字段）根本不会被序列化 ⇒
+     * 这条断言会空转通过，看起来绿其实什么都没验。
+     */
+    @Test
+    fun `新导出的备份不得再包含已删除字段`() {
+        val json = backupGson.toJson(AppPreferences.BackupData(appSettings = AppSettings()))
+        for (gone in listOf(
+            "weatherEnabled", "weatherManualCity", "weatherAutoRefresh",
+            "spectrumEnabled", "lyricsOffsetMs",
+        )) {
+            assertTrue(
+                "导出 JSON 仍含被删字段 $gone —— 备份格式没跟着设置一起清，json=$json",
+                !json.contains(gone)
+            )
+        }
+    }
 }

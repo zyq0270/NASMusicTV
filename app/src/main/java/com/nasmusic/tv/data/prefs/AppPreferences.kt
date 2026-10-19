@@ -6,7 +6,6 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.doublePreferencesKey
-import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
@@ -275,7 +274,6 @@ class AppPreferences internal constructor(private val context: Context) {
     private val keyPlayMode = intPreferencesKey("settings_play_mode")
     private val keyCacheLyrics = booleanPreferencesKey("settings_cache_lyrics")
     private val keyCacheCover = booleanPreferencesKey("settings_cache_cover")
-    private val keyLyricsOffset = longPreferencesKey("settings_lyrics_offset")
     private val keyDefaultNetworkSource = stringPreferencesKey("settings_default_network_source")
     private val keyMetingApiBaseUrl = stringPreferencesKey("settings_meting_api_base_url")
     private val keyMvApiBaseUrl = stringPreferencesKey("settings_mv_api_base_url")
@@ -304,9 +302,6 @@ class AppPreferences internal constructor(private val context: Context) {
     private val keyLastQueue = stringPreferencesKey("last_queue")
 
     // --- 天气电台设置 ---
-    private val keyWeatherEnabled = booleanPreferencesKey("weather_enabled")
-    private val keyWeatherManualCity = stringPreferencesKey("weather_manual_city")
-    private val keyWeatherAutoRefresh = booleanPreferencesKey("weather_auto_refresh")
     private val keyWeatherApiKey = stringPreferencesKey("weather_openweathermap_api_key")
     /**
      * F-7：加密存储键（OpenWeatherMap key 属付费资源凭证，泄露可被刷量；
@@ -320,7 +315,6 @@ class AppPreferences internal constructor(private val context: Context) {
     private val keyCoverFilterDarkOverlay = doublePreferencesKey("cover_filter_dark_overlay")
 
     // --- 频谱显示设置 ---
-    private val keySpectrumEnabled = booleanPreferencesKey("settings_spectrum_enabled")
     private val keyVisualizerTheme = stringPreferencesKey("settings_visualizer_theme")
     private val keyVisualizerQuality = stringPreferencesKey("visualizer_quality")
 
@@ -795,7 +789,6 @@ class AppPreferences internal constructor(private val context: Context) {
             defaultPlayMode = PlayMode.fromOrdinal(prefs[keyPlayMode] ?: 0),
             cacheLyrics = prefs[keyCacheLyrics] ?: true,
             cacheCover = prefs[keyCacheCover] ?: true,
-            lyricsOffsetMs = prefs[keyLyricsOffset] ?: 0L,
             defaultNetworkSource = prefs[keyDefaultNetworkSource]?.let { NetworkSource.fromKey(it) ?: NetworkSource.fromName(it) } ?: NetworkSource.DEFAULT,
             metingApiBaseUrl = prefs[keyMetingApiBaseUrl] ?: MetingApiService.DEFAULT_BASE_URL,
             mvApiBaseUrl = prefs[keyMvApiBaseUrl] ?: BilibiliMvService.DEFAULT_BASE_URL,
@@ -870,8 +863,6 @@ class AppPreferences internal constructor(private val context: Context) {
     suspend fun setCacheLyrics(enabled: Boolean) = dataStore.edit { it[keyCacheLyrics] = enabled }
 
     suspend fun setCacheCover(enabled: Boolean) = dataStore.edit { it[keyCacheCover] = enabled }
-
-    suspend fun setLyricsOffset(offsetMs: Long) = dataStore.edit { it[keyLyricsOffset] = offsetMs }
 
     // --- 歌词显示设置 ---
     private val keyLyricsFontScale = doublePreferencesKey("lyrics_font_scale")
@@ -1015,41 +1006,6 @@ class AppPreferences internal constructor(private val context: Context) {
      */
     fun getJamendoClientIdSync(): String = cachedJamendoClientId
 
-    // --- 天气电台设置 ---
-
-    /**
-     * 获取天气是否启用
-     */
-    val weatherEnabled: Flow<Boolean> = dataStore.data.map { prefs ->
-        prefs[keyWeatherEnabled] ?: true
-    }
-
-    suspend fun setWeatherEnabled(enabled: Boolean) {
-        dataStore.edit { it[keyWeatherEnabled] = enabled }
-    }
-
-    /**
-     * 获取手动设置的城市名（空串=自动定位）
-     */
-    val weatherManualCity: Flow<String> = dataStore.data.map { prefs ->
-        prefs[keyWeatherManualCity] ?: ""
-    }
-
-    suspend fun setWeatherManualCity(city: String) {
-        dataStore.edit { it[keyWeatherManualCity] = city }
-    }
-
-    /**
-     * 获取天气自动刷新开关
-     */
-    val weatherAutoRefresh: Flow<Boolean> = dataStore.data.map { prefs ->
-        prefs[keyWeatherAutoRefresh] ?: true
-    }
-
-    suspend fun setWeatherAutoRefresh(enabled: Boolean) {
-        dataStore.edit { it[keyWeatherAutoRefresh] = enabled }
-    }
-
     /**
      * OpenWeatherMap API Key
      * 当 Open-Meteo 不可用时的备选天气数据源
@@ -1115,10 +1071,6 @@ class AppPreferences internal constructor(private val context: Context) {
 
     suspend fun setCoverFilterDarkOverlay(overlay: Float) {
         dataStore.edit { it[keyCoverFilterDarkOverlay] = overlay.toDouble() }
-    }
-
-    suspend fun setSpectrumEnabled(enabled: Boolean) {
-        dataStore.edit { it[keySpectrumEnabled] = enabled }
     }
 
     // --- F2-5 跨曲交叉淡入淡出 ---
@@ -1876,15 +1828,6 @@ class AppPreferences internal constructor(private val context: Context) {
     }
     suspend fun setBaiduMvDir(dir: String?) =
         saveCloudDriveConfig(baiduConfigFlow.first().copy(mvDir = dir))
-    suspend fun getBaiduCustomAppKey(): String? = baiduConfigFlow.first().customAppKey
-    suspend fun setBaiduCustomAppKey(key: String?) =
-        saveCloudDriveConfig(baiduConfigFlow.first().copy(customAppKey = key))
-    suspend fun getBaiduCustomSecretKey(): String? = baiduConfigFlow.first().customSecretKey
-    suspend fun setBaiduCustomSecretKey(secret: String?) =
-        saveCloudDriveConfig(baiduConfigFlow.first().copy(customSecretKey = secret))
-    suspend fun getBaiduApiDriftNotified(): Boolean = baiduConfigFlow.first().apiDriftNotified
-    suspend fun setBaiduApiDriftNotified(v: Boolean) =
-        saveCloudDriveConfig(baiduConfigFlow.first().copy(apiDriftNotified = v))
 
     // ---- 内部：CloudDriveConfig Map <-> JSON（tokens 加密）----
 
@@ -1922,9 +1865,6 @@ class AppPreferences internal constructor(private val context: Context) {
         val equalizerBands: List<Float> = emptyList(),
         // v2: 新增备份项（旧备份文件恢复时用默认值）
         val mvCacheEntries: List<com.nasmusic.tv.data.model.MvCacheEntry> = emptyList(),
-        val weatherEnabled: Boolean = true,
-        val weatherManualCity: String = "",
-        val weatherAutoRefresh: Boolean = true,
         val coverFilterEnabled: Boolean = false,
         val coverFilterBlurRadius: Double = 8.0,
         val coverFilterDarkOverlay: Double = 0.3,
@@ -1966,9 +1906,6 @@ class AppPreferences internal constructor(private val context: Context) {
             equalizerPreset = equalizerPreset.first(),
             equalizerBands = equalizerBands.first(),
             // v2: 补全之前遗漏的设置项
-            weatherEnabled = ds[keyWeatherEnabled] ?: true,
-            weatherManualCity = ds[keyWeatherManualCity] ?: "",
-            weatherAutoRefresh = ds[keyWeatherAutoRefresh] ?: true,
             coverFilterEnabled = ds[keyCoverFilterEnabled] ?: false,
             coverFilterBlurRadius = ds[keyCoverFilterBlurRadius] ?: 8.0,
             coverFilterDarkOverlay = ds[keyCoverFilterDarkOverlay] ?: 0.3,
@@ -1996,7 +1933,6 @@ class AppPreferences internal constructor(private val context: Context) {
                 prefs[keyPlayMode] = settings.defaultPlayMode.ordinalOrDefault()
                 prefs[keyCacheLyrics] = settings.cacheLyrics
                 prefs[keyCacheCover] = settings.cacheCover
-                prefs[keyLyricsOffset] = settings.lyricsOffsetMs
                 prefs[keyDefaultNetworkSource] = settings.defaultNetworkSource.keyOrDefault()
                 // P2 修复（2026-09-22 审查）：恢复路径同样过端点校验——恶意/异常
                 // 备份不能把请求流量重定向到任意字符串端点；非法值回落默认。
@@ -2072,9 +2008,6 @@ class AppPreferences internal constructor(private val context: Context) {
                 prefs[keySearchHistory] = gson.toJson(data.searchHistory)
             }
             // v2: 恢复之前遗漏的设置项
-            prefs[keyWeatherEnabled] = data.weatherEnabled
-            prefs[keyWeatherManualCity] = data.weatherManualCity
-            prefs[keyWeatherAutoRefresh] = data.weatherAutoRefresh
             prefs[keyCoverFilterEnabled] = data.coverFilterEnabled
             prefs[keyCoverFilterBlurRadius] = data.coverFilterBlurRadius
             prefs[keyCoverFilterDarkOverlay] = data.coverFilterDarkOverlay

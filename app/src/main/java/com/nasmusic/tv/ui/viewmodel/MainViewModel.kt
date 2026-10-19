@@ -3086,10 +3086,6 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
         prefs.lyrics.setCacheCover(enabled)
     }
 
-    fun updateLyricsOffset(offsetMs: Long) = viewModelScope.launch {
-        prefs.lyrics.setLyricsOffset(offsetMs)
-    }
-
     fun updateLyricsFontScale(scale: Float) = viewModelScope.launch {
         prefs.lyrics.setLyricsFontScale(scale)
     }

@@ -17,8 +17,6 @@ import com.nasmusic.tv.backend.network.baidu.BaiduNetdiskConfig
  * @param tokens          鉴权 token
  * @param musicRootDir    音乐根目录（默认 "/音乐"）
  * @param mvDir           MV 文件目录（可选；null 表示与 musicRootDir 相同）
- * @param customAppKey    用户自填 AppKey（覆盖默认嵌入值）
- * @param customSecretKey 用户自填 SecretKey
  * @param apiProbeBaseline 本版 APK 实现时验证过的 API 字段指纹（哈希），随 App 版本固化
  * @param apiProbeResult  最近一次启动探测到的实际字段指纹，与 baseline 对比
  */
@@ -28,12 +26,8 @@ data class CloudDriveConfig(
     val tokens: BaiduTokens? = null,
     val musicRootDir: String = BaiduNetdiskConfig.APP_DIR,
     val mvDir: String? = null,
-    val customAppKey: String? = null,
-    val customSecretKey: String? = null,
     val apiProbeBaseline: String? = null,
-    val apiProbeResult: String? = null,
-    /** API 漂移一次性提示是否已弹（避免每次启动重复提示） */
-    val apiDriftNotified: Boolean = false
+    val apiProbeResult: String? = null
 ) {
     /** 实际指纹与本地基线不一致 → API 可能已升级 */
     val apiDrifted: Boolean

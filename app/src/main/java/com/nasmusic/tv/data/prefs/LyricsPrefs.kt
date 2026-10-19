@@ -9,7 +9,6 @@ class LyricsPrefs internal constructor(private val prefs: AppPreferences) {
 
     val lyricsFontScale: Flow<Float> = prefs.lyricsFontScale
 
-    suspend fun setLyricsOffset(offsetMs: Long) = prefs.setLyricsOffset(offsetMs)
     suspend fun setLyricsFontScale(scale: Float) = prefs.setLyricsFontScale(scale)
     suspend fun setCacheLyrics(enabled: Boolean) = prefs.setCacheLyrics(enabled)
     suspend fun setCacheCover(enabled: Boolean) = prefs.setCacheCover(enabled)

@@ -11,7 +11,6 @@ class VisualizerPrefs internal constructor(private val prefs: AppPreferences) {
     suspend fun setEqualizerPreset(preset: com.nasmusic.tv.data.model.EqualizerPreset) = prefs.setEqualizerPreset(preset)
     suspend fun setEqualizerBands(bands: List<Float>) = prefs.setEqualizerBands(bands)
     suspend fun setEqualizerBand(index: Int, value: Float) = prefs.setEqualizerBand(index, value)
-    suspend fun setSpectrumEnabled(enabled: Boolean) = prefs.setSpectrumEnabled(enabled)
     suspend fun setVisualizerTheme(theme: com.nasmusic.tv.data.model.VisualizerTheme) = prefs.setVisualizerTheme(theme)
 
     suspend fun setVisualizerQuality(quality: com.nasmusic.tv.data.model.VisualQuality) = prefs.setVisualizerQuality(quality)
