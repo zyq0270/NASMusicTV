@@ -172,6 +172,21 @@ class BackendRegistry(private val appContext: Context? = null) {
     }
 
     /**
+     * 读取当前活跃适配器的**实时**失败诊断（v2.39.3）。
+     *
+     * ⚠️ 与 [lastErrorDetail]（只在 initialize / testConnection 时快照一次）不同：
+     * 本方法每次调用都实时读取 `currentAdapter.lastErrorDetail`，因此能拿到
+     * 运行期（如 `track/list` 返回 `code != 0`）的最新失败原因。
+     *
+     * 用途：`MainViewModel.loadSongsNextPage` 在「服务端有数据但本页拉空」时
+     * 调用此方法，把诊断带到 [SongsPagingState.error] 上展示给用户。
+     *
+     * @return 当前适配器的诊断文案；未连接或无诊断时为空串
+     */
+    fun currentErrorDetail(): String =
+        synchronized(lock) { currentAdapter }?.lastErrorDetail.orEmpty()
+
+    /**
      * 获取当前活动的后端适配器
      */
     fun getAdapter(): BackendAdapter? = synchronized(lock) { currentAdapter }

@@ -721,6 +721,10 @@
     <string name="library_songs_loading">歌曲 (加载中…)</string>
     <string name="library_songs_count">歌曲 (%d)</string>
     <string name="library_no_songs">暂无歌曲</string>
+    <!-- v2.39.3：歌曲加载失败时的空态文案（%s = 具体失败原因，如「服务端返回错误：code=1000xx」） -->
+    <string name="library_songs_load_failed">歌曲加载失败：%s</string>
+    <string name="library_songs_retry">重试</string>
+    <string name="library_songs_parse_failed">歌曲数据解析失败（服务端字段不兼容）</string>
     <string name="library_load_more">加载更多…</string>
     <string name="library_genres_count">风格 (%d)</string>
     <string name="library_song_count_suffix">%d首</string>

@@ -171,6 +171,7 @@ val discoverCurrentDimensionValues = remember(browseSelections) {
                         onSongsByYear = { from, to, callback -> viewModel.getSongsByYearRange(from, to, callback) },
                         onLoadSongsFirstPage = { viewModel.loadSongsFirstPage() },
                         onLoadSongsNextPage = { viewModel.loadSongsNextPage() },
+                        onRetrySongsLoad = { viewModel.retrySongsLoad() },
                         onLoadArtists = { viewModel.loadArtists() },
                         onLoadYears = { viewModel.loadYears() },
                         onSearch = { query -> viewModel.searchSongsOnServer(query) },

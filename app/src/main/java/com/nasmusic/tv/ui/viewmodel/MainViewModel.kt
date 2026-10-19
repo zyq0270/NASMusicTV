@@ -1153,25 +1153,52 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
                 val offset = state.songs.size
                 val batch = adapter.getSongs(pageSize, offset)
                 val totalCount = if (state.totalCount == 0) adapter.getSongsTotalCount() else state.totalCount
+                // v2.39.3（T7b）：区分「真没歌」与「加载失败」。
+                // 判定逻辑抽到 SongsPagingState.resolveError（纯函数，便于单测覆盖）。
+                // 要点：诊断优先于 totalCount —— 服务端 code!=0 时 total 也是 0。
+                val loadError = SongsPagingState.resolveError(
+                    batchSize = batch.size,
+                    totalCount = totalCount,
+                    diagnostic = backendRegistry.currentErrorDetail(),
+                    parseFailedFallback = getApplication<Application>()
+                        .getString(R.string.library_songs_parse_failed)
+                )
                 val newState = SongsPagingState(
                     songs = state.songs + batch,
                     totalCount = totalCount,
                     isLoading = false,
                     hasMore = batch.size == pageSize,
-                    currentPage = state.currentPage + 1
+                    currentPage = state.currentPage + 1,
+                    error = loadError
                 )
                 _songsPaging.value = newState
                 // 同步更新 _songs（兼容现有 UI 依赖）
                 _songs.value = UiState.Success(newState.songs)
                 // 增量构建艺术家映射（仅处理新加载的批次，避免全量重建）
                 buildArtistMapsIncremental(batch)
+                if (loadError != null) {
+                    AppLog.w("NASMusic", "loadSongsNextPage: empty page but total=$totalCount, error=$loadError")
+                }
                 AppLog.d("NASMusic", "loadSongsNextPage: loaded ${batch.size}, total ${newState.songs.size}/$totalCount")
             } catch (e: Exception) {
                 AppLog.e("NASMusic", "loadSongsNextPage failed", e)
-                _songsPaging.value = state.copy(isLoading = false)
+                _songsPaging.value = state.copy(isLoading = false, error = e.message?.take(120))
                 showError(getApplication<Application>().getString(R.string.load_songs_error, e.message?.take(50)))
             }
         }
+    }
+
+    /**
+     * 重试加载歌曲（v2.39.3）。
+     *
+     * 由空态里的「重试」按钮触发：先清空含 error 的旧状态（否则
+     * `loadSongsFirstPage` 会因 `songs` 非空或 `isLoading` 直接 return），
+     * 再重新拉第一页。
+     */
+    fun retrySongsLoad() {
+        _songsPaging.value = SongsPagingState()
+        _songs.value = UiState.Success(emptyList())
+        loadSongsFirstPage()
     }
 
     /**

@@ -199,6 +199,8 @@ fun LibraryScreen(
     onSongsByYear: ((Int, Int, (List<Song>) -> Unit) -> Unit)? = null,
     onLoadSongsFirstPage: () -> Unit = {},
     onLoadSongsNextPage: () -> Unit = {},
+    /** v2.39.3：歌曲加载失败后的「重试」回调（空态展示错误时使用） */
+    onRetrySongsLoad: () -> Unit = {},
     onLoadArtists: () -> Unit = {},
     onLoadYears: () -> Unit = {},
     onSearch: (String) -> Unit = {},
@@ -783,7 +785,14 @@ fun LibraryScreen(
                                 )
                             }
                             LibraryTab.SONGS -> if (displaySongs.isEmpty() && songsPaging.songs.isEmpty()) {
-                                EmptyHint(isConnected = isConnected, tab = LibraryTab.SONGS)
+                                // v2.39.3：把加载失败的具体原因（服务端 code/msg 或解析失败）
+                                // 带到空态上，并提供「重试」入口；未失败时行为与之前完全一致。
+                                EmptyHint(
+                                    isConnected = isConnected,
+                                    tab = LibraryTab.SONGS,
+                                    errorText = songsPaging.error,
+                                    onRetry = onRetrySongsLoad
+                                )
                             } else {
                                 SongsTab(
                                     songs = displaySongs,

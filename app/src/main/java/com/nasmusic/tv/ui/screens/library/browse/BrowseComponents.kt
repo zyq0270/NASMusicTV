@@ -24,6 +24,7 @@ import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -252,22 +253,38 @@ internal fun ButtonChip(text: String, onClick: () -> Unit, modifier: Modifier = 
  * 根据连接状态和可用数据源显示不同提示：
  * - 未连接 NAS 且无任何数据源 → 提示连接服务器或扫描本地音乐
  * - 已连接 NAS 但库为空 → 提示库为空
+ * - **加载失败（v2.39.3）** → 显示具体原因 + 「重试」按钮，而不是笼统的「暂无歌曲」
+ *
+ * @param errorText 非空时优先展示该错误（已本地化，如「服务端返回错误：code=1000xx」）
+ * @param onRetry 非空时展示「重试」按钮；通常由 ViewModel.retrySongsLoad 提供
  */
 @Composable
-internal fun EmptyHint(isConnected: Boolean, tab: LibraryTab = LibraryTab.ALBUMS) {
-    val (icon, title, subtitle) = if (!isConnected) {
-        Triple(
+internal fun EmptyHint(
+    isConnected: Boolean,
+    tab: LibraryTab = LibraryTab.ALBUMS,
+    errorText: String? = null,
+    onRetry: (() -> Unit)? = null
+) {
+    // v2.39.3：错误态优先于「库为空」——服务端有 1541 首却拉到 0 条时，
+    // 用户需要看到原因（code/msg），否则完全无从反馈。
+    val hasError = !errorText.isNullOrBlank()
+    val (icon, title, subtitle) = when {
+        hasError -> Triple(
+            Icons.Default.Warning,
+            stringResource(R.string.library_songs_load_failed, errorText!!),
+            ""
+        )
+        !isConnected -> Triple(
             Icons.Default.CloudOff,
             stringResource(R.string.common_not_connected),
             stringResource(R.string.library_connect_or_local_hint)
         )
-    } else when (tab) {
-        LibraryTab.ARTISTS -> Triple(
+        tab == LibraryTab.ARTISTS -> Triple(
             Icons.Default.Person,
             stringResource(R.string.library_empty_artists),
             stringResource(R.string.library_empty_artists_hint)
         )
-        LibraryTab.SONGS -> Triple(
+        tab == LibraryTab.SONGS -> Triple(
             Icons.Default.MusicNote,
             stringResource(R.string.library_empty_songs),
             stringResource(R.string.library_empty_songs_hint)
@@ -278,26 +295,50 @@ internal fun EmptyHint(isConnected: Boolean, tab: LibraryTab = LibraryTab.ALBUMS
             stringResource(R.string.library_empty_albums_hint)
         )
     }
+    val accent = if (hasError) NasMusicColors.Danger else NasMusicColors.TextSecondary
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Icon(
                 imageVector = icon,
                 contentDescription = null,
                 modifier = Modifier.size(64.dp),
-                tint = NasMusicColors.TextSecondary.copy(alpha = 0.5f)
+                tint = if (hasError) NasMusicColors.Danger else NasMusicColors.TextSecondary.copy(alpha = 0.5f)
             )
             Spacer(modifier = Modifier.height(16.dp))
             Text(
                 text = title,
-                color = NasMusicColors.TextSecondary,
-                fontSize = FontSize.title()
+                color = accent,
+                fontSize = FontSize.title(),
+                modifier = Modifier.padding(horizontal = 32.dp)
             )
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = subtitle,
-                color = NasMusicColors.TextSecondary.copy(alpha = 0.7f),
-                fontSize = FontSize.button()
-            )
+            if (subtitle.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = subtitle,
+                    color = NasMusicColors.TextSecondary.copy(alpha = 0.7f),
+                    fontSize = FontSize.button()
+                )
+            }
+            if (hasError && onRetry != null) {
+                Spacer(modifier = Modifier.height(20.dp))
+                FocusableSurface(
+                    onClick = onRetry,
+                    shape = RoundedCornerShape(10.dp),
+                    focusedScale = 1.06f,
+                    animationDurationMs = 200,
+                    containerColor = NasMusicColors.Surface,
+                    focusedContainerColor = NasMusicColors.Primary.copy(alpha = 0.2f),
+                    contentColor = NasMusicColors.TextPrimary,
+                    focusedContentColor = NasMusicColors.Primary,
+                    pressedContainerColor = NasMusicColors.Background
+                ) {
+                    Text(
+                        text = stringResource(R.string.library_songs_retry),
+                        modifier = Modifier.padding(horizontal = 28.dp, vertical = 12.dp),
+                        fontSize = FontSize.button()
+                    )
+                }
+            }
         }
     }
 }

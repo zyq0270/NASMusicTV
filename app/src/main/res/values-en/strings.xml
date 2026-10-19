@@ -684,6 +684,10 @@
     <string name="library_songs_loading">Songs (Loading…)</string>
     <string name="library_songs_count">Songs (%d)</string>
     <string name="library_no_songs">No songs</string>
+    <!-- v2.39.3: shown when songs fail to load (%s = reason, e.g. "Server error: code=1000xx") -->
+    <string name="library_songs_load_failed">Failed to load songs: %s</string>
+    <string name="library_songs_retry">Retry</string>
+    <string name="library_songs_parse_failed">Could not parse song data (incompatible server fields)</string>
     <string name="library_load_more">Load more…</string>
     <string name="library_genres_count">Genres (%d)</string>
     <string name="library_song_count_suffix">%d songs</string>

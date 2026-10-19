@@ -2,6 +2,7 @@ package com.nasmusic.tv.backend.impl
 
 import android.content.Context
 import android.util.Base64
+import com.google.gson.JsonElement
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import com.nasmusic.tv.R
@@ -593,6 +594,9 @@ class FeiniuAdapter(private val appContext: Context? = null) : BackendAdapter {
     /** `GET track/list?page&size&sort=createdAt,desc` */
     override suspend fun getSongs(limit: Int, offset: Int): List<Song> = withContext(Dispatchers.IO) {
         runCatchingSuspend {
+            // v2.39.3：每次取数前清掉上一次的失败诊断，避免「昨天连不上」的旧原因
+            // 被当成本次的错误展示给用户（成功路径不会自动清 lastFailure）。
+            lastFailure = null
             // B14 修复沿用：limit <= 0 会除零，回退默认页大小
             val safeLimit = if (limit > 0) limit else DEFAULT_PAGE_SIZE
             val page = (offset / safeLimit) + 1
@@ -604,6 +608,8 @@ class FeiniuAdapter(private val appContext: Context? = null) : BackendAdapter {
 
     override suspend fun getSongsTotalCount(): Int = withContext(Dispatchers.IO) {
         runCatchingSuspend {
+            // v2.39.3：同上，取数前清诊断
+            lastFailure = null
             fetchTotal("track/list", "sort" to "createdAt,desc")
         }.onFailure { AppLog.e(TAG, "getSongsTotalCount failed", it) }.getOrDefault(0)
     }
@@ -638,9 +644,10 @@ class FeiniuAdapter(private val appContext: Context? = null) : BackendAdapter {
     private fun fetchTrackMetadataSongRaw(raw: String): Song? {
         val url = FeiniuUrl.endpoint(apiBase, "track/metadata", "guid" to raw)
         val data = dataOf(get(url), url) ?: return null
-        val track = data.getAsJsonObject("track") ?: data
+        // T1（2026-10-18）：安全访问器，避免 track / audioSpec 类型不符抛异常
+        val track = data.get("track")?.takeIf { it.isJsonObject }?.asJsonObject ?: data
         // 优先用 metadata 里的 audioSpec（列表接口返回的可能是空壳）
-        val spec = data.getAsJsonObject("audioSpec")
+        val spec = data.get("audioSpec")?.takeIf { it.isJsonObject }?.asJsonObject
         return parseTrack(track, audioSpec = spec)
     }
 
@@ -784,7 +791,7 @@ class FeiniuAdapter(private val appContext: Context? = null) : BackendAdapter {
     private fun fetchLyricsRaw(trackGuid: String): String? {
         val url = FeiniuUrl.endpoint(apiBase, "lyric/list", "trackGUID" to trackGuid)
         val data = dataOf(get(url), url) ?: return null
-        val list = data.getAsJsonArray("list") ?: return null
+        val list = data.get("list")?.takeIf { it.isJsonArray }?.asJsonArray ?: return null
         if (list.isEmpty) return null
         val preferred = str(data, "preferred")
 
@@ -801,7 +808,7 @@ class FeiniuAdapter(private val appContext: Context? = null) : BackendAdapter {
         }
         val target = chosen ?: fallback ?: return null
         val content = str(target, "content")?.takeIf { it.isNotBlank() } ?: return null
-        val offset = target.get("offset")?.asLong ?: 0L
+        val offset = longOf(target.get("offset")) ?: 0L
         return if (offset != 0L) "[offset:$offset]\n$content" else content
     }
 
@@ -816,10 +823,11 @@ class FeiniuAdapter(private val appContext: Context? = null) : BackendAdapter {
     private fun fetchTechInfoRaw(guid: String): SongTechnicalInfo? {
         val url = FeiniuUrl.endpoint(apiBase, "track/metadata", "guid" to guid)
         val data = dataOf(get(url), url) ?: return null
-        val spec = data.getAsJsonObject("audioSpec") ?: return null
+        // T1（2026-10-18）：安全访问器，避免 audioSpec 类型不符时抛异常
+        val spec = data.get("audioSpec")?.takeIf { it.isJsonObject }?.asJsonObject ?: return null
         val container = str(spec, "container").orEmpty()
         val codec = str(spec, "codec").orEmpty()
-        val rawBitrate = spec.get("bitrate")?.asLong ?: 0L
+        val rawBitrate = longOf(spec.get("bitrate")) ?: 0L
         if (rawBitrate != 0L) {
             AppLog.d(TAG, "track/metadata: raw bitrate=$rawBitrate (单位未确认，暂不展示)")
         }
@@ -830,7 +838,7 @@ class FeiniuAdapter(private val appContext: Context? = null) : BackendAdapter {
             sampleRate = 0,
             channels = 0,
             fileSize = 0L,
-            durationMs = spec.get("duration")?.asLong ?: 0L,
+            durationMs = parseDurationMs(spec.get("duration")) ?: 0L,
             format = container.ifBlank { codec }.uppercase()
         )
     }
@@ -842,7 +850,8 @@ class FeiniuAdapter(private val appContext: Context? = null) : BackendAdapter {
         runCatchingSuspend {
             val url = FeiniuUrl.endpoint(apiBase, "playlist/list")
             val data = dataOf(get(url), url) ?: return@runCatchingSuspend emptyList<Playlist>()
-            val list = data.getAsJsonArray("list") ?: return@runCatchingSuspend emptyList<Playlist>()
+            val list = data.get("list")?.takeIf { it.isJsonArray }?.asJsonArray
+                ?: return@runCatchingSuspend emptyList<Playlist>()
             val basic = list.mapNotNull { el ->
                 val obj = el as? JsonObject ?: return@mapNotNull null
                 val guid = str(obj, "guid") ?: return@mapNotNull null
@@ -874,7 +883,7 @@ class FeiniuAdapter(private val appContext: Context? = null) : BackendAdapter {
     private suspend fun fetchPlaylistTrackCount(guid: String): Int {
         val url = FeiniuUrl.endpoint(apiBase, "playlist/detail", "guid" to guid)
         return try {
-            withAuthRetry { dataOf(get(url), url)?.get("trackCount")?.asInt ?: 0 }
+            withAuthRetry { intOf(dataOf(get(url), url), "trackCount") }
         } catch (e: Exception) {
             AppLog.d(TAG, "playlist/detail failed for guid=$guid: ${e.message}")
             0
@@ -913,7 +922,9 @@ class FeiniuAdapter(private val appContext: Context? = null) : BackendAdapter {
         val body = JsonObject().apply { addProperty("trackGUID", trackGuid) }.toString()
         val url = FeiniuUrl.endpoint(apiBase, path)
         val envelope = post(url, body, authenticated = true) ?: return false
-        val code = envelope.get("code")?.asInt ?: 0
+        // T1（2026-10-18）：`asInt` 在 code 为字符串/对象时会抛异常，改用 intOf；
+        // `getAsJsonObject("data")` 在 data 为数组/字符串时抛异常，改用安全访问器。
+        val code = intOf(envelope, "code")
         if (code != 0) {
             AppLog.w(TAG, "toggleFavorite failed: code=$code msg=${str(envelope, "msg")}")
             return false
@@ -1011,7 +1022,9 @@ class FeiniuAdapter(private val appContext: Context? = null) : BackendAdapter {
      */
     private fun dataOf(envelope: JsonObject?, url: String): JsonObject? {
         if (envelope == null) return null
-        val code = envelope.get("code")?.asInt ?: 0
+        // T1（2026-10-18）：`asInt` 在 code 为字符串/对象时会抛异常，改用 intOf；
+        // `getAsJsonObject("data")` 在 data 为数组/字符串时抛异常，改用安全访问器。
+        val code = intOf(envelope, "code")
         if (code != 0) {
             val msg = str(envelope, "msg").orEmpty()
             when (code) {
@@ -1034,7 +1047,7 @@ class FeiniuAdapter(private val appContext: Context? = null) : BackendAdapter {
             }
             return null
         }
-        return envelope.getAsJsonObject("data")
+        return envelope.get("data")?.takeIf { it.isJsonObject }?.asJsonObject
     }
 
     // ==================== 内部：分页 ====================
@@ -1057,14 +1070,36 @@ class FeiniuAdapter(private val appContext: Context? = null) : BackendAdapter {
             // 会被误判为末页，后续页被静默截断（收藏/全量搜索少歌且无任何日志）。
             // 现在优先以 `data.total` 判定。
             val data = fetchPageEnvelope(path, currentPage, size, *extra) ?: break
-            val items = data.getAsJsonArray("list") ?: break
+            // T1（2026-10-18）：`getAsJsonArray` 在 `list` 类型异常时抛
+            // IllegalStateException（整页崩），改安全访问器后按「空页」处理。
+            val items = data.get("list")?.takeIf { it.isJsonArray }?.asJsonArray ?: break
+            // T0（2026-10-18）：**逐条异常隔离**。
+            //
+            // 原实现 `parse(obj)?.let { ... }` 没有异常隔离：服务端任意一条曲目的字段
+            // 类型异常（如 CUE 转码产生的 `duration:"154100.5"`、`album` 是字符串而非
+            // 对象、`artists` 是对象而非数组）都会让 Gson 的 `asLong` /
+            // `getAsJsonObject` 抛 IllegalStateException / NumberFormatException，
+            // 进而**中断整个 forEach** —— 一层层冒泡到 `runCatchingSuspend` 被吞成
+            // `getOrDefault(emptyList())`，最终整页 500 首全部丢失，UI 显示 0 首。
+            //
+            // 改为逐条 runCatching 后，一条脏数据只丢弃它自己，其余正常入列表。
+            // 这是 v2.39.3「飞牛歌曲列表为 0」的根因修复（真机 v2.39.2 复现确认）。
+            //
+            // 🙏 感谢 @Chengxi-x 提供本方案：逐条容错 + parseTrack 安全访问器两处
+            // 修改思路均由该用户实测反馈给出。详见 CHANGELOG v2.39.3「致谢」。
             items.forEach { el ->
                 val obj = el as? JsonObject ?: return@forEach
-                parse(obj)?.let { result.add(it) }
+                runCatching { parse(obj) }
+                    .onFailure { e ->
+                        AppLog.w(TAG, "parse item failed in $path: ${e.javaClass.simpleName}: ${e.message}")
+                    }
+                    .getOrNull()
+                    ?.let { result.add(it) }
             }
             pagesFetched++
             if (singlePage || items.size() == 0) break
-            val total = data.get("total")?.asInt ?: -1
+            // total 缺失时用 -1 表示「未知」，退回 items.size() 判末页
+            val total = if (data.get("total") == null) -1 else intOf(data, "total")
             val reachedEnd = if (total >= 0) {
                 // 已请求 pagesFetched 页、每页 size 条，覆盖 total 即到末页
                 pagesFetched.toLong() * size >= total
@@ -1104,7 +1139,8 @@ class FeiniuAdapter(private val appContext: Context? = null) : BackendAdapter {
     private suspend fun fetchTotal(path: String, vararg extra: Pair<String, Any?>): Int = withAuthRetry {
         val url = FeiniuUrl.endpoint(apiBase, path, *extra, "page" to 1, "size" to 1)
         val data = dataOf(get(url), url) ?: return@withAuthRetry 0
-        data.get("total")?.asInt ?: (data.getAsJsonArray("list")?.size() ?: 0)
+        if (data.get("total") != null) intOf(data, "total")
+        else data.get("list")?.takeIf { it.isJsonArray }?.asJsonArray?.size() ?: 0
     }
 
     /**
@@ -1135,8 +1171,10 @@ class FeiniuAdapter(private val appContext: Context? = null) : BackendAdapter {
         val name = str(obj, "name")?.takeIf { it.isNotBlank() } ?: return null
         val coverId = str(obj, "coverId")
         if (coverId != null) synchronized(albumCoverIds) { albumCoverIds[guid] = coverId }
-        // AlbumDto.artists 是数组（可能为空），展示时取首位
-        val artistName = obj.getAsJsonArray("artists")
+        // AlbumDto.artists 是数组（可能为空），展示时取首位。
+        // T1（2026-10-18）：`getAsJsonArray` 在字段类型不符时会抛异常（整页崩溃），
+        // 改用安全访问器 —— 与 parseTrack 保持一致的防御水平。
+        val artistName = obj.get("artists")?.takeIf { it.isJsonArray }?.asJsonArray
             ?.firstOrNull()
             ?.takeIf { it.isJsonObject }
             ?.asJsonObject
@@ -1149,7 +1187,7 @@ class FeiniuAdapter(private val appContext: Context? = null) : BackendAdapter {
             artist = artistName ?: "",
             coverUrl = FeiniuUrl.coverUrl(apiBase, coverId, COVER_SIZE),
             year = year,
-            songCount = obj.get("trackCount")?.asInt ?: 0
+            songCount = intOf(obj, "trackCount")
         )
     }
 
@@ -1162,8 +1200,8 @@ class FeiniuAdapter(private val appContext: Context? = null) : BackendAdapter {
             id = ID_PREFIX + guid,
             name = name,
             coverUrl = FeiniuUrl.coverUrl(apiBase, coverId, COVER_SIZE),
-            albumCount = obj.get("albumCount")?.asInt ?: 0,
-            songCount = obj.get("trackCount")?.asInt ?: 0
+            albumCount = intOf(obj, "albumCount"),
+            songCount = intOf(obj, "trackCount")
         )
     }
 
@@ -1180,7 +1218,15 @@ class FeiniuAdapter(private val appContext: Context? = null) : BackendAdapter {
         val coverId = str(obj, "coverId")
         if (coverId != null) synchronized(trackCoverIds) { trackCoverIds[guid] = coverId }
 
-        val albumObj = obj.getAsJsonObject("album")
+        // T1（2026-10-18）：安全访问器替代强制转换。
+        //
+        // ⚠️ Gson 的 `getAsJsonObject(name)` / `getAsJsonArray(name)` 在字段存在但
+        // **类型不符**时会直接抛 IllegalStateException（不是返回 null）——
+        // 例如服务端把 `album` 发成字符串、把 `artists` 发成单个对象，
+        // 都会让整条曲目解析崩溃。T0 已保证只丢这一条，但没必要丢掉可救的数据。
+        //
+        // 🙏 感谢 @Chengxi-x 提供本方案（安全访问器 + duration 兜底思路）。
+        val albumObj = obj.get("album")?.takeIf { it.isJsonObject }?.asJsonObject
         val albumGuid = str(albumObj, "guid")
         val albumName = str(albumObj, "name")
         val albumCoverId = str(albumObj, "coverId")
@@ -1191,7 +1237,7 @@ class FeiniuAdapter(private val appContext: Context? = null) : BackendAdapter {
         val artistNames = ArrayList<String>()
         var firstArtistGuid: String? = null
         var firstArtistCoverId: String? = null
-        obj.getAsJsonArray("artists")?.forEach { el ->
+        obj.get("artists")?.takeIf { it.isJsonArray }?.asJsonArray?.forEach { el ->
             val artistObj = el as? JsonObject ?: return@forEach
             str(artistObj, "name")?.takeIf { it.isNotBlank() }?.let { artistNames.add(it) }
             val ag = str(artistObj, "guid")
@@ -1201,9 +1247,16 @@ class FeiniuAdapter(private val appContext: Context? = null) : BackendAdapter {
             if (ag != null && ac != null) synchronized(artistCoverIds) { artistCoverIds[ag] = ac }
         }
 
-        // duration 单位已是毫秒（参考项目 Dto: durationMs = duration），不要 ×1000
-        val spec = audioSpec ?: obj.getAsJsonObject("audioSpec")
-        val durationMs = obj.get("duration")?.asLong ?: spec?.get("duration")?.asLong ?: 0L
+        // duration 单位已是毫秒（参考项目 Dto: durationMs = duration），不要 ×1000。
+        //
+        // ⚠️ 不能写成 `el?.asLong`：Gson 的 asLong 对 `"154100"` 能解析（内部走
+        // Double.parse），但对 `"154100.5"` / `"2:33"` / `"abc"` 会抛
+        // NumberFormatException。CUE 转码/第三方导入的库经常产生这类值。
+        // 用 parseDurationMs 兜住：数字取长整、纯数字字符串取小数再截断、其余回退 null。
+        val spec = audioSpec ?: obj.get("audioSpec")?.takeIf { it.isJsonObject }?.asJsonObject
+        val durationMs = parseDurationMs(obj.get("duration"))
+            ?: parseDurationMs(spec?.get("duration"))
+            ?: 0L
 
         return Song(
             id = ID_PREFIX + guid,
@@ -1281,6 +1334,63 @@ class FeiniuAdapter(private val appContext: Context? = null) : BackendAdapter {
             null
         }
     }
+
+    /**
+     * 安全取整数：字段缺失、非基本类型、或内容不是数字时返回 0（不抛异常）。
+     *
+     * ⚠️ 为什么不用 `el.asInt`：Gson 对 `"12abc"`、JSON `null`、对象都会抛
+     * NumberFormatException / IllegalStateException。列表解析场景一条脏数据
+     * 就能拖垮整页（见 T0），统计字段没必要冒这个风险。
+     */
+    private fun intOf(obj: JsonObject?, name: String): Int {
+        val el = obj?.get(name) ?: return 0
+        if (el.isJsonNull || !el.isJsonPrimitive) return 0
+        return try {
+            val prim = el.asJsonPrimitive
+            if (prim.isNumber) prim.asInt
+            else prim.asString.trim().toIntOrNull() ?: 0
+        } catch (e: Exception) {
+            0
+        }
+    }
+
+    /**
+     * 尽最大努力把 JSON 值解析为 Long；无法解析返回 `null`（调用方自行回退）。
+     *
+     * ⚠️ 为什么不能用 `el.asLong`：
+     * Gson 的 `JsonPrimitive.asLong` 只保证「数字」可用，对字符串走
+     * `Double.parseDouble` 再转 long —— 传 `"154100"` 能成功，
+     * 但传 `"154100.5"` 会抛 NumberFormatException，`"2:33"`、`"abc"`、
+     * `true`、JSON `null` 同样抛。飞牛上由 CUE 分轨 / 第三方导入产生的
+     * 曲目经常出现这类值，一条就会让整页解析崩溃（v2.39.3 修复）。
+     *
+     * 支持形态：
+     * - 数字 `154100` / `154100.5` → 154100（截断小数）
+     * - 纯数字字符串 `"154100"` / `"154100.5"` → 同上
+     * - 其它（时间戳格式、非法字符、null）→ null
+     */
+    private fun longOf(el: JsonElement?): Long? {
+        if (el == null || el.isJsonNull) return null
+        if (!el.isJsonPrimitive) return null
+        return try {
+            val prim = el.asJsonPrimitive
+            if (prim.isNumber) {
+                // 数字：Gson 的 asLong 对浮点会截断小数（实测 154100.5 → 154100），不抛异常
+                prim.asLong
+            } else {
+                val text = prim.asString.trim()
+                if (text.isEmpty()) null
+                // 字符串：优先按整数解析，失败再按浮点截断
+                else text.toLongOrNull() ?: text.toDoubleOrNull()?.toLong()
+            }
+        } catch (e: Exception) {
+            // 超大数超出 Long 范围等极端情况：回退 null，不让单条脏数据影响整页
+            null
+        }
+    }
+
+    /** 毫秒时长提取：语义化包装 [longOf]，供 duration / bitrate 等数值字段复用 */
+    private fun parseDurationMs(el: JsonElement?): Long? = longOf(el)
 
     /** 定长 LRU 缓存（访问序）；所有访问需外部 synchronized */
     private class LruCache<K, V>(maxSize: Int) : LinkedHashMap<K, V>(maxSize, 0.75f, true) {
