@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -21,6 +22,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -407,6 +409,54 @@ internal fun AdjustButton(text: String, onClick: () -> Unit) {
     ) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text(text = text, color = NasMusicColors.TextPrimary, fontSize = FontSize.title(), fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+/**
+ * 设置页共享芯片（单选组用）：选中态是**唯一一种表达**（实底 Primary + 黑字）。
+ *
+ * 从 `PhotoWallSettingsSection` 的私有 `OptionChip` 提升而来（T10 先用，T11 把
+ * 照片墙的三处调用点一起换过来）。
+ *
+ * ⛔ **宽度必须由内容决定**（文字 + padding），不能用 `fillMaxSize()`：
+ * 本组件总是被放在 `Row` 里并排，而 `Row` 给每个 wrap-content 子项的最大宽度是
+ * 「本行剩余宽度」——`fillMaxSize()` 会取这个最大值 ⇒ **第一个 chip 撑满整行，
+ * 同排后续 chip 被挤成 0 宽**（v2.37.0「画面适配只显示满屏」、v2.35.0「音质只有自动」
+ * 两次线上实例，护栏见 `ChipContentWidthScanTest`）。
+ * 高度由外层 `Modifier.height(portraitTouchTarget(48.dp))` 给定，故内容只填高。
+ */
+@OptIn(ExperimentalTvMaterial3Api::class)
+@Composable
+internal fun SettingsChip(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    FocusableSurface(
+        onClick = onClick,
+        modifier = modifier.height(portraitTouchTarget(48.dp)),
+        shape = RoundedCornerShape(12.dp),
+        focusedScale = 1.06f,
+        animationDurationMs = 200,
+        containerColor = if (selected) NasMusicColors.Primary else NasMusicColors.Surface,
+        contentColor = if (selected) Color.Black else NasMusicColors.TextPrimary,
+        focusedContainerColor = if (selected) NasMusicColors.Primary else NasMusicColors.Primary.copy(alpha = 0.2f),
+        focusedContentColor = if (selected) Color.Black else NasMusicColors.TextPrimary,
+        pressedScale = 0.96f,
+        focusBorderColor = NasMusicColors.FocusRing.copy(alpha = 0.6f)
+    ) {
+        Box(
+            modifier = Modifier.fillMaxHeight().padding(horizontal = 16.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = label,
+                color = if (selected) Color.Black else LocalFocusableContentColor.current,
+                fontSize = FontSize.button(),
+                fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal
+            )
         }
     }
 }

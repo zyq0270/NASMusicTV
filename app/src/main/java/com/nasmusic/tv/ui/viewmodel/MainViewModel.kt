@@ -3090,6 +3090,18 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
         prefs.lyrics.setLyricsFontScale(scale)
     }
 
+    /**
+     * 保存分离模型的自定义下载源（方案 §6-11 / T10）。
+     *
+     * 校验**不在这一层**：`AppPreferences.setModelDownloadUrl` 已经过 `normalizeEndpointUrl`
+     * （scheme 必须 http/https、长度 ≤ 500、主机必须有点/端口/localhost），非法值会被它
+     * 静默拒绝并保留旧值 —— 在这里再写一套校验只会让两处口径漂移。
+     * 空串 = 恢复内置默认候选。
+     */
+    fun saveCustomModelUrl(url: String) = viewModelScope.launch {
+        prefs.setModelDownloadUrl(url)
+    }
+
     suspend fun updateLanguage(lang: String) {
         prefs.languagePrefs.setLanguage(lang)
         // 立即应用语言变更（重启 Activity 以重新加载所有资源）

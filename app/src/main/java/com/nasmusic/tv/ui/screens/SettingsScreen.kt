@@ -218,6 +218,16 @@ fun SettingsScreen(
     onDeleteModel: (() -> Unit)? = null,
     onRefreshModelStatus: (() -> Unit)? = null,
     onScanTransferModel: (() -> Unit)? = null,
+    // ── T10：歌词显示（与播放页弹窗共用同一份持久化 key）──
+    lyricsFontScale: Float = 1f,
+    lyricsHighlightMode: com.nasmusic.tv.data.model.LyricsHighlightMode =
+        com.nasmusic.tv.data.model.LyricsHighlightMode.LINE_BY_LINE,
+    onChangeLyricsFontScale: (Float) -> Unit = {},
+    onChangeLyricsHighlightMode: (com.nasmusic.tv.data.model.LyricsHighlightMode) -> Unit = {},
+    // ── T10：分离模型自定义下载源（空串 = 内置默认源）──
+    customModelUrl: String = "",
+    onChangeCustomModelUrl: ((String) -> Unit)? = null,
+    onResetCustomModelUrl: (() -> Unit)? = null,
     // T1.6.4（§十三 裁决项 9=A）：可视化画质三档（低/中/高）
     visualizerQuality: VisualQuality = VisualQuality.Default,
     onChangeVisualizerQuality: (VisualQuality) -> Unit = {},
@@ -373,6 +383,10 @@ var activeSection by remember { mutableStateOf(SettingsSection.GENERAL) }
 
     // Jamendo Client ID 编辑对话框
     var showJamendoClientIdDialog by remember { mutableStateOf(false) }
+
+    // T10：分离模型自定义下载源编辑对话框（复用同一个 TextInputDialog 宿主，
+    // ⛔ 不新建第 7 种对话框组件 —— T16 收敛 EndpointEditor 时这里一起并进去）
+    var showCustomModelUrlDialog by remember { mutableStateOf(false) }
 
     // P1-17: 清空所有下载确认弹窗
     var showClearDownloadsConfirm by remember { mutableStateOf(false) }
@@ -615,12 +629,19 @@ var activeSection by remember { mutableStateOf(SettingsSection.GENERAL) }
                             modelDownloadError = modelDownloadError,
                             modelPath = modelPath,
                             hqErrorDetail = hqErrorDetail,
+                            lyricsFontScale = lyricsFontScale,
+                            lyricsHighlightMode = lyricsHighlightMode,
+                            customModelUrl = customModelUrl,
                         ),
                         actions = LyricsKaraokeActions(
                             onChangeSeparationMode = onChangeSeparationMode,
                             onDownloadModel = onDownloadModel,
                             onDeleteModel = onDeleteModel,
                             onScanTransferModel = onScanTransferModel,
+                            onChangeLyricsFontScale = onChangeLyricsFontScale,
+                            onChangeLyricsHighlightMode = onChangeLyricsHighlightMode,
+                            onEditCustomModelUrl = { showCustomModelUrlDialog = true },
+                            onResetCustomModelUrl = onResetCustomModelUrl,
                         )
                     )
                 }
@@ -983,6 +1004,26 @@ var activeSection by remember { mutableStateOf(SettingsSection.GENERAL) }
                 showMvUrlDialog = false
                 mvUrlError = null
             }
+        )
+    }
+
+    // T10：分离模型自定义下载源编辑对话框
+    if (showCustomModelUrlDialog) {
+        TextInputDialog(
+            title = stringResource(R.string.settings_model_custom_url),
+            hint = stringResource(R.string.settings_model_custom_url_desc),
+            initialValue = customModelUrl,
+            onConfirm = { input ->
+                val trimmed = input.trim()
+                // scheme 不合法时**不关闭对话框**（用户可继续改）；真正的取值校验仍在
+                // `AppPreferences.setModelDownloadUrl` → `normalizeEndpointUrl`，这里只是提前挡一下
+                if (trimmed.isEmpty() || trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+                    // 空串 = 恢复内置默认源（与「恢复默认源」按钮同一条路径）
+                    onChangeCustomModelUrl?.invoke(trimmed)
+                    showCustomModelUrlDialog = false
+                }
+            },
+            onDismiss = { showCustomModelUrlDialog = false }
         )
     }
 

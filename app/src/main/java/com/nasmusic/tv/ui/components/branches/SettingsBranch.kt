@@ -69,6 +69,9 @@ internal fun SettingsBranch(
                     )
                     val jamendoClientId by viewModel.prefs.network.jamendoClientIdFlow.collectAsState(initial = "")
                     val separationMode by viewModel.vocalVM.separationMode.collectAsState()
+                    // T10：歌词字号 / 高亮（与播放页 NowPlayingBranch 读的是同一份持久化 key）
+                    val lyricsFontScale by viewModel.prefs.lyrics.lyricsFontScale.collectAsState(initial = 1.0f)
+                    val lyricsHighlightMode by viewModel.lyricsHighlightMode.collectAsState()
                     val modelDownloaded by viewModel.downloadVM.modelDownloaded.collectAsState()
                     // === F2-2b 睡眠定时器（常驻按钮状态，本页内收集） ===
                     val sleepTimerSt by viewModel.playerVM.sleepTimerState.collectAsState()
@@ -263,6 +266,15 @@ internal fun SettingsBranch(
                     onDeleteModel = { viewModel.deleteModel() },
                     onRefreshModelStatus = { viewModel.downloadVM.refreshModelStatus() },
                     onScanTransferModel = { showModelTransferDialog = true },
+                    // T10：歌词显示（与播放页弹窗读同一条 Flow，改完立刻对播放页生效）
+                    lyricsFontScale = lyricsFontScale,
+                    lyricsHighlightMode = lyricsHighlightMode,
+                    onChangeLyricsFontScale = { viewModel.updateLyricsFontScale(it) },
+                    onChangeLyricsHighlightMode = { viewModel.setLyricsHighlightMode(it) },
+                    // T10：分离模型自定义下载源（空串 = 内置默认源）
+                    customModelUrl = settings.modelDownloadUrl,
+                    onChangeCustomModelUrl = { viewModel.saveCustomModelUrl(it) },
+                    onResetCustomModelUrl = { viewModel.saveCustomModelUrl("") },
                     // 歌曲离线下载设置
                     downloadEnabled = settings.downloadEnabled,
                     autoDownloadOnPlay = settings.autoDownloadOnPlay,

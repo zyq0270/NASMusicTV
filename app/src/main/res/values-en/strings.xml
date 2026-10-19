@@ -244,6 +244,17 @@
     <string name="settings_group_transition_volume">Transition &amp; Volume</string>
     <string name="settings_group_quality">Audio Quality</string>
     <string name="settings_group_equalizer">Equalizer</string>
+    <string name="settings_group_lyrics">Lyrics Display</string>
+    <string name="settings_lyrics_scale">Lyrics Font Size</string>
+    <string name="settings_lyrics_scale_desc">Only affects lyrics on the Now Playing screen, not system UI</string>
+    <string name="settings_lyrics_highlight">Lyrics Highlight</string>
+    <string name="settings_lyrics_highlight_desc">Line mode tints whole lines; word mode needs word-level timing</string>
+    <string name="settings_model_custom_url">Custom Source</string>
+    <string name="settings_model_custom_url_desc">Direct NAS link; checksum must still match</string>
+    <string name="settings_model_custom_url_builtin">Built-in default source</string>
+    <string name="settings_model_custom_url_edit">Edit</string>
+    <string name="settings_reset_custom_model_url">Reset to Default Source</string>
+    <string name="settings_reset_custom_model_url_desc">Clear the custom URL and use the built-in source</string>
     <string name="settings_group_separation">Vocal Separation</string>
     <string name="settings_group_model">Separation Model</string>
     <string name="settings_group_visualizer">Visualizer</string>

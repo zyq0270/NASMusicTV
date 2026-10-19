@@ -19,6 +19,7 @@ import androidx.tv.material3.ExperimentalTvMaterial3Api
 import androidx.tv.material3.Text
 import com.nasmusic.tv.R
 import com.nasmusic.tv.data.model.AppSettings
+import com.nasmusic.tv.data.model.LyricsHighlightMode
 import com.nasmusic.tv.player.SeparationMode
 import com.nasmusic.tv.ui.theme.FontSize
 import com.nasmusic.tv.ui.theme.NasMusicColors
@@ -41,6 +42,12 @@ data class LyricsKaraokeSettingsState(
     val modelDownloadError: String?,
     val modelPath: String,
     val hqErrorDetail: String?,
+    /** T10：歌词字号倍率（与播放页弹窗读同一条 Flow，⛔ 不要写成 Double） */
+    val lyricsFontScale: Float = 1f,
+    /** T10：歌词高亮方式（逐行 / 逐字） */
+    val lyricsHighlightMode: LyricsHighlightMode = LyricsHighlightMode.LINE_BY_LINE,
+    /** T10：分离模型自定义下载源（空串 = 用内置默认源） */
+    val customModelUrl: String = "",
 )
 
 /** 歌词与 K 歌分区动作（可空性与默认值同 `PlayerSettingsActions` 原样） */
@@ -49,6 +56,12 @@ data class LyricsKaraokeActions(
     val onDownloadModel: (() -> Unit)?,
     val onDeleteModel: (() -> Unit)?,
     val onScanTransferModel: (() -> Unit)?,
+    /** T10：歌词字号 / 高亮（与播放页共用同一份持久化 key） */
+    val onChangeLyricsFontScale: (Float) -> Unit = {},
+    val onChangeLyricsHighlightMode: (LyricsHighlightMode) -> Unit = {},
+    /** T10：分离模型自定义源（编辑走 SettingsScreen 的 TextInputDialog 宿主，恢复默认直接写空串） */
+    val onEditCustomModelUrl: (() -> Unit)? = null,
+    val onResetCustomModelUrl: (() -> Unit)? = null,
 )
 
 /**
@@ -67,6 +80,65 @@ internal fun LyricsKaraokeSettingsSection(
 ) {
     Column {
         SectionTitle(stringResource(R.string.settings_lyrics_karaoke))
+        // 卡① 歌词显示（T10 新增：字号 / 高亮与播放页弹窗共用同一份持久化 key，
+        // 所以在设置页改完回到播放页立刻生效 —— 不存在"两份配置谁优先"的问题）
+        SettingsGroupCard(title = stringResource(R.string.settings_group_lyrics)) {
+            Text(
+                text = stringResource(R.string.settings_lyrics_scale),
+                color = NasMusicColors.TextPrimary,
+                fontSize = FontSize.button(),
+                modifier = Modifier.padding(start = 4.dp)
+            )
+            Text(
+                text = stringResource(R.string.settings_lyrics_scale_desc),
+                color = NasMusicColors.TextSecondary,
+                fontSize = FontSize.small(),
+                modifier = Modifier.padding(start = 4.dp, top = 2.dp)
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            // 4 档与播放页 `LyricsSettingsDialog` 完全同源（0.7/1.0/1.3/1.6，复用同一批标签 key）
+            Row(
+                modifier = Modifier.padding(start = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                LYRICS_FONT_SCALES.forEach { (scale, labelRes) ->
+                    SettingsChip(
+                        label = stringResource(labelRes),
+                        selected = kotlin.math.abs(state.lyricsFontScale - scale) < 0.01f,
+                        onClick = { actions.onChangeLyricsFontScale(scale) }
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                text = stringResource(R.string.settings_lyrics_highlight),
+                color = NasMusicColors.TextPrimary,
+                fontSize = FontSize.button(),
+                modifier = Modifier.padding(start = 4.dp)
+            )
+            Text(
+                text = stringResource(R.string.settings_lyrics_highlight_desc),
+                color = NasMusicColors.TextSecondary,
+                fontSize = FontSize.small(),
+                modifier = Modifier.padding(start = 4.dp, top = 2.dp)
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(
+                modifier = Modifier.padding(start = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                SettingsChip(
+                    label = stringResource(R.string.player_highlight_line),
+                    selected = state.lyricsHighlightMode == LyricsHighlightMode.LINE_BY_LINE,
+                    onClick = { actions.onChangeLyricsHighlightMode(LyricsHighlightMode.LINE_BY_LINE) }
+                )
+                SettingsChip(
+                    label = stringResource(R.string.player_highlight_word),
+                    selected = state.lyricsHighlightMode == LyricsHighlightMode.WORD_BY_WORD,
+                    onClick = { actions.onChangeLyricsHighlightMode(LyricsHighlightMode.WORD_BY_WORD) }
+                )
+            }
+        }
         // 卡② 人声分离
         SettingsGroupCard(title = stringResource(R.string.settings_group_separation)) {
             run {
@@ -185,6 +257,33 @@ internal fun LyricsKaraokeSettingsSection(
                     Text(text = err, color = NasMusicColors.Danger, fontSize = FontSize.small())
                 }
             }
+            // ── 自定义源（T10）：值与"恢复默认"都在这里；编辑走 SettingsScreen 的 TextInputDialog 宿主 ──
+            SettingsInfoRow(
+                label = stringResource(R.string.settings_model_custom_url),
+                value = state.customModelUrl.ifBlank {
+                    stringResource(R.string.settings_model_custom_url_builtin)
+                },
+                description = stringResource(R.string.settings_model_custom_url_desc)
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Box(modifier = Modifier.weight(1f)) {
+                    SettingActionButton(
+                        label = stringResource(R.string.settings_model_custom_url_edit),
+                        description = stringResource(R.string.settings_model_custom_url_desc),
+                        onClick = { actions.onEditCustomModelUrl?.invoke() }
+                    )
+                }
+                Box(modifier = Modifier.weight(1f)) {
+                    SettingActionButton(
+                        label = stringResource(R.string.settings_reset_custom_model_url),
+                        description = stringResource(R.string.settings_reset_custom_model_url_desc),
+                        onClick = { actions.onResetCustomModelUrl?.invoke() }
+                    )
+                }
+            }
             // ── 高质量分离失败详情（本轮长期留存，供用户对着屏幕截图回传）──
             state.hqErrorDetail?.let { detail ->
                 Text(
@@ -210,3 +309,16 @@ internal fun LyricsKaraokeSettingsSection(
         }
     }
 }
+
+/**
+ * 歌词字号档位（与播放页 `LyricsSettingsDialog` 的 4 档完全一致）。
+ *
+ * ⛔ 不要改成"任意滑条"：0.7/1.0/1.3/1.6 是播放页既有的离散档，改成连续值会让
+ * 同一首歌在两个页面显示成不同大小（两处读的是同一个 Float key）。
+ */
+private val LYRICS_FONT_SCALES: List<Pair<Float, Int>> = listOf(
+    0.7f to R.string.lyrics_settings_size_small,
+    1.0f to R.string.lyrics_settings_size_medium,
+    1.3f to R.string.lyrics_settings_size_large,
+    1.6f to R.string.lyrics_settings_size_xlarge,
+)
