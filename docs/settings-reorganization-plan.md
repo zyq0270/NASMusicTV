@@ -3109,10 +3109,10 @@ fun `样例里的 SubSectionTitle 必须被检出`() {
 
 **Files:** Modify `ui/screens/SettingsScreen.kt`（删 6 份重复对话框状态、:713-744 的内联 OkHttp）、`ui/components/branches/SettingsBranch.kt`、`ui/viewmodel/MainViewModel.kt`（新增 `runNetworkProbe()`）、`app/src/test/java/com/nasmusic/tv/ui/SettingsEndpointDialogWiringTest.kt`
 
-- [ ] **Step 1: 写失败的门禁**：断言 `SettingsScreen.kt` 里 `TextInputDialog(` 调用点只剩 1 个通用宿主 + 1 个删除确认 + 1 个清除下载确认（共 ≤3），且不含 `OkHttpClient`/`Request.Builder` 字样（I/O 已下沉）。含负向自证（把 `OkHttpClient` 塞回文本必须判负）。
-- [ ] **Step 2: 实现 `EndpointEditor` spec（§5.3）与 `MainViewModel.runNetworkProbe()`**（探针 URL、超时、状态文案逐行照搬原 lambda，行为不变；⛔ 不要在单测里真连该端点）
-- [ ] **Step 3: 跑测试 PASS + 真机验证网络测试结果与迁移前一致**
-- [ ] **Step 4: 提交** `git commit -am "refactor(settings): 端点编辑对话框收敛为通用宿主，网络测试下沉到 ViewModel"`
+- [x] **Step 1: 写失败的门禁**：断言 `SettingsScreen.kt` 里 `TextInputDialog(` 调用点只剩 1 个通用宿主 + 1 个删除确认 + 1 个清除下载确认（共 ≤3），且不含 `OkHttpClient`/`Request.Builder` 字样（I/O 已下沉）。含负向自证（把 `OkHttpClient` 塞回文本必须判负）。（✅ 实做：`SettingsEndpointDialogWiringTest` 10 例 —— 红 ≠ 空转：首跑 4 正向失败 / 6 过（3 负向自证 + 2 现状本就满足）；删除/清除确认实际是 `Dialog(`+自绘 与 `Dialog(`+`ConfirmDialog`，门禁按「`TextInputDialog(` == 1 + 两确认弹窗仍在」落地，与方案 ≤3 意图一致）
+- [x] **Step 2: 实现 `EndpointEditor` spec（§5.3）与 `MainViewModel.runNetworkProbe()`**（探针 URL、超时、状态文案逐行照搬原 lambda，行为不变；⛔ 不要在单测里真连该端点）（✅ 实做出入见 §10.255：spec 加 `masked`、`descRes`→`hintRes`；百度目录文本回退也并入通用宿主，目录树形态保留布尔 + `BaiduDirPickerDialog`；方案所写的 `:713-744 内联 OkHttp` 现状已是 `HttpURLConnection` 且只有 30 行，照搬下沉）
+- [x] **Step 3: 跑测试 PASS + 真机验证网络测试结果与迁移前一致**（✅ 单测：新门 10/10 绿 + 5 个设置扫描门 46 例回归全绿 + `t16_selfcheck.py` 正向/负向自证全过；⏳ 真机验证待用户执行 —— 归入 V16 走查）
+- [x] **Step 4: 提交** `git commit` "refactor(settings): 端点编辑对话框收敛为通用宿主，网络测试下沉到 ViewModel"（⛔ 非 `-am`：只 add 本任务文件，不带入其他会话改动）
 
 ---
 

@@ -119,6 +119,9 @@ internal fun SettingsBranch(
                     val faceScanSupported by viewModel.visualizerVM.faceScanSupported.collectAsState()
                     // T8b：剩余空间（CACHE「占用与存储」首行）
                     val storageAvailableBytes by viewModel.storageAvailableBytes.collectAsState()
+                    // T16（§5.4）：网络探针状态（MainViewModel 持有，UI 只渲染 + 发意图）
+                    val networkProbeRunning by viewModel.networkProbeRunning.collectAsState(initial = false)
+                    val networkProbeStatus by viewModel.networkProbeStatus.collectAsState(initial = "")
                     SettingsScreen(
                         selectedSection = settingsSection,
                         onOpenSection = { viewModel.navVM.openSettingsSection(it) },
@@ -169,6 +172,10 @@ internal fun SettingsBranch(
                         onChangeJamendoClientId = { viewModel.updateJamendoClientId(it) },
                         weatherApiKey = weatherApiKey,
                         onChangeWeatherApiKey = { viewModel.updateWeatherApiKey(it) },
+                        // T16：网络探针（I/O 在 MainViewModel.runNetworkProbe，§5.4）
+                        isNetworkTesting = networkProbeRunning,
+                        networkTestStatus = networkProbeStatus,
+                        onRunNetworkProbe = { viewModel.runNetworkProbe() },
                         // T1.6.4（§十三 裁决项 9=A）：接已有的 setQuality（写 DataStore ⇒ 立即生效）。
                         // ⛔ 不走 MainViewModel.updateVisualizerQuality（它没有降档回退主题的逻辑）。
                         visualizerQuality = settings.visualizerQuality,

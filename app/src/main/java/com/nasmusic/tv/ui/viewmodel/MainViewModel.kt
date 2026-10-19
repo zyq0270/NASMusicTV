@@ -3266,6 +3266,58 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
         prefs.weather.setWeatherApiKey(key.trim())
     }
 
+    // ===================== T16（方案 §5.4）：网络连通性探针 =====================
+    // 从 SettingsScreen 的 onRunNetworkTest 内联 lambda 下沉（原为 UI 层持有
+    // HttpURLConnection I/O，且 rememberCoroutineScope 会让离开设置页的探针被取消）。
+    // 探针 URL / 超时 / HEAD 方法 / 结果文案逐行照搬原 lambda，行为不变；
+    // 副作用差异只有一条：探针改挂 viewModelScope，离开设置页不再被取消（改进）。
+
+    private val _networkProbeRunning = MutableStateFlow(false)
+
+    /** 探针进行中（UI 据此禁用按钮并显示「测试中」） */
+    val networkProbeRunning: StateFlow<Boolean> = _networkProbeRunning.asStateFlow()
+
+    private val _networkProbeStatus = MutableStateFlow("")
+
+    /**
+     * 探针结果，带 `success:` / `error:` 前缀（`NetworkMusicSection` 按前缀着色，口径不变）；
+     * 空串 = 尚无结果。
+     */
+    val networkProbeStatus: StateFlow<String> = _networkProbeStatus.asStateFlow()
+
+    /** 发起一次连通性探针（HEAD https://www.baidu.com，5s 超时）；进行中重复调用被忽略（防重入）。 */
+    fun runNetworkProbe() {
+        if (_networkProbeRunning.value) return
+        _networkProbeRunning.value = true
+        _networkProbeStatus.value = ""
+        viewModelScope.launch {
+            val app = getApplication<Application>()
+            val result = withContext(Dispatchers.IO) {
+                try {
+                    val url = java.net.URL("https://www.baidu.com")
+                    val conn = url.openConnection() as java.net.HttpURLConnection
+                    conn.connectTimeout = 5000
+                    conn.readTimeout = 5000
+                    conn.requestMethod = "HEAD"
+                    val code = conn.responseCode
+                    conn.disconnect()
+                    if (code in 200..399) "success:${app.getString(R.string.settings_network_test_success, code)}"
+                    else "error:${app.getString(R.string.settings_network_test_http_error, code)}"
+                } catch (e: java.net.SocketTimeoutException) {
+                    "error:${app.getString(R.string.settings_network_test_timeout)}"
+                } catch (e: java.net.UnknownHostException) {
+                    "error:${app.getString(R.string.settings_network_test_dns_error)}"
+                } catch (e: java.net.ConnectException) {
+                    "error:${app.getString(R.string.settings_network_test_connection_refused)}"
+                } catch (e: Exception) {
+                    "error:${app.getString(R.string.settings_network_test_error, e.message ?: e.javaClass.simpleName)}"
+                }
+            }
+            _networkProbeStatus.value = result
+            _networkProbeRunning.value = false
+        }
+    }
+
     fun updateVisualizerQuality(quality: com.nasmusic.tv.data.model.VisualQuality) = viewModelScope.launch {
         prefs.setVisualizerQuality(quality)
     }

@@ -474,7 +474,6 @@
     <string name="settings_meting_api_url_desc">API address for network search, can self-host or use other public endpoints</string>
     <string name="settings_meting_api_url_edit">Change Endpoint</string>
     <string name="settings_meting_api_url_hint">Enter Meting-API endpoint URL</string>
-    <string name="settings_meting_api_url_invalid">Invalid URL format, must start with http:// or https://</string>
     <string name="settings_meting_preset_endpoints">Preset Endpoints</string>
     <string name="settings_meting_custom_endpoint">Custom Endpoint</string>
     <string name="settings_meting_custom_endpoint_desc">Use other public or self-hosted endpoint</string>
@@ -482,7 +481,6 @@
     <string name="settings_mv_api_url_desc">API address for MTV music video search, can use self-hosted proxy or other endpoints</string>
     <string name="settings_mv_api_url_edit">Change Endpoint</string>
     <string name="settings_mv_api_url_hint">Enter video search endpoint URL</string>
-    <string name="settings_mv_api_url_invalid">Invalid URL format, must start with http:// or https://</string>
 
     <string name="settings_lyrics_endpoint">Lyrics Endpoint</string>
     <string name="settings_lyrics_kugou_url">KuGou Lyrics Endpoint</string>
@@ -490,7 +488,6 @@
     <string name="settings_lyrics_url_edit">Change Endpoint</string>
     <string name="settings_lyrics_url_reset">Reset to Default</string>
     <string name="settings_lyrics_url_hint">Enter lyrics search endpoint URL</string>
-    <string name="settings_lyrics_url_invalid">Invalid URL format, must start with http:// or https://</string>
     <string name="settings_mv_preset_endpoints">Preset Endpoints</string>
     <string name="settings_mv_custom_endpoint">Custom Endpoint</string>
     <string name="settings_mv_custom_endpoint_desc">Use self-hosted proxy or other mirror endpoints</string>

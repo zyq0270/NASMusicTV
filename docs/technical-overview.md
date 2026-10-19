@@ -16479,3 +16479,45 @@ Compose 侧改动仍须 `assembleRelease` 兜底（见 §10.250 的覆盖盲区�
 **免 Gradle 自查**：6 个扫描门 55 例全绿；`t13_selfcheck.py`（57 项）与 `t14_selfcheck.py`
 （105 项）回归全过。
 
+### 10.255 v2.39.0 — 设置区整理 T16：端点对话框收敛 + 探针下沉（2026-10-19）
+
+**方案与现状的三处出入（实做按现状调整）**：
+1. 方案写的「`:713-744 内联 OkHttp`」在当前代码里**不存在**——网络探针早已是
+   `HttpURLConnection`（URL/HEAD/5s 超时），只是仍内联在 `onRunNetworkTest` lambda 里
+   （30 行，UI 层持 I/O）。下沉照搬的就是这段。
+2. `TextInputDialog` 实际有 **9 个**宿主（方案写 6 个端点 + T10 加的自定义源 + 百度目录
+   两个回退分支）。收敛口径：7 个端点/Key 宿主 + 2 个百度目录**文本回退**全部并入
+   `EndpointEditor` 通用宿主（`TextInputDialog(` 调用点 9 → 1）；百度**目录树**形态
+   （`BaiduDirPickerDialog`，与文本编辑不同构）保留 `showBaidu*Dialog` 布尔承载，
+   onShow 回调里按 `onListBaiduDirs != null` 分流。
+3. **`metingUrlError` / `mvUrlError` / `lyricsUrlError` 是幽灵状态**：只写不读，全仓没有任何
+   UI 渲染它们——scheme 校验失败的真实反馈从来只有「对话框不关」。随收敛删除这三个状态
+   与 3 对零引用的 `settings_*_invalid` 字符串资源（中英各 3 条），用户可感知行为不变。
+
+**`EndpointEditor` spec 偏离**：方案 `(titleRes, descRes, value, onConfirm)` → 实做
+`(titleRes, hintRes, value, masked = false, onConfirm)`——`descRes` 改名贴组件实参
+`hint`（它本来就是输入框占位文字），`masked` 是天气 Key 需要的密码态。关闭语义不变：
+**对话框关不关由 `onConfirm` 自己决定**（校验失败不置 null = 保持打开），这正是原 9 个
+宿主各自的写法，收敛后统一成一条规则。
+
+**探针下沉的行为差异**（唯一一条，属改进）：原探针挂在 `rememberCoroutineScope`，
+离开设置页即被取消且状态丢失；改挂 `viewModelScope` 后探针跑完、回来还能看到结果。
+防重入语义保留（原 `if (!isNetworkTesting)` → `if (_networkProbeRunning.value) return`）。
+结果字符串的 `success:`/`error:` 前缀口径不变（`NetworkMusicSection` 按前缀着色）。
+
+**门禁**（`SettingsEndpointDialogWiringTest`，10 例）：`TextInputDialog(` == 1、
+UI 层无 `OkHttpClient`/`Request.Builder`、`MainViewModel.runNetworkProbe(` 存在且
+`SettingsBranch` 接线、12 个旧状态标识（7 个 show 布尔 + 3 个 error + 2 个旧探针局部量）
+防回流、两个确认弹窗仍在、`EndpointEditor` 定义与构造点存在；负向自证 4 例（双宿主 /
+网络标识 / 旧状态标识 / 注释举例不误报）与正向共用同一份谓词。已知边界：**「每个打开
+对话框的入口都构造 EndpointEditor」无法静态断言**（需跨回调追踪），由「宿主唯一 + 旧布尔
+禁词」组合闭环。⚠️ 门禁扫**剥注释后**文本，但**不剥字符串字面量**——夹具字符串里写
+`TextInputDialog(` 会计入（本门只扫 SettingsScreen.kt，该文件字符串里没有此类内容；
+测试文件自身的夹具不进扫描范围）。
+
+**免 Gradle 自查**：新门 10/10 绿；5 个设置扫描门（G1–G3/G6/G8 + 卡片契约）46 例回归
+全绿；`t16_selfcheck.py` 正向全过 + `--selftest` 负向 6 项全过。⛔ 覆盖盲区照旧：
+`SettingsScreen.kt`/`MainViewModel.kt`/`SettingsBranch.kt` 依赖 Compose 编不动，
+全绿 ≠ 编译通过，须 `:app:assembleRelease` 兜底（`logs_temp/verify_t16.bat`）。
+真机验证（探针结果与迁移前一致 + 各端点对话框编辑生效）⏳ 待用户，归入 V16 走查。
+

@@ -28,7 +28,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -99,9 +98,6 @@ import com.nasmusic.tv.ui.theme.FontSize
 import com.nasmusic.tv.ui.theme.LocalUiMode
 import com.nasmusic.tv.ui.theme.NasMusicColors
 import com.nasmusic.tv.ui.theme.UiMode
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 /**
  * 设置屏幕 — 左侧为导航侧边栏（settings-sidebar），右侧为具体选项（settings-content）
@@ -176,6 +172,10 @@ fun SettingsScreen(
     // 天气 API Key 设置
     weatherApiKey: String = "",
     onChangeWeatherApiKey: ((String) -> Unit)? = null,
+    // ── T16（方案 §5.4）：网络探针状态由 MainViewModel 持有，UI 只渲染 + 发意图 ──
+    isNetworkTesting: Boolean = false,
+    networkTestStatus: String = "",
+    onRunNetworkProbe: () -> Unit = {},
     // 频谱显示设置
     // 全局字体字号调整
     fontAdjustment: Int = 0,
@@ -360,33 +360,13 @@ var activeSection by remember { mutableStateOf(SettingsSection.GENERAL) }
         navFocusRequesters.getOrPut(section) { remember { FocusRequester() } }
     }
 
-    // 网络测试状态
-    var isNetworkTesting by remember { mutableStateOf(false) }
-    var networkTestStatus by remember { mutableStateOf("") }
-    val networkTestScope = rememberCoroutineScope()
-
-    // Meting-API 端点编辑对话框状态
-    var showMetingUrlDialog by remember { mutableStateOf(false) }
-    var metingUrlError by remember { mutableStateOf<String?>(null) }
-
-    // MTV 视频端点编辑对话框状态
-    var showMvUrlDialog by remember { mutableStateOf(false) }
-    var mvUrlError by remember { mutableStateOf<String?>(null) }
-
-    // 天气 API Key 编辑对话框状态
-    var showWeatherApiKeyDialog by remember { mutableStateOf(false) }
-
-    // 歌词端点编辑对话框状态
-    var showLyricsKugouDialog by remember { mutableStateOf(false) }
-    var showLyricsNeteaseDialog by remember { mutableStateOf(false) }
-    var lyricsUrlError by remember { mutableStateOf<String?>(null) }
-
-    // Jamendo Client ID 编辑对话框
-    var showJamendoClientIdDialog by remember { mutableStateOf(false) }
-
-    // T10：分离模型自定义下载源编辑对话框（复用同一个 TextInputDialog 宿主，
-    // ⛔ 不新建第 7 种对话框组件 —— T16 收敛 EndpointEditor 时这里一起并进去）
-    var showCustomModelUrlDialog by remember { mutableStateOf(false) }
+    // T16（方案 §5.3）：端点/文本编辑对话框的**唯一**运行状态。
+    // 原 7 个端点/Key `show*Dialog` 布尔（Meting/MV/天气/歌词×2/Jamendo/自定义模型源）
+    // 与 3 个 error 幽灵状态（metingUrlError / mvUrlError / lyricsUrlError —— 只写不读，
+    // 校验失败的真实反馈只有「对话框不关」）随收敛删除；打开对话框 = 构造一个
+    // [EndpointEditor]，确认/取消逻辑整体搬进它的 onConfirm。
+    // 百度目录的文本回退分支同样走本宿主（目录树形态仍由 showBaidu*Dialog 布尔承载）。
+    var endpointEditor by remember { mutableStateOf<EndpointEditor?>(null) }
 
     // P1-17: 清空所有下载确认弹窗
     var showClearDownloadsConfirm by remember { mutableStateOf(false) }
@@ -399,7 +379,8 @@ var activeSection by remember { mutableStateOf(SettingsSection.GENERAL) }
     // 百度网盘设备码授权对话框显隐
     var showBaiduAuthDialog by remember { mutableStateOf(false) }
 
-    // 百度网盘目录编辑对话框状态
+    // 百度目录**树选择**对话框显隐（T16 后只承载 BaiduDirPickerDialog 形态；
+    // 无目录树回调时的文本回退由 endpointEditor 承载，onShow 回调里分流）
     var showBaiduMusicRootDialog by remember { mutableStateOf(false) }
     var showBaiduMvDirDialog by remember { mutableStateOf(false) }
 
@@ -446,18 +427,9 @@ var activeSection by remember { mutableStateOf(SettingsSection.GENERAL) }
         }
     }
 
-    // 提前解析字符串资源，供非 Composable 回调使用
-    val metingUrlInvalidMsg = stringResource(R.string.settings_meting_api_url_invalid)
-    val metingUrlHint = stringResource(R.string.settings_meting_api_url_hint)
-    val metingUrlTitle = stringResource(R.string.settings_meting_api_url)
-
-    // 网络测试上下文（Composable 作用域内提前获取，供协程内使用）
-    val networkTestContext = androidx.compose.ui.platform.LocalContext.current
-
-    // MTV 视频端点对话框字符串资源
-    val mvUrlInvalidMsg = stringResource(R.string.settings_mv_api_url_invalid)
-    val mvUrlHint = stringResource(R.string.settings_mv_api_url_hint)
-    val mvUrlTitle = stringResource(R.string.settings_mv_api_url)
+    // T16：预解析字符串区已清空 —— 端点对话框的 title/hint 一律存 resId，
+    // 由通用宿主在 Composable 作用域内 stringResource 解析（onShow 回调是非
+    // Composable 上下文，不能调 stringResource）
 
     Row(
         modifier = modifier.fillMaxSize().padding(
@@ -640,7 +612,23 @@ var activeSection by remember { mutableStateOf(SettingsSection.GENERAL) }
                             onScanTransferModel = onScanTransferModel,
                             onChangeLyricsFontScale = onChangeLyricsFontScale,
                             onChangeLyricsHighlightMode = onChangeLyricsHighlightMode,
-                            onEditCustomModelUrl = { showCustomModelUrlDialog = true },
+                            // T16：自定义源编辑并入通用宿主（原 showCustomModelUrlDialog）
+                            onEditCustomModelUrl = {
+                                endpointEditor = EndpointEditor(
+                                    titleRes = R.string.settings_model_custom_url,
+                                    hintRes = R.string.settings_model_custom_url_desc,
+                                    value = customModelUrl,
+                                ) { input ->
+                                    val trimmed = input.trim()
+                                    // scheme 不合法时**不关闭对话框**（用户可继续改）；真正的取值校验仍在
+                                    // `AppPreferences.setModelDownloadUrl` → `normalizeEndpointUrl`，这里只是提前挡一下。
+                                    // 空串 = 恢复内置默认源（与「恢复默认源」按钮同一条路径）
+                                    if (trimmed.isEmpty() || trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+                                        onChangeCustomModelUrl?.invoke(trimmed)
+                                        endpointEditor = null
+                                    }
+                                }
+                            },
                             onResetCustomModelUrl = onResetCustomModelUrl,
                         )
                     )
@@ -694,8 +682,42 @@ var activeSection by remember { mutableStateOf(SettingsSection.GENERAL) }
                         ),
                         dialogs = SourcesDialogActions(
                             onShowBaiduAuthDialog = { showBaiduAuthDialog = true },
-                            onShowMusicRootDialog = { showBaiduMusicRootDialog = true },
-                            onShowMvDirDialog = { showBaiduMvDirDialog = true },
+                            // T16：有目录树回调 → 目录树形态；否则回退通用端点宿主（文本输入），
+                            // 原 else 分支的独立 TextInputDialog 已删除（§5.3）
+                            onShowMusicRootDialog = {
+                                if (onListBaiduDirs != null) {
+                                    showBaiduMusicRootDialog = true
+                                } else {
+                                    endpointEditor = EndpointEditor(
+                                        titleRes = R.string.settings_netdisk_music_root,
+                                        hintRes = R.string.settings_netdisk_hint_dir,
+                                        value = baiduMusicRootLocal,
+                                    ) { input ->
+                                        val trimmed = input.trim()
+                                        if (trimmed.isNotEmpty()) {
+                                            baiduMusicRootLocal = trimmed
+                                            onChangeBaiduMusicRootDir(trimmed)
+                                        }
+                                        endpointEditor = null
+                                    }
+                                }
+                            },
+                            onShowMvDirDialog = {
+                                if (onListBaiduDirs != null) {
+                                    showBaiduMvDirDialog = true
+                                } else {
+                                    endpointEditor = EndpointEditor(
+                                        titleRes = R.string.settings_netdisk_mv_dir,
+                                        hintRes = R.string.settings_netdisk_hint_dir,
+                                        value = baiduMvDirLocal.orEmpty(),
+                                    ) { input ->
+                                        val trimmed = input.trim()
+                                        baiduMvDirLocal = trimmed.ifEmpty { null }
+                                        onChangeBaiduMvDir(baiduMvDirLocal)
+                                        endpointEditor = null
+                                    }
+                                }
+                            },
                         )
                     )
                 }
@@ -769,46 +791,114 @@ var activeSection by remember { mutableStateOf(SettingsSection.GENERAL) }
                             onChangeLyricsKugouBaseUrl = onChangeLyricsKugouBaseUrl,
                             onChangeLyricsNeteaseBaseUrl = onChangeLyricsNeteaseBaseUrl,
                             onChangeWeatherApiKey = onChangeWeatherApiKey,
-                            onRunNetworkTest = {
-                                if (!isNetworkTesting) {
-                                    isNetworkTesting = true
-                                    networkTestStatus = ""
-                                    networkTestScope.launch {
-                                        val ctx = networkTestContext
-                                        val result = withContext(Dispatchers.IO) {
-                                            try {
-                                                val url = java.net.URL("https://www.baidu.com")
-                                                val conn = url.openConnection() as java.net.HttpURLConnection
-                                                conn.connectTimeout = 5000
-                                                conn.readTimeout = 5000
-                                                conn.requestMethod = "HEAD"
-                                                val code = conn.responseCode
-                                                conn.disconnect()
-                                                if (code in 200..399) "success:${ctx.getString(R.string.settings_network_test_success, code)}"
-                                                else "error:${ctx.getString(R.string.settings_network_test_http_error, code)}"
-                                            } catch (e: java.net.SocketTimeoutException) {
-                                                "error:${ctx.getString(R.string.settings_network_test_timeout)}"
-                                            } catch (e: java.net.UnknownHostException) {
-                                                "error:${ctx.getString(R.string.settings_network_test_dns_error)}"
-                                            } catch (e: java.net.ConnectException) {
-                                                "error:${ctx.getString(R.string.settings_network_test_connection_refused)}"
-                                            } catch (e: Exception) {
-                                                "error:${ctx.getString(R.string.settings_network_test_error, e.message ?: e.javaClass.simpleName)}"
-                                            }
-                                        }
-                                        networkTestStatus = result
-                                        isNetworkTesting = false
+                            // T16：探针 I/O 已下沉 MainViewModel.runNetworkProbe()（§5.4），UI 只发意图
+                            onRunNetworkTest = onRunNetworkProbe,
+                        ),
+                        dialogs = NetworkMusicDialogActions(
+                            // T16（§5.3）：6 个端点/Key 编辑入口全部构造通用宿主。
+                            // scheme 校验失败的反馈 = 对话框不关（用户可改）——原 3 个 error
+                            // 状态只写不读（幽灵），随收敛删除，用户可感知行为不变。
+                            onShowMetingUrlDialog = {
+                                endpointEditor = EndpointEditor(
+                                    titleRes = R.string.settings_meting_api_url,
+                                    hintRes = R.string.settings_meting_api_url_hint,
+                                    value = settings.metingApiBaseUrl,
+                                ) { input ->
+                                    val trimmed = input.trim()
+                                    if (trimmed.isEmpty()) {
+                                        onChangeMetingApiBaseUrl?.invoke(
+                                            com.nasmusic.tv.backend.network.MetingApiService.DEFAULT_BASE_URL
+                                        )
+                                        endpointEditor = null
+                                    } else if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) {
+                                        // 校验失败：保持对话框打开
+                                    } else {
+                                        onChangeMetingApiBaseUrl?.invoke(trimmed)
+                                        endpointEditor = null
                                     }
                                 }
                             },
-                        ),
-                        dialogs = NetworkMusicDialogActions(
-                            onShowMetingUrlDialog = { metingUrlError = null; showMetingUrlDialog = true },
-                            onShowJamendoClientIdDialog = { showJamendoClientIdDialog = true },
-                            onShowMvUrlDialog = { mvUrlError = null; showMvUrlDialog = true },
-                            onShowLyricsKugouDialog = { showLyricsKugouDialog = true; lyricsUrlError = null },
-                            onShowLyricsNeteaseDialog = { showLyricsNeteaseDialog = true; lyricsUrlError = null },
-                            onShowWeatherApiKeyDialog = { showWeatherApiKeyDialog = true },
+                            onShowJamendoClientIdDialog = {
+                                endpointEditor = EndpointEditor(
+                                    titleRes = R.string.settings_jamendo_client_id,
+                                    hintRes = R.string.settings_jamendo_client_id,
+                                    value = jamendoClientId,
+                                ) { input ->
+                                    onChangeJamendoClientId?.invoke(input.trim())
+                                    endpointEditor = null
+                                }
+                            },
+                            onShowMvUrlDialog = {
+                                endpointEditor = EndpointEditor(
+                                    titleRes = R.string.settings_mv_api_url,
+                                    hintRes = R.string.settings_mv_api_url_hint,
+                                    value = mvApiBaseUrl,
+                                ) { input ->
+                                    val trimmed = input.trim()
+                                    if (trimmed.isEmpty()) {
+                                        onChangeMvApiBaseUrl?.invoke(
+                                            com.nasmusic.tv.backend.network.mv.BilibiliMvService.DEFAULT_BASE_URL
+                                        )
+                                        endpointEditor = null
+                                    } else if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) {
+                                        // 校验失败：保持对话框打开
+                                    } else {
+                                        onChangeMvApiBaseUrl?.invoke(trimmed)
+                                        endpointEditor = null
+                                    }
+                                }
+                            },
+                            onShowLyricsKugouDialog = {
+                                endpointEditor = EndpointEditor(
+                                    titleRes = R.string.settings_lyrics_kugou_url,
+                                    hintRes = R.string.settings_lyrics_url_hint,
+                                    value = lyricsKugouBaseUrl,
+                                ) { input ->
+                                    val trimmed = input.trim()
+                                    if (trimmed.isEmpty()) {
+                                        onChangeLyricsKugouBaseUrl?.invoke(
+                                            com.nasmusic.tv.lyrics.LyricsNetworkProvider.DEFAULT_KUGOU_BASE_URL
+                                        )
+                                        endpointEditor = null
+                                    } else if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) {
+                                        // 校验失败：保持对话框打开
+                                    } else {
+                                        onChangeLyricsKugouBaseUrl?.invoke(trimmed)
+                                        endpointEditor = null
+                                    }
+                                }
+                            },
+                            onShowLyricsNeteaseDialog = {
+                                endpointEditor = EndpointEditor(
+                                    titleRes = R.string.settings_lyrics_netease_url,
+                                    hintRes = R.string.settings_lyrics_url_hint,
+                                    value = lyricsNeteaseBaseUrl,
+                                ) { input ->
+                                    val trimmed = input.trim()
+                                    if (trimmed.isEmpty()) {
+                                        onChangeLyricsNeteaseBaseUrl?.invoke(
+                                            com.nasmusic.tv.lyrics.LyricsNetworkProvider.DEFAULT_NETEASE_BASE_URL
+                                        )
+                                        endpointEditor = null
+                                    } else if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) {
+                                        // 校验失败：保持对话框打开
+                                    } else {
+                                        onChangeLyricsNeteaseBaseUrl?.invoke(trimmed)
+                                        endpointEditor = null
+                                    }
+                                }
+                            },
+                            onShowWeatherApiKeyDialog = {
+                                endpointEditor = EndpointEditor(
+                                    titleRes = R.string.settings_weather_api_key,
+                                    hintRes = R.string.settings_weather_api_key_hint,
+                                    value = weatherApiKey,
+                                    masked = true,
+                                ) { input ->
+                                    onChangeWeatherApiKey?.invoke(input.trim())
+                                    endpointEditor = null
+                                }
+                            },
                         )
                     )
                 }
@@ -855,240 +945,50 @@ var activeSection by remember { mutableStateOf(SettingsSection.GENERAL) }
         )
     }
 
-    // 百度网盘音乐根目录选择对话框（优先目录树选择，无回调时回退文本输入）
-    if (showBaiduMusicRootDialog && onChangeBaiduMusicRootDir != null) {
-        if (onListBaiduDirs != null) {
-            BaiduDirPickerDialog(
-                initialPath = baiduMusicRootLocal.ifBlank { com.nasmusic.tv.backend.network.baidu.BaiduNetdiskConfig.APP_DIR },
-                onListDirs = onListBaiduDirs,
-                onConfirm = { path ->
-                    baiduMusicRootLocal = path
-                    onChangeBaiduMusicRootDir(path)
-                    showBaiduMusicRootDialog = false
-                },
-                onDismiss = { showBaiduMusicRootDialog = false }
-            )
-        } else {
-            TextInputDialog(
-                title = stringResource(R.string.settings_netdisk_music_root),
-                hint = stringResource(R.string.settings_netdisk_hint_dir),
-                initialValue = baiduMusicRootLocal,
-                onConfirm = { input ->
-                    val trimmed = input.trim()
-                    if (trimmed.isNotEmpty()) {
-                        baiduMusicRootLocal = trimmed
-                        onChangeBaiduMusicRootDir(trimmed)
-                    }
-                    showBaiduMusicRootDialog = false
-                },
-                onDismiss = { showBaiduMusicRootDialog = false }
-            )
-        }
-    }
-
-    // 百度网盘 MV 目录选择对话框（优先目录树选择，无回调时回退文本输入）
-    if (showBaiduMvDirDialog && onChangeBaiduMvDir != null) {
-        if (onListBaiduDirs != null) {
-            BaiduDirPickerDialog(
-                initialPath = baiduMvDirLocal?.takeIf { it.isNotBlank() }
-                    ?: baiduMusicRootLocal.ifBlank { com.nasmusic.tv.backend.network.baidu.BaiduNetdiskConfig.APP_DIR },
-                onListDirs = onListBaiduDirs,
-                onConfirm = { path ->
-                    baiduMvDirLocal = path
-                    onChangeBaiduMvDir(path)
-                    showBaiduMvDirDialog = false
-                },
-                onDismiss = { showBaiduMvDirDialog = false }
-            )
-        } else {
-            TextInputDialog(
-                title = stringResource(R.string.settings_netdisk_mv_dir),
-                hint = stringResource(R.string.settings_netdisk_hint_dir),
-                initialValue = baiduMvDirLocal.orEmpty(),
-                onConfirm = { input ->
-                    val trimmed = input.trim()
-                    baiduMvDirLocal = trimmed.ifEmpty { null }
-                    onChangeBaiduMvDir(baiduMvDirLocal)
-                    showBaiduMvDirDialog = false
-                },
-                onDismiss = { showBaiduMvDirDialog = false }
-            )
-        }
-    }
-
-    // 天气 API Key 编辑对话框
-    if (showWeatherApiKeyDialog && onChangeWeatherApiKey != null) {
-        TextInputDialog(
-            title = stringResource(R.string.settings_weather_api_key),
-            hint = stringResource(R.string.settings_weather_api_key_hint),
-            initialValue = weatherApiKey,
-            masked = true,
-            onConfirm = { input ->
-                onChangeWeatherApiKey(input.trim())
-                showWeatherApiKeyDialog = false
+    // 百度网盘音乐根目录选择对话框（目录树形态；无目录树回调时 onShow 已改走
+    // 通用端点宿主 endpointEditor —— 文本回退不再是独立的 TextInputDialog）
+    if (showBaiduMusicRootDialog && onListBaiduDirs != null && onChangeBaiduMusicRootDir != null) {
+        BaiduDirPickerDialog(
+            initialPath = baiduMusicRootLocal.ifBlank { com.nasmusic.tv.backend.network.baidu.BaiduNetdiskConfig.APP_DIR },
+            onListDirs = onListBaiduDirs,
+            onConfirm = { path ->
+                baiduMusicRootLocal = path
+                onChangeBaiduMusicRootDir(path)
+                showBaiduMusicRootDialog = false
             },
-            onDismiss = {
-                showWeatherApiKeyDialog = false
-            }
+            onDismiss = { showBaiduMusicRootDialog = false }
         )
     }
 
-    // Meting-API 端点编辑对话框
-    if (showMetingUrlDialog) {
-        TextInputDialog(
-            title = metingUrlTitle,
-            hint = metingUrlHint,
-            initialValue = settings.metingApiBaseUrl,
-            onConfirm = { input ->
-                val trimmed = input.trim()
-                if (trimmed.isEmpty()) {
-                    metingUrlError = null
-                    onChangeMetingApiBaseUrl?.invoke(
-                        com.nasmusic.tv.backend.network.MetingApiService.DEFAULT_BASE_URL
-                    )
-                    showMetingUrlDialog = false
-                } else if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) {
-                    metingUrlError = metingUrlInvalidMsg
-                } else {
-                    metingUrlError = null
-                    onChangeMetingApiBaseUrl?.invoke(trimmed)
-                    showMetingUrlDialog = false
-                }
+    // 百度网盘 MV 目录选择对话框（目录树形态；文本回退同上走 endpointEditor）
+    if (showBaiduMvDirDialog && onListBaiduDirs != null && onChangeBaiduMvDir != null) {
+        BaiduDirPickerDialog(
+            initialPath = baiduMvDirLocal?.takeIf { it.isNotBlank() }
+                ?: baiduMusicRootLocal.ifBlank { com.nasmusic.tv.backend.network.baidu.BaiduNetdiskConfig.APP_DIR },
+            onListDirs = onListBaiduDirs,
+            onConfirm = { path ->
+                baiduMvDirLocal = path
+                onChangeBaiduMvDir(path)
+                showBaiduMvDirDialog = false
             },
-            onDismiss = {
-                showMetingUrlDialog = false
-                metingUrlError = null
-            }
+            onDismiss = { showBaiduMvDirDialog = false }
         )
     }
 
-    // Jamendo Client ID 编辑对话框
-    if (showJamendoClientIdDialog) {
+    // ===================== T16（§5.3）：端点/文本编辑通用宿主（唯一） =====================
+    // 所有「点行 → 弹输入框 → 确认回调」形态的对话框都从这里走：百度目录文本回退、
+    // 天气 Key（masked）、Meting / MV / 酷狗 / 网易云端点、Jamendo Client ID、分离模型自定义源。
+    // 确认与否由 [EndpointEditor.onConfirm] 自己决定（校验失败不置 null = 对话框保持打开）。
+    endpointEditor?.let { editor ->
         TextInputDialog(
-            title = stringResource(R.string.settings_jamendo_client_id),
-            hint = stringResource(R.string.settings_jamendo_client_id),
-            initialValue = jamendoClientId,
-            onConfirm = { input ->
-                onChangeJamendoClientId?.invoke(input.trim())
-                showJamendoClientIdDialog = false
-            },
-            onDismiss = {
-                showJamendoClientIdDialog = false
-            }
+            title = stringResource(editor.titleRes),
+            hint = stringResource(editor.hintRes),
+            initialValue = editor.value,
+            masked = editor.masked,
+            onConfirm = editor.onConfirm,
+            onDismiss = { endpointEditor = null }
         )
     }
-
-    // MTV 视频端点编辑对话框
-    if (showMvUrlDialog) {
-        TextInputDialog(
-            title = mvUrlTitle,
-            hint = mvUrlHint,
-            initialValue = mvApiBaseUrl,
-            onConfirm = { input ->
-                val trimmed = input.trim()
-                if (trimmed.isEmpty()) {
-                    mvUrlError = null
-                    onChangeMvApiBaseUrl?.invoke(
-                        com.nasmusic.tv.backend.network.mv.BilibiliMvService.DEFAULT_BASE_URL
-                    )
-                    showMvUrlDialog = false
-                } else if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) {
-                    mvUrlError = mvUrlInvalidMsg
-                } else {
-                    mvUrlError = null
-                    onChangeMvApiBaseUrl?.invoke(trimmed)
-                    showMvUrlDialog = false
-                }
-            },
-            onDismiss = {
-                showMvUrlDialog = false
-                mvUrlError = null
-            }
-        )
-    }
-
-    // T10：分离模型自定义下载源编辑对话框
-    if (showCustomModelUrlDialog) {
-        TextInputDialog(
-            title = stringResource(R.string.settings_model_custom_url),
-            hint = stringResource(R.string.settings_model_custom_url_desc),
-            initialValue = customModelUrl,
-            onConfirm = { input ->
-                val trimmed = input.trim()
-                // scheme 不合法时**不关闭对话框**（用户可继续改）；真正的取值校验仍在
-                // `AppPreferences.setModelDownloadUrl` → `normalizeEndpointUrl`，这里只是提前挡一下
-                if (trimmed.isEmpty() || trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
-                    // 空串 = 恢复内置默认源（与「恢复默认源」按钮同一条路径）
-                    onChangeCustomModelUrl?.invoke(trimmed)
-                    showCustomModelUrlDialog = false
-                }
-            },
-            onDismiss = { showCustomModelUrlDialog = false }
-        )
-    }
-
-    // 酷狗歌词端点编辑对话框
-    if (showLyricsKugouDialog) {
-        val invalidMsg = stringResource(R.string.settings_lyrics_url_invalid)
-        val hint = stringResource(R.string.settings_lyrics_url_hint)
-        TextInputDialog(
-            title = stringResource(R.string.settings_lyrics_kugou_url),
-            hint = hint,
-            initialValue = lyricsKugouBaseUrl,
-            onConfirm = { input ->
-                val trimmed = input.trim()
-                if (trimmed.isEmpty()) {
-                    lyricsUrlError = null
-                    onChangeLyricsKugouBaseUrl?.invoke(
-                        com.nasmusic.tv.lyrics.LyricsNetworkProvider.DEFAULT_KUGOU_BASE_URL
-                    )
-                    showLyricsKugouDialog = false
-                } else if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) {
-                    lyricsUrlError = invalidMsg
-                } else {
-                    lyricsUrlError = null
-                    onChangeLyricsKugouBaseUrl?.invoke(trimmed)
-                    showLyricsKugouDialog = false
-                }
-            },
-            onDismiss = {
-                showLyricsKugouDialog = false
-                lyricsUrlError = null
-            }
-        )
-    }
-
-    // 网易云歌词端点编辑对话框
-    if (showLyricsNeteaseDialog) {
-        val invalidMsg = stringResource(R.string.settings_lyrics_url_invalid)
-        val hint = stringResource(R.string.settings_lyrics_url_hint)
-        TextInputDialog(
-            title = stringResource(R.string.settings_lyrics_netease_url),
-            hint = hint,
-            initialValue = lyricsNeteaseBaseUrl,
-            onConfirm = { input ->
-                val trimmed = input.trim()
-                if (trimmed.isEmpty()) {
-                    lyricsUrlError = null
-                    onChangeLyricsNeteaseBaseUrl?.invoke(
-                        com.nasmusic.tv.lyrics.LyricsNetworkProvider.DEFAULT_NETEASE_BASE_URL
-                    )
-                    showLyricsNeteaseDialog = false
-                } else if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) {
-                    lyricsUrlError = invalidMsg
-                } else {
-                    lyricsUrlError = null
-                    onChangeLyricsNeteaseBaseUrl?.invoke(trimmed)
-                    showLyricsNeteaseDialog = false
-                }
-            },
-            onDismiss = {
-                showLyricsNeteaseDialog = false
-                lyricsUrlError = null
-            }
-        )
-    }
-
     // 删除备份文件确认弹窗
     backupToDelete?.let { file ->
         androidx.compose.ui.window.Dialog(
@@ -1197,3 +1097,31 @@ title = stringResource(R.string.settings_clear_downloads_title),
         }
     }
 }
+
+/**
+ * T16（方案 §5.3）：端点/文本编辑对话框的通用宿主描述。
+ *
+ * 「点行 → 弹 [TextInputDialog] → 确认回调」形态的对话框全部收敛到这一个 data class 上，
+ * `SettingsScreen` 只持有一个 `endpointEditor: EndpointEditor?`；打开对话框 = 构造一个实例，
+ * 关闭对话框 = 把它置回 null（**由 [onConfirm] 自己决定**——校验失败不置 null，
+ * 对话框就保持打开，用户可继续改；这正是原 9 个宿主的关闭语义，行为不变）。
+ *
+ * @param titleRes 对话框标题资源（通用宿主在 Composable 作用域内 `stringResource` 解析，
+ *   故 onShow 回调——非 Composable 上下文——里只能存 resId，不能存已解析字符串）
+ * @param hintRes 输入框空态占位文字资源
+ * @param value 打开对话框时的初始值（构造时快照；对话框打开期间设置值不变，语义与原实现一致）
+ * @param masked 密码态（天气 API Key 用；输入框显示圆点，与原 `masked = true` 一致）
+ * @param onConfirm 确认回调，入参为输入框当前文本；内部自行完成 trim / 校验 / 应用并决定是否关闭
+ *
+ * ⚠️ 与方案 §5.3 原文的 `(titleRes, descRes, value, onConfirm)` 有一处命名偏离：
+ * `descRes` → [hintRes]（贴 [TextInputDialog] 的实参名，它本来就是输入框占位文字），
+ * 并新增 [masked]。方案未覆盖的两个百度目录回退分支也并入了本宿主（目录树形态
+ * 仍由 `showBaidu*Dialog` 布尔 + `BaiduDirPickerDialog` 承载，不同构不硬并）。
+ */
+private data class EndpointEditor(
+    val titleRes: Int,
+    val hintRes: Int,
+    val value: String,
+    val masked: Boolean = false,
+    val onConfirm: (String) -> Unit,
+)
