@@ -16593,3 +16593,39 @@ G7-C：3 处实底选中 → 0。⚠️ `ChipContentWidthScanTest` 的 `CALL` �
 - T16 后置零引用但不删的三对字符串资源：无（已删）；唯一已知留痕 = `settings_network_test_desc` 等文案
   仍按旧排版排在 NETWORK 卡①卡头下（T14 卡级 description 之外的冗余说明），真机 V12 抽查时若判读重复再删。
 
+
+### 10.257 v2.39.0 发版前验证实测与真机反馈修复（2026-10-19）
+
+**首轮 Gradle 编译暴露 10 个错误 —— 全部落在免 Gradle 通道的盲区**（只编得动不依赖 Compose 的文件）：
+`assembleRelease` 首次兜底一次性爆出，6 处修复见 `956ee5b`。
+① **T9 漏删两处**：判"零消费"时按**字段名** `customAppKey` grep，漏掉**方法名** `getBaiduCustomAppKey` 的消费方
+（`BaiduPrefs` 4 个包装 + `BaiduOAuthClient.resolveAppKey/SecretKey`）——而 `setBaiduCustomAppKey` 全仓零调用
+⇒ 自填值恒 null ⇒ 收窄为 `BuildConfig` 单路径属**行为等价**；test 源集同款漏删 `ApiDriftNotifyTest`（5 例全测已删除功能，整份退役）。
+② **图标**：`Icons.Default.OpenInNew` 在 1.6+ 是 HIDDEN 弃用（jar 里 `filled.OpenInNewKt` 存在但不可见）→
+`Icons.AutoMirrored.Filled.OpenInNew`；`AutoFilmed` 在 icons 1.7.8 **根本不存在**（解包 aar 实证）→ `AutoAwesome`。
+③ `SettingsChipRow` 的 `equalWidth` 分支：`Box` 内容区是 `BoxScope`，`itemContent`（`RowScope.(T) -> Unit`）
+第一接收者需显式 `rowScope.itemContent(item)`。④ 百度目录文本回退分支补 `onChangeXxx != null` + `?.invoke`
+（与原对话框外层条件等价）。
+
+**最终验证实测**（⛔ 均以落地物为准，不看退出码）：`testDebugUnitTest --rerun-tasks` **218 份 XML / 2279 例 /
+0 失败 / 0 错误 / 0 跳过**（newest XML 19:56）；`lintDebug` **0 Error / 157 Warning**；
+`assembleRelease` BUILD SUCCESSFUL（83 tasks / 11m26s），APK `NASMusicTV-release-v2-39-0.apk` **25,758,135 B**，
+`output-metadata.json` 实证 versionCode 185 / versionName 2.39.0。
+
+**真机反馈 ①：默认播放模式第 4 枚芯片被挤没**（`c96a9c7`）。`PlayModeSelector` 原用裸
+`Row(spacedBy(12.dp))` 塞 4 枚 `SettingsChip`，竖屏 407dp 放不下 ⇒ 第 4 枚（随机播放）宽度归零。
+改 `SettingsChipRow(items = PlayMode.values().toList(), tv = 4, phonePortrait = 2, equalWidth = true)`
+——竖屏 2×2 等宽、TV/横屏一行 4 枚（与时长档、模型双按钮同一原语）。⚠️ **G8 门禁只扫 `*Section.kt`，
+组件文件（`SettingsComponents.kt`）内部的芯片行是盲区**——`PlayModeSelector` 是 `DurationRow` 之后
+第二处同款 0 宽陷阱，说明"组件内封装"会绕过源码门禁，新增组件时须人工按 G8 口径复核。
+
+**真机反馈 ②：「自定义源」与分离模型的关系**。链路实证：`ModelDownloadManager(customUrlProvider = …)`
+每次下载读 `prefs.getModelDownloadUrlSync()`，自定义 URL **优先**、失败回退内置候选
+（hf-mirror → HuggingFace 官方），且**校验和（`EXPECTED_SHA256`）对自定义源同样强制**
+⇒ 它本就是**人声分离模型权重文件**的下载地址（可指向自建镜像/NAS），放在「分离模型」卡内**位置正确**，
+旧行名「自定义源」看不出这层关系 ⇒ 改名「模型下载源」（en: Model Download Source），`desc` 保留
+"填 NAS 直链，校验和仍需匹配"。
+
+**运维教训**：`lintDebug` 后台任务与后续单测互斥，**静默挂死 7h 零输出**（Gradle 锁等待）——
+长 Gradle 任务必须串行，且后台任务先确认无残留再启动；`tail` 管道会吞掉全部进度输出，
+"零输出"不能当作"还在正常跑"。
