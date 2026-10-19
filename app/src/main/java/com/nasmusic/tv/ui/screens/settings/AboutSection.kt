@@ -9,6 +9,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -143,7 +145,9 @@ internal fun AboutSettingsSection(state: AboutSettingsState) {
                         modifier = Modifier.weight(1f)
                     )
                     Icon(
-                        imageVector = androidx.compose.material.icons.Icons.Default.OpenInNew,
+                        // ⚠️ OpenInNew 是方向性图标：1.6+ 旧路径 Icons.Default/Filled.OpenInNew 已 HIDDEN，
+                        // 必须 Icons.AutoMirrored.Filled.OpenInNew（否则 Unresolved reference）
+                        imageVector = Icons.AutoMirrored.Filled.OpenInNew,
                         contentDescription = null,
                         tint = NasMusicColors.Primary,
                         modifier = Modifier.size(20.dp)

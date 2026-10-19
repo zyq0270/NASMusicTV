@@ -22,8 +22,6 @@ class BaiduPrefs internal constructor(private val prefs: AppPreferences) {
     suspend fun setBaiduMusicRootDir(dir: String) = prefs.setBaiduMusicRootDir(dir)
     suspend fun getBaiduMvDir(): String? = prefs.getBaiduMvDir()
     suspend fun setBaiduMvDir(dir: String?) = prefs.setBaiduMvDir(dir)
-    suspend fun getBaiduCustomAppKey(): String? = prefs.getBaiduCustomAppKey()
-    suspend fun setBaiduCustomAppKey(key: String?) = prefs.setBaiduCustomAppKey(key)
-    suspend fun getBaiduCustomSecretKey(): String? = prefs.getBaiduCustomSecretKey()
-    suspend fun setBaiduCustomSecretKey(secret: String?) = prefs.setBaiduCustomSecretKey(secret)
+    // T9（06f55f0 的漏删收尾）：customAppKey / customSecretKey 已随「零消费设置项清理」删除 ——
+    // setter 全仓零调用 ⇒ 自填值无法写入，getter 链路恒走 BuildConfig 嵌入值（BaiduOAuthClient 侧同步收窄）。
 }

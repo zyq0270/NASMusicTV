@@ -41,9 +41,13 @@ class BaiduOAuthClient(
     /** 并发刷新加锁（避免两个协程各用同一 refresh_token 各刷一次、其一必失败） */
     private val refreshLock = Mutex()
 
-    /** 解析 AppKey/SecretKey：优先用户自填，否则用编译期嵌入的默认值 */
-    private suspend fun resolveAppKey(): String? = prefs.baidu.getBaiduCustomAppKey() ?: BuildConfig.BAIDU_APP_ID.takeIf { it.isNotBlank() }
-    private suspend fun resolveSecretKey(): String? = prefs.baidu.getBaiduCustomSecretKey() ?: BuildConfig.BAIDU_APP_SECRET.takeIf { it.isNotBlank() }
+    /**
+     * 解析 AppKey/SecretKey：编译期嵌入的默认值。
+     * T9 收尾：`BaiduPrefs` 的自填凭据链路已删（setter 全仓零调用，值恒 null ⇒ 原首选项
+     * 分支死代码），这里只剩 `BuildConfig` 一条路径；为空时由调用点给可见失败提示（行为不变）。
+     */
+    private suspend fun resolveAppKey(): String? = BuildConfig.BAIDU_APP_ID.takeIf { it.isNotBlank() }
+    private suspend fun resolveSecretKey(): String? = BuildConfig.BAIDU_APP_SECRET.takeIf { it.isNotBlank() }
 
     /** 设备码请求结果（供 UI 显示） */
     data class DeviceCodeResult(

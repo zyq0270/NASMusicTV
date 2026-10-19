@@ -2,7 +2,7 @@ package com.nasmusic.tv.ui.screens.settings
 
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Audiotrack
-import androidx.compose.material.icons.filled.AutoFilmed
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Info
@@ -46,8 +46,8 @@ enum class SettingsSection(val titleRes: Int, val icon: ImageVector) {
     PLAYBACK(R.string.settings_playback, Icons.Default.Audiotrack),       // 播放行为 · 过渡音量 · 音质 · 均衡器
     /** 新增：歌词显示（字号/高亮，T10）+ K 歌人声分离与模型管理 */
     LYRICS_KARAOKE(R.string.settings_lyrics_karaoke, Icons.Default.Mic),
-    /** 新增：可视化画质与效果主题 + 封面滤镜 */
-    VISUAL_EFFECTS(R.string.settings_visual_effects, Icons.Default.AutoFilmed),
+    /** 新增：可视化画质与效果主题 + 封面滤镜。⚠️ 图标名 AutoFilmed 在 icons 1.7.8 里不存在（编译实证），换 AutoAwesome */
+    VISUAL_EFFECTS(R.string.settings_visual_effects, Icons.Default.AutoAwesome),
     /** 照片墙（§7.1 / §7.2），原地不动 */
     PHOTO_WALL(R.string.settings_photo_wall, Icons.Default.PhotoLibrary),
     /** 新增：NAS 服务器 + 本地曲库 + 百度网盘 + 默认网络源，同为「曲库从哪来」 */

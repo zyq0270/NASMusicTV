@@ -687,7 +687,9 @@ var activeSection by remember { mutableStateOf(SettingsSection.GENERAL) }
                             onShowMusicRootDialog = {
                                 if (onListBaiduDirs != null) {
                                     showBaiduMusicRootDialog = true
-                                } else {
+                                } else if (onChangeBaiduMusicRootDir != null) {
+                                    // 与原对话框外层条件 `&& onChangeBaiduMusicRootDir != null` 等价：
+                                    // 回退为 null 时点击无反应，不弹输入框
                                     endpointEditor = EndpointEditor(
                                         titleRes = R.string.settings_netdisk_music_root,
                                         hintRes = R.string.settings_netdisk_hint_dir,
@@ -696,7 +698,7 @@ var activeSection by remember { mutableStateOf(SettingsSection.GENERAL) }
                                         val trimmed = input.trim()
                                         if (trimmed.isNotEmpty()) {
                                             baiduMusicRootLocal = trimmed
-                                            onChangeBaiduMusicRootDir(trimmed)
+                                            onChangeBaiduMusicRootDir?.invoke(trimmed)
                                         }
                                         endpointEditor = null
                                     }
@@ -705,7 +707,7 @@ var activeSection by remember { mutableStateOf(SettingsSection.GENERAL) }
                             onShowMvDirDialog = {
                                 if (onListBaiduDirs != null) {
                                     showBaiduMvDirDialog = true
-                                } else {
+                                } else if (onChangeBaiduMvDir != null) {
                                     endpointEditor = EndpointEditor(
                                         titleRes = R.string.settings_netdisk_mv_dir,
                                         hintRes = R.string.settings_netdisk_hint_dir,
@@ -713,7 +715,7 @@ var activeSection by remember { mutableStateOf(SettingsSection.GENERAL) }
                                     ) { input ->
                                         val trimmed = input.trim()
                                         baiduMvDirLocal = trimmed.ifEmpty { null }
-                                        onChangeBaiduMvDir(baiduMvDirLocal)
+                                        onChangeBaiduMvDir?.invoke(baiduMvDirLocal)
                                         endpointEditor = null
                                     }
                                 }

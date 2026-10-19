@@ -694,8 +694,12 @@ internal fun <T> SettingsChipRow(
     ) {
         items.chunked(columns.coerceAtLeast(1)).forEach { rowItems ->
             Row(horizontalArrangement = Arrangement.spacedBy(SettingsTokens.chipGap)) {
+                // 把 RowScope 接收者固定为局部量：`equalWidth` 分支里 Box 的 content 是
+                // BoxScope 作用域，itemContent（@Composable RowScope.(T) -> Unit）的
+                // 第一接收者无法再隐式解析 ⇒ 必须显式 `rowScope.itemContent(item)`。
+                val rowScope = this
                 rowItems.forEach { item ->
-                    if (equalWidth) Box(modifier = Modifier.weight(1f)) { itemContent(item) }
+                    if (equalWidth) Box(modifier = Modifier.weight(1f)) { rowScope.itemContent(item) }
                     else itemContent(item)
                 }
             }
