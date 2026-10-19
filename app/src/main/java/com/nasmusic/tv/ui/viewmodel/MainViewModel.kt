@@ -2710,11 +2710,25 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
 
     // ---- VocalSeparationViewModel 转发 ----
 
-    fun clearAccompanimentCache() {
+    /**
+     * 清除全部分离产物与临时残留（设置页「清除分离缓存」入口；方案 §1.14 / T8b）。
+     *
+     * 取代旧 `clearAccompanimentCache()`：后者只删三种后缀、提示还是文件数口径
+     * （"清了 3 个、占用却掉了 40MB"的两套数）。现在统一按 `formatBytes` 报释放字节数。
+     */
+    fun clearSeparationArtifacts() {
         viewModelScope.launch {
-            val count = vocalVM.clearAccompanimentCache()
-            postLocalConnectMessage(
-                getApplication<Application>().getString(R.string.status_accompaniment_cache_cleared, count))
+            val freed = vocalVM.clearAllSeparationArtifacts()
+            if (vocalVM.separating.value) {
+                // 分离中跳过删除（返回 0 与"本来就没有"同值，必须另判状态，否则用户以为清过了）
+                postLocalConnectMessage(
+                    getApplication<Application>().getString(R.string.status_separation_busy))
+            } else {
+                postLocalConnectMessage(
+                    getApplication<Application>().getString(
+                        R.string.status_accompaniment_cache_cleared,
+                        com.nasmusic.tv.ui.screens.settings.formatBytes(freed)))
+            }
         }
     }
 
@@ -3318,11 +3332,54 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
     }
 
     // --- E-4 缓存管理 ---
+
+    /**
+     * 剩余空间（设置页 CACHE「占用与存储」首行，方案 §1.14 / T8b）。
+     *
+     * 直接转发 [com.nasmusic.tv.backend.download.StorageGuard.availableBytes] —— 该类
+     * 已用「双 StatFs 取 min + 30s 轮询 + 广播」维护这个值，设置页**不得**再起第二个
+     * `StatFs`，否则下载队列与设置页会看到两个不同的"可用空间"。
+     */
+    val storageAvailableBytes: kotlinx.coroutines.flow.StateFlow<Long> =
+        nasMusicApp.storageGuard.availableBytes
+
     fun clearLyricsCache() {
         viewModelScope.launch {
             lyricsManager.clearCache()
             postLocalConnectMessage(
                 getApplication<Application>().getString(R.string.status_lyrics_cache_cleared))
+        }
+    }
+
+    /**
+     * 清除封面地址表（`filesDir/cover_url_cache.json`，方案 §1.14 / T8b）。
+     *
+     * 该清除函数（`CoverUrlPersistentCache.clear()`）早写好了却从未接线，KDoc 里
+     * "供设置页缓存管理手动清除"的承诺到本轮才兑现。清后需重新联网解析封面地址。
+     */
+    fun clearCoverUrlCache() {
+        viewModelScope.launch {
+            nasMusicApp.coverUrlPersistentCache.clear()
+            postLocalConnectMessage(
+                getApplication<Application>().getString(R.string.status_cover_url_cache_cleared))
+        }
+    }
+
+    /**
+     * 清除解包封面缓存：`cacheDir` 根下的 `cover_cache_*` 散文件（内嵌 APIC 提取结果）
+     * + `cacheDir/album_covers/`（本机曲库封面缩略图）。两者都由本方法一次清掉。
+     */
+    fun clearExtractedCoverCache() {
+        viewModelScope.launch {
+            val context = getApplication<android.app.Application>()
+            val freed = com.nasmusic.tv.backend.local.EmbeddedCoverExtractor
+                .clearDiskCache(context.cacheDir) +
+                com.nasmusic.tv.backend.local.LocalCoverExtractor(context).clearDiskCache()
+            AppLog.d("MainViewModel", "clearExtractedCoverCache: freed $freed bytes")
+            postLocalConnectMessage(
+                getApplication<Application>().getString(
+                    R.string.status_cover_cache_freed,
+                    com.nasmusic.tv.ui.screens.settings.formatBytes(freed)))
         }
     }
 
@@ -3342,7 +3399,7 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
         }
     }
 
-    // （clearMvPersistentCache / clearAccompanimentCache 已迁至子 ViewModel 转发区，勿重复定义）
+    // （clearMvPersistentCache / clearAllSeparationArtifacts 已迁至子 ViewModel 转发区，勿重复定义）
 
     // --- B-4 均衡器 ---
     val equalizerPreset: StateFlow<EqualizerPreset> = prefs.visualizer.equalizerPreset.stateIn(

@@ -411,25 +411,48 @@ internal fun AdjustButton(text: String, onClick: () -> Unit) {
     }
 }
 
-/** 下载统计行：标签 + 值（W0 约定重命名：原 InfoRow → SettingsInfoRow） */
+/**
+ * 下载统计行：标签 + 值（W0 约定重命名：原 InfoRow → SettingsInfoRow）。
+ *
+ * @param description 只读行按 §4.5 规范**默认不带**功能说明；只有该项"删了有代价"
+ *   需要警示时才给（T8b 的 9 条缓存代价说明）。`null` = 不占第二行。
+ * @param indent 从属行缩进（T8b 占用一览的分组 → 条目两级）；分组行/顶层行保持 `false`。
+ */
 @Composable
-internal fun SettingsInfoRow(label: String, value: String) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
+internal fun SettingsInfoRow(
+    label: String,
+    value: String,
+    description: String? = null,
+    indent: Boolean = false,
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth().padding(start = if (indent) 16.dp else 0.dp)
     ) {
-        Text(
-            text = label,
-            color = NasMusicColors.TextSecondary,
-            fontSize = FontSize.body()
-        )
-        Text(
-            text = value,
-            color = NasMusicColors.TextPrimary,
-            fontSize = FontSize.body(),
-            fontWeight = FontWeight.Medium
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = label,
+                color = NasMusicColors.TextSecondary,
+                fontSize = FontSize.body()
+            )
+            Text(
+                text = value,
+                color = NasMusicColors.TextPrimary,
+                fontSize = FontSize.body(),
+                fontWeight = FontWeight.Medium
+            )
+        }
+        if (description != null) {
+            Text(
+                text = description,
+                color = NasMusicColors.TextSecondary,
+                fontSize = FontSize.caption(),
+                modifier = Modifier.padding(bottom = 4.dp)
+            )
+        }
     }
 }
 

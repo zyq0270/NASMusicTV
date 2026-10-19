@@ -123,26 +123,17 @@ class AccompanimentCache(
 
     /**
      * 清空缓存
+     *
+     * @return 释放的字节数（T8b 起有真调用方：设置页「清除分离缓存」，返回字节数供 formatBytes 提示）
      */
-    fun clearCache() {
-        cacheDir.listFiles()?.forEach { it.delete() }
-        AppLog.d(TAG, "clearCache: all files deleted")
-    }
-
-    /**
-     * 清除所有分离文件（伴奏+人声+原唱缓存）
-     * 用户不需要保留人声文件，所有分离文件都可以删除
-     */
-    fun clearAccompaniments(): Int {
-        var count = 0
-        cacheDir.listFiles()?.forEach { file ->
-            if (file.name.endsWith("_accompaniment.wav") || file.name.endsWith("_vocals.wav") || file.name.endsWith("_original.wav")) {
-                file.delete()
-                count++
-            }
+    fun clearCache(): Long {
+        var freed = 0L
+        cacheDir.listFiles()?.forEach { f ->
+            val len = runCatching { f.length() }.getOrDefault(0L)
+            if (runCatching { f.delete() }.getOrDefault(false)) freed += len
         }
-        AppLog.d(TAG, "clearAccompaniments: deleted $count separation files")
-        return count
+        AppLog.d(TAG, "clearCache: all files deleted")
+        return freed
     }
 
     /**

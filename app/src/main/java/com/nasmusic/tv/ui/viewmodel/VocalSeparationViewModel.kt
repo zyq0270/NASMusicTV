@@ -302,8 +302,8 @@ class VocalSeparationViewModel(
         AppLog.d("VocalSeparationViewModel", "exitKaraoke: reset vocalRemoval, pitch, speed")
     }
 
-    /** 清除伴奏缓存（设置页"缓存管理"手动清除用），返回清除数量 */
-    fun clearAccompanimentCache(): Int {
-        return playerManager.clearAccompanimentCache()
+    /** 清除全部分离产物与临时残留（设置页"缓存清理"手动清除用），返回释放的字节数 */
+    fun clearAllSeparationArtifacts(): Long {
+        return playerManager.clearAllSeparationArtifacts()
     }
 }

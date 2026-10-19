@@ -169,10 +169,14 @@
     <string name="settings_copyright">版权说明</string>
     <string name="settings_copyright_text">本应用涉及的网络音乐搜索功能通过 Meting-API 端点获取公开数据，仅提供元数据索引。原始版权归原始版权方所有，本应用仅为聚合浏览工具，不存储、分发或转售任何媒体文件，也不对第三方音乐资源的合法性、准确性及可用性承担任何责任。如版权方认为其合法权益受到侵害，请通过 GitHub Issues 联系我们，我们将及时处理。</string>
     <string name="settings_star_prompt">如果这个项目对你有帮助，欢迎到 GitHub 给个 Star 支持一下！</string>
-    <string name="settings_cache_dir_size">当前缓存目录大小: %s</string>
+    <string name="settings_cache_dir_size">本机已占用的空间，只读；清除请用下方「缓存清理」</string>
     <string name="settings_clear_coil_cache">清除 Coil 图片缓存器的磁盘缓存</string>
-    <string name="settings_clear_all_cache">清除全部缓存</string>
-    <string name="settings_clear_all_cache_desc">删除 HQ 模式缓存和网络歌曲缓存（约10秒）</string>
+    <string name="settings_clear_separation_cache">清除分离缓存</string>
+    <string name="settings_clear_separation_cache_desc">删除伴奏与人声副本，含分离临时残留</string>
+    <string name="settings_clear_extracted_cover">清除解包封面</string>
+    <string name="settings_clear_extracted_cover_desc">删除从音频文件提取的封面缓存，下次浏览会重新提取</string>
+    <string name="settings_clear_cover_url">清除封面地址表</string>
+    <string name="settings_clear_cover_url_desc">清后需重新联网解析封面地址</string>
     <string name="settings_clear_downloads_title">清空所有下载</string>
     <string name="settings_clear_downloads_message">确认删除所有已下载的歌曲文件？此操作不可撤销。</string>
     <string name="settings_clear_downloads_desc">删除所有已下载的歌曲文件，此操作不可撤销</string>
@@ -385,12 +389,48 @@
     <string name="settings_equalizer_desc">调节各频段增益</string>
     <string name="settings_clear_lyrics_cache">清除歌词缓存</string>
     <string name="settings_clear_lyrics_cache_desc">删除所有已缓存的歌词文件</string>
-    <string name="settings_clear_cover_cache">清除封面缓存</string>
+    <string name="settings_clear_cover_cache">清除封面缓存（Coil）</string>
     <string name="settings_cache_switch">缓存开关</string>
     <string name="settings_cache_clear">缓存清理</string>
-    <!-- 缓存分区两卡标题（T8；占用一览卡由 T8b 建） -->
+    <!-- 缓存分区三卡标题（T8 建两卡，T8b 拆出「占用与存储」） -->
     <string name="settings_group_cache_policy">缓存策略</string>
-    <string name="settings_group_cache_clear">占用与清理</string>
+    <string name="settings_group_cache_occupancy">占用与存储</string>
+    <string name="settings_group_cache_clear">缓存清理</string>
+    <!-- 占用一览（T8b）：1 个剩余空间 + 5 个组名 + 19 条目录标签 + 9 条代价说明 -->
+    <string name="settings_cache_free_space">剩余空间</string>
+    <string name="settings_cache_group_app_cache">应用缓存</string>
+    <string name="settings_cache_group_persistent">持久缓存</string>
+    <string name="settings_cache_group_index_db">索引与数据库</string>
+    <string name="settings_cache_group_media_model">媒体与模型</string>
+    <string name="settings_cache_group_app_data">应用数据</string>
+    <string name="settings_cache_dir_coil">图片缓存（Coil）</string>
+    <string name="settings_cache_dir_separation">伴奏与人声副本</string>
+    <string name="settings_cache_dir_hq_tmp">分离输入临时文件</string>
+    <string name="settings_cache_dir_embedded">解包封面</string>
+    <string name="settings_cache_dir_pcm_tmp">解码临时文件</string>
+    <string name="settings_cache_dir_local_covers">本机曲库封面</string>
+    <string name="settings_cache_dir_lyrics">歌词缓存</string>
+    <string name="settings_cache_dir_lyrics_desc">歌词与索引同进同退</string>
+    <string name="settings_cache_dir_lyrics_index">歌词索引</string>
+    <string name="settings_cache_dir_mv">MV 搜索结果</string>
+    <string name="settings_cache_dir_cover_url">封面地址表</string>
+    <string name="settings_cache_dir_cover_url_desc">清后需重新联网解析</string>
+    <string name="settings_cache_dir_local_lrc">本机歌词文件</string>
+    <string name="settings_cache_dir_local_lrc_ext">外部歌词文件</string>
+    <string name="settings_cache_dir_local_lrc_desc">用户自行放入的 LRC，不删除</string>
+    <string name="settings_cache_dir_baidu">网盘索引</string>
+    <string name="settings_cache_dir_baidu_desc">清除需重新扫描全部文件</string>
+    <string name="settings_cache_dir_db_downloads">下载记录库</string>
+    <string name="settings_cache_dir_db_local">本机曲库库</string>
+    <string name="settings_cache_dir_db_local_desc">删除需重新扫描本机曲库</string>
+    <string name="settings_cache_dir_db_face">人脸库</string>
+    <string name="settings_cache_dir_db_face_desc">人脸数据在照片墙设置里清除</string>
+    <string name="settings_cache_dir_downloads">已下载歌曲</string>
+    <string name="settings_cache_dir_downloads_desc">在下载设置里管理</string>
+    <string name="settings_cache_dir_model">分离模型</string>
+    <string name="settings_cache_dir_model_desc">分离模型在歌词与K歌里管理</string>
+    <string name="settings_cache_dir_prefs">偏好设置</string>
+    <string name="settings_cache_dir_prefs_desc">删除等于重置全部设置</string>
     <string name="settings_clear_mv_cache">清除 MV 缓存</string>
     <string name="settings_clear_mv_cache_desc">删除所有已缓存的 MV 搜索结果（bvid）</string>
     <string name="settings_network_test">测试网络</string>
@@ -586,6 +626,9 @@
     <string name="status_network_disconnected">网络已断开</string>
     <string name="status_lyrics_cache_cleared">歌词缓存已清除</string>
     <string name="status_cover_cache_cleared">封面缓存已清除</string>
+    <string name="status_cover_cache_freed">解包封面已清除（释放 %s）</string>
+    <string name="status_cover_url_cache_cleared">封面地址表已清除，下次将重新联网解析</string>
+    <string name="status_separation_busy">正在分离，请等本次完成后再清理</string>
 
     <!-- Download management (§8.7.3) -->
     <string name="download_cleared">已清空全部下载（%1$s）</string>
@@ -890,7 +933,7 @@
 
     <!-- Cache Status (MainViewModel) -->
     <string name="status_mv_cache_cleared">MV 缓存已清除</string>
-    <string name="status_accompaniment_cache_cleared">伴奏缓存已清除（%d 个文件）</string>
+    <string name="status_accompaniment_cache_cleared">分离缓存已清除（释放 %s）</string>
 
     <!-- NAS Playlists (MainViewModel) -->
     <string name="load_playlists_error">加载播放列表失败: %s</string>

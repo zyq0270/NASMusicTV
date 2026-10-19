@@ -209,9 +209,42 @@ class HqSeparationOrchestrator(
         }
     }
 
-    /** 清除伴奏缓存（返回删除的文件数） */
-    fun clearAccompanimentCache(): Int {
-        return accompanimentCache?.clearAccompaniments() ?: 0
+    /**
+     * 清除全部分离产物与临时残留（方案 §1.14 / T8b，设置页「清除分离缓存」的真正入口）。
+     *
+     * ⛔ 与旧的 `clearAccompanimentCache()` 不同：那个只删 `_accompaniment.wav` / `_vocals.wav` /
+     * `_original.wav` 三种后缀（§1.14 结论 2「名不副实」的第二层），连同目录里的其它残留都不清。
+     * 这里删的是**整份伴奏缓存目录** + `cacheDir/nasmusic_hq` 里的 `_input.tmp`（:257 的输入
+     * 临时文件）+ `cacheDir` 根下的 `demucs_pcm_*.tmp`（DemucsSeparator:580 解码临时文件），
+     * 与按钮说明「删除伴奏与人声副本，含分离临时残留」保持同一范围。
+     *
+     * @return 释放的字节数；**正在分离时直接返回 0**（此时删文件会让当次任务失败，
+     *   调用方必须给可见提示，不能让用户以为清过了）。
+     */
+    fun clearAllSeparationArtifacts(): Long {
+        if (_separating.value) {
+            AppLog.w(TAG, "clearAllSeparationArtifacts: separation in progress, skip")
+            return 0L
+        }
+        var freed = 0L
+        // ① 伴奏 / 人声 / 原唱缓存（整目录，clearCache 返回释放字节数）
+        freed += accompanimentCache?.clearCache() ?: 0L
+        // ② HQ 输入临时文件（后缀判死口径与 cleanupTempFile :326 一致，不新发明匹配规则）
+        val hqDir = File(appContext.cacheDir, "nasmusic_hq")
+        freed += hqDir.listFiles { f -> f.isFile && f.name.endsWith("_input.tmp") }
+            ?.sumOf { f -> deleteAndCount(f) } ?: 0L
+        // ③ Demucs 解码临时文件（cacheDir 根下的散文件，前缀 + .tmp 后缀）
+        freed += appContext.cacheDir.listFiles { f ->
+            f.isFile && f.name.startsWith("demucs_pcm_") && f.name.endsWith(".tmp")
+        }?.sumOf { f -> deleteAndCount(f) } ?: 0L
+        AppLog.d(TAG, "clearAllSeparationArtifacts: freed $freed bytes")
+        return freed
+    }
+
+    /** 删一个文件并累加释放字节（失败不计，避免把"没删掉"报成"已释放"） */
+    private fun deleteAndCount(file: File): Long {
+        val len = runCatching { file.length() }.getOrDefault(0L)
+        return if (runCatching { file.delete() }.getOrDefault(false)) len else 0L
     }
 
     // ── 输入解析 ──

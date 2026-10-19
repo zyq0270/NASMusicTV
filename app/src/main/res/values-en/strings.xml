@@ -166,10 +166,14 @@
     <string name="settings_copyright">Copyright Notice</string>
     <string name="settings_copyright_text">The network music search feature retrieves public data through Meting-API endpoints, providing only metadata indexing. Original copyrights belong to their respective owners. This app is an aggregation browsing tool only, it does not store, distribute, or resell any media files, and assumes no responsibility for the legality, accuracy, or availability of third-party music resources. If copyright holders believe their rights have been infringed, please contact us via GitHub Issues for timely resolution.</string>
     <string name="settings_star_prompt">If this project helps you, please give us a Star on GitHub!</string>
-    <string name="settings_cache_dir_size">Current cache directory size: %s</string>
+    <string name="settings_cache_dir_size">Space used on this device (read-only); clear it in "Cache Cleanup" below</string>
     <string name="settings_clear_coil_cache">Clear Coil image cache disk cache</string>
-    <string name="settings_clear_all_cache">Clear All Cache</string>
-    <string name="settings_clear_all_cache_desc">Delete HQ mode cache and network song cache (~10 seconds)</string>
+    <string name="settings_clear_separation_cache">Clear Separation Cache</string>
+    <string name="settings_clear_separation_cache_desc">Delete accompaniment and vocal copies, including separation temp files</string>
+    <string name="settings_clear_extracted_cover">Clear Extracted Covers</string>
+    <string name="settings_clear_extracted_cover_desc">Delete cover cache extracted from audio files; re-extracted on next browse</string>
+    <string name="settings_clear_cover_url">Clear Cover URL Table</string>
+    <string name="settings_clear_cover_url_desc">Cover URLs will be resolved online again</string>
     <string name="settings_clear_downloads_title">Clear All Downloads</string>
     <string name="settings_clear_downloads_message">Delete all downloaded song files? This cannot be undone.</string>
     <string name="settings_clear_downloads_desc">Delete all downloaded song files. This cannot be undone.</string>
@@ -382,12 +386,48 @@
     <string name="settings_equalizer_desc">Adjust frequency band gains</string>
     <string name="settings_clear_lyrics_cache">Clear Lyrics Cache</string>
     <string name="settings_clear_lyrics_cache_desc">Delete all cached lyrics files</string>
-    <string name="settings_clear_cover_cache">Clear Cover Cache</string>
+    <string name="settings_clear_cover_cache">Clear Cover Cache (Coil)</string>
     <string name="settings_cache_switch">Cache Switch</string>
     <string name="settings_cache_clear">Cache Cleanup</string>
-    <!-- Cache section two card titles (T8; the usage card is built in T8b) -->
+    <!-- Cache section three card titles (T8 built two; T8b split out "Usage &amp; Storage") -->
     <string name="settings_group_cache_policy">Cache Policy</string>
-    <string name="settings_group_cache_clear">Usage &amp; Cleanup</string>
+    <string name="settings_group_cache_occupancy">Usage &amp; Storage</string>
+    <string name="settings_group_cache_clear">Cache Cleanup</string>
+    <!-- Usage overview (T8b): 1 free-space + 5 group names + 19 directory labels + 9 cost notes -->
+    <string name="settings_cache_free_space">Free Space</string>
+    <string name="settings_cache_group_app_cache">App Cache</string>
+    <string name="settings_cache_group_persistent">Persistent Cache</string>
+    <string name="settings_cache_group_index_db">Index &amp; Databases</string>
+    <string name="settings_cache_group_media_model">Media &amp; Models</string>
+    <string name="settings_cache_group_app_data">App Data</string>
+    <string name="settings_cache_dir_coil">Image Cache (Coil)</string>
+    <string name="settings_cache_dir_separation">Accompaniment &amp; Vocal Copies</string>
+    <string name="settings_cache_dir_hq_tmp">Separation Input Temp</string>
+    <string name="settings_cache_dir_embedded">Extracted Covers</string>
+    <string name="settings_cache_dir_pcm_tmp">Decode Temp Files</string>
+    <string name="settings_cache_dir_local_covers">Local Library Covers</string>
+    <string name="settings_cache_dir_lyrics">Lyrics Cache</string>
+    <string name="settings_cache_dir_lyrics_desc">Lyrics and index are cleared together</string>
+    <string name="settings_cache_dir_lyrics_index">Lyrics Index</string>
+    <string name="settings_cache_dir_mv">MV Search Results</string>
+    <string name="settings_cache_dir_cover_url">Cover URL Table</string>
+    <string name="settings_cache_dir_cover_url_desc">Re-resolved online after clearing</string>
+    <string name="settings_cache_dir_local_lrc">Local Lyrics Files</string>
+    <string name="settings_cache_dir_local_lrc_ext">External Lyrics Files</string>
+    <string name="settings_cache_dir_local_lrc_desc">Your own LRC files, never deleted</string>
+    <string name="settings_cache_dir_baidu">Netdisk Index</string>
+    <string name="settings_cache_dir_baidu_desc">Clearing requires rescanning all files</string>
+    <string name="settings_cache_dir_db_downloads">Download Records DB</string>
+    <string name="settings_cache_dir_db_local">Local Library DB</string>
+    <string name="settings_cache_dir_db_local_desc">Deleting requires rescanning the local library</string>
+    <string name="settings_cache_dir_db_face">Face Database</string>
+    <string name="settings_cache_dir_db_face_desc">Clear face data in Photo Wall settings</string>
+    <string name="settings_cache_dir_downloads">Downloaded Songs</string>
+    <string name="settings_cache_dir_downloads_desc">Managed in Download settings</string>
+    <string name="settings_cache_dir_model">Separation Models</string>
+    <string name="settings_cache_dir_model_desc">Managed in Lyrics &amp; Karaoke</string>
+    <string name="settings_cache_dir_prefs">Preferences</string>
+    <string name="settings_cache_dir_prefs_desc">Deleting equals resetting all settings</string>
     <string name="settings_clear_mv_cache">Clear MV Cache</string>
     <string name="settings_clear_mv_cache_desc">Delete all cached MV search results (bvid)</string>
     <string name="settings_network_test">Test Network</string>
@@ -549,6 +589,9 @@
     <string name="status_network_disconnected">Network disconnected</string>
     <string name="status_lyrics_cache_cleared">Lyrics cache cleared</string>
     <string name="status_cover_cache_cleared">Cover cache cleared</string>
+    <string name="status_cover_cache_freed">Extracted covers cleared (%s freed)</string>
+    <string name="status_cover_url_cache_cleared">Cover URL table cleared; will resolve online again</string>
+    <string name="status_separation_busy">Separation in progress, please retry after it finishes</string>
 
     <!-- Download management (§8.7.3) -->
     <string name="download_cleared">All downloads cleared (%1$s)</string>
@@ -850,7 +893,7 @@
 
     <!-- Cache Status (MainViewModel) -->
     <string name="status_mv_cache_cleared">MV cache cleared</string>
-    <string name="status_accompaniment_cache_cleared">Accompaniment cache cleared (%d files)</string>
+    <string name="status_accompaniment_cache_cleared">Separation cache cleared (%s freed)</string>
 
     <!-- NAS Playlists (MainViewModel) -->
     <string name="load_playlists_error">Failed to load playlists: %s</string>

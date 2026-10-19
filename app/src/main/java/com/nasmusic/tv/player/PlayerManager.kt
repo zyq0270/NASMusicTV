@@ -291,8 +291,8 @@ class PlayerManager(private val applicationContext: Context) {
     /** 清除高质量分离成功信息 */
     fun clearHqSuccess() = hqOrchestrator.clearHqSuccess()
 
-    /** 清除伴奏缓存（返回删除的文件数） */
-    fun clearAccompanimentCache(): Int = hqOrchestrator.clearAccompanimentCache()
+    /** 清除全部分离产物与临时残留（返回释放的字节数；分离中返回 0） */
+    fun clearAllSeparationArtifacts(): Long = hqOrchestrator.clearAllSeparationArtifacts()
 
     /** 应用内音量（0.0–1.0）：立即生效于主播放器，跨淡由 CrossfadeController 按比例缩放 */
     fun applyAppVolume(volume: Float) {

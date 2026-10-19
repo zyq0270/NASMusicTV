@@ -84,6 +84,29 @@ class LocalCoverExtractor(private val context: Context) {
         return null
     }
 
+    /**
+     * 清空**磁盘**缓存：删除 `cacheDir/album_covers/` 整目录（本机曲库封面的缩略图副本）。
+     *
+     * 本类此前**没有任何删除方法**（方案 §1.14 / T8b 补上），删除后下次播放/浏览会重新提取。
+     *
+     * @return 释放的字节数（供调用方按 `formatBytes` 口径提示）
+     */
+    fun clearDiskCache(): Long {
+        val dir = File(context.cacheDir, "album_covers")
+        var freed = 0L
+        try {
+            dir.walkTopDown().filter { it.isFile }.forEach { f ->
+                val len = runCatching { f.length() }.getOrDefault(0L)
+                if (runCatching { f.delete() }.getOrDefault(false)) freed += len
+            }
+            runCatching { dir.delete() }
+        } catch (e: Exception) {
+            AppLog.w(TAG, "clearDiskCache failed: ${e.message}")
+        }
+        AppLog.d(TAG, "clearDiskCache: freed $freed bytes")
+        return freed
+    }
+
     /** 保存封面位图到缓存目录 */
     private fun saveCoverToCache(mediaStoreId: Long, bitmap: Bitmap): File? {
         return try {

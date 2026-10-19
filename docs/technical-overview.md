@@ -16123,3 +16123,50 @@ XML `tests="5" skipped="0" failures="0" errors="0"`（含 G4 两组自证，证�
   grep 无命中时整条仍返回 0。行为无害（无失败本就应打印空），但下次动这段 YAML 时把回显改成
   `if ! grep -q "<failure" …` 的显式判定，别把它当成"CI 已经会报告没失败"的依据。
 
+
+### 10.249 v2.39.0 — 设置区整理 T8b：缓存页从「一个数字」到「全树占用一览 + 登记表门 G9」（2026-10-19）
+
+**问题**：CACHE 分区原来只有 `cacheDir` 一个数字、2 个开关、4 个清除按钮。全树扫下来实际有
+**14 处可管理落盘**，其中 5 处设置页完全管不到、4 处统计不到；另有 **3 个清除函数早就写好、
+KDoc 还写着"供设置页手动清除"，但从来没有调用方**（`CoverUrlPersistentCache.clear()`、
+`AccompanimentCache.clearCache()`、`EmbeddedCoverExtractor.clearMemoryCache()`）。
+表现层的症状是「点了『清除歌词缓存』，顶部数字一动不动」——因为那个数字只量 `cacheDir`，
+而歌词缓存落在 `filesDir`。
+
+**做法**：
+
+1. **唯一真源** `data/cache/CacheInventory.kt`：19 条登记项（`dir` / `root` / `group` /
+   `labelRes` / `descRes?` / `deletable` / `clearVia`），5 个分组（应用缓存 / 持久缓存 /
+   索引与数据库 / 媒体与模型 / 应用数据）。统计口径与清除入口同源，所以清完数字必然回落。
+2. **G9 门**（`CacheInventoryGateTest`，扫整个 `app/src/main`）：① 源码里 `cacheDir`/`filesDir`/
+   `dataDir` 后紧跟的字面量 + Room 三个 `.db` 必须登记；② `deletable = true` 的 `clearVia`
+   必须在 main 源集里真有 `fun` 声明（专治"函数写好没接线"）；③ 登记的 `dir` 必须在源码出现过。
+3. **清除入口从 4 个补到 6 个**：「清除全部缓存」改名「清除分离缓存」并**扩容**——旧链路只删
+   `_accompaniment.wav`/`_vocals.wav`/`_original.wav` 三种后缀，新链路删整份伴奏目录 +
+   `cacheDir/nasmusic_hq/*_input.tmp` + `cacheDir/demucs_pcm_*.tmp`；新增「清除解包封面」
+   （`cover_cache_*` + `album_covers/`）与「清除封面地址表」。
+
+**四处必须照此实现、不要"顺手简化"**：
+
+- `cover_cache_` / `demucs_pcm_` 是 `cacheDir` **根下的散文件**（文件名前缀，不是子目录）⇒
+  `sizeOf` 有"目录名以 `_` 结尾则按前缀列根文件"的特例；当子目录算会恒为 0，数字看着正常但永不增长。
+- 扫描有 `MAX_FILES = 4000` 上限 ⇒ 超限时 `CacheSize.truncated = true`，UI 显示「≥ 123 MB」。
+  那个「≥」是"扫描上限"的唯一可见证据，⛔ 不要在 UI 侧剥掉。
+- 数据库一律 `context.getDatabasePath(name)`，⛔ 不猜 `applicationInfo.dataDir`（API 30+ 已废弃）。
+- `resolve()` 对 `EXTERNAL_MUSIC` 的回落必须与 `AppSettings` 的 `rootProvider` **同一套**
+  （`NasMusicApp` 的 `"music"` 回落行以 `cache-inventory-exempt:` 豁免，否则与 `dir=""` 条目双计体积）。
+
+**返回值口径统一为字节**：`AccompanimentCache.clearCache()` / `HqSeparationOrchestrator.clearAllSeparationArtifacts()` /
+两个 extractor 的 `clearDiskCache()` 全部返回 `Long`，提示文案走 `formatBytes`。
+`status_accompaniment_cache_cleared` 的占位符从 `%d`（文件数）改成 `%s`（字节）——
+**中英必须同批改**，只改一侧会让运行期 `getString` 抛 `IllegalArgumentException`（不是编译错误）。
+分离进行中直接返回 0 并另给可见提示（`status_separation_busy`）：0 字节与"本来就没有"同值，
+不另判状态用户会以为清过了。
+
+**剩余空间只有一个真源**：`StorageGuard.availableBytes`（双 `StatFs` 取 min + 30s 轮询 + 广播）
+经 `MainViewModel.storageAvailableBytes` 转发到设置页；⛔ 分区里再起一个 `StatFs` 会让下载队列
+与设置页看到两个不同的"可用空间"。
+
+**验收口径**：G9 空转下限写不变式（命中目录数 `>= 15`，当前基线 15 个非豁免 + 1 个豁免 `music`），
+⛔ 不要把"16"抄进断言。本任务实测：19 条登记 / 17 个唯一非空 `dir`（`lyrics` 两处 root 各 1 行、
+`dir=""` 的外部根 1 条），与 G9 扫出的目录名**不是一一对应**——对账请按 `dir` 清单逐名点。

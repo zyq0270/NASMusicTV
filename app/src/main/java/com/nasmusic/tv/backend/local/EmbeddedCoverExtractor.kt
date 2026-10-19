@@ -150,4 +150,27 @@ object EmbeddedCoverExtractor {
     fun clearMemoryCache() {
         synchronized(lock) { cache.clear() }
     }
+
+    /**
+     * 清空**磁盘**缓存：删除 [cacheDir] 根下所有 `cover_cache_` 前缀的散文件，
+     * 并顺带清空内存 LRU（方案 §1.14 / T8b：该清除函数早已写好却无人调用）。
+     *
+     * @param cacheDir 应用 cacheDir（与 [extractCoverUri] 传入的是同一个）
+     * @return 释放的字节数（供调用方按 `formatBytes` 口径提示）
+     */
+    fun clearDiskCache(cacheDir: File): Long {
+        clearMemoryCache()
+        synchronized(lock) { missCache.clear() }
+        var freed = 0L
+        try {
+            cacheDir.listFiles { f -> f.isFile && f.name.startsWith("cover_cache_") }?.forEach { f ->
+                val len = runCatching { f.length() }.getOrDefault(0L)
+                if (runCatching { f.delete() }.getOrDefault(false)) freed += len
+            }
+        } catch (e: Exception) {
+            AppLog.w(TAG, "clearDiskCache failed: ${e.message}")
+        }
+        AppLog.d(TAG, "clearDiskCache: freed $freed bytes")
+        return freed
+    }
 }

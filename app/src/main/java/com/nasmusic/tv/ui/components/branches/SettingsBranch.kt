@@ -114,6 +114,8 @@ internal fun SettingsBranch(
                     //    `FaceScanManager`（开 photo_face.db / 读 assets），平时零成本。
                     val photoWallFaceScan by viewModel.visualizerVM.faceScanState.collectAsState()
                     val faceScanSupported by viewModel.visualizerVM.faceScanSupported.collectAsState()
+                    // T8b：剩余空间（CACHE「占用与存储」首行）
+                    val storageAvailableBytes by viewModel.storageAvailableBytes.collectAsState()
                     SettingsScreen(
                         selectedSection = settingsSection,
                         onOpenSection = { viewModel.navVM.openSettingsSection(it) },
@@ -132,7 +134,11 @@ internal fun SettingsBranch(
                         onClearLyricsCache = { viewModel.clearLyricsCache() },
                         onClearCoverCache = { viewModel.clearCoverCache() },
                         onClearMvCache = { viewModel.clearMvPersistentCache() },
-                        onClearAccompanimentCache = { viewModel.clearAccompanimentCache() },
+                        onClearSeparationArtifacts = { viewModel.clearSeparationArtifacts() },
+                        onClearCoverUrlCache = { viewModel.clearCoverUrlCache() },
+                        onClearExtractedCoverCache = { viewModel.clearExtractedCoverCache() },
+                        // T8b：CACHE「占用与存储」首行剩余空间（StorageGuard 的 30s 轮询值）
+                        storageAvailableBytes = storageAvailableBytes,
                         onOpenEqualizer = { viewModel.navVM.navigateTo(Screen.Equalizer) },
                         onOpenPlayStats = { viewModel.navVM.navigateTo(Screen.PlayStats) },
                         // F2-5：crossfade 设置接线

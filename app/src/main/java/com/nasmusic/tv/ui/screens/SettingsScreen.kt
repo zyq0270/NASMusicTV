@@ -132,7 +132,13 @@ fun SettingsScreen(
     onClearLyricsCache: (() -> Unit)? = null,
     onClearCoverCache: (() -> Unit)? = null,
     onClearMvCache: (() -> Unit)? = null,
-    onClearAccompanimentCache: (() -> Unit)? = null,
+    /** T8b：分离产物与临时残留（原「清除全部缓存」改名 + 扩容后的真正入口） */
+    onClearSeparationArtifacts: (() -> Unit)? = null,
+    /** T8b：封面地址表 / 解包封面两个新增清理入口 */
+    onClearCoverUrlCache: (() -> Unit)? = null,
+    onClearExtractedCoverCache: (() -> Unit)? = null,
+    /** T8b：剩余空间（StorageGuard.availableBytes，⛔ 不要再起一个 StatFs） */
+    storageAvailableBytes: Long = 0L,
     onOpenEqualizer: (() -> Unit)? = null,
     onOpenPlayStats: (() -> Unit)? = null,
     // F2-5：跨曲交叉淡入淡出
@@ -707,14 +713,19 @@ var activeSection by remember { mutableStateOf(SettingsSection.GENERAL) }
                 }
                 SettingsSection.CACHE -> item {
                     CacheSettingsSection(
-                        state = CacheSettingsState(settings = settings),
+                        state = CacheSettingsState(
+                            settings = settings,
+                            availableBytes = storageAvailableBytes
+                        ),
                         actions = CacheSettingsActions(
                             onToggleCacheLyrics = onToggleCacheLyrics,
                             onToggleCacheCover = onToggleCacheCover,
                             onClearLyricsCache = onClearLyricsCache,
                             onClearCoverCache = onClearCoverCache,
                             onClearMvCache = onClearMvCache,
-                            onClearAccompanimentCache = onClearAccompanimentCache,
+                            onClearSeparationArtifacts = onClearSeparationArtifacts,
+                            onClearCoverUrlCache = onClearCoverUrlCache,
+                            onClearExtractedCoverCache = onClearExtractedCoverCache,
                         )
                     )
                 }
