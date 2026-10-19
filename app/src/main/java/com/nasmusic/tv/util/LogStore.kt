@@ -1,6 +1,9 @@
 package com.nasmusic.tv.util
 
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
@@ -241,3 +244,30 @@ object LogStore {
         return sb.toString()
     }
 }
+
+/**
+ * 详情「复制」按钮写进剪贴板的全文（v2.39.3）。
+ *
+ * ## 为什么要一个函数而不是在 UI 里拼字符串
+ * ① 电视上**没法长按选中文本**（真机反馈：「报错信息文本无法长按选择进行复制」），
+ *    一键复制是唯一可用的出口，复制内容就必须**完整**（含堆栈），不能只是屏幕上那几行；
+ * ② 拼装规则要能被单测直接调用（本文件是纯 JVM），UI 里拼就只能靠源码门禁猜。
+ *
+ * 时间固定用 [Locale.US]：这段文本是要粘到别处（聊天窗口 / issue）的**数据**，
+ * 跟着系统 Locale 走会变成「2026/10/20 上午12:17」这种没法 grep 的形态。
+ */
+fun LogEntry.toClipboardText(): String = buildString {
+    append(level).append(' ')
+    append(formatLogTimestamp(timestamp)).append(' ')
+    append(tag).append('\n')
+    append(message)
+    val stack = stackTrace
+    if (!stack.isNullOrBlank()) {
+        append('\n').append(stack)
+    }
+}
+
+/** 日志时间戳格式化（`yyyy-MM-dd HH:mm:ss`，固定 [Locale.US]）。 */
+internal fun formatLogTimestamp(timestamp: Long): String =
+    SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date(timestamp))
+

@@ -16722,3 +16722,77 @@ G7-C：3 处实底选中 → 0。⚠️ `ChipContentWidthScanTest` 的 `CALL` �
 
 **验证**：`testDebugUnitTest` 220 XML / **2301 例 / 0 失败**；`assembleRelease` BUILD SUCCESSFUL；
 APK `NASMusicTV-release-v2-39-2.apk` 25,790,655 B（versionCode 187 / 2.39.2）。
+
+#### 10.258.2 v2.39.3：日志详情可复制 / 可滚到底 + Meting 响应形态收敛
+
+两条真机反馈（v2.39.2 装机后）：
+① 「报错信息文本无法长按选择进行复制，并且还未显示完全。要增加一个复制报错信息的按钮。」
+② 日志里另有一条错误：`E MetingDiag parseSongs error: JsonSyntaxException:
+java.lang.IllegalStateException: Expected BEGIN_ARRAY but was BEGIN_OBJECT at line 1 column 2 path $`。
+
+##### A. 详情「看不到底」的真根因：`responsiveDialogSize` 的 `scrollable` 在 TV 上是空参
+
+`CommonComponents.kt:228` 首行即 `if (LocalUiMode.current != UiMode.PhonePortrait) return Modifier.width(landscapeWidth)`
+—— **非竖屏直接返回，`scrollable` 与 `heightIn` 全被跳过**。v2.39.2 里写的
+`responsiveDialogSize(760.dp, scrollable = true)` 在电视上等价于「只定宽」：
+长堆栈既没有高度上限（顶出屏幕被裁），也没有滚动容器（`verticalScroll` 根本没挂）。
+⇒ 本轮**不再依赖该函数分叉**，在 `LogDetailDialog` 里自己补两条与形态无关的约束：
+
+- `.heightIn(max = screenHeightDp * 0.82f)`（竖屏原有的 80% 上限仍由 `responsiveDialogSize` 给，
+  两个 `heightIn` 叠加取更严者，不冲突）；
+- 正文区独立 `weight(1f, fill = false)` + `verticalScroll` —— 页头与按钮固定，只有正文滚。
+
+⛔ 不要「顺手把 `responsiveDialogSize` 的 TV 分支也改成可滚动」：`ConfirmDialog` /
+`TextInputDialog` / `SettingsScreen:1040` 等 10 余个调用点里有 `LazyColumn`，
+给它们套一层 `verticalScroll` 会撞上「同方向可滚动组件被以无限高约束测量」的崩溃。
+
+##### B. 遥控器怎么滚：`onKeyEvent` 挂在**根节点**，不造新的可聚焦节点
+
+纯文本没有子焦点，`BringIntoView` 不会替我们滚。做法是在对话框根 `Column` 上挂
+`onKeyEvent`，`DirectionUp/Down` → `scrollState.dispatchRawDelta(±200dp)`。
+按键事件从**获得焦点的芯片冒泡到祖先**，所以根节点能收到，且**不需要**给正文加
+`focusable()`（那样会把初始焦点吸到正文、还要额外做焦点出口）。
+上下键**恒消费**（返回 `true`）：越界时若交回默认焦点搜索，焦点会跑出弹窗落到背后页面上
+（v2.38.10 四个方向钉死就是踩过这个坑）。`canScrollForward` 为真时额外显示「按 ↑ ↓ 滚动」提示。
+
+##### C. 复制：`LogEntry.toClipboardText()` + 复用 `LinkUtils`
+
+电视上不存在「长按选择」（遥控器没指针）⇒ 一键复制是唯一出口，且必须复制**全文**（含堆栈），
+否则粘出去没法定位。拼装逻辑放在 `LogStore.kt`（**纯 JVM**）里而不是 UI 里：
+① 单测能直接调；② UI 里拼只能靠源码门禁猜。时间固定 `Locale.US`（要粘到别处的是**数据**，
+跟系统 Locale 会变成「2026/10/20 上午12:17」这种没法 grep 的形态）。
+剪贴板走既有 `LinkUtils.copyToClipboard`（自带「已复制」Toast，与链接弹窗同一路径）。
+触摸设备另保留 `SelectionContainer`，长按选择仍可用。
+
+##### D. Meting 端点回对象：`TypeToken<List<JsonObject>>` 直解析是硬伤
+
+`parseSongs` 原来 `gson.fromJson(body, TypeToken<List<JsonObject>>)`，端点回一个 `{`
+（错误信封 `{"code":403,"error":…}` 或 `{"data":[…]}` 包装）就整次搜索抛异常，
+而且日志里**只剩异常文本、看不到端点回了什么**，无法定位。
+
+新增 `backend/network/MetingJsonShape.kt`（**纯 JVM，只依赖 Gson**，故可走免 Gradle 通道）：
+- 根是数组 → 直接用；
+- 根是对象 → 按 `data/result/results/songs/list/items/tracks/playlist/song` 顺序下钻，
+  最多 3 层，取**第一个非空**数组；全空则返回第一个空数组；
+- 都不是 → 空列表 + 形态诊断串。
+
+判据关键：**「空数组」与「形态认不出」必须是两种不同 shape**
+（`array@root.data` vs `object@root keys=[…]` / `invalid:JsonSyntaxException`）——
+前者是端点的正常答案，后者才需要人介入；混成一个值会让真机日志失去诊断力。
+`parseSongs` 的 W 日志同步改为带 `shape=` 与 `body=` 摘要（截断 240 字符、压平换行）。
+
+##### E. 回归锁 / 自查
+
+- `MetingJsonShapeTest`（11 例，纯 JVM）：包装下钻、嵌套、优先非空、非对象元素丢弃、
+  空数组 vs 认不出、错误信封、非 JSON、标量、摘要截断；
+  末尾一条**负向自证**——同一份对象响应喂给旧 `TypeToken` 写法必须抛 `JsonSyntaxException`。
+- `LogStoreTest` +2 例：复制全文含级别/时间/tag/正文/堆栈末行；无堆栈时不得多出空段。
+- `LogsTabWiringGateTest` +6 例：详情必须一键复制全文、TV 必须能滚到底、
+  `parseSongs` 必须先收敛形态，各配一条负向自证。
+- `logs_temp/t19_selfcheck.py`（正向逐条谓词 + `--selftest` 9 个负向夹具）：谓词一律先剥注释、
+  按**方法体**取值（避免 KDoc 里的一句 `MetingJsonShape.extract(` 把门禁骗过去）。
+- `logs_temp/kt_standalone.py` / `run_junit.py` 的 compile/run classpath 追加 gson（可选，
+  找不到就降级）——此前「纯 JVM 但依赖第三方库」的被测文件编不过。
+
+**已知取舍**：日志详情仍不分页（一次渲染整段堆栈；单条最长约 256KB 上限内的一行日志，
+实际堆栈多在 2–4KB）；复制不含其他条目，需要多条请逐条复制。

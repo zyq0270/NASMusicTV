@@ -120,4 +120,41 @@ class LogStoreTest {
         assertTrue("MAX_BYTES 必须小于 4000×120 字节，否则轮转用例测不到东西", LogStore.MAX_BYTES < 4000L * 120L)
         assertTrue("KEEP_LINES 必须小于写入条数", LogStore.KEEP_LINES < 4000)
     }
+
+    // ───────────────────── 详情「复制」全文（v2.39.3） ─────────────────────
+
+    /**
+     * 真机反馈「报错信息文本无法长按选择进行复制」⇒ 加了复制按钮。
+     * 复制内容必须是**全文**：级别 + 时间 + tag + 正文 + **完整堆栈**。
+     * 只要漏了堆栈，粘出去的日志就没法定位问题，等于白复制。
+     */
+    @Test
+    fun `复制全文必须包含级别 时间 tag 正文与完整堆栈`() {
+        val stack = "java.lang.IllegalStateException: boom\n\tat a.b.C(D.kt:1)\n\tat e.f.G(H.kt:2)"
+        val entry = LogEntry(
+            timestamp = 1_766_000_000_000L,
+            level = LogStore.LEVEL_ERROR,
+            tag = "MetingDiag",
+            message = "parseSongs: no songs",
+            stackTrace = stack,
+        )
+        val text = entry.toClipboardText()
+        assertTrue("缺级别", text.contains("E"))
+        assertTrue("缺 tag", text.contains("MetingDiag"))
+        assertTrue("缺正文", text.contains("parseSongs: no songs"))
+        assertTrue("缺堆栈首行", text.contains("IllegalStateException: boom"))
+        assertTrue("缺堆栈末行（必须完整，不能只截首行）", text.contains("at e.f.G(H.kt:2)"))
+        assertTrue(
+            "时间戳必须是可 grep 的固定格式：实际 ${text.lineSequence().first()}",
+            Regex("""\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}""").containsMatchIn(text),
+        )
+    }
+
+    @Test
+    fun `无堆栈的日志复制全文不得出现空堆栈段`() {
+        val entry = LogEntry(0L, LogStore.LEVEL_WARN, "T", "只有正文", null)
+        val text = entry.toClipboardText()
+        assertTrue("正文必须保留", text.contains("只有正文"))
+        assertEquals("无堆栈时只能是 2 行（头 + 正文）", 2, text.lines().size)
+    }
 }

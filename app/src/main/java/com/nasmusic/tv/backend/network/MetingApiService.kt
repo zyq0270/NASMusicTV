@@ -2,7 +2,6 @@ package com.nasmusic.tv.backend.network
 
 import com.google.gson.Gson
 import com.google.gson.JsonObject
-import com.google.gson.reflect.TypeToken
 import com.nasmusic.tv.R
 import com.nasmusic.tv.data.model.Song
 import com.nasmusic.tv.util.AppLog
@@ -563,28 +562,34 @@ class MetingApiService(
     /**
      * 解析 Meting-API 搜索响应
      *
-     * 响应格式：JSON 数组，每个元素字段：
-     * - title：歌曲名
-     * - author：艺术家
-     * - album：专辑名
+     * **元素**字段（不同端点字段名不同，下面逐项都做了兼容）：
+     * - title / name：歌曲名
+     * - author / artist：艺术家
+     * - album / al：专辑名
      * - pic：封面端点 URL
      * - url：播放端点 URL（含 id 参数，需提取）
      * - lrc：歌词端点 URL
+     *
+     * **整体形态**不一定是数组 —— v2.39.3 真机日志抓到有端点回对象
+     * （`Expected BEGIN_ARRAY but was BEGIN_OBJECT`）。形态收敛交给
+     * [MetingJsonShape]，本函数只负责「拿到数组之后的逐条映射」。
      */
     private fun parseSongs(body: String): List<Song> {
+        // 先收敛形态：根数组直接用；对象则按常见包装键下钻（错误信封 / {"data":[…]}）
+        val extraction = MetingJsonShape.extract(gson, body)
+        val items = extraction.items
+        if (items.isEmpty()) {
+            // 形态 + 正文摘要一起记：真机上一眼能看出端点回的是错误信封还是空列表
+            AppLog.w(
+                DIAG,
+                "parseSongs: no songs (shape=${extraction.shape}, body=${extraction.bodyPreview})",
+            )
+            return emptyList()
+        }
         return try {
-            val type = object : TypeToken<List<JsonObject>>() {}.type
-            val items: List<JsonObject> = gson.fromJson(body, type) ?: run {
-                AppLog.w(DIAG, "parseSongs: gson returned null, body is not a JSON array")
-                return emptyList()
-            }
-            if (items.isEmpty()) {
-                AppLog.w(DIAG, "parseSongs: array empty")
-                return emptyList()
-            }
             // 首项 key 集合打印一次（便于核对字段名），不再逐条打 INFO 日志
             items.firstOrNull()?.keySet()?.let { keys ->
-                AppLog.d(DIAG, "parseSongs: json array size=${items.size}, first item keys=$keys")
+                AppLog.d(DIAG, "parseSongs: size=${items.size}, shape=${extraction.shape}, keys=$keys")
             }
             var skippedNoTitle = 0
             var skippedNoId = 0

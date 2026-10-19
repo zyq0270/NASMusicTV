@@ -164,6 +164,122 @@ class LogsTabWiringGateTest {
         )
     }
 
+    // ─────────────────── 9. 详情可复制（v2.39.3 真机反馈） ───────────────────
+
+    /**
+     * 真机原话：「报错信息文本无法长按选择进行复制，并且还未显示完全。
+     * 要增加一个复制报错信息的按钮。」
+     *
+     * 电视上**没有长按选择**这回事（遥控器没指针），一键复制是唯一出口；
+     * 而复制内容漏了堆栈就等于没复制 ⇒ 这里同时锁「按钮存在」与「写的是全文」。
+     */
+    @Test
+    fun `日志详情必须提供一键复制全文`() {
+        val section = stripComments(mainSource("ui/screens/settings/LogsSettingsSection.kt"))
+        assertTrue(
+            "详情里没有 `settings_logs_detail_copy` 文案 —— 复制按钮没接上",
+            section.contains("settings_logs_detail_copy"),
+        )
+        assertTrue(
+            "详情里没有调用 `toClipboardText()` —— 复制出去的内容不是全文",
+            section.contains("toClipboardText()"),
+        )
+        assertTrue(
+            "详情里没有调用 `LinkUtils.copyToClipboard` —— 按钮点了不会写剪贴板",
+            section.contains("LinkUtils.copyToClipboard("),
+        )
+    }
+
+    /** 负向自证：只放一个「关闭」按钮的详情必须判负。 */
+    @Test
+    fun `负向自证 详情只有关闭按钮必须判负`() {
+        val sample = """
+            SettingsChip(
+                label = stringResource(R.string.settings_logs_detail_close),
+                selected = false,
+                onClick = onDismiss,
+            )
+        """.trimIndent()
+        assertTrue(
+            "护栏空转：没有复制按钮的样例被误判通过",
+            !(sample.contains("settings_logs_detail_copy") && sample.contains("toClipboardText()")),
+        )
+    }
+
+    // ─────────────────── 10. 详情可滚动（TV 上不许被裁） ───────────────────
+
+    /**
+     * 真机反馈的后半句「还未显示完全」根因：`responsiveDialogSize` 在**非竖屏**
+     * 只返回 `Modifier.width(…)`，`scrollable` 参数在 TV 上被静默忽略
+     * ⇒ 长堆栈直接被屏幕裁掉，而且遥控器也没有拖动这回事。
+     *
+     * 判据三件套缺一不可：高度上限（别顶出屏幕）+ 正文滚动容器 + 上下键处理。
+     */
+    @Test
+    fun `日志详情在 TV 上必须能滚到底`() {
+        val section = stripComments(mainSource("ui/screens/settings/LogsSettingsSection.kt"))
+        assertTrue(
+            "详情缺 `heightIn(` 高度上限 —— TV 分支的 responsiveDialogSize 不给高度，长堆栈会顶出屏幕",
+            section.contains("heightIn("),
+        )
+        assertTrue(
+            "详情缺 `verticalScroll(` —— 堆栈根本滚不动",
+            section.contains("verticalScroll("),
+        )
+        assertTrue(
+            "详情缺上下键处理（`Key.DirectionDown`）—— 遥控器无法翻页，纯文本也没有子焦点能带滚",
+            section.contains("Key.DirectionDown"),
+        )
+    }
+
+    /** 负向自证：只有 `responsiveDialogSize(…, scrollable = true)` 的写法必须判负。 */
+    @Test
+    fun `负向自证 只靠 responsiveDialogSize 可滚动必须判负`() {
+        val sample = "Column(modifier = responsiveDialogSize(landscapeWidth = 760.dp, scrollable = true)) { }"
+        assertTrue(
+            "护栏空转：只传 scrollable = true 的样例被误判为已处理（该参数在 TV 上被忽略）",
+            !(sample.contains("heightIn(") && sample.contains("verticalScroll(") && sample.contains("Key.DirectionDown")),
+        )
+    }
+
+    // ─────────────────── 11. Meting 响应形态收敛（v2.39.3） ───────────────────
+
+    /**
+     * 真机日志：`parseSongs error: JsonSyntaxException … Expected BEGIN_ARRAY but was BEGIN_OBJECT`。
+     * 端点回对象时旧写法整次搜索报废 ⇒ 必须走 [MetingJsonShape] 收敛形态。
+     */
+    @Test
+    fun `parseSongs 必须先收敛响应形态`() {
+        val src = stripComments(mainSource("backend/network/MetingApiService.kt"))
+        assertTrue(
+            "parseSongs 没有走 `MetingJsonShape.extract(` —— 端点回对象时又会整次搜索失败",
+            src.contains("MetingJsonShape.extract("),
+        )
+        assertTrue(
+            "parseSongs 不再使用 `TypeToken<List<JsonObject>>`（该写法对对象响应直接抛异常）",
+            !src.contains("TypeToken<List<JsonObject>>"),
+        )
+        assertTrue(
+            "形态诊断没有进日志（AppLog 里要带 shape / body）—— 真机无从判断端点回了什么",
+            Regex("""parseSongs: no songs \(shape=""").containsMatchIn(src),
+        )
+    }
+
+    /** 负向自证：旧的 TypeToken 直解析写法必须判负。 */
+    @Test
+    fun `负向自证 TypeToken 直解析必须判负`() {
+        val sample = """
+            private fun parseSongs(body: String): List<Song> {
+                val type = object : TypeToken<List<JsonObject>>() {}.type
+                return gson.fromJson(body, type)
+            }
+        """.trimIndent()
+        assertTrue(
+            "护栏空转：旧的 TypeToken 直解析写法被误判为已收敛形态",
+            !sample.contains("MetingJsonShape.extract("),
+        )
+    }
+
     private fun hasSignatureKeep(rules: String): Boolean =
         rules.lineSequence().any { it.trim() == "-keepattributes Signature" }
 
