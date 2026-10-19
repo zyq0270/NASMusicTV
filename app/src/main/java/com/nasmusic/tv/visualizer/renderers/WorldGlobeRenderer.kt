@@ -198,21 +198,26 @@ internal class WorldGlobeRenderer(context: Context) : VisualizerRenderer {
                     request: WebResourceRequest?
                 ): WebResourceResponse? {
                     val url = request?.url?.toString() ?: return null
-                    if (!url.startsWith(ASSET_BASE)) return null
-                    val path = Uri.parse(url).path ?: return null
-                    // ASSET_BASE = "https://appassets.androidplatform.net/globe"
-                    val assetName = path.removePrefix("/globe/")
-                    // favicon 是 WebView 的自动请求，assets 里没有也不影响渲染。
-                    // 返回空 body 而非 null，避免它触发真联网 + 报错噪音。
-                    if (assetName == "favicon.ico") {
-                        return WebResourceResponse(
-                            "image/x-icon", "UTF-8",
-                            java.io.ByteArrayInputStream(ByteArray(0))
-                        )
+                    // 只接管虚拟资产域，判定用 **host** 而非 startsWith(ASSET_BASE)：
+                    // favicon 请求是从**域根** `https://appassets.androidplatform.net/favicon.ico`
+                    // 发起的（2026-10-20 真机实测，Chrome 39 不带 /globe 前缀）——
+                    // 用 ASSET_BASE 前缀判定会漏掉它 → 返回 null → fallback 真联网 →
+                    // 该保留域无公网 DNS → ERR_NAME_NOT_RESOLVED + onReceivedError 噪音
+                    // （页面渲染其实不受影响，纯诊断噪音）。
+                    if (Uri.parse(url).host != ASSET_HOST) return null
+                    // path 为 null（无斜杠的裸域 URL）按 "/" 处理：同样走下面的空 body 分支，
+                    // 不在资产域上放任何请求去真联网
+                    val path = Uri.parse(url).path ?: "/"
+                    // favicon：WebView 的自动请求，assets 里没有。**任何路径下**都返回
+                    // 空 body（200 + 0 字节），绝不返回 null——见下条。
+                    if (path.endsWith("/favicon.ico") || path == "favicon.ico") {
+                        return emptyBody("image/x-icon")
                     }
                     // ⛔ 资产域内请求**永不返回 null**：返回 null 会让 WebView fallback
                     //    真联网（该保留域无公网 DNS → 国内直接失败 → 黑屏）。
-                    //    解析失败也返回空 body，保持完全离线。
+                    //    非 /globe/ 的越界路径同样返回空 body，保持完全离线。
+                    if (!path.startsWith("/globe/")) return emptyBody("text/plain")
+                    val assetName = path.removePrefix("/globe/")
                     return try {
                         val stream = appContext.assets.open("globe/$assetName")
                         val mime = when {
@@ -226,7 +231,7 @@ internal class WorldGlobeRenderer(context: Context) : VisualizerRenderer {
                         WebResourceResponse(mime, "UTF-8", stream)
                     } catch (e: Exception) {
                         AppLog.e("WorldGlobe", "asset not found, serving empty: $assetName", e)
-                        WebResourceResponse("text/plain", "UTF-8", java.io.ByteArrayInputStream(ByteArray(0)))
+                        emptyBody("text/plain")
                     }
                 }
 
@@ -245,6 +250,15 @@ internal class WorldGlobeRenderer(context: Context) : VisualizerRenderer {
                     request: WebResourceRequest?,
                     error: android.webkit.WebResourceError?
                 ) {
+                    val url = request?.url?.toString() ?: ""
+                    // favicon 是装饰性资源，失败**永远**不影响渲染：万一某版 WebView
+                    // 绕过 shouldInterceptRequest 直奔真联网（无公网 DNS 必失败），
+                    // 也别按 E 刷屏（2026-10-20 真机日志噪音）。真问题（脚本/贴图/
+                    // 页面失败）仍恒 E 留痕，此处按 favicon 精确收窄，不误伤。
+                    if (url.endsWith("/favicon.ico")) {
+                        AppLog.d("WorldGlobe", "favicon fetch failed (ignorable): ${error?.errorCode} ${error?.description} url=$url")
+                        return
+                    }
                     AppLog.e("WorldGlobe", "page/resource error: ${error?.errorCode} ${error?.description} url=${request?.url}")
                 }
             }
@@ -253,10 +267,31 @@ internal class WorldGlobeRenderer(context: Context) : VisualizerRenderer {
             //    只做转发不改页面行为。
             webChromeClient = object : WebChromeClient() {
                 override fun onConsoleMessage(msg: ConsoleMessage): Boolean {
-                    AppLog.e(
-                        "WorldGlobe",
-                        "JS[${msg.messageLevel()}] ${msg.message()} @${msg.sourceId()}:${msg.lineNumber()}"
-                    )
+                    val level = msg.messageLevel()
+                    val text = "JS[$level] ${msg.message()} @${msg.sourceId()}:${msg.lineNumber()}"
+                    // 级别映射（此前无差别全走 AppLog.e，把无害提示也放大成 E）：
+                    // - ERROR 恒 e：JS 运行时错误是黑屏诊断的主要线索，⛔ 不许降级；
+                    // - WARNING 默认 w；仅**已知无害**的 three.js UMD 加载噪音降 d（见下）；
+                    // - LOG / TIP / DEBUG → i（不落盘，避免挤掉崩溃现场）。
+                    when (level) {
+                        ConsoleMessage.MessageLevel.ERROR -> AppLog.e("WorldGlobe", text)
+                        ConsoleMessage.MessageLevel.WARNING -> {
+                            val benign =
+                                // UMD 构建（three.es5.js）自身的弃用提示：ES5 降级策略就是为
+                                // Android 5.1 / Chrome 39 环境存在的（index.html 注释有完整
+                                // 论证），加载即报、无法也不需要消除，与渲染无关。
+                                text.contains("deprecated with r150") ||
+                                // three-globe.es5.js 内置了一份 three.core，与 three.es5.js
+                                // 重复注册 ⇒ 加载即报。既定用法（globe.js 只绑 window.THREE）
+                                // 下真机渲染正常。⛔ 仅当来源是 three-globe.es5.js 才降级——
+                                // 若哪天这条改从 three.es5.js 报出，说明真的重复加载了 three，
+                                // 仍按 w 留痕。
+                                (text.contains("Multiple instances of Three.js") &&
+                                    text.contains("three-globe.es5.js"))
+                            if (benign) AppLog.d("WorldGlobe", text) else AppLog.w("WorldGlobe", text)
+                        }
+                        else -> AppLog.i("WorldGlobe", text)
+                    }
                     return true
                 }
             }
@@ -266,8 +301,21 @@ internal class WorldGlobeRenderer(context: Context) : VisualizerRenderer {
         return wv
     }
 
+    /**
+     * 空 body 响应（200 + 0 字节）：favicon 与资产域内越界路径专用。
+     *
+     * ⛔ 这些路径**绝不能返回 null**：返回 null 会让 WebView fallback 真联网，而
+     * `appassets.androidplatform.net` 是无公网 DNS 的保留域 ⇒ 国内直接
+     * ERR_NAME_NOT_RESOLVED（纯噪音；极端情况下阻塞渲染）。
+     */
+    private fun emptyBody(mime: String): WebResourceResponse =
+        WebResourceResponse(mime, "UTF-8", java.io.ByteArrayInputStream(ByteArray(0)))
+
     companion object {
-        /** 虚拟资产域：脚本与页面都从这里加载，绕开 file:// 子资源限制（完全离线） */
+        /** 虚拟资产域 host：脚本与页面都从这里加载，绕开 file:// 子资源限制（完全离线） */
+        private const val ASSET_HOST = "appassets.androidplatform.net"
+
+        /** 虚拟资产域 + globe 子路径：页面与脚本的加载前缀 */
         private const val ASSET_BASE = "https://appassets.androidplatform.net/globe"
     }
 

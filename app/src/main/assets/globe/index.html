@@ -3,6 +3,13 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <!--
+    显式声明空 favicon：否则 WebView 会**自动**向域根 https://appassets.androidplatform.net/favicon.ico
+    发请求（2026-10-20 真机实测；该保留域无公网 DNS ⇒ ERR_NAME_NOT_RESOLVED 噪音）。
+    data: 空 URI 满足「有图标」语义，浏览器就不再自动探测。Kotlin 侧
+    shouldInterceptRequest 的 host 级拦截是第二道防线（双保险，勿删其一）。
+  -->
+  <link rel="icon" href="data:,">
   <title>WorldGlobe</title>
   <style>
     html, body {

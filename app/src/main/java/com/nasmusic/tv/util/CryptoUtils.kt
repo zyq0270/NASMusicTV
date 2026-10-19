@@ -95,8 +95,21 @@ object CryptoUtils {
     /**
      * 解密 Base64 编码的 "iv + ciphertext + tag" 字符串。
      * 先尝试通用软件密钥，再回退 AndroidKeyStore 旧密钥；都失败则原样返回（可能是明文，兼容旧版本）。
+     *
+     * ⚠️ 两条**提前返回**的兼容短路（2026-10-20 真机日志刷屏修复，行为不变）：
+     * - 空串：多数后端没有 apiToken、百度未登录时 token 为空串，`AppPreferences.serverConfig`
+     *   Flow 每次排放都会走到这里。空串必然「全密钥失败」，此前**每次读取刷一条 W**，且
+     *   [AppLog.w] 始终落盘（LogStore）⇒ 电视日志页被这条挤爆。空串原样返回即可。
+     * - 非密文形态（非 Base64 或解码后无 IV+密文+tag 空间）：任何密钥都解不开，且多半是
+     *   旧版明文值——「原样返回明文」本来就是设计的兼容路径，不该按异常报警。顺带省掉
+     *   两次必然失败的 Cipher 初始化。
+     * 两者与旧实现**返回结果完全一致**，只是不再刷告警。真正需要留 W 的只剩一种：
+     * 看着像密文却所有密钥都解不开（口令变更 / 数据损坏）——这会让密文被当明文 token
+     * 发出（表现为 API 报 -6）。
      */
     fun decrypt(encryptedText: String): String {
+        if (encryptedText.isEmpty()) return ""
+        if (!isEncrypted(encryptedText)) return encryptedText
         tryDecrypt(softwareKey, encryptedText)?.let { return it }
         getKeyStoreKey()?.let { ks -> tryDecrypt(ks, encryptedText)?.let { return it } }
         AppLog.w("CryptoUtils", "decrypt: all keys failed, returning original (len=${encryptedText.length}, prefix=${encryptedText.take(16)}...)")

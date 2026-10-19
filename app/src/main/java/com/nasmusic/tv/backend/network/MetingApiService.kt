@@ -535,7 +535,11 @@ class MetingApiService(
                     AppLog.i(DIAG, "getPlaylist: loaded ${songs.size} songs via '$endpoint'")
                     return@withContext songs
                 }
-                AppLog.w(DIAG, "getPlaylist: empty from '$endpoint'")
+                // 「本端点返回空」是合法结果（歌单就是空的/不存在，或换了端点才有）——
+                // 上面的 i 级日志已带 code/bodyLen 详情，此处按 W 打会在 release 刷屏
+                // （W 恒落盘 LogStore，2026-10-20 真机：redcha 端点持续回 []），降 d。
+                // 真的全军覆没（所有端点都空）才由循环后的 W 留痕。
+                AppLog.d(DIAG, "getPlaylist: empty from '$endpoint'")
             } catch (e: Exception) {
                 AppLog.w(DIAG, "getPlaylist: endpoint '$endpoint' failed: ${e.javaClass.simpleName}: ${e.message}")
             }
@@ -579,11 +583,15 @@ class MetingApiService(
         val extraction = MetingJsonShape.extract(gson, body)
         val items = extraction.items
         if (items.isEmpty()) {
-            // 形态 + 正文摘要一起记：真机上一眼能看出端点回的是错误信封还是空列表
-            AppLog.w(
-                DIAG,
-                "parseSongs: no songs (shape=${extraction.shape}, body=${extraction.bodyPreview})",
-            )
+            // ⚠️ 两种空必须分开记，正对应 [MetingJsonShape] 的设计注释：
+            // - `array@…` 形态 = 端点**合法地回答了空列表**（如 redcha 持续回 `[]`）——
+            //   这是正常空结果，不是异常。按 W 打会在 release 刷屏且 W 恒落盘
+            //   （挤掉崩溃现场，2026-10-20 真机日志实测被刷爆）⇒ 降 d。
+            // - 其它形态（`invalid:` / `scalar@` / `object@` / `too-deep@` / `empty`）=
+            //   端点回了认不出的东西，必须 W 留痕 + 正文摘要。
+            val shape = extraction.shape
+            val message = "parseSongs: no songs (shape=$shape, body=${extraction.bodyPreview})"
+            if (shape.startsWith("array@")) AppLog.d(DIAG, message) else AppLog.w(DIAG, message)
             return emptyList()
         }
         return try {
