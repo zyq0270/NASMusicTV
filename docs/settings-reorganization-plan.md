@@ -3064,11 +3064,18 @@ git commit -am "feat(settings): 每个设置子项补一句说明文案，新增
 
 **Files:** Modify `SettingsComponents.kt`（删 :56-64 定义）；Modify `SettingsGroupCoverageTest.kt`（`migrated` 名单换成按目录枚举）
 
-- [ ] **Step 1: 全树 grep 确认 0 命中**
+- [x] **Step 1: 全树 grep 确认 0 命中**
+  > ⚠️ **与方案预期的出入**：方案假设此时已 0 调用点，实测 `DataSettingsSection:139` 还剩
+  > **最后一个**（卡②里的「最近导入记录」小标题）。已按 §3.2 意图处理：该块**移出卡②独立成卡**
+  > （卡中卡会破坏卡片边界），`SubSectionTitle` 随之归零，Step 3 才能删定义。
 
 Run: `grep -rn "SubSectionTitle" app/src` → Expected: 仅剩 `SettingsComponents.kt` 自身定义（0 个调用点）
 
-- [ ] **Step 2: 加 G2 断言（含负向自证）**
+- [x] **Step 2: 加 G2 断言（含负向自证）**
+  > ⚠️ **对方案片段的修正**：G1 转**全量**后，按目录枚举会扫到 `SettingsSection.kt` ——
+  > 那是分区**枚举**定义文件、不是分区 UI，天然没有卡片。显式排除 + **防锈断言**
+  > （被排除的文件一旦出现卡片/设置行，测试立刻红，逼人把它移出名单），
+  > 否则排除名单会静默漏扫。
 
 ```kotlin
 @Test
@@ -3091,7 +3098,9 @@ fun `样例里的 SubSectionTitle 必须被检出`() {
 }
 ```
 
-- [ ] **Step 3: 删除组件定义 + `migrated` 改为全目录扫描**，跑测试 PASS
+- [x] **Step 3: 删除组件定义 + `migrated` 改为全目录扫描**，跑测试 PASS（✅ 实做：G1/G2 等
+  6 个扫描门 55 例全绿 —— 含新增的 `nonSectionFiles` 防锈断言；`logs_temp/t13_selfcheck.py`
+  57 项 + `t14_selfcheck.py` 105 项回归全过）
 - [ ] **Step 4: 提交** `git commit -am "refactor(settings): 移除 SubSectionTitle，分组卡片覆盖率转为全量门禁"`
 
 ---

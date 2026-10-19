@@ -123,7 +123,7 @@ internal fun DataSettingsSection(
             // 从备份列表恢复（电视无系统文件选择器，恢复入口即上方备份文件列表）
             // ⚠️ 备份结果消息已上移到分区顶部，见上文 —— 不要在这里再加一份。
         }
-        // 卡② 歌单导入：导入入口、最近导入记录（方案 §3.2；2026-09-18 新增：§4.4.2）
+        // 卡② 歌单导入：导入入口（方案 §3.2；2026-09-18 新增：§4.4.2）
         SettingsGroupCard(title = stringResource(R.string.settings_group_playlist_import)) {
             if (actions.onImportPlaylistFile != null) {
                 SettingActionButton(
@@ -132,17 +132,6 @@ internal fun DataSettingsSection(
                     onClick = { actions.onImportPlaylistFile?.invoke() },
                     trailing = Trail.Arrow,
                 )
-            }
-            // 最近导入记录（无删除操作；点击打开 → 「我的」，2026-09-18 用户决策）
-            if (state.playlistImportHistory.isNotEmpty()) {
-                Spacer(modifier = Modifier.height(24.dp))
-                SubSectionTitle(stringResource(R.string.settings_playlist_import_history))
-                state.playlistImportHistory.forEach { item ->
-                    ImportedPlaylistRow(
-                        item = item,
-                        onOpen = { actions.onOpenImportedPlaylist?.invoke(item.playlistId) }
-                    )
-                }
             }
             // 导入结果消息
             if (state.playlistImportMessage != null) {
@@ -154,6 +143,19 @@ internal fun DataSettingsSection(
                     fontSize = FontSize.button(),
                     modifier = Modifier.padding(start = 4.dp)
                 )
+            }
+        }
+        // 卡②b 最近导入记录：**独立成卡**（无删除操作；点击打开 → 「我的」，2026-09-18 用户决策）。
+        // 原来是卡②里一枚 `SubSectionTitle` + 列表 —— 卡中卡既破坏卡片边界，又是
+        // `SubSectionTitle` 全仓最后一个调用点（T15 因此得以删除该组件）。
+        if (state.playlistImportHistory.isNotEmpty()) {
+            SettingsGroupCard(title = stringResource(R.string.settings_playlist_import_history)) {
+                state.playlistImportHistory.forEach { item ->
+                    ImportedPlaylistRow(
+                        item = item,
+                        onOpen = { actions.onOpenImportedPlaylist?.invoke(item.playlistId) }
+                    )
+                }
             }
         }
         // 卡③ 播放统计：入口（F2-1；方案 §3.2 上移到分区末尾独立成卡）

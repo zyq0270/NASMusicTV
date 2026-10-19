@@ -16461,3 +16461,21 @@ Compose 侧改动仍须 `assembleRelease` 兜底（见 §10.250 的覆盖盲区�
 长度 + 接线清单 + 违例清零 + `SettingsHint` 落点 + 括号配平/LF）。G6 等 6 个扫描门
 经独立编译通道 53 例全绿；Compose 侧仍须用户跑 `assembleRelease` 兜底。
 
+### 10.254 v2.39.0 — 设置区整理 T15：`SubSectionTitle` 移除 + G1 转全量（2026-10-19）
+
+**与方案预期的出入**：方案假设 T14 结束时 `SubSectionTitle` 已 0 调用点，实测还剩最后一个 ——
+`DataSettingsSection` 卡②里「最近导入记录」的小标题。已按 §3.2 意图处理：该块**移出卡②
+独立成卡**（卡中卡会破坏卡片边界，嵌套的 `SettingsGroupCard(` 还会让 G1 的区间解析产生
+重叠区间），组件定义随之删除。
+
+**G1 转全量的一个坑**：按目录枚举 `*Section.kt` 会扫到 `SettingsSection.kt` —— 那是分区
+**枚举**定义文件（v2.36.0 从 `SettingsScreen.kt` 上移），不是分区 UI，天然没有卡片。
+处理：显式排除名单 `nonSectionFiles` + **防锈断言**（被排除的文件一旦出现卡片或设置行，
+测试立刻红、逼人把它移出名单）。没有防锈断言，排除名单就是一处**静默漏扫**。
+
+**新增 G2**（2 例）：`SubSectionTitle(` 在 `ui/screens/settings/` 全目录剥注释后必须 0 命中 +
+负向自证（样例文本必须被检出）。
+
+**免 Gradle 自查**：6 个扫描门 55 例全绿；`t13_selfcheck.py`（57 项）与 `t14_selfcheck.py`
+（105 项）回归全过。
+

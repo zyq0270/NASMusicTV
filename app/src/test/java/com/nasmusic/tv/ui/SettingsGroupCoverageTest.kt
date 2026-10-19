@@ -21,21 +21,34 @@ import java.io.File
  */
 class SettingsGroupCoverageTest {
 
-    private val migrated = listOf(
-        "GeneralSettingsSection.kt",
-        "PlayerSettingsSection.kt",
-        "LyricsKaraokeSettingsSection.kt",
-        "VisualEffectsSettingsSection.kt",
-        "PhotoWallSettingsSection.kt",
-        "DownloadSettingsSection.kt",
-        "SourcesSettingsSection.kt",
-        "CacheSettingsSection.kt",
-        "NetworkMusicSection.kt",
-        "DataSettingsSection.kt",
-        "AboutSection.kt",
-    )
+    /**
+     * G1 的作用域（T15 起 = **全量**）：`ui/screens/settings/` 下全部 `*Section.kt`。
+     * T15 之前是增量名单 —— 只扫已卡片化的文件，防止门禁红在旧任务身上；
+     * 全部迁完后改为按目录枚举，新增分区文件**自动**进门，不再需要记得登记。
+     *
+     * ⚠️ 目录里还有一个同名后缀的**非 UI** 文件：`SettingsSection.kt` 是分区**枚举**定义，
+     * 不是分区 UI，天然没有卡片 —— 显式排除（见 [nonSectionFiles] 的防锈断言）。
+     */
+    private fun migratedFiles(root: File): List<File> {
+        val all = root.listFiles { f -> f.name.endsWith("Section.kt") }.orEmpty().sortedBy { it.name }
+        val excluded = all.filter { it.name in nonSectionFiles }
+        // 排除名单防锈：被排除的文件一旦开始出现卡片或设置行，说明它已经变成 UI 分区，
+        // 必须从名单里移除 —— 否则本门会**静默漏扫**它。
+        val leaked = excluded.mapNotNull { f ->
+            val t = stripComments(f.readText())
+            if (t.contains("SettingsGroupCard(") || rowCalls.any { t.contains(it) }) f.name else null
+        }
+        assertTrue(
+            "nonSectionFiles 排除名单已失效，以下文件出现了卡片/设置行，请从名单移除：$leaked",
+            leaked.isEmpty(),
+        )
+        return all.filter { it.name !in nonSectionFiles }
+    }
 
     private val rowCalls = listOf("SettingSwitch(", "SettingActionButton(", "SettingsInfoRow(")
+
+    /** 以 `Section.kt` 结尾但**不是**分区 UI 的文件（见 [migratedFiles] 的防锈断言） */
+    private val nonSectionFiles = setOf("SettingsSection.kt")
 
     /**
      * G6-C 的触发名单：出现任一即视为「本卡有芯片组 / 调整行，必须有说明」。
@@ -53,10 +66,13 @@ class SettingsGroupCoverageTest {
     @Test
     fun `已迁移分区的每个设置行都必须位于 SettingsGroupCard 内`() {
         val root = settingsRoot()
+        val files = migratedFiles(root)
+        assertTrue("G1 作用域为空：${root.absolutePath}", files.isNotEmpty())
         var scanned = 0
         val violations = mutableListOf<String>()
-        for (name in migrated) {
-            val text = stripComments(root.resolve(name).readText())
+        for (f in files) {
+            val name = f.name
+            val text = stripComments(f.readText())
             val cardRanges = groupCardSpans(text)
             assertTrue("$name 已列入迁移名单却找不到 SettingsGroupCard 调用", cardRanges.isNotEmpty())
             text.lines().forEachIndexed { idx, line ->
@@ -70,6 +86,34 @@ class SettingsGroupCoverageTest {
         }
         assertTrue("扫描到 0 个调用点 —— 门禁在空转", scanned > 0)
         if (violations.isNotEmpty()) fail("以下设置行不在任何分组卡片内：\n" + violations.joinToString("\n"))
+    }
+
+    // ─────────── G2：SubSectionTitle 必须已移除（T15） ───────────
+
+    @Test
+    fun `SubSectionTitle 必须已从源码中彻底移除`() {
+        val root = settingsRoot()
+        val hits = root.listFiles { f -> f.name.endsWith(".kt") }.orEmpty()
+            .flatMap { f ->
+                stripComments(f.readText()).lines().withIndex()
+                    .filter { it.value.contains("SubSectionTitle(") }
+                    .map { "${f.name}:${it.index + 1}" }
+            }
+            .toList()
+        assertTrue(
+            "仍有 SubSectionTitle 调用：$hits（分组标题必须用 SettingsGroupCard 卡片头）",
+            hits.isEmpty(),
+        )
+    }
+
+    /** 负向自证：把 SubSectionTitle 塞回样例文本必须被检出。 */
+    @Test
+    fun `样例里的 SubSectionTitle 必须被检出`() {
+        val text = "Column {\n    SubSectionTitle(\"x\")\n}"
+        assertTrue(
+            "护栏空转：SubSectionTitle 检测失效",
+            stripComments(text).lines().any { it.contains("SubSectionTitle(") },
+        )
     }
 
     /** 负向自证：把一行挪到卡片外，必须被判违规。 */

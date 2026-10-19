@@ -119,18 +119,6 @@ internal fun SettingsGroupCard(
     }
 }
 
-/** 分区内的分组小标题（用于"网盘"下区分百度/其他） */
-@Composable
-internal fun SubSectionTitle(text: String) {
-    Text(
-        text = text,
-        color = NasMusicColors.Primary,
-        fontSize = FontSize.button(),
-        fontWeight = FontWeight.Bold,
-        modifier = Modifier.padding(bottom = 10.dp, start = 4.dp, top = 4.dp)
-    )
-}
-
 /**
  * 设置区**唯一**的可聚焦瓦片（方案 §4.7-②，门禁 G7-B）。
  *
