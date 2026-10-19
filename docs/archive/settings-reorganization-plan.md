@@ -1,5 +1,12 @@
 # 设置区整理（Settings Reorganization）开发方案
 
+> **⛔ 归档状态：✅ 已落地（2026-10-19）。** T1–T17 全部执行完毕并逐个提交（`bdfd4a2` → T17 的文档提交）；
+> 逐任务实现出入与数字对账见 `docs/technical-overview.md` §10.249–§10.256；用户可感知变更见 `CHANGELOG.md`
+> 的 v2.39.0 段落。**§6 唯一保留的未决项 = 13b**（`k_pitch_semitones` / `k_playback_speed` 要不要继续写
+> DataStore，超出本方案范围）——已按文档生命周期规则显式登记进 `docs/archive/README.md` 对应行，未静默埋掉。
+> 真机验收（V1–V18）与 Gradle 全量验证 ⏳ 待用户执行。本文仅供追溯，⛔ 不再作为执行依据。
+
+
 > **版本：v1.1**（2026-10-18 审校修订，逐条对照源码核实；v1.0 = 2026-10-18 初稿）。变更明细见文末 **§11 修订记录**。⛔ 执行以本版为准。
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

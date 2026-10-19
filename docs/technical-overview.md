@@ -16521,3 +16521,75 @@ UI 层无 `OkHttpClient`/`Request.Builder`、`MainViewModel.runNetworkProbe(` �
 全绿 ≠ 编译通过，须 `:app:assembleRelease` 兜底（`logs_temp/verify_t16.bat`）。
 真机验证（探针结果与迁移前一致 + 各端点对话框编辑生效）⏳ 待用户，归入 V16 走查。
 
+### 10.256 v2.39.0 — 设置区整理 T17：全量汇总与发版前对账（2026-10-19）
+
+本节是 T1–T16 的**集中对账**（逐任务细节见 §10.249–§10.255 与方案 `docs/archive/settings-reorganization-plan.md`；
+T1–T7 / T9 / T10 无独立节，数字以方案文件打勾注记与本节为准）。
+
+**tab 映射表**（分区只按内容归属划分，11 个）：GENERAL（语言/主题/字体/方向）、PLAYBACK（自动连播/播放模式/均衡器只读/交叉淡入淡出/音质档/应用内音量）、
+LYRICS_KARAOKE（字号/高亮/分离模式/模型管理/自定义源）、VISUAL_EFFECTS（画质/封面滤镜）、PHOTO_WALL（来源开关/扫描/人脸）、
+SOURCES（服务器/本地曲库/百度网盘/默认网络源）、DOWNLOAD（开关/自动下载/位置/导出）、CACHE（占用一览+6 个清理入口）、
+NETWORK（连通性测试/Meting/Jamendo/MV/歌词端点/天气 Key）、DATA（备份/歌单导入/播放统计）、ABOUT（版本/API 版本/GitHub）。
+K 歌变调 / 倍速**不在**设置页（§6-13 用户裁决：运行态控制留播放页）。
+
+**明度阶梯**（§4.1）：页面背景（最深）→ 卡片外壳 `NasMusicColors.Surface.copy(alpha = 0.45f)`（中层）→
+行瓦片 `NasMusicColors.Surface`（最亮），层级只靠明度与缩进区分、圆角统一。
+
+**G7-A 红-绿对账**（§10.250，脚本 `t11_redlist.py` 与单测同谓词）：迁移前 **69 处 / 14 个文件**（`shape =` 19、
+`focusedScale` 17、`animationDurationMs` 17、`pressedScale` 16）→ **0**。方案 §2-10 的"15/20/4"是估算口径，
+以 §10.250 表为准。G7-B：5 文件 11 处 + 组件层 7 处 → 0 + 1（组件定义文件内的 `SettingsTile` 实现自身豁免）。
+G7-C：3 处实底选中 → 0。⚠️ `ChipContentWidthScanTest` 的 `CALL` 正则同步扩为
+`\b(FocusableSurface|SettingsTile|SettingsChip)\(`（迁移后 0 宽陷阱换了载体），`callSites` 基线不变、新增
+`SettingsTile`/`SettingsChip` 各一个破坏样本。
+
+**G8 建门红名单 → 0**：方案预估 `PlayerSettingsSection:117/323/330/357/364` 5 处；实测（`t13_redlist.py`，
+与门禁同谓词）**8 处 / 3 文件 / 29 个 Row 内容块**（`PlayerSettingsSection:98`、`LyricsKaraoke:205/212/241/248/277/286`、
+`ImportedPlaylistRow:44`）→ **0**（§10.252）。修复原语 = `SettingsChipRow(items, tv, phonePortrait, equalWidth)`；
+竖屏每行 3 枚时长芯片（407dp 放不下 5 枚）、TV/横屏 5 枚（B1 逐字等价）。
+
+**开关轨参考图实测与两处偏离**（§10.251，`scripts/measure_switch_reference.py`）：结构比例照抄（滑块 50% / 高 67% /
+描边 3% / 帽高 27%），轨道 `128×36`、滑块 `58×24`、行程 `58dp`；偏离 ① 全轨比例 4.657 → 3.56（长条比例是被
+"标签间 173px 空档"撑出来的，不是结构），偏离 ② 帽高 26.9% → 35%（TV 最小字档 `CaptionTv = 18sp` 是地板，
+18sp 帽高 ≈ 12.6dp，`12.6/36 = 0.35`）——**字号地板优先于参考图比例**，V15 真机判读兜底回退 = 单令牌改动。
+
+**竖屏内容宽算式**（§4.8）：竖屏 `439 − 2×16 = 407dp`；TV `1920 − 2×32（页 padding）− 240（侧栏）− 24（LazyColumn start）
+≈ 1592dp` ⇒ 407/1592 = **26%**，差 3.9×。11 个分区全按 TV 宽写 ⇒ 三类失效（0 宽 / 参差 / 折行）+ 一类可用样本
+（语言三芯片，标签 ≤4 全角字的等宽判据）。
+
+**幽灵管道的发现**（§1.2-✕15）：`PlayerSettingsState.visualizerTheme` 与 `Actions.onChangeVisualizerTheme`
+从 `SettingsBranch` → `SettingsScreen` → 分区一路传到后被**0 次读取**（主题真源在 `VisualizerStage`/`VisualizerViewModel`）；
+同款 `onChangeLyricsOffset`。处理：删管道、key `settings_visualizer_theme` 保留，VISUAL_EFFECTS 加只读行呈现。
+
+**死配置的 grep 判据**（§1.2）：`AppPreferences` 每个 DataStore key 反查全树消费方——有 UI 有后端 ● / 有后端无 UI ◐（候选暴露）/
+有 key 无消费方 ○（死配置）/ UI 管道不渲染 ✕（幽灵）。净结果（§6）：**删 5 个 DataStore key**（`settings_lyrics_offset`、
+`settings_spectrum_enabled`、`weather_enabled`、`weather_manual_city`、`weather_auto_refresh`）+ **3 个 `CloudDriveConfig`
+字段**（`customAppKey`/`customSecretKey`/`apiDriftNotified`，是 config 字段不是 key）+ 1 个 `BackupData` 三元组 +
+1 个占位组件（`PlaceholderRow`）+ 2 条幽灵管道；**新增暴露 4 项**（默认网络源 / 模型自定义源 / 歌词字号 / 歌词高亮；
+第 5 项"变调/倍速"按用户 2026-10-18 裁决撤销，保留播放页）。
+
+**备份兼容**（§5.8）：`BackupData` 删字段后旧备份 JSON 由 Gson 忽略未知字段，`BackupGsonTest` 实证含被删字段的
+旧 JSON 仍能导入且守卫不崩；凭据继续排除。**旧 JSON 宽容，恢复链路无需版本分支**。
+
+**G9 缓存登记表对账**（§10.249）：建门时正则在全树命中目录数 15 非豁免 + 1 豁免（`music`）——**这个数随代码变，
+⛔ 不抄进断言**（门里写的是不变式 `>= 15`）。19 条登记 / 17 个唯一非空 `dir`，与扫描命中数**不是一一对应**，
+差额来源：`accompaniment` 来自 `CACHE_DIR_NAME` 常量拼接（扫不到）、`models` 是变量根（扫不到）、`dir=""` 外部根
+与 `music` 豁免是同一份数据双登记、`lyrics` 两处 root 各占一行。两条已知漏网面（常量拼接 + 变量根）**故意不加
+反向断言**——"每条登记都必须被扫到"会把正确登记判成违规；登记表完整度靠人工对账（§1.14 表 15–18）。
+
+**真机验收口径**（§8 V1–V18，⏳ 全部待用户）：V16 竖屏两档（407dp 一级列表 + 二级页）；V17 B1 对照
+（TV/横屏与迁移前逐像素等价的抽样）；V18 三形态看缓存（清前后实际字节数、逐目录归零、低端机焦点）。
+截图判读用 NEAREST/profiles，⛔ 不用 LANCZOS 描边。
+
+**本轮门禁总账**：G1–G3 / G6 / G8 / G9 + 卡片契约 + 接线门 + 端点接线门（T16 新增 10 例）全部独立通道回归绿
+（最后一次全量对账：46 例设置门 + `t16_selfcheck.py` 正/负向）。发版前仍须用户跑
+`logs_temp/verify_t16.bat`（全量 2203 基线 + `assembleRelease`）与 lint（CI 的 `lintDebug` job 或
+`gradlew.bat lintDebug`）。
+
+**执行中新增的未决/遗留**（随归档显式记录，⛔ 不静默埋掉）：
+- 13b（唯一保留的 §6 未决项）：`k_pitch_semitones` / `k_playback_speed` **要不要继续写 DataStore** ——
+  超出本方案范围（只把它们移出设置页呈现，未动 DataStore 读写链路）；若裁决"运行态就该运行态"，
+  另开任务删 key + `BackupData` 字段。已写进归档 README 对应行。
+- V16/V17/V18 真机走查与 `verify_t16.bat` 全量验证 ⏳ 待用户。
+- T16 后置零引用但不删的三对字符串资源：无（已删）；唯一已知留痕 = `settings_network_test_desc` 等文案
+  仍按旧排版排在 NETWORK 卡①卡头下（T14 卡级 description 之外的冗余说明），真机 V12 抽查时若判读重复再删。
+

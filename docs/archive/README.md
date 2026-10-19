@@ -519,6 +519,16 @@
 >
 > ⚠️ 未进 `CHANGELOG.md`：纯文档移动 + 清理，按本仓规矩不登记。
 
+## 第十五轮（2026-10-19，1 个）—— 设置区整理方案落地完毕，✅ 归档
+
+| 文档 | 判定依据 | 被谁引用（已改写） | 挂起决策 |
+|---|---|---|---|
+| `settings-reorganization-plan.md` | ✅ **已落地**：T1–T17 全部执行并逐个提交（2026-10-19，`bdfd4a2`…T17 提交），执行出入与数字对账集中在 `technical-overview.md` §10.249–§10.256，用户可感知变更在 `CHANGELOG.md` v2.39.0 段落（superseding 记录）。**superseding 细节**：§6-13 原案「设置页只读呈现 K 歌变调/倍速」被用户 2026-10-18 **推翻**为「保留播放页、不进设置页」；§6-13b 是唯一保留的未决项（见右列）。方案原文与实现的三处已知出入（T13 红名单 8 处 vs 方案估 5 处、T16 探针已是 HttpURLConnection 而非 OkHttp、EndpointEditor spec 加 `masked`/改名 `hintRes`）都以 §10.252/§10.255 为准 | 源码 KDoc / `AGENTS.md` / 其它 `docs/` **零引用**（归档前后全仓 grep 均无 `docs/settings-reorganization-plan` 旧路径残留，死链自证通过） | ⏳ **13b 未决**：`k_pitch_semitones` / `k_playback_speed` **要不要继续写 DataStore** —— 方案只把它们移出设置页呈现、未动 DataStore 读写链路；若后续裁决「运行态就该运行态」，另开任务删 key + `BackupData` 字段（⛔ 本轮不静默埋掉，显式留此）。⏳ 另有执行期事项待用户：V1–V18 真机走查（V16 竖屏两档 / V17 B1 对照 / V18 缓存三形态）与 `logs_temp/verify_t16.bat` 全量 Gradle 验证 |
+
+> 归档为 `git mv`（历史保留）。归档状态头已加在文件顶部；正文一字未删（T13/T14/T15/T16 的打勾注记
+> 与「⏳ 待用户」标注原样保留，供追溯）。
+
+
 ## 回滚
 
 归档为**纯移动**（`git mv`，历史保留），未删除任何内容。整体回滚：
