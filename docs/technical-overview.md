@@ -16723,9 +16723,9 @@ G7-C：3 处实底选中 → 0。⚠️ `ChipContentWidthScanTest` 的 `CALL` �
 **验证**：`testDebugUnitTest` 220 XML / **2301 例 / 0 失败**；`assembleRelease` BUILD SUCCESSFUL；
 APK `NASMusicTV-release-v2-39-2.apk` 25,790,655 B（versionCode 187 / 2.39.2）。
 
-#### 10.258.2 v2.39.3：日志详情可复制 / 可滚到底 + Meting 响应形态收敛
+#### 10.258.2 v2.39.2 二次补丁：日志详情可复制 / 可滚到底 + Meting 响应形态收敛
 
-两条真机反馈（v2.39.2 装机后）：
+两条真机反馈（v2.39.2 首版装机后；**本轮不升版本号，改动并入 2.39.2**）：
 ① 「报错信息文本无法长按选择进行复制，并且还未显示完全。要增加一个复制报错信息的按钮。」
 ② 日志里另有一条错误：`E MetingDiag parseSongs error: JsonSyntaxException:
 java.lang.IllegalStateException: Expected BEGIN_ARRAY but was BEGIN_OBJECT at line 1 column 2 path $`。
@@ -16733,7 +16733,7 @@ java.lang.IllegalStateException: Expected BEGIN_ARRAY but was BEGIN_OBJECT at li
 ##### A. 详情「看不到底」的真根因：`responsiveDialogSize` 的 `scrollable` 在 TV 上是空参
 
 `CommonComponents.kt:228` 首行即 `if (LocalUiMode.current != UiMode.PhonePortrait) return Modifier.width(landscapeWidth)`
-—— **非竖屏直接返回，`scrollable` 与 `heightIn` 全被跳过**。v2.39.2 里写的
+—— **非竖屏直接返回，`scrollable` 与 `heightIn` 全被跳过**。首版 2.39.2 里写的
 `responsiveDialogSize(760.dp, scrollable = true)` 在电视上等价于「只定宽」：
 长堆栈既没有高度上限（顶出屏幕被裁），也没有滚动容器（`verticalScroll` 根本没挂）。
 ⇒ 本轮**不再依赖该函数分叉**，在 `LogDetailDialog` 里自己补两条与形态无关的约束：
@@ -16796,3 +16796,9 @@ java.lang.IllegalStateException: Expected BEGIN_ARRAY but was BEGIN_OBJECT at li
 
 **已知取舍**：日志详情仍不分页（一次渲染整段堆栈；单条最长约 256KB 上限内的一行日志，
 实际堆栈多在 2–4KB）；复制不含其他条目，需要多条请逐条复制。
+
+**验证（真机前最后一道）**：`logs_temp/verify_t19.bat` 四步全绿 ——
+目标用例 3 个 XML 落地、设置区门禁回归通过、全量 `testDebugUnitTest` 0 失败、
+`assembleRelease` BUILD SUCCESSFUL（5m30s）；`test-results` 共 **221 个 XML**
+（220 + 新增 `MetingJsonShapeTest` 一个类）。版本号**保持 2.39.2 / versionCode 187**
+（本轮不升版，APK 仍为 `NASMusicTV-release-v2-39-2.apk`，会覆盖上一版同名产物）。

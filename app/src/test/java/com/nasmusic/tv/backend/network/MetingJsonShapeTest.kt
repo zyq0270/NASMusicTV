@@ -12,7 +12,7 @@ import org.junit.Test
  * Meting 响应形态收敛（[MetingJsonShape]）的纯 JVM 单测。
  *
  * ## 为什么有这一层
- * v2.39.3 真机日志抓到：`MetingDiag parseSongs error: JsonSyntaxException:
+ * v2.39.2 真机日志抓到：`MetingDiag parseSongs error: JsonSyntaxException:
  * … Expected BEGIN_ARRAY but was BEGIN_OBJECT at line 1 column 2 path $`。
  * 端点是**第三方聚合层**，返回形态不可控 —— 错误信封、`{"data":[…]}` 包装、
  * 甚至整页 HTML 错误页都可能。原来直接用 `TypeToken<List<JsonObject>>` 反序列化，

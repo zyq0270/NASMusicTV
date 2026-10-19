@@ -570,7 +570,7 @@ class MetingApiService(
      * - url：播放端点 URL（含 id 参数，需提取）
      * - lrc：歌词端点 URL
      *
-     * **整体形态**不一定是数组 —— v2.39.3 真机日志抓到有端点回对象
+     * **整体形态**不一定是数组 —— v2.39.2 真机日志抓到有端点回对象
      * （`Expected BEGIN_ARRAY but was BEGIN_OBJECT`）。形态收敛交给
      * [MetingJsonShape]，本函数只负责「拿到数组之后的逐条映射」。
      */

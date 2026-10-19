@@ -20,7 +20,7 @@ internal data class MetingArrayExtraction(
 )
 
 /**
- * Meting 兼容端点响应形态的**收敛器**（v2.39.3）。
+ * Meting 兼容端点响应形态的**收敛器**（v2.39.2）。
  *
  * ## 为什么单独成文件
  * `type=search` 并不保证返回 JSON 数组。真机日志（2026-10-20 00:17:51）抓到：

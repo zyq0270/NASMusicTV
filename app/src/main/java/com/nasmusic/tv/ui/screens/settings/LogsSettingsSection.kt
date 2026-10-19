@@ -249,7 +249,7 @@ private fun LogEntryRow(entry: LogEntry, onOpen: () -> Unit) {
  * 堆栈长度不可控（几十行），展开会让「找下一条日志」变成滚动噩梦；
  * 详情是「看这一条」的专注场景。
  *
- * ## 三处真机反馈（v2.39.3）
+ * ## 三处真机反馈（v2.39.2）
  * ① **「文本无法长按选择复制」** —— 电视上根本没有长按选择这回事（遥控器没有指针）。
  *    ⇒ 给一枚「复制」芯片，把 [LogEntry.toClipboardText] 的全文（含堆栈）写进剪贴板，
  *    复用 `LinkUtils.copyToClipboard`（自带「已复制」Toast，与链接弹窗同一路径）。
