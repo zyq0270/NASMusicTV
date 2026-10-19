@@ -2,15 +2,12 @@ package com.nasmusic.tv.ui.screens.settings
 
 import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -18,7 +15,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
@@ -32,10 +28,7 @@ import com.nasmusic.tv.backend.photo.PhotoWallAccessPolicy
 import com.nasmusic.tv.backend.photo.SafDirectoryPolicy
 import com.nasmusic.tv.data.model.AppSettings
 import com.nasmusic.tv.ui.components.ConfirmDialog
-import com.nasmusic.tv.ui.components.FocusableSurface
-import com.nasmusic.tv.ui.components.LocalFocusableContentColor
 import com.nasmusic.tv.ui.components.adaptiveColumns
-import com.nasmusic.tv.ui.components.portraitTouchTarget
 import com.nasmusic.tv.ui.theme.FontSize
 import com.nasmusic.tv.ui.theme.NasMusicColors
 import com.nasmusic.tv.util.PermissionHelper
@@ -174,8 +167,9 @@ data class PhotoWallSettingsActions(
  * 照片墙分区（五卡构成见方案 §3.2 / Task 5）。
  *
  * ⚠️ Task 5 把 5 个 `SubSectionTitle` 换成 `SettingsGroupCard`（标题**复用原字符串**，
- * 不新增 key）。卡内行级排布逐行未动 —— `OptionChip` 同排宽度陷阱等既有缺陷按
- * 方案留到 T13 修；⛔ 「打开图库开关才申请权限」（§6.2）的 onClick 语义原样保留。
+ * 不新增 key）。卡内行级排布逐行未动 —— 芯片同排宽度陷阱等既有缺陷按
+ * 方案留到 T13 修（T11 已把私有 `OptionChip` 换成共享 `SettingsChip`，宽度约束不变）；
+ * ⛔ 「打开图库开关才申请权限」（§6.2）的 onClick 语义原样保留。
  */
 @OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
@@ -423,12 +417,12 @@ internal fun PhotoWallSettingsSection(
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    OptionChip(
+                    SettingsChip(
                         label = stringResource(R.string.settings_photo_wall_scale_crop),
                         selected = s.photoWallScaleMode == PhotoScaleMode.CROP,
                         onClick = { actions.onChangeScaleMode?.invoke(PhotoScaleMode.CROP) }
                     )
-                    OptionChip(
+                    SettingsChip(
                         label = stringResource(R.string.settings_photo_wall_scale_fit),
                         selected = s.photoWallScaleMode == PhotoScaleMode.FIT,
                         onClick = { actions.onChangeScaleMode?.invoke(PhotoScaleMode.FIT) }
@@ -586,53 +580,13 @@ private fun PhotoTransitionChips(
         ids.chunked(columns).forEach { rowIds ->
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 rowIds.forEach { id ->
-                    OptionChip(
+                    SettingsChip(
                         label = stringResource(id.displayNameRes),
                         selected = id == selected,
                         onClick = { onSelect(id) }
                     )
                 }
             }
-        }
-    }
-}
-
-/** 单个多选一 chip（照 `PlayModeSelector` 的选中样式） */
-@OptIn(ExperimentalTvMaterial3Api::class)
-@Composable
-private fun OptionChip(label: String, selected: Boolean, onClick: () -> Unit) {
-    FocusableSurface(
-        onClick = onClick,
-        // 48dp 在竖屏只有 39.4 物理 dp ⇒ 走 portraitTouchTarget（TV / 横屏原样返回 48dp）
-        modifier = Modifier.height(portraitTouchTarget(48.dp)),
-        shape = RoundedCornerShape(12.dp),
-        focusedScale = 1.06f,
-        animationDurationMs = 200,
-        containerColor = if (selected) NasMusicColors.Primary else NasMusicColors.Surface,
-        contentColor = if (selected) Color.Black else NasMusicColors.TextPrimary,
-        focusedContainerColor = if (selected) NasMusicColors.Primary else NasMusicColors.Primary.copy(alpha = 0.2f),
-        focusedContentColor = if (selected) Color.Black else NasMusicColors.TextPrimary,
-        pressedScale = 0.96f,
-        focusBorderColor = NasMusicColors.FocusRing.copy(alpha = 0.6f)
-    ) {
-        Box(
-            // ⛔ 宽度**必须由内容决定**（文字 + padding），不能用 `fillMaxSize()`：
-            // 本组件总是被放在 `Row` 里并排（画面适配 2 个、转场 43 个），而 `Row`
-            // 给每个 wrap-content 子项的最大宽度是「本行剩余宽度」——`fillMaxSize()`
-            // 会取这个最大值 ⇒ **第一个 chip 撑满整行，同排后续 chip 被挤成 0 宽**。
-            // 症状（2026-09-24 用户报）：画面适配只见「满屏」，「完整」不显示。
-            // 同类坑在 v2.35.0 已发生过一次（`SettingActionButton` 默认 fillMaxWidth，
-            // 表现为「网络源音质只有『自动』一个选项」）。
-            // 高度仍由外层 `Modifier.height(portraitTouchTarget(48.dp))` 给定，故只填高。
-            modifier = Modifier.fillMaxHeight().padding(horizontal = 16.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(
-                text = label,
-                color = if (selected) Color.Black else LocalFocusableContentColor.current,
-                fontSize = FontSize.button(),
-                maxLines = 1
-            )
         }
     }
 }

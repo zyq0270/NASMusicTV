@@ -7,7 +7,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlaylistPlay
 import androidx.compose.runtime.Composable
@@ -20,7 +19,6 @@ import androidx.tv.material3.Icon
 import androidx.tv.material3.Text
 import com.nasmusic.tv.R
 import com.nasmusic.tv.data.model.PlaylistImportHistoryItem
-import com.nasmusic.tv.ui.components.FocusableSurface
 import com.nasmusic.tv.ui.components.LocalFocusableContentColor
 import com.nasmusic.tv.ui.theme.FontSize
 import com.nasmusic.tv.ui.theme.NasMusicColors
@@ -43,21 +41,13 @@ internal fun ImportedPlaylistRow(
             .padding(vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        FocusableSurface(
+        SettingsTile(
             onClick = onOpen,
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(12.dp),
-            focusedScale = 1.03f,
-            animationDurationMs = 250,
-            containerColor = NasMusicColors.Surface,
-            contentColor = NasMusicColors.TextPrimary,
-            focusedContainerColor = NasMusicColors.Primary.copy(alpha = 0.15f),
-            focusedContentColor = NasMusicColors.TextPrimary,
-            pressedScale = 0.98f,
-            focusBorderColor = NasMusicColors.FocusRing.copy(alpha = 0.6f)
         ) {
             Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 14.dp),
+                modifier = Modifier.fillMaxWidth()
+                    .padding(horizontal = SettingsTokens.rowHPadding, vertical = SettingsTokens.rowVPadding),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Icon(

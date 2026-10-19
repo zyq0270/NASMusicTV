@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -22,7 +21,7 @@ import androidx.tv.material3.Text
 import com.nasmusic.tv.NasMusicVersion
 import com.nasmusic.tv.R
 import com.nasmusic.tv.data.model.VersionInfo
-import com.nasmusic.tv.ui.components.FocusableSurface
+import com.nasmusic.tv.ui.components.LocalFocusableContentColor
 import com.nasmusic.tv.ui.theme.FontSize
 import com.nasmusic.tv.ui.theme.NasMusicColors
 
@@ -41,9 +40,10 @@ data class AboutSettingsState(
  * 关于分区（原 SettingsScreen ABOUT 分支，逻辑逐行搬迁；四卡构成见方案 §3.2 / Task 8）。
  *
  * ⚠️ Task 8 只做「裸 `Text` / `SubSectionTitle` 标题 → `SettingsGroupCard` 卡片头」，
- * 并把 GitHub 仓库链接从 `Text.clickable` 换成 [FocusableSurface] 瓦片
+ * 并把 GitHub 仓库链接从 `Text.clickable` 换成可聚焦瓦片
  * （方案 §2-7 缺陷本体：`Modifier.clickable` 的文本在 TV 上聚焦不到，遥控器没路径）：
- * 容器 / 焦点色与 [SettingActionButton] 同一套口径，跳转仍走 `Intent.ACTION_VIEW`。
+ * 容器 / 焦点色与 [SettingActionButton] 同一套口径（T11 起两者都走 `SettingsTile`），
+ * 跳转仍走 `Intent.ACTION_VIEW`。
  */
 @OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
@@ -117,8 +117,8 @@ internal fun AboutSettingsSection(state: AboutSettingsState) {
                 modifier = Modifier.padding(bottom = 8.dp)
             )
             // ⚠️ 原 `Text(...).clickable { startActivity }` 在 TV 上聚焦不到（方案 §2-7），
-            // 换成 FocusableSurface 瓦片；容器 / 焦点色与 SettingActionButton 同口径。
-            FocusableSurface(
+            // 换成瓦片；T11 起统一走 SettingsTile（取值收口，G7-B 要求分区零裸瓦片）。
+            SettingsTile(
                 onClick = {
                     try {
                         val intent = Intent(Intent.ACTION_VIEW, Uri.parse(GITHUB_PROJECT_URL))
@@ -126,25 +126,16 @@ internal fun AboutSettingsSection(state: AboutSettingsState) {
                     } catch (_: Exception) {}
                 },
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp),
-                focusedScale = 1.03f,
-                animationDurationMs = 250,
-                containerColor = NasMusicColors.Surface,
-                contentColor = NasMusicColors.TextPrimary,
-                focusedContainerColor = NasMusicColors.Primary.copy(alpha = 0.15f),
-                focusedContentColor = NasMusicColors.TextPrimary,
-                pressedScale = 0.98f,
-                focusBorderColor = NasMusicColors.FocusRing.copy(alpha = 0.6f)
             ) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 24.dp, vertical = 18.dp),
+                        .padding(horizontal = SettingsTokens.rowHPadding, vertical = SettingsTokens.rowVPadding),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
                         text = GITHUB_PROJECT_URL,
-                        color = NasMusicColors.TextPrimary,
+                        color = LocalFocusableContentColor.current,
                         fontSize = FontSize.button(),
                         modifier = Modifier.weight(1f)
                     )

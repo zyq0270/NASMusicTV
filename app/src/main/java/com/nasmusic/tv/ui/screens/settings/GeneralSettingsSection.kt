@@ -6,20 +6,16 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.tv.material3.ExperimentalTvMaterial3Api
 import androidx.tv.material3.Text
 import com.nasmusic.tv.R
 import com.nasmusic.tv.data.model.AppSettings
-import com.nasmusic.tv.ui.components.FocusableSurface
-import com.nasmusic.tv.ui.components.LocalFocusableContentColor
 import com.nasmusic.tv.ui.theme.FontSize
 import com.nasmusic.tv.ui.theme.NasMusicColors
 
@@ -66,25 +62,12 @@ internal fun GeneralSettingsSection(
                     "zh" to stringResource(R.string.settings_language_zh),
                     "en" to stringResource(R.string.settings_language_en)
                 ).forEach { (value, label) ->
-                    val selected = state.language == value
-                    FocusableSurface(
+                    SettingsChip(
+                        label = label,
+                        selected = state.language == value,
                         onClick = { actions.onChangeLanguage?.invoke(value) },
                         modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(10.dp),
-                        containerColor = if (selected) NasMusicColors.Primary.copy(alpha = 0.18f) else androidx.compose.ui.graphics.Color.Transparent,
-                        contentColor = if (selected) NasMusicColors.Primary else NasMusicColors.TextPrimary,
-                        focusedContainerColor = if (selected) NasMusicColors.Primary.copy(alpha = 0.3f) else NasMusicColors.SurfaceVariant,
-                        focusedContentColor = if (selected) NasMusicColors.Primary else NasMusicColors.TextPrimary,
-                        focusedScale = 1.05f
-                    ) {
-                        Text(
-                            text = label,
-                            color = LocalFocusableContentColor.current,
-                            fontSize = FontSize.body(),
-                            fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
-                        )
-                    }
+                    )
                 }
             }
         }
@@ -124,25 +107,12 @@ internal fun GeneralSettingsSection(
                     "portrait" to stringResource(R.string.settings_orientation_portrait),
                     "landscape" to stringResource(R.string.settings_orientation_landscape)
                 ).forEach { (value, label) ->
-                    val selected = state.screenOrientation == value
-                    FocusableSurface(
+                    SettingsChip(
+                        label = label,
+                        selected = state.screenOrientation == value,
                         onClick = { actions.onChangeScreenOrientation?.invoke(value) },
                         modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(10.dp),
-                        containerColor = if (selected) NasMusicColors.Primary.copy(alpha = 0.18f) else androidx.compose.ui.graphics.Color.Transparent,
-                        contentColor = if (selected) NasMusicColors.Primary else NasMusicColors.TextPrimary,
-                        focusedContainerColor = if (selected) NasMusicColors.Primary.copy(alpha = 0.3f) else NasMusicColors.SurfaceVariant,
-                        focusedContentColor = if (selected) NasMusicColors.Primary else NasMusicColors.TextPrimary,
-                        focusedScale = 1.05f
-                    ) {
-                        Text(
-                            text = label,
-                            color = LocalFocusableContentColor.current,
-                            fontSize = FontSize.body(),
-                            fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
-                        )
-                    }
+                    )
                 }
             }
         }

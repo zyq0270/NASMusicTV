@@ -22,7 +22,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -122,6 +121,105 @@ internal fun SubSectionTitle(text: String) {
     )
 }
 
+/**
+ * 设置区**唯一**的可聚焦瓦片（方案 §4.7-②，门禁 G7-B）。
+ *
+ * 存在理由：同一份 `FocusableSurface` 参数块此前在设置区有 7 份，圆角 4 种、`focusedScale`
+ * 6 种、动画时长 4 种、按压缩放 3 种 —— 逐个组件手改参数必然再次漂移。这里收成一份，
+ * 取值全部来自 [SettingsTokens]，分区里**不准**再出现裸 `FocusableSurface(`。
+ *
+ * 语义只有四个开关，覆盖设置页的全部瓦片形态：
+ * - [enabled]：置灰。⚠️ `onClick` 里**必须**判一次 —— `FocusableSurface` 仍可聚焦，
+ *   单靠颜色挡不住遥控器的「确认」键。
+ * - [selected]：「已选中」的**唯一**表达（`Primary@0.18` 底 + Primary 字，§4.7-③ S3）。
+ *   ⛔ 设置页不出现实底 Primary —— 那是唯一主 CTA（连接页「连接」按钮）的语义。
+ * - [danger]：破坏性动作（§4.7-③ S6）。文字与焦点底都取 `Warning`；
+ *   ⚠️ 方案 §4.7-② 的片段里 danger 会落进 `else` 分支拿到 `Primary@0.15` 焦点底，
+ *   与 S6「焦点底也取 Warning」冲突 —— 这里以 S6 为准，danger 单列一支。
+ * - [chip]：小尺寸可选项（芯片 / ± 按钮）。圆角、缩放、按压、外边距各降一档。
+ *
+ * ⛔ 别在这里加 `height()`：芯片的高度由调用方给（`portraitTouchTarget(48.dp)`），
+ * 行的高度由内容撑开 —— 统一写死会把 `BackupFileRow` 的 64dp 方块也压扁。
+ */
+@OptIn(ExperimentalTvMaterial3Api::class)
+@Composable
+internal fun SettingsTile(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    selected: Boolean = false,
+    danger: Boolean = false,
+    chip: Boolean = false,
+    content: @Composable () -> Unit,
+) {
+    val accent = if (danger) NasMusicColors.Warning else NasMusicColors.Primary
+    FocusableSurface(
+        onClick = { if (enabled) onClick() },
+        modifier = modifier.padding(vertical = if (chip) 0.dp else 4.dp),
+        shape = if (chip) SettingsTokens.chipShape else SettingsTokens.rowShape,
+        focusedScale = when {
+            !enabled -> SettingsTokens.focusScaleDisabled
+            chip -> SettingsTokens.focusScaleChip
+            else -> SettingsTokens.focusScaleRow
+        },
+        pressedScale = if (chip) SettingsTokens.pressScaleChip else SettingsTokens.pressScaleRow,
+        animationDurationMs = SettingsTokens.animMs,
+        containerColor = when {
+            !enabled -> NasMusicColors.Surface.copy(alpha = 0.5f)
+            selected -> accent.copy(alpha = 0.18f)
+            else -> NasMusicColors.Surface
+        },
+        contentColor = when {
+            !enabled -> NasMusicColors.TextSecondary
+            selected -> accent
+            danger -> NasMusicColors.Warning
+            else -> NasMusicColors.TextPrimary
+        },
+        focusedContainerColor = when {
+            !enabled -> NasMusicColors.SurfaceVariant
+            selected -> accent.copy(alpha = 0.3f)
+            danger -> accent.copy(alpha = 0.18f)
+            else -> NasMusicColors.Primary.copy(alpha = 0.15f)
+        },
+        focusedContentColor = when {
+            !enabled -> NasMusicColors.TextSecondary
+            danger -> accent
+            else -> NasMusicColors.TextPrimary
+        },
+        focusBorderColor = NasMusicColors.FocusRing.copy(alpha = 0.6f),
+        content = content,
+    )
+}
+
+/**
+ * 行瓦片的统一内容排版：标签 + 说明（左，占权重）+ 尾部（右）。方案 §4.7-②。
+ *
+ * 说明用 `FontSize.small()` + 固定 [NasMusicColors.TextSecondary]（§4.7-④）：此前
+ * `SettingSwitch` / `SettingActionButton` 的说明是 `FontSize.body()` + 跟随焦点的
+ * `LocalFocusableContentColor`，而 GENERAL 的语言/方向说明是 `small()` + 固定色 ——
+ * 同为"行说明"两套规格。变色还会让「标签 + 说明」在聚焦时同时提亮，反而削弱层级差。
+ */
+@Composable
+private fun SettingsTileBody(
+    label: String,
+    description: String?,
+    trailing: @Composable () -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth()
+            .padding(horizontal = SettingsTokens.rowHPadding, vertical = SettingsTokens.rowVPadding),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(text = label, color = LocalFocusableContentColor.current, fontSize = FontSize.button())
+            if (description != null) {
+                Text(text = description, color = NasMusicColors.TextSecondary, fontSize = FontSize.small())
+            }
+        }
+        trailing()
+    }
+}
+
 @OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
 internal fun SettingSwitch(
@@ -131,30 +229,14 @@ internal fun SettingSwitch(
     onClick: () -> Unit,
     enabled: Boolean = true
 ) {
-    FocusableSurface(
-        onClick = { if (enabled) onClick() },
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 4.dp),
-        shape = RoundedCornerShape(12.dp),
-        focusedScale = 1.03f,
-        animationDurationMs = 250,
-        containerColor = if (enabled) NasMusicColors.Surface else NasMusicColors.Surface.copy(alpha = 0.5f),
-        contentColor = if (enabled) NasMusicColors.TextPrimary else NasMusicColors.TextSecondary,
-        focusedContainerColor = if (enabled) NasMusicColors.Primary.copy(alpha = 0.15f) else NasMusicColors.SurfaceVariant,
-        focusedContentColor = if (enabled) NasMusicColors.TextPrimary else NasMusicColors.TextSecondary,
-        pressedScale = 0.98f,
-        focusBorderColor = NasMusicColors.FocusRing.copy(alpha = 0.6f)
+    SettingsTile(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
+        enabled = enabled,
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 18.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(text = label, color = if (enabled) NasMusicColors.TextPrimary else NasMusicColors.TextSecondary, fontSize = FontSize.button())
-                Text(text = description, color = LocalFocusableContentColor.current, fontSize = FontSize.body())
-            }
-            // Switch indicator
+        SettingsTileBody(label = label, description = description) {
+            // ⚠️ 尾部这里仍是 WiFi 开关文案（T12 换成 SwitchTrack + settings_on/off）：
+            // T11 只收"取值"，diff 里不许出现语义变化（方案 §4.7 与 T12 开头互证）。
             Text(
                 text = if (checked) stringResource(R.string.settings_wifi_on) else stringResource(R.string.settings_wifi_off),
                 color = if (checked) NasMusicColors.Primary else NasMusicColors.TextSecondary,
@@ -176,20 +258,11 @@ internal fun PlayModeSelector(current: PlayMode, onSelect: (PlayMode) -> Unit) {
         )
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             PlayMode.values().forEach { mode ->
-                val selected = current == mode
-                FocusableSurface(
+                SettingsChip(
+                    label = stringResource(mode.displayNameRes),
+                    selected = current == mode,
                     onClick = { onSelect(mode) },
-                    shape = RoundedCornerShape(12.dp),
-                    focusedScale = 1.08f,
-                    animationDurationMs = 250,
-                    containerColor = if (selected) NasMusicColors.Primary else NasMusicColors.Surface,
-                    contentColor = if (selected) androidx.compose.ui.graphics.Color.Black else NasMusicColors.TextPrimary,
-                    focusedContainerColor = if (selected) NasMusicColors.Primary else NasMusicColors.Primary.copy(alpha = 0.2f),
-                    focusedContentColor = if (selected) androidx.compose.ui.graphics.Color.Black else NasMusicColors.TextPrimary,
-                    pressedScale = 0.95f
-                ) {
-                    Text(text = stringResource(mode.displayNameRes), color = if (selected) androidx.compose.ui.graphics.Color.Black else NasMusicColors.TextPrimary, fontSize = FontSize.button(), modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp))
-                }
+                )
             }
         }
     }
@@ -219,28 +292,12 @@ internal fun SettingActionButton(
      */
     enabled: Boolean = true,
 ) {
-    FocusableSurface(
-        onClick = { if (enabled) onClick() },
-        modifier = modifier
-            .padding(vertical = 4.dp),
-        shape = RoundedCornerShape(12.dp),
-        focusedScale = if (enabled) 1.03f else 1f,
-        animationDurationMs = 250,
-        containerColor = if (enabled) NasMusicColors.Surface else NasMusicColors.Surface.copy(alpha = 0.5f),
-        contentColor = if (enabled) NasMusicColors.TextPrimary else NasMusicColors.TextSecondary,
-        focusedContainerColor = if (enabled) NasMusicColors.Primary.copy(alpha = 0.15f) else NasMusicColors.SurfaceVariant,
-        focusedContentColor = if (enabled) NasMusicColors.TextPrimary else NasMusicColors.TextSecondary,
-        pressedScale = 0.98f,
-        focusBorderColor = NasMusicColors.FocusRing.copy(alpha = 0.6f)
+    SettingsTile(
+        onClick = onClick,
+        modifier = modifier,
+        enabled = enabled,
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 18.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(text = label, color = if (enabled) NasMusicColors.TextPrimary else NasMusicColors.TextSecondary, fontSize = FontSize.button())
-                Text(text = description, color = LocalFocusableContentColor.current, fontSize = FontSize.body())
-            }
+        SettingsTileBody(label = label, description = description) {
             Text(
                 text = stringResource(R.string.common_confirm),
                 color = NasMusicColors.Primary,
@@ -263,23 +320,15 @@ internal fun BackupFileRow(
             .padding(vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        FocusableSurface(
+        SettingsTile(
             onClick = onRestore,
             modifier = Modifier
                 .weight(1f)
                 .padding(end = 12.dp),
-            shape = RoundedCornerShape(12.dp),
-            focusedScale = 1.03f,
-            animationDurationMs = 250,
-            containerColor = NasMusicColors.Surface,
-            contentColor = NasMusicColors.TextPrimary,
-            focusedContainerColor = NasMusicColors.Primary.copy(alpha = 0.15f),
-            focusedContentColor = NasMusicColors.TextPrimary,
-            pressedScale = 0.98f,
-            focusBorderColor = NasMusicColors.FocusRing.copy(alpha = 0.6f)
         ) {
             Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 14.dp),
+                modifier = Modifier.fillMaxWidth()
+                    .padding(horizontal = SettingsTokens.rowHPadding, vertical = SettingsTokens.rowVPadding),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Icon(
@@ -306,18 +355,13 @@ internal fun BackupFileRow(
             }
         }
         if (onDelete != null) {
-            FocusableSurface(
+            // 删除是设置区唯一一处**现状就已经用语义色**的瓦片（§4.7-③ S6 的样本），
+            // 收口到 `danger = true` 后其余破坏性按钮在 T12 跟上。
+            SettingsTile(
                 onClick = onDelete,
                 modifier = Modifier.size(64.dp),
-                shape = RoundedCornerShape(12.dp),
-                focusedScale = 1.06f,
-                animationDurationMs = 200,
-                containerColor = NasMusicColors.Surface,
-                contentColor = NasMusicColors.Warning,
-                focusedContainerColor = NasMusicColors.Warning.copy(alpha = 0.18f),
-                focusedContentColor = NasMusicColors.Warning,
-                pressedScale = 0.96f,
-                focusBorderColor = NasMusicColors.FocusRing.copy(alpha = 0.6f)
+                danger = true,
+                chip = true,
             ) {
                 Text(
                     text = stringResource(R.string.settings_delete_backup),
@@ -336,14 +380,40 @@ internal fun AboutRow(label: String, value: String) {
     // 修复（2026-09-22 用户反馈）：原「标签 + weight Spacer + 值」结构在值过长时
     // Spacer 塌缩、值紧跟标签（视觉上忽左忽右）。改为固定双栏：标签占左（超长换行），
     // 值恒右对齐（超长换行也按右缘对齐）。手机 / TV 一致。
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically
+    Box(
+        modifier = Modifier.fillMaxWidth()
+            .padding(horizontal = SettingsTokens.rowHPadding, vertical = SettingsTokens.rowVPadding)
     ) {
+        SettingsLabelValueRow(
+            label = label,
+            value = value,
+            labelFontSize = FontSize.button(),
+            valueFontSize = FontSize.button(),
+            valueWeight = FontWeight.Normal,
+        )
+    }
+}
+
+/**
+ * 「标签 + 值」的唯一版式（方案 §4.7-④）：标签占 1 份、值占 1.5 份，值恒右对齐。
+ *
+ * 存在理由：`AboutRow` 与 `SettingsInfoRow` 是同一个版式的两套实现，后者用
+ * `Arrangement.SpaceBetween` 且**不限宽** —— 长值会把标签挤没（竖屏实测）。收成一份后
+ * 两处都吃这个 1 : 1.5 的双栏。⛔ 不要给值加 `maxLines`：长值必须折行，不许省略号截断。
+ */
+@Composable
+private fun SettingsLabelValueRow(
+    label: String,
+    value: String,
+    labelFontSize: androidx.compose.ui.unit.TextUnit,
+    valueFontSize: androidx.compose.ui.unit.TextUnit,
+    valueWeight: FontWeight,
+) {
+    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Text(
             text = label,
             color = NasMusicColors.TextSecondary,
-            fontSize = FontSize.button(),
+            fontSize = labelFontSize,
             modifier = Modifier.weight(1f)
         )
         // 竖屏修正（20:40 用户反馈）：值不限定权重时长文本会吃掉整行、把 weight
@@ -352,7 +422,8 @@ internal fun AboutRow(label: String, value: String) {
         Text(
             text = value,
             color = NasMusicColors.TextPrimary,
-            fontSize = FontSize.button(),
+            fontSize = valueFontSize,
+            fontWeight = valueWeight,
             textAlign = androidx.compose.ui.text.style.TextAlign.End,
             modifier = Modifier.weight(1.5f).padding(start = 16.dp)
         )
@@ -393,38 +464,32 @@ internal fun formatVersionInfo(v: com.nasmusic.tv.data.model.VersionInfo): Pair<
 @OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
 internal fun AdjustButton(text: String, onClick: () -> Unit) {
-    FocusableSurface(
+    SettingsTile(
         onClick = onClick,
         // 48dp 在竖屏只有 39.4 物理 dp ❌ → §2.7 换算抬到 56dp（TV/横屏保持 48dp，B1）
+        // ⚠️ 这个字面量是 `SmallTouchTargetScanTest` 的抓手，⛔ 不要令牌化（§4.7-⑥ 已说明）。
         modifier = Modifier.size(portraitTouchTarget(48.dp)),
-        shape = RoundedCornerShape(12.dp),
-        focusedScale = 1.1f,
-        animationDurationMs = 200,
-        containerColor = NasMusicColors.Surface,
-        contentColor = NasMusicColors.TextPrimary,
-        focusedContainerColor = NasMusicColors.Primary.copy(alpha = 0.2f),
-        focusedContentColor = NasMusicColors.Primary,
-        pressedScale = 0.95f,
-        focusBorderColor = NasMusicColors.FocusRing.copy(alpha = 0.6f)
+        chip = true,
     ) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text(text = text, color = NasMusicColors.TextPrimary, fontSize = FontSize.title(), fontWeight = FontWeight.Bold)
+            Text(text = text, color = LocalFocusableContentColor.current, fontSize = FontSize.title(), fontWeight = FontWeight.Bold)
         }
     }
 }
 
 /**
- * 设置页共享芯片（单选组用）：选中态是**唯一一种表达**（实底 Primary + 黑字）。
+ * 设置页共享芯片（单选组用）。
  *
- * 从 `PhotoWallSettingsSection` 的私有 `OptionChip` 提升而来（T10 先用，T11 把
- * 照片墙的三处调用点一起换过来）。
+ * 从 `PhotoWallSettingsSection` 的私有 `OptionChip` 提升而来；T11 起**内部委托
+ * [SettingsTile]**，选中态因此与行瓦片共用同一种表达（`Primary@0.18` 底 + Primary 字，
+ * §4.7-③ S3）—— 此前芯片是**实底 Primary + 黑字**，与行瓦片的 `0.18` 底是两套。
  *
  * ⛔ **宽度必须由内容决定**（文字 + padding），不能用 `fillMaxSize()`：
  * 本组件总是被放在 `Row` 里并排，而 `Row` 给每个 wrap-content 子项的最大宽度是
  * 「本行剩余宽度」——`fillMaxSize()` 会取这个最大值 ⇒ **第一个 chip 撑满整行，
  * 同排后续 chip 被挤成 0 宽**（v2.37.0「画面适配只显示满屏」、v2.35.0「音质只有自动」
  * 两次线上实例，护栏见 `ChipContentWidthScanTest`）。
- * 高度由外层 `Modifier.height(portraitTouchTarget(48.dp))` 给定，故内容只填高。
+ * 高度由 `portraitTouchTarget(48.dp)` 给定（同样是那道门的抓手，⛔ 别换写法），故内容只填高。
  */
 @OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
@@ -434,28 +499,23 @@ internal fun SettingsChip(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    FocusableSurface(
+    SettingsTile(
         onClick = onClick,
         modifier = modifier.height(portraitTouchTarget(48.dp)),
-        shape = RoundedCornerShape(12.dp),
-        focusedScale = 1.06f,
-        animationDurationMs = 200,
-        containerColor = if (selected) NasMusicColors.Primary else NasMusicColors.Surface,
-        contentColor = if (selected) Color.Black else NasMusicColors.TextPrimary,
-        focusedContainerColor = if (selected) NasMusicColors.Primary else NasMusicColors.Primary.copy(alpha = 0.2f),
-        focusedContentColor = if (selected) Color.Black else NasMusicColors.TextPrimary,
-        pressedScale = 0.96f,
-        focusBorderColor = NasMusicColors.FocusRing.copy(alpha = 0.6f)
+        selected = selected,
+        chip = true,
     ) {
         Box(
-            modifier = Modifier.fillMaxHeight().padding(horizontal = 16.dp),
+            modifier = Modifier.fillMaxHeight().padding(horizontal = SettingsTokens.chipHPadding),
             contentAlignment = Alignment.Center
         ) {
             Text(
                 text = label,
-                color = if (selected) Color.Black else LocalFocusableContentColor.current,
+                color = LocalFocusableContentColor.current,
                 fontSize = FontSize.button(),
-                fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal
+                fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                // 芯片恒单行：高度被 `portraitTouchTarget(48.dp)` 钉死，折行会溢出。
+                maxLines = 1
             )
         }
     }
@@ -463,6 +523,10 @@ internal fun SettingsChip(
 
 /**
  * 下载统计行：标签 + 值（W0 约定重命名：原 InfoRow → SettingsInfoRow）。
+ *
+ * 版式与 `AboutRow` 共用 [SettingsLabelValueRow]（1 : 1.5 双栏、值恒右对齐）——
+ * 此前这里用 `Arrangement.SpaceBetween` 且不限宽，长值会把标签挤没（§4.7-④）。
+ * 水平边距取 `rowHPadding`，与行瓦片的内边距对齐，标签不再比上面的开关行凸出 20dp。
  *
  * @param description 只读行按 §4.5 规范**默认不带**功能说明；只有该项"删了有代价"
  *   需要警示时才给（T8b 的 9 条缓存代价说明）。`null` = 不占第二行。
@@ -476,23 +540,18 @@ internal fun SettingsInfoRow(
     indent: Boolean = false,
 ) {
     Column(
-        modifier = Modifier.fillMaxWidth().padding(start = if (indent) 16.dp else 0.dp)
+        modifier = Modifier.fillMaxWidth().padding(
+            start = SettingsTokens.rowHPadding + if (indent) 16.dp else 0.dp,
+            end = SettingsTokens.rowHPadding,
+        )
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = label,
-                color = NasMusicColors.TextSecondary,
-                fontSize = FontSize.body()
-            )
-            Text(
-                text = value,
-                color = NasMusicColors.TextPrimary,
-                fontSize = FontSize.body(),
-                fontWeight = FontWeight.Medium
+        Box(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+            SettingsLabelValueRow(
+                label = label,
+                value = value,
+                labelFontSize = FontSize.body(),
+                valueFontSize = FontSize.body(),
+                valueWeight = FontWeight.Medium,
             )
         }
         if (description != null) {

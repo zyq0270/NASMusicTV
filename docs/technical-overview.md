@@ -16170,3 +16170,75 @@ KDoc 还写着"供设置页手动清除"，但从来没有调用方**（`CoverUr
 **验收口径**：G9 空转下限写不变式（命中目录数 `>= 15`，当前基线 15 个非豁免 + 1 个豁免 `music`），
 ⛔ 不要把"16"抄进断言。本任务实测：19 条登记 / 17 个唯一非空 `dir`（`lyrics` 两处 root 各 1 行、
 `dir=""` 的外部根 1 条），与 G9 扫出的目录名**不是一一对应**——对账请按 `dir` 清单逐名点。
+
+---
+
+### 10.250 v2.39.0 — 设置区整理 T11：取值收口到 `SettingsTile`，G7-A/B/C 转绿（2026-10-19）
+
+**问题**：设置区的瓦片参数块有 **7 份**，同一语义各写一套 —— 圆角 4 种（6/8/10/12dp）、
+`focusedScale` 6 种（1.02/1.03/1.05/1.06/1.08/1.1）、动画时长 4 种（120/150/200/250）、
+按压缩放 3 种（0.95/0.96/0.98）、行内边距 4 套（24/18、24/14、24/12、0）、
+「已选中」3 种互不兼容的表达（实底 Primary + 黑字 / `Primary@0.18` / 纯文字前缀「▶」）。
+逐组件手改参数必然再次漂移 ⇒ 收成一个委托层 `SettingsTile`，取值全部来自 `SettingsTokens`。
+
+**红-绿对账基线（迁移前实测，脚本 `logs_temp/t11_redlist.py`，与单测同谓词）**：
+
+| 门 | 迁移前 | 迁移后 | 说明 |
+|---|---|---|---|
+| G7-A 参数位字面量 | **69 处 / 14 个受检文件** | **0** | 其中 `shape =` 19 处、`focusedScale` 17、`animationDurationMs` 17、`pressedScale` 16 |
+| G7-B 分区裸瓦片 | **5 个文件 11 处** + `SettingsComponents` **7 处** | **0** + **1** | 11 = About 1 / General 2 / ImportedPlaylistRow 1 / NetworkMusic 6 / PhotoWall 1 |
+| G7-C 实底或手调选中 | **3 处**（`General:74`、`General:132`、`NetworkMusic:417`） | **0** | 方案说 4 处是含 `SettingsComponents` 那处，G7-C 作用域不含它 |
+
+⚠️ 方案 §2-10 写的"15 处 `shape = ` / 20 处裸瓦片 / 4 处选中"是**估算口径**（它把 FQN 写法、
+`SettingsComponents` 内、豁免文件一起算进了不同列）。以本表为准 —— **不变式写法**，别把数字抄进断言。
+
+**三条判据必须这样实现**（照抄会漏整类，逐条都有实测依据）：
+
+- **G7-A 判据是「参数名行内不得有数字」，不是「不得出现 `RoundedCornerShape(`」**。真病灶之一是
+  `focusedScale = if (enabled) 1.03f else 1f` —— 条件表达式里藏字面量，只匹配 `= 1.` 会整类漏掉。
+  代价：`if (enabled) SettingsTokens.focusScaleRow else 1f` 也会被咬，所以令牌里必须有
+  `focusScaleDisabled = 1f`。这是**有意的**：置灰不放大也该是唯一取值。
+- **G7-C 必须用「`NasMusicColors.Primary` 后面不是 `.copy(`」这个正则**，不能写成
+  `contains("NasMusicColors.Primary,")`。真实病灶有两种写法：裸的
+  `containerColor = NasMusicColors.Primary,`，以及
+  `containerColor = if (selected) NasMusicColors.Primary else NasMusicColors.Surface,`
+  （原 `OptionChip` / `PlayModeSelector` 就是后者）。只匹配带逗号的那种会整类漏掉 ——
+  **方案自带的负向样本恰好就是这一行**，照抄会让负向自证自己失败（实测 `size` 只到 1，断言要 2）。
+- **`stripComments` 必须换成状态机，且按深度计块注释**。原实现是
+  `Regex("/\\*.*?\\*/", DOT_MATCHES_ALL)` + 按行 `substringBefore("//")`，三个坑：
+  ① 块注释整段删除（含换行）会把跨行注释两侧的代码**粘到一行**，而 G7-A 是逐行判据 ⇒ 假绿 + 假红；
+  ② Kotlin 的块注释**可嵌套**（KDoc 正文里写 `/* … */` 不会提前闭合），非贪婪匹配会提前收尾；
+  ③ 字符串里的 `//`（本仓有 `it.substringBefore("//")`）会被当注释吃掉后半行。
+  换成"保留长度、按 `//` / `/* */` 深度、认字符串与字符字面量"的状态机后，行号与原文一致。
+
+**委托层的四个语义开关**（`SettingsTile(onClick, modifier, enabled, selected, danger, chip, content)`）：
+
+- `selected`：「已选中」的唯一表达 = `Primary@0.18` 底 + Primary 字（§4.7-③ S3）。
+  ⛔ 设置页**不出现实底 Primary** —— 那是唯一主 CTA（连接页「连接」按钮）的语义。
+  ⚠️ 这条让 `PlayModeSelector` 与照片墙 43 个转场芯片的选中态从「实底 + 黑字」变成「0.18 底 + Primary 字」，
+  是**可感知的改动**（方案 S3 明确要求），真机按 V14 专看这一项。
+- `danger`：方案 §4.7-② 的代码片段让 danger 落进 `else` 分支拿到 `Primary@0.15` 焦点底，
+  与 S6「焦点底也取 `Warning`」冲突 ⇒ 实现里 danger **单列一支**（焦点底 `Warning@0.18`、焦点字 `Warning`），
+  以 S6 为准。`BackupFileRow` 的删除键是现状里唯一已经用语义色的样本，收口后语义不变。
+- `chip`：圆角 / 缩放 / 按压 / 外边距各降一档（`chipShape` 10dp、1.06、0.96、0 外边距）。
+- ⛔ **不在 `SettingsTile` 里写 `height()`**：芯片高度由调用方给（`portraitTouchTarget(48.dp)`），
+  行高由内容撑开 —— 统一写死会把 `BackupFileRow` 的 64dp 方块压扁。
+
+**顺带修掉的三处排版漂移**（属"统一"，不是新功能）：`SettingsInfoRow` 换成与 `AboutRow` 共用的
+`SettingsLabelValueRow`（1 : 1.5 双栏、值恒右对齐、水平边距取 `rowHPadding`，标签不再比上面的开关行
+凸出 20dp）；`SettingSwitch` / `SettingActionButton` 的说明从 `FontSize.body()` + 跟随焦点的
+`LocalFocusableContentColor` 改为 `FontSize.small()` + 固定 `TextSecondary`（变色会让标签与说明
+在聚焦时同时提亮，反而削弱层级差）。
+
+**`AdjustButton` 的 `focusedScale` 1.1 → 1.06**：± 按钮放大幅度变小，可感知，真机 V14 一起看。
+
+**两个"抓手"必须同批改，否则门变成空转**：`ChipContentWidthScanTest` 的 `CALL` 正则从
+`\bFocusableSurface\(` 扩成 `\b(FocusableSurface|SettingsTile|SettingsChip)\(` —— 迁移后 0 宽陷阱的载体
+换了名字，不扩就是"扫不到调用点 → 空转断言仍绿但实际失配"；并补了 `SettingsTile` / `SettingsChip`
+各一个破坏样本。`SmallTouchTargetScanTest` 靠 `(\d+(\.\d+)?)\.dp` 字面量量热区 ⇒
+`portraitTouchTarget(48.dp)` **保持原样**（G7-A 只检四个参数名，正是故意不把审计面从"取值"扩到"尺寸"）。
+
+**`PhotoWallSettingsSection` 的私有 `OptionChip` 已删除**，三处调用点改用共享 `SettingsChip`
+（宽度约束不变：内容只填高、宽度由文字 + `chipHPadding` 决定）。⚠️ 方案 T14 的 G6-C 判据原文
+引用的是 `OptionChip(`，本任务已把方案里那两处同步改成 `SettingsChip(`，否则 T14 建门时抓手会落空。
+

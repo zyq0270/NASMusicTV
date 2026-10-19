@@ -7,7 +7,11 @@ import org.junit.Test
 import java.io.File
 
 /**
- * 「`FocusableSurface` 的内容不得用 `fillMaxSize()` 撑满行内剩余宽度」的**门禁测试**。
+ * 「瓦片内容不得用 `fillMaxSize()` 撑满行内剩余宽度」的**门禁测试**。
+ *
+ * 抓手是三类调用：`FocusableSurface(`（全站通用瓦片）、`SettingsTile(` / `SettingsChip(`
+ * （设置区的唯一委托层，T11 起）。⚠️ 迁移后如果只留 `FocusableSurface(` 一个名字，
+ * 设置区就变成"扫不到调用点 → 空转断言仍绿但实际失配"。
  *
  * ## 为什么需要它
  *
@@ -28,7 +32,7 @@ import java.io.File
  * ## 判定规则
  *
  * 命中需**同时**满足：
- * ① 某处 `FocusableSurface(` 调用的**实参区**（括号配对，不含尾随 lambda）里
+ * ① 某处瓦片调用（见 `CALL`）的**实参区**（括号配对，不含尾随 lambda）里
  *    **没有**任何显式给定宽度的修饰符（`fillMaxWidth(` / `.width(` / `widthIn(` /
  *    `weight(` / `.size(`），且 `modifier =` 的**首行以 `Modifier` 开头**
  *    （宽度由调用方/变量传入时静态判不出来 → **跳过**，同 `SmallTouchTargetScanTest`
@@ -79,13 +83,14 @@ class ChipContentWidthScanTest {
         )
         // ⚠️ 空转自证：一个调用点都没扫到 → 扫描逻辑失配（而非"代码干净"）
         assertTrue(
-            "没有扫到任何 `FocusableSurface(` 调用点 —— 扫描逻辑可能失配（空转），结果不可信",
+            "没有扫到任何 `FocusableSurface(` / `SettingsTile(` / `SettingsChip(` 调用点 —— " +
+                "扫描逻辑可能失配（空转），结果不可信",
             callSites > 0,
         )
 
         if (violations.isNotEmpty()) {
             fail(
-                "以下 `FocusableSurface` 的内容用了 `fillMaxSize()`，宽度会随「行内剩余宽度」膨胀：\n" +
+                "以下瓦片的内容用了 `fillMaxSize()`，宽度会随「行内剩余宽度」膨胀：\n" +
                     violations.joinToString("\n") { "  • $it" } +
                     "\n\n症状：放在 `Row` 里时**第一个子项撑满整行、后续子项被挤成 0 宽**" +
                     "（表现为「选项不见了」，见 v2.35.0 音质档、v2.37.0 画面适配两次实例）。\n" +
@@ -126,6 +131,24 @@ class ChipContentWidthScanTest {
         val src = """FocusableSurface(onClick = {}, modifier = Modifier.height(48.dp)) { Box(Modifier.fillMaxSize()) }"""
         val hits = chipWidthViolations(stripComments(src), src)
         assertTrue("护栏失效：单行写法没被判违规", hits.isNotEmpty())
+    }
+
+    /**
+     * T11 起设置区瓦片改叫 `SettingsTile` / `SettingsChip` —— 抓手不扩就是
+     * "扫不到调用点 → 空转断言仍绿但实际失配"，所以这两个名字各喂一个破坏样本。
+     */
+    @Test
+    fun `设置区新瓦片名字同样必须被判违规`() {
+        val chip = """SettingsChip(label = "x", selected = true, onClick = {}) { Box(Modifier.fillMaxSize()) }"""
+        assertTrue(
+            "护栏失效：`SettingsChip` 的 fillMaxSize 内容没被扫到（CALL 正则漏了这个名字）",
+            chipWidthViolations(stripComments(chip), chip).isNotEmpty(),
+        )
+        val tile = """SettingsTile(onClick = {}) { Row(Modifier.fillMaxSize()) { Text("x") } }"""
+        assertTrue(
+            "护栏失效：`SettingsTile` 的 fillMaxSize 内容没被扫到（CALL 正则漏了这个名字）",
+            chipWidthViolations(stripComments(tile), tile).isNotEmpty(),
+        )
     }
 
     /** 修复后的 `OptionChip` 写法 —— 必须放行 */
@@ -251,8 +274,8 @@ class ChipContentWidthScanTest {
 /** 豁免标记：写在调用行或其上方 3 行内，后跟理由 */
 private const val EXEMPT_MARKER = "ChipWidth-exempt"
 
-/** 要扫的调用 */
-private val CALL = Regex("""\bFocusableSurface\(""")
+/** 要扫的调用：设置区 T11 起瓦片统一走 `SettingsTile` / `SettingsChip`，抓手必须同时认三个名字 */
+private val CALL = Regex("""\b(FocusableSurface|SettingsTile|SettingsChip)\(""")
 
 /** 出现任一即说明宽度已被显式给定 → 不算违规 */
 private val WIDTH_GIVEN = listOf("fillMaxWidth(", ".width(", "widthIn(", "weight(", ".size(")

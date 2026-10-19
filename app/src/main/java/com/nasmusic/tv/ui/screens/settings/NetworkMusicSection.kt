@@ -4,11 +4,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -133,22 +132,14 @@ internal fun NetworkMusicSection(
                     modifier = Modifier.padding(bottom = 8.dp, start = 4.dp)
                 )
                 // 当前值状态卡 + 修改按钮
-                com.nasmusic.tv.ui.components.FocusableSurface(
+                SettingsTile(
                     onClick = { dialogs.onShowJamendoClientIdDialog() },
                     modifier = androidx.compose.ui.Modifier.fillMaxWidth(),
-                    shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
-                    focusedScale = 1.02f,
-                    animationDurationMs = 250,
-                    containerColor = NasMusicColors.Surface,
-                    focusedContainerColor = NasMusicColors.Primary.copy(alpha = 0.15f),
-                    contentColor = NasMusicColors.TextPrimary,
-                    focusedContentColor = NasMusicColors.TextPrimary,
-                    pressedScale = 0.98f
                 ) {
                     androidx.compose.foundation.layout.Column(
                         modifier = androidx.compose.ui.Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 20.dp, vertical = 14.dp)
+                            .padding(horizontal = SettingsTokens.rowHPadding, vertical = SettingsTokens.rowVPadding)
                     ) {
                         Text(
                             text = if (state.jamendoClientId.isBlank())
@@ -220,25 +211,16 @@ internal fun NetworkMusicSection(
                     fontSize = FontSize.button(),
                     modifier = Modifier.padding(start = 4.dp, top = 4.dp, bottom = 4.dp)
                 )
-                com.nasmusic.tv.ui.components.FocusableSurface(
+                SettingsTile(
                     onClick = { dialogs.onShowLyricsKugouDialog() },
-                    modifier = androidx.compose.ui.Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 4.dp),
-                    shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
-                    focusedScale = 1.02f,
-                    animationDurationMs = 250,
-                    containerColor = NasMusicColors.Surface,
-                    contentColor = NasMusicColors.TextPrimary,
-                    focusedContainerColor = NasMusicColors.Primary.copy(alpha = 0.15f),
-                    focusedContentColor = NasMusicColors.TextPrimary,
-                    pressedScale = 0.98f,
-                    focusBorderColor = NasMusicColors.FocusRing.copy(alpha = 0.6f)
+                    // ⚠️ 不再自带 `.padding(vertical = 4.dp)`：SettingsTile 已经给了行外边距，
+                    // 再叠一层会变成 8dp（三处端点/Key 行同一处理）。
+                    modifier = androidx.compose.ui.Modifier.fillMaxWidth(),
                 ) {
                     androidx.compose.foundation.layout.Row(
                         modifier = androidx.compose.ui.Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 24.dp, vertical = 14.dp),
+                            .padding(horizontal = SettingsTokens.rowHPadding, vertical = SettingsTokens.rowVPadding),
                         verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
                     ) {
                         androidx.compose.foundation.layout.Column(modifier = androidx.compose.ui.Modifier.weight(1f)) {
@@ -263,25 +245,16 @@ internal fun NetworkMusicSection(
                     fontSize = FontSize.button(),
                     modifier = Modifier.padding(start = 4.dp, top = 4.dp, bottom = 4.dp)
                 )
-                com.nasmusic.tv.ui.components.FocusableSurface(
+                SettingsTile(
                     onClick = { dialogs.onShowLyricsNeteaseDialog() },
-                    modifier = androidx.compose.ui.Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 4.dp),
-                    shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
-                    focusedScale = 1.02f,
-                    animationDurationMs = 250,
-                    containerColor = NasMusicColors.Surface,
-                    contentColor = NasMusicColors.TextPrimary,
-                    focusedContainerColor = NasMusicColors.Primary.copy(alpha = 0.15f),
-                    focusedContentColor = NasMusicColors.TextPrimary,
-                    pressedScale = 0.98f,
-                    focusBorderColor = NasMusicColors.FocusRing.copy(alpha = 0.6f)
+                    // ⚠️ 不再自带 `.padding(vertical = 4.dp)`：SettingsTile 已经给了行外边距，
+                    // 再叠一层会变成 8dp（三处端点/Key 行同一处理）。
+                    modifier = androidx.compose.ui.Modifier.fillMaxWidth(),
                 ) {
                     androidx.compose.foundation.layout.Row(
                         modifier = androidx.compose.ui.Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 24.dp, vertical = 14.dp),
+                            .padding(horizontal = SettingsTokens.rowHPadding, vertical = SettingsTokens.rowVPadding),
                         verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
                     ) {
                         androidx.compose.foundation.layout.Column(modifier = androidx.compose.ui.Modifier.weight(1f)) {
@@ -310,25 +283,16 @@ internal fun NetworkMusicSection(
                     fontSize = FontSize.body(),
                     modifier = Modifier.padding(bottom = 8.dp, start = 4.dp)
                 )
-                com.nasmusic.tv.ui.components.FocusableSurface(
+                SettingsTile(
                     onClick = { dialogs.onShowWeatherApiKeyDialog() },
-                    modifier = androidx.compose.ui.Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 4.dp),
-                    shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
-                    focusedScale = 1.02f,
-                    animationDurationMs = 250,
-                    containerColor = NasMusicColors.Surface,
-                    contentColor = NasMusicColors.TextPrimary,
-                    focusedContainerColor = NasMusicColors.Primary.copy(alpha = 0.15f),
-                    focusedContentColor = NasMusicColors.TextPrimary,
-                    pressedScale = 0.98f,
-                    focusBorderColor = NasMusicColors.FocusRing.copy(alpha = 0.6f)
+                    // ⚠️ 不再自带 `.padding(vertical = 4.dp)`：SettingsTile 已经给了行外边距，
+                    // 再叠一层会变成 8dp（三处端点/Key 行同一处理）。
+                    modifier = androidx.compose.ui.Modifier.fillMaxWidth(),
                 ) {
                     androidx.compose.foundation.layout.Row(
                         modifier = androidx.compose.ui.Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 24.dp, vertical = 14.dp),
+                            .padding(horizontal = SettingsTokens.rowHPadding, vertical = SettingsTokens.rowVPadding),
                         verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
                     ) {
                         androidx.compose.foundation.layout.Column(modifier = androidx.compose.ui.Modifier.weight(1f)) {
@@ -352,33 +316,22 @@ internal fun NetworkMusicSection(
     }
 }
 
-/** 网络测试卡片（原 NETWORK 分支的网络测试 FocusableSurface，逻辑搬迁） */
+/** 网络测试卡片（原 NETWORK 分支的网络测试瓦片，逻辑搬迁；T11 起走 SettingsTile） */
 @OptIn(androidx.tv.material3.ExperimentalTvMaterial3Api::class)
 @Composable
 private fun NetworkTestCard(state: NetworkMusicSettingsState, onRun: () -> Unit) {
-    com.nasmusic.tv.ui.components.FocusableSurface(
+    SettingsTile(
         onClick = onRun,
-        modifier = androidx.compose.ui.Modifier
-            .fillMaxWidth()
-            .border(
-                width = 1.dp,
-                color = NasMusicColors.Border,
-                shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp)
-            ),
-        shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
-        focusedScale = 1.03f,
-        animationDurationMs = 200,
-        containerColor = NasMusicColors.SurfaceVariant,
-        contentColor = NasMusicColors.TextPrimary,
-        focusedContainerColor = NasMusicColors.Primary.copy(alpha = 0.2f),
-        focusedContentColor = NasMusicColors.TextPrimary,
-        pressedScale = 0.96f,
-        focusBorderColor = NasMusicColors.FocusRing.copy(alpha = 0.6f)
+        modifier = androidx.compose.ui.Modifier.fillMaxWidth(),
+        // ⚠️ 原来这里的 `containerColor = SurfaceVariant` + 1dp `Border` 描边一起表达
+        // 「这是一张卡、不是普通行」。收口到 SettingsTile 后容器色回到 Surface；
+        // 描边本来也画不出来（`FocusableSurface` 的 `background` 排在入参 modifier 之后，
+        // 会把描边整条盖住）⇒ 一并去掉，视觉等价。
     ) {
         androidx.compose.foundation.layout.Row(
             modifier = androidx.compose.ui.Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 16.dp),
+                .padding(horizontal = SettingsTokens.rowHPadding, vertical = SettingsTokens.rowVPadding),
             verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
         ) {
             androidx.tv.material3.Icon(
@@ -417,31 +370,23 @@ private fun PresetEndpointRow(
     onClick: () -> Unit,
     trailingLabel: String? = null
 ) {
-    com.nasmusic.tv.ui.components.FocusableSurface(
+    SettingsTile(
         onClick = onClick,
-        modifier = androidx.compose.ui.Modifier
-            .fillMaxWidth()
-            .padding(vertical = 4.dp),
-        shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
-        focusedScale = 1.02f,
-        animationDurationMs = 250,
-        containerColor = if (selected) NasMusicColors.Primary.copy(alpha = 0.18f) else NasMusicColors.Surface,
-        contentColor = NasMusicColors.TextPrimary,
-        focusedContainerColor = if (selected) NasMusicColors.Primary.copy(alpha = 0.3f) else NasMusicColors.Primary.copy(alpha = 0.15f),
-        focusedContentColor = NasMusicColors.TextPrimary,
-        pressedScale = 0.98f,
-        focusBorderColor = if (selected) NasMusicColors.Primary.copy(alpha = 0.5f) else NasMusicColors.FocusRing.copy(alpha = 0.6f)
+        modifier = androidx.compose.ui.Modifier.fillMaxWidth(),
+        // 「已选中」= 唯一的 0.18 底 + Primary 字（§4.7-③ S3），不再手调 containerColor。
+        selected = selected,
     ) {
         androidx.compose.foundation.layout.Row(
             modifier = androidx.compose.ui.Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 24.dp, vertical = 14.dp),
+                .padding(horizontal = SettingsTokens.rowHPadding, vertical = SettingsTokens.rowVPadding),
             verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
         ) {
             androidx.compose.foundation.layout.Column(modifier = androidx.compose.ui.Modifier.weight(1f)) {
                 Text(
                     text = name,
-                    color = if (selected) NasMusicColors.Primary else NasMusicColors.TextPrimary,
+                    // 选中时 SettingsTile 的 contentColor 已经是 Primary，跟随即可。
+                    color = com.nasmusic.tv.ui.components.LocalFocusableContentColor.current,
                     fontSize = FontSize.button()
                 )
                 Text(

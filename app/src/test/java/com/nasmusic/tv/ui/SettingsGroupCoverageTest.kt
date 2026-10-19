@@ -81,6 +81,116 @@ class SettingsGroupCoverageTest {
         assertTrue(stripComments(text).contains("SettingSwitch") == false)
     }
 
+    // ───────────────────────── G7 风格统一 ─────────────────────────
+
+    /** 文件级豁免必须点名，且名单里的文件必须真的存在（改名即失效，见 §4.7-⑥）。 */
+    private val styleOutOfFileNames = setOf(
+        "SettingsTokens.kt",
+        "PlaylistImportUploadDialog.kt",
+        "SettingsSectionList.kt",
+    )
+
+    /** 参数名：这四行的取值只准引用 SettingsTokens，不准出现数字字面量。 */
+    private val styleParamNames = listOf("shape", "focusedScale", "pressedScale", "animationDurationMs")
+
+    /** G7-A：参数位含数字字面量 → 违规（整行标了 `Style-exempt:` 才放行）。注释先剥离。 */
+    private fun literalStyleViolations(text: String): List<String> =
+        stripComments(text).lines().withIndex().mapNotNull { (i, raw) ->
+            val line = raw.trim()
+            val param = styleParamNames.firstOrNull { p ->
+                line.startsWith("$p =") || line.contains(" $p =") || line.contains(",$p =")
+            } ?: return@mapNotNull null
+            if (line.contains("Style-exempt") || !line.any { it.isDigit() }) return@mapNotNull null
+            "${i + 1}:$param"
+        }
+
+    /** G7-B：`FocusableSurface(` 只准出现在 SettingsTile 那一处（FQN 写法同样命中）。 */
+    private fun tileCallCount(text: String): Int =
+        Regex("""\bFocusableSurface\(""").findAll(stripComments(text)).count()
+
+    /**
+     * 「实底 Primary」= 该行 `containerColor` 里的 `NasMusicColors.Primary` 后面**不是** `.copy(`。
+     *
+     * ⚠️ 判据必须是这个正则，不能写成 `line.contains("NasMusicColors.Primary,")`：
+     * 真实病灶有两种写法 —— 裸的 `containerColor = NasMusicColors.Primary,`，以及
+     * `containerColor = if (selected) NasMusicColors.Primary else NasMusicColors.Surface,`
+     * （原 `OptionChip` / `PlayModeSelector` 就是后者）。只匹配带逗号的那种会整类漏掉，
+     * 而方案 §4.7-⑥ 自带的负向样本恰好就是这一行 —— 漏了它负向自证也过不去。
+     */
+    private val solidPrimary = Regex("""NasMusicColors\.Primary\b(?!\.copy)""")
+
+    /** G7-C：「已选中」只准 `SettingsTile(selected = true)`，不准实底 Primary 或手调 alpha。 */
+    private fun selectedStyleViolations(text: String): List<String> =
+        stripComments(text).lines().withIndex().mapNotNull { (i, raw) ->
+            val line = raw.trim()
+            when {
+                line.contains("Style-exempt") -> null
+                line.contains("containerColor") && solidPrimary.containsMatchIn(line) -> "${i + 1}"
+                line.contains("containerColor") && line.contains("alpha = 0.18") -> "${i + 1}"
+                else -> null
+            }
+        }
+
+    @Test
+    fun `设置区瓦片取值必须全部走 SettingsTokens`() {
+        val root = settingsRoot()
+        val files = root.listFiles { f -> f.name.endsWith(".kt") }.orEmpty().toList()
+        val scoped = files.filter { it.name !in styleOutOfFileNames }
+        assertTrue("G7 扫描到 0 个受检文件 —— 源目录定位失败或豁免名单吞掉了全部文件", scoped.isNotEmpty())
+        for (name in styleOutOfFileNames) {
+            assertTrue("文件级豁免 $name 已不存在（改名后该文件会静默脱离检查）",
+                files.any { it.name == name })
+        }
+        val hits = scoped.flatMap { f -> literalStyleViolations(f.readText()).map { "${f.name}:$it" } }
+        assertTrue("参数位仍有字面量（必须改成 SettingsTokens.*）：\n${hits.joinToString("\n")}", hits.isEmpty())
+    }
+
+    @Test
+    fun `设置区分区不得手写 FocusableSurface 参数块`() {
+        val root = settingsRoot()
+        val scoped = root.listFiles { f ->
+            f.name.endsWith("Section.kt") || f.name == "ImportedPlaylistRow.kt"
+        }.orEmpty().toList()
+        assertTrue("G7-B 扫描到 0 个分区文件", scoped.isNotEmpty())
+        val hits = scoped.mapNotNull { f ->
+            tileCallCount(f.readText()).takeIf { it > 0 }?.let { "${f.name}($it 处)" }
+        }
+        val shared = File(root, "SettingsComponents.kt")
+        val sharedCount = if (shared.exists()) tileCallCount(shared.readText()) else 0
+        assertTrue(
+            "分区里还有裸瓦片：${hits}；SettingsComponents 内 FocusableSurface( 出现 $sharedCount 次（只准 SettingsTile 那 1 处）",
+            hits.isEmpty() && sharedCount <= 1,
+        )
+    }
+
+    @Test
+    fun `已选中态只准一种表达`() {
+        val root = settingsRoot()
+        val scoped = root.walkTopDown().filter { it.isFile && (it.name.endsWith("Section.kt") || it.name == "ImportedPlaylistRow.kt") }.toList()
+        val hits = scoped.flatMap { f -> selectedStyleViolations(f.readText()).map { "${f.name}:$it" } }
+        assertTrue("出现实底 Primary / 手调 0.18 选中态，必须改用 SettingsTile(selected = true)：$hits", hits.isEmpty())
+    }
+
+    /** 负向自证：三条判据各自必须能咬人（缺任一，"全绿"可能只是空转）。 */
+    @Test
+    fun `G7 三条负向自证`() {
+        val a = "FocusableSurface(\n    shape = RoundedCornerShape(12.dp),\n    focusedScale = if (enabled) 1.03f else 1f,\n    animationDurationMs = 250,\n)"
+        assertTrue("G7-A 空转：字面量圆角/缩放/时长没被检出",
+            literalStyleViolations(a).size >= 3)
+        assertTrue("G7-A 误伤：令牌写法被判负",
+            literalStyleViolations("    focusedScale = if (chip) SettingsTokens.focusScaleChip else SettingsTokens.focusScaleRow,").isEmpty())
+        // 方案原文这里写 `== 2`，但样本里 `FocusableSurface(` 只出现 1 次 —— 按实际计数写 1。
+        assertTrue("G7-B 空转：裸瓦片没被检出", tileCallCount(a) == 1)
+        assertTrue("G7-B 空转：FQN 写法漏检", tileCallCount("    com.nasmusic.tv.ui.components.FocusableSurface(") == 1)
+        // 第 1 行是 `if (selected) …Primary else …Surface` 形态（原 OptionChip 的写法），
+        // 第 2 行是手调 0.18 —— 两种都必须被咬，缺一即 G7-C 漏一类。
+        val c = "    containerColor = if (selected) NasMusicColors.Primary else NasMusicColors.Surface,\n" +
+            "    containerColor = NasMusicColors.Primary.copy(alpha = 0.18f),"
+        assertTrue("G7-C 空转：实底/手调选中态没被检出", selectedStyleViolations(c).size == 2)
+        assertTrue("G7-C 误伤：SettingsTile 委托写法被判负",
+            selectedStyleViolations("    SettingsTile(onClick = {}, selected = true) { }").isEmpty())
+    }
+
     // ─────────── 辅助 ───────────
 
     /** 返回每个 `SettingsGroupCard(` 尾随 lambda 体（大括号配对）的字符区间。 */
@@ -108,9 +218,57 @@ class SettingsGroupCoverageTest {
         return out
     }
 
-    private fun stripComments(text: String): String = text
-        .replace(Regex("/\\*.*?\\*/", RegexOption.DOT_MATCHES_ALL), "")
-        .lines().joinToString("\n") { it.substringBefore("//") }
+    /**
+     * 剥注释，**保留长度与换行位置**（行号因此与原文一致 —— G7 的失败信息要能直接跳行）。
+     *
+     * 三条都必须处理，缺一条 G7 就会假绿/假红：
+     * - **块注释换成等长空格**而不是直接删除：直接删会把跨行 `/* … */` 两侧的代码粘到一行，
+     *   而 G7-A 是逐行判「参数位有没有数字」，粘连出来的行会同时假绿（原来那行没了）与假红。
+     * - **Kotlin 的块注释可嵌套**（`/* a /* b */ c */` 是一整个注释，KDoc 正文里写
+     *   `/* … */` 也不会提前闭合）⇒ 必须按深度计，不能用 `/\*.*?\*/` 非贪婪一刀切。
+     * - **字符串/字符字面量里的 `//` 不是注释**（本仓有 `it.substringBefore("//")` 这种写法），
+     *   按行 `substringBefore("//")` 会把后半行吃掉。
+     */
+    private fun stripComments(text: String): String {
+        val sb = StringBuilder(text.length)
+        var i = 0
+        var depth = 0
+        var inLine = false
+        var inStr = false
+        var inChar = false
+        while (i < text.length) {
+            val c = text[i]
+            val n = if (i + 1 < text.length) text[i + 1] else '\u0000'
+            when {
+                inLine -> {
+                    sb.append(if (c == '\n') '\n' else ' ')
+                    if (c == '\n') inLine = false
+                    i++
+                }
+                depth > 0 -> when {
+                    c == '/' && n == '*' -> { depth++; sb.append("  "); i += 2 }
+                    c == '*' && n == '/' -> { depth--; sb.append("  "); i += 2 }
+                    else -> { sb.append(if (c == '\n') '\n' else ' '); i++ }
+                }
+                inStr -> {
+                    sb.append(c)
+                    if (c == '\\' && i + 1 < text.length) { sb.append(text[i + 1]); i += 2 }
+                    else { if (c == '"') inStr = false; i++ }
+                }
+                inChar -> {
+                    sb.append(c)
+                    if (c == '\\' && i + 1 < text.length) { sb.append(text[i + 1]); i += 2 }
+                    else { if (c == '\'') inChar = false; i++ }
+                }
+                c == '/' && n == '/' -> { inLine = true; sb.append("  "); i += 2 }
+                c == '/' && n == '*' -> { depth = 1; sb.append("  "); i += 2 }
+                c == '"' -> { inStr = true; sb.append(c); i++ }
+                c == '\'' -> { inChar = true; sb.append(c); i++ }
+                else -> { sb.append(c); i++ }
+            }
+        }
+        return sb.toString()
+    }
 
     private fun String.lineOffset(lineIndex: Int): Int {
         var o = 0

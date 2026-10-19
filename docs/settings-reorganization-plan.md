@@ -532,7 +532,7 @@ internal fun PlayModeSelector(
 
 **门禁（G6，写进 `SettingsGroupCoverageTest`，实现见 T14 Step 1）**
 - 断言 A（含原 B）：`ui/screens/settings/*Section.kt` 里每个 `SettingSwitch(` / `SettingActionButton(` / `PlayModeSelector(` 调用，其**实参区**（从 `(` 起括号配对到匹配的 `)`，跳过字符串字面量）必须含 `description =`，且实参不得是空串字面量 `""`。`PlayModeSelector` 的形参改成必填后编译器已兜住"必须有"，这条断言防的是**有人把它改回可选**。
-- 断言 C：以 `SettingsGroupCard(` 的大括号配对区为扫描单元（与 G1 同一套区域解析），**含 `AdjustButton(` 或 `OptionChip(` 的卡区必须至少出现一次 `SettingsHint(`** —— 即"芯片组/调整行也得有说明"。⛔ 不用"上方 6 行内"这类行窗口判据，它对格式化和代码移动极敏感，会把门变成噪音源。
+- 断言 C：以 `SettingsGroupCard(` 的大括号配对区为扫描单元（与 G1 同一套区域解析），**含 `AdjustButton(` 或 `SettingsChip(` 的卡区必须至少出现一次 `SettingsHint(`** —— 即"芯片组/调整行也得有说明"。（T11 把私有的 `OptionChip` 换成了共享的 `SettingsChip`，抓手随之改名。）⛔ 不用"上方 6 行内"这类行窗口判据，它对格式化和代码移动极敏感，会把门变成噪音源。
 - 断言 D（负向自证）：A 与 C 各配一个破坏样本必须判负（A 的样本里同时含"缺 description"与"`description = ""`"两种行，另验证带非空说明的行**不被误伤**）；再加两条**空转断言**（A 的真实调用点数 > 0、C 的真实含芯片卡片数 > 0）。
 - 豁免标记 `Desc-exempt: <理由>`，且注释里的示例写法先剥离（口径同 `ChipContentWidthScanTest`）。⛔ `SettingsInfoRow` / `AboutRow` 只读行**不进**扫描名单（§4.5 规范：它们的说明由卡片 `description` 承担）。
 
@@ -2059,7 +2059,7 @@ class ModelDownloadUrlPrefTest {
 - Consumes：T1 的 `SettingsGroupCard`（卡片外壳已经用 `SettingsTokens.cardShape`）、T2–T8 的全部卡片化分区
 - Produces：`SettingsTokens`（§4.7-① 全文）、`SettingsTile(onClick, enabled, selected, danger, chip, modifier, content)`、`SettingsChip(label, selected, onClick, modifier)`（`modifier` **必须**给宽度，沿用原 `OptionChip` 的宽度约束）
 
-- [ ] **Step 1: 写失败的 G7-A/B/C 门禁**（追加到 `SettingsGroupCoverageTest.kt`，复用 T2 已有的 `settingsRoot()` / `stripComments()`）
+- [x] **Step 1: 写失败的 G7-A/B/C 门禁**（追加到 `SettingsGroupCoverageTest.kt`，复用 T2 已有的 `settingsRoot()` / `stripComments()`）
 
 ```kotlin
     // ───────────────────────── G7 风格统一 ─────────────────────────
@@ -2162,29 +2162,42 @@ class ModelDownloadUrlPrefTest {
 > ⚠️ **G7-A 的判据是「参数名行内不得有数字」，不是「不得出现 `RoundedCornerShape(`」**。原因见上面负向样本第 2 行：`SettingActionButton:187` 的真面目是 `focusedScale = if (enabled) 1.03f else 1f` —— 条件表达式里藏字面量，只匹配 `= 1.` 会整类漏掉。代价是 `focusedScale = if (enabled) SettingsTokens.focusScaleRow else 1f` 也会被咬，所以令牌里必须备 `focusScaleDisabled = 1f`（§4.7-① 已加），这是**有意的**：置灰不放大这件事也该是唯一取值。
 > ⚠️ **令牌化不许夺走其它门的抓手**：`SmallTouchTargetScanTest` 靠 `(\d+(\.\d+)?)\.dp` 字面量量触控目标，`portraitTouchTarget(48.dp)`（SettingsComponents:359）**保持原样**；G7-A 只检四个参数名，正是不想把审计面从"取值"扩到"尺寸"。
 
-- [ ] **Step 2: 跑门确认判红，并把红名单留档**
+- [x] **Step 2: 跑门确认判红，并把红名单留档**
 
 Run: `./gradlew.bat testDebugUnitTest --tests "*SettingsGroupCoverageTest" --no-daemon -Pkotlin.compiler.execution.strategy=in-process`
 Expected: 三条 FAIL，违规清单应接近 §2-10 的计数（**15** 处 `shape = ` 字面量 + 其余三个参数名字面量行、**20** 处裸 `FocusableSurface(`、**4** 处实底/手调选中态 —— G7-C 作用域内口径，`SettingsComponents:145-146` 那处不在 `*Section.kt` 扫描范围故不计入）。⛔ 红名单比这少 → 先修扫描，别开始迁移（扫描漏一类就等于那类永远没人管）。把清单贴进 `docs/technical-overview.md` 的新 §10.N，作为迁移前后的对账基线。
 
-- [ ] **Step 3: 落地 `SettingsTokens.kt`**（§4.7-① 全文，含 `focusScaleDisabled` 与开关轨五项）
+> ✅ **实做（2026-10-19）**：红名单由 `logs_temp/t11_redlist.py`（与单测同一份谓词）干跑产出并留档在 §10.250 ——
+> **G7-A 69 处 / 14 个受检文件、G7-B 5 文件 11 处 + `SettingsComponents` 7 处、G7-C 3 处**。
+> 与上面"15 / 20 / 4"的估算口径不同（估算把 FQN 写法、`SettingsComponents` 内、豁免文件混在不同列），
+> 以 §10.250 的表为准。⛔ 断言里写不变式（`== 0`），别把任何一版数字抄进去。
 
-- [ ] **Step 4: 加 `SettingsTile` / `SettingsTileBody`（§4.7-②），把 5 个行组件改为委托**
+- [x] **Step 3: 落地 `SettingsTokens.kt`**（§4.7-① 全文，含 `focusScaleDisabled` 与开关轨五项）
+
+- [x] **Step 4: 加 `SettingsTile` / `SettingsTileBody`（§4.7-②），把 5 个行组件改为委托**
   - ⛔ **公开签名不变**（`SettingSwitch(label, description, checked, onClick, enabled)` 等），调用点零改动 —— 本任务只做"取值收口"，改语义（尾部文案）在 T12。
   - `SettingActionButton` 的 `modifier` 默认值**保持** `Modifier.fillMaxWidth()`，且 :164-172 的「0 宽陷阱」KDoc **一行都不许删**（`ChipContentWidthScanTest` 的注释里就引用了它）。
   - `BackupFileRow` 的主瓦片 + 删除瓦片 → `SettingsTile`（删除那颗继续 `danger = true`，它是现状里唯一已经用 `Warning` 的，:276-279）；`size(64.dp)` 保留。
   - `AdjustButton` 的 `focusedScale = 1.1f` → `SettingsTokens.focusScaleChip`（1.06）：**这是可感知的改动**，± 按钮放大幅度变小，Step 8 真机专验（V14）。
+  - ✅ **实做**：`danger` 在 `SettingsTile` 里**单列一支**（焦点底 `Warning@0.18`、焦点字 `Warning`）——
+    §4.7-② 的片段会让 danger 落进 `else` 拿到 `Primary@0.15` 焦点底，与 S6「焦点底也取 Warning」冲突，以 S6 为准。
 
-- [ ] **Step 5: 迁移分区内联瓦片**
+- [x] **Step 5: 迁移分区内联瓦片**
   - `GeneralSettingsSection` 语言 :74-82 / 方向 :134-142 → `SettingsChip`（选中态从 `Primary@0.18` 变为 `SettingsTile(selected = true)`，视觉等价）。
   - `NetworkMusicSection` 6 处（:133/:230/:273/:325/:370/:431，含 `focusedScale = 1.02f` 那一族）→ `SettingsTile`。**注意 `:369 NetworkTestCard` 与 `:424 PresetEndpointRow` 是私有 composable，迁移点在函数体内**，不改它们的签名。
   - `PhotoWallSettingsSection` 的私有 `OptionChip`（:601-613）**提升**为 `SettingsComponents.kt` 的 `SettingsChip`，三处调用点（:420/:425/:587）改引用；⚠️ 提升后 `modifier` 仍需给固定宽度（v2.37.0「画面适配只显示满屏」的护栏就是这个宽度）。
   - `ImportedPlaylistRow:46` → `SettingsTile`。
   - `AboutSection` 的 GitHub 链接瓦片（T8 Step 4 落地的 `FocusableSurface`）→ `SettingsTile`，至此 G7-B 的"分区 0 裸瓦片"才可能真的归零。
+  - ✅ **实做补充**：`NetworkTestCard` 原来的 `containerColor = SurfaceVariant` + 1dp `Border` 描边一起表达
+    「这是一张卡」。描边本来就画不出来（`FocusableSurface` 的 `background` 排在入参 modifier 之后，整条盖住），
+    收口后容器色回到 `Surface` ⇒ 描边一并删除，视觉等价。
 
-- [ ] **Step 6: 统一「标签 + 值」版式与说明字号（§4.7-④）**：`SettingsInfoRow` 内部换成 `AboutRow` 的 `1 : 1.5` 权重双栏（值 `TextAlign.End`，长值换行不再挤掉标签）；`SettingSwitch`/`SettingActionButton` 的 `description` 由 `FontSize.body()` + `LocalFocusableContentColor` 改为 `FontSize.small()` + `NasMusicColors.TextSecondary`（与 GENERAL 的 :60/:120 对齐，也与 §4.5 的 `SettingsHint` 同规格）。
+- [x] **Step 6: 统一「标签 + 值」版式与说明字号（§4.7-④）**：`SettingsInfoRow` 内部换成 `AboutRow` 的 `1 : 1.5` 权重双栏（值 `TextAlign.End`，长值换行不再挤掉标签）；`SettingSwitch`/`SettingActionButton` 的 `description` 由 `FontSize.body()` + `LocalFocusableContentColor` 改为 `FontSize.small()` + `NasMusicColors.TextSecondary`（与 GENERAL 的 :60/:120 对齐，也与 §4.5 的 `SettingsHint` 同规格）。
+  - ✅ **实做**：两者共用新抽出的 `SettingsLabelValueRow`；`SettingsInfoRow` 水平边距同时收口到 `rowHPadding`
+    （S2 点名了它的 0 水平边距），标签不再比上面的开关行凸出 20dp。
 
-- [ ] **Step 7: 把 `ChipContentWidthScanTest` 的抓手一起改**：`CALL` 正则（:255）由 `\bFocusableSurface\(` 扩为 `\b(FocusableSurface|SettingsTile|SettingsChip)\(` —— 迁移后 0 宽陷阱的载体换了名字，不扩就变成"扫不到调用点 → 空转断言仍绿但实际失配"。扩完确认该测试自己的 `callSites > 0` 断言仍成立。
+- [x] **Step 7: 把 `ChipContentWidthScanTest` 的抓手一起改**：`CALL` 正则（:255）由 `\bFocusableSurface\(` 扩为 `\b(FocusableSurface|SettingsTile|SettingsChip)\(` —— 迁移后 0 宽陷阱的载体换了名字，不扩就变成"扫不到调用点 → 空转断言仍绿但实际失配"。扩完确认该测试自己的 `callSites > 0` 断言仍成立。
+  - ✅ **实做**：另补 `设置区新瓦片名字同样必须被判违规` 一条，给 `SettingsTile` / `SettingsChip` 各一个破坏样本。
 
 - [ ] **Step 8: 全量验证 + 真机抽查 + 提交**
 
@@ -2924,7 +2937,7 @@ git commit -m "fix(settings): 时长档 0 宽塌陷与竖屏芯片挤压 —— 
             for ((i, span) in groupCardSpans(text).withIndex()) {
                 val body = text.substring(span)
                 if (body.contains("Desc-exempt:")) continue
-                if (!(body.contains("AdjustButton(") || body.contains("OptionChip("))) continue
+                if (!(body.contains("AdjustButton(") || body.contains("SettingsChip("))) continue
                 checkedCards++
                 if (!body.contains("SettingsHint(")) missing += "${f.name} 第 ${i + 1} 张卡（有芯片/调整行，无 SettingsHint）"
             }
@@ -2954,7 +2967,7 @@ git commit -m "fix(settings): 时长档 0 宽塌陷与竖屏芯片挤压 —— 
     fun `含芯片但无 SettingsHint 的卡片必须判负`() {
         val body = "SettingsGroupCard(title = \"x\") {\n    AdjustButton(\"-\", onClick = {})\n}"
         assertTrue("护栏空转：SettingsHint 检测失效",
-            (body.contains("AdjustButton(") || body.contains("OptionChip(")) && !body.contains("SettingsHint("))
+            (body.contains("AdjustButton(") || body.contains("SettingsChip(")) && !body.contains("SettingsHint("))
     }
 
     /** 从 `(` 的下标开始做括号配对，返回匹配 `)` 之后的下标。字符串字面量内的括号必须跳过。 */
