@@ -517,6 +517,8 @@
     <string name="settings_logs_clear_desc">删除全部已记录的日志，不可恢复</string>
     <string name="settings_logs_clear_confirm_title">清空日志？</string>
     <string name="settings_logs_clear_confirm_msg">将删除全部已记录的运行日志，且不可恢复。</string>
+    <string name="settings_logs_stack_label">异常堆栈</string>
+    <string name="settings_logs_detail_close">关闭</string>
     <!-- 数据分区三卡标题（T8） -->
     <string name="settings_group_backup">备份与恢复</string>
     <string name="settings_group_playlist_import">歌单导入</string>

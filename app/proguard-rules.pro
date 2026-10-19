@@ -12,6 +12,18 @@
 
 # Gson
 -keep class com.google.gson.** { *; }
+
+# ⛔ 泛型签名（v2.39.2 修复）：`object : TypeToken<Map<String, X>>() {}.type` 依赖
+# class 文件里的 Signature 属性。R8 默认会剥掉它 ⇒ release 包运行时报
+# `IllegalStateException: TypeToken must be created with a type argument`。
+# 影响面：LyricsPersistentCache / CoverUrlPersistentCache / MvPersistentCache /
+# BaiduFileIndexCache / AppPreferences 的历史与统计反序列化等**全部 TypeToken 调用点**。
+# 该问题只在 release 出现，debug 与单测都测不到 —— 由「日志」页在真机上抓到。
+-keepattributes Signature
+-keepattributes *Annotation*
+-keepattributes InnerClasses,EnclosingMethod
+# TypeToken 的匿名子类必须连签名一起保留（只保留 Gson 自身类不够）
+-keep class * extends com.google.gson.reflect.TypeToken { *; }
 -keep class * implements com.google.gson.TypeAdapterFactory
 -keep class * implements com.google.gson.JsonSerializer
 -keep class * implements com.google.gson.JsonDeserializer

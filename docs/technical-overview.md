@@ -16682,3 +16682,43 @@ G7-C：3 处实底选中 → 0。⚠️ `ChipContentWidthScanTest` 的 `CALL` �
   出现这种现场时按「tag + message 相同且 1s 内重复」去重（⛔ 不要全局按 tag 去重，会掩盖真实变化）。
 - 日志不进备份、不受「清除缓存」影响（它在 `filesDir`，不是 `cacheDir`）——这是刻意的：
   备份包里塞运行日志既增大体积又可能带出设备信息。
+
+#### 10.258.1 v2.39.2 补丁：日志页上线当天抓到的 release 专属 bug
+
+**现象**（真机，日志页第一条错误）：
+`E LyricsPersistentCache loadIndex failed: TypeToken must be created with a type argument …`
+
+**根因**：`app/proguard-rules.pro` 只写了 `-keep class com.google.gson.** { *; }`，
+**从未配置 `-keepattributes Signature`**。`object : TypeToken<Map<String, X>>() {}.type`
+的类型实参来自 class 文件的泛型签名属性，R8 默认把它剥掉 ⇒ Gson 解析不到实参，
+构造 TypeToken 时直接抛 `IllegalStateException`。
+
+**为什么以前没发现**：该错误**只在 release 出现**——debug 不混淆、单测跑 JVM 不经过 R8，
+所以 2300 条单测全绿也拦不住。它是「日志」页上线后第一眼看到的问题，
+反过来印证了该功能的价值（生产现场可观测性）。
+
+**影响面**（不止歌词缓存）：`LyricsPersistentCache` / `CoverUrlPersistentCache` /
+`MvPersistentCache` / `BaiduFileIndexCache` / `AppPreferences` 的历史与播放统计反序列化
+等**全部 `TypeToken` 调用点**；歌词缓存只是最先被访问到的那个。
+
+**修复**：
+```
+-keepattributes Signature
+-keepattributes *Annotation*
+-keepattributes InnerClasses,EnclosingMethod
+-keep class * extends com.google.gson.reflect.TypeToken { *; }
+```
+⛔ 只 keep Gson 自身类**不够**——匿名子类的签名同样要留。
+
+**回归锁**：`LogsTabWiringGateTest` 新增「Gson 泛型签名必须在混淆规则中保留」
++ 负向自证（只 keep Gson 类、不 keepattributes 的规则必须判负）；
+`t18_selfcheck.py` 同步加两项（90 项）。
+
+**同批改进：日志详情**。真机反馈「日志能看到但不全」——列表只显示 3 行正文 + 堆栈首行。
+现在日志行改用 `SettingsTile`（可聚焦；⛔ 分区里手写 `FocusableSurface` 会被
+`SettingsGroupCoverageTest` 的「裸瓦片」门禁拦下——形状/缩放/动画令牌只允许在
+`SettingsComponents` 定义一次），点开 `LogDetailDialog` 查看**完整消息 + 完整堆栈**
+（`responsiveDialogSize(760.dp, scrollable = true)`；竖屏 92% 宽 / 上限 420dp）。
+
+**验证**：`testDebugUnitTest` 220 XML / **2301 例 / 0 失败**；`assembleRelease` BUILD SUCCESSFUL；
+APK `NASMusicTV-release-v2-39-2.apk` 25,790,655 B（versionCode 187 / 2.39.2）。

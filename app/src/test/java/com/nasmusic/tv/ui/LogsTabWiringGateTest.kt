@@ -120,6 +120,53 @@ class LogsTabWiringGateTest {
         )
     }
 
+    // ─────────────────── 7. 混淆规则：Gson 泛型签名 ───────────────────
+
+    /**
+     * v2.39.2 真机 bug（日志页抓到）：release 包报
+     * `IllegalStateException: TypeToken must be created with a type argument`。
+     * 根因是 R8 默认剥掉 `Signature` 属性，`object : TypeToken<Map<String, X>>() {}.type`
+     * 拿不到类型实参。这条规则**只影响 release**，debug 与全部单测都测不到 ⇒ 必须门禁锁。
+     */
+    @Test
+    fun `Gson 泛型签名必须在混淆规则中保留`() {
+        val rules = projectFile("app/proguard-rules.pro")
+        assertTrue(
+            "proguard-rules.pro 缺 `-keepattributes Signature` —— release 下所有 TypeToken 调用点都会抛异常",
+            hasSignatureKeep(rules),
+        )
+        assertTrue(
+            "proguard-rules.pro 缺 TypeToken 匿名子类保留规则（只保 Gson 自身类不够）",
+            rules.lineSequence().any {
+                it.trim().startsWith("-keep class * extends com.google.gson.reflect.TypeToken")
+            },
+        )
+    }
+
+    /** 负向自证：只 keep Gson 自身类、不 keepattributes Signature 的规则必须判负。 */
+    @Test
+    fun `负向自证 缺 Signature 保留必须判负`() {
+        val sample = "# Gson\n-keep class com.google.gson.** { *; }\n"
+        assertTrue("护栏空转：缺 Signature 的样例被误判为已保留", !hasSignatureKeep(sample))
+    }
+
+    // ─────────────────── 8. 日志详情入口 ───────────────────
+
+    @Test
+    fun `日志行必须能打开完整详情`() {
+        val section = stripComments(mainSource("ui/screens/settings/LogsSettingsSection.kt"))
+        assertTrue("缺 LogDetailDialog( —— 只能看截断的首行", section.contains("LogDetailDialog("))
+        assertTrue("详情里必须展示完整堆栈（entry.stackTrace）", section.contains("entry.stackTrace"))
+        assertTrue(
+            "列表行必须可聚焦（SettingsTile）—— 否则遥控器根本点不开详情；" +
+                "⛔ 分区里不许手写 FocusableSurface（令牌只在 SettingsComponents 定义一次）",
+            section.contains("SettingsTile("),
+        )
+    }
+
+    private fun hasSignatureKeep(rules: String): Boolean =
+        rules.lineSequence().any { it.trim() == "-keepattributes Signature" }
+
     // ─────────────────── 负向自证（同一份谓词喂反例） ───────────────────
 
     /** 负向 ①：`AppLog` 不写 LogStore 时，[persistedIn] 必须判负。 */
@@ -194,6 +241,21 @@ class LogsTabWiringGateTest {
             i++
         }
         return src.substring(open)
+    }
+
+    /**
+     * 项目根相对路径（`app/proguard-rules.pro` 这类不在 java 源集里的文件）。
+     * `user.dir` 可能是仓库根、`app/` 或更深的构建目录 ⇒ 多候选。
+     */
+    private fun projectFile(relativePath: String): String {
+        val candidates = listOf(
+            File(relativePath),
+            File("../$relativePath"),
+            File("../../$relativePath"),
+        )
+        val found = candidates.firstOrNull { it.isFile }
+        assertTrue("找不到 $relativePath（user.dir=${File("").absolutePath}）", found != null)
+        return found!!.readText(Charsets.UTF_8)
     }
 
     private fun mainSource(relativePath: String): String {
