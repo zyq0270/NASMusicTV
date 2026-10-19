@@ -256,7 +256,7 @@
     <string name="settings_lyrics_scale_desc">只影响播放页歌词大小，不影响系统界面</string>
     <string name="settings_lyrics_highlight">歌词高亮</string>
     <string name="settings_lyrics_highlight_desc">逐行整句变色，逐字需要该歌曲有词级时间轴</string>
-    <string name="settings_model_custom_url">自定义源</string>
+    <string name="settings_model_custom_url">模型下载源</string>
     <string name="settings_model_custom_url_desc">填 NAS 直链，校验和仍需匹配</string>
     <string name="settings_model_custom_url_builtin">内置默认源</string>
     <string name="settings_model_custom_url_edit">编辑</string>

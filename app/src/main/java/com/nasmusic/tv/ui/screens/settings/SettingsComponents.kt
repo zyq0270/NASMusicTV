@@ -361,14 +361,19 @@ internal fun PlayModeSelector(
             modifier = Modifier.padding(start = 4.dp, top = 8.dp)
         )
         SettingsHint(description)
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            PlayMode.values().forEach { mode ->
-                SettingsChip(
-                    label = stringResource(mode.displayNameRes),
-                    selected = current == mode,
-                    onClick = { onSelect(mode) },
-                )
-            }
+        // v2.39.0 真机反馈：竖屏 407dp 一行放不下 4 枚「默认播放模式」芯片，第 4 枚被挤没
+        // —— 与时长档同一条原语（SettingsChipRow）：竖屏 2×2 等宽，TV/横屏一行 4 枚。
+        SettingsChipRow(
+            items = PlayMode.values().toList(),
+            tv = 4,
+            phonePortrait = 2,
+            equalWidth = true,
+        ) { mode ->
+            SettingsChip(
+                label = stringResource(mode.displayNameRes),
+                selected = current == mode,
+                onClick = { onSelect(mode) },
+            )
         }
     }
 }
