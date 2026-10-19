@@ -16837,3 +16837,110 @@ java.lang.IllegalStateException: Expected BEGIN_ARRAY but was BEGIN_OBJECT at li
 `assembleRelease` BUILD SUCCESSFUL（5m30s）；`test-results` 共 **221 个 XML**
 （220 + 新增 `MetingJsonShapeTest` 一个类）。版本号**保持 2.39.2 / versionCode 187**
 （本轮不升版，APK 仍为 `NASMusicTV-release-v2-39-2.apk`，会覆盖上一版同名产物）。
+
+### 10.259 v2.39.3 补丁：真机日志噪音三连修（favicon / THREE 告警 / 解密刷屏，2026-10-20）
+
+用户贴出 02:10 的真机日志（01:55 构建的新包，日志是持久化的 ⇒ 先按 §10.258.2 F3 的
+口径核对过时间戳，确认是**新包现场**而非历史记录）。四条记录、三个根因，全部只涉及
+日志噪音层，不触及渲染行为。**本轮不升版本号，改动并入 2.39.3。**
+
+**A. favicon `ERR_NAME_NOT_RESOLVED`（E41「世界」WebView）**
+链路：页面从 `https://appassets.androidplatform.net/globe/index.html` 加载；WebView
+**自动**请求 favicon，且 Chrome 39（创维 5.1.1 系统 WebView）是从**域根**发起的
+`/favicon.ico`，**不带 `/globe` 前缀**。而 `shouldInterceptRequest` 的准入判定是
+`url.startsWith(ASSET_BASE)`（`.../globe`）⇒ 根路径请求被判「不是我的」直接 `return null`
+⇒ WebView fallback 真联网 ⇒ 保留域无公网 DNS ⇒ `ERR_NAME_NOT_RESOLVED`，被
+`onReceivedError` 按 E 记下。原代码里 `assetName == "favicon.ico"` 的分支等的是
+`/globe/favicon.ico`，**永远不会被命中**（自 `779d40b` 起的假防护）。
+修法三件套（双保险 + 兜底）：
+- `shouldInterceptRequest` 准入改 **host 判定**（`Uri.parse(url).host != ASSET_HOST` 才放行），
+  favicon 在任何路径下都返 200 空 body；资产域内非 `/globe/` 的越界路径同样返空 body，
+  维持「资产域永不返回 null」既有纲领；
+- `index.html` 显式 `<link rel="icon" href="data:,">`，浏览器不再自动探测 favicon；
+- `onReceivedError` 对 `favicon.ico` 失败降级 d（装饰性资源，失败永远不影响渲染）。
+
+**B. 两条 THREE.WARNING 被放大成 E**
+`onConsoleMessage` 此前**无差别**全走 `AppLog.e`（E 恒输出 + 恒落盘）。两条警告的来源：
+- `deprecated with r150+ ... removed with r160`：three.es5.js（UMD）**自身加载即报**，
+  不可也不需要消除——ES5 降级策略就是为 Android 5.1 / Chrome 39 存在的，页面 ES6
+  原版在该机直接 SyntaxError（index.html 注释有完整论证）；
+- `Multiple instances of Three.js being imported`：three-globe.es5.js 内置了一份
+  three.core，与 three.es5.js 重复注册 `window.__THREE__`。既定用法（globe.js 只绑
+  `window.THREE`，真机渲染正常）下无害。
+修法：按 `ConsoleMessage.MessageLevel` 映射——ERROR 恒 e（⛔ JS 运行时错误是黑屏诊断
+主线索，不许降级）；WARNING 默认 w；仅上述**已知无害**噪音降 d，且 "Multiple instances"
+只在来源含 `three-globe.es5.js` 时才降（若哪天改从 three.es5.js 报出，说明真的重复
+加载了 three，仍按 w 留痕）；LOG/TIP/DEBUG → i。
+
+**C. `CryptoUtils decrypt: all keys failed (len=0)` 刷屏**
+链路：`AppPreferences.serverConfig` Flow 每次 DataStore 排放都对 apiToken/password/
+accessCode 调 `decrypt`，多数后端没有 apiToken ⇒ `decrypt("")` 高频；`getBaiduTokens`
+对未登录的空串 token 同路径。空串必然「全密钥失败」⇒ 每次一条 W。⚠️ `AppLog.w`
+**始终落盘**（LogStore，§10.258）⇒ 电视设置页日志 tab 被这条挤爆，崩溃现场被冲掉。
+修法：`decrypt` 加两条**返回结果完全等价**的提前返回——空串返 `""`；
+非密文形态（非 Base64 或解码后 ≤ IV 长度，`isEncrypted` 判据不变）返原串
+（旧版明文透传本来就是设计的兼容路径，顺带省掉两次必然失败的 Cipher 初始化）。
+真正需要 W 的只剩「看着像密文却所有密钥都解不开」（口令变更 / 数据损坏，会让密文被
+当明文 token 发出、API 报 -6）。等价性由新增 `CryptoUtilsTest`（5 例，Robolectric——
+`android.util.Base64` 是 SDK 类）锁死：密文往返、空串、非 Base64 明文、合法 Base64
+短明文、`isEncrypted` 分界线。
+
+**验证**：免 Gradle 自查（改的是既有分支逻辑 + asset/内联 JS 常量，无新增效果/组件）
++ 新 `CryptoUtilsTest` 5 例。用户侧**已复跑通过**：`testDebugUnitTest` 与
+`assembleRelease` 两次构建均 BUILD SUCCESSFUL、全量 2358 例 0 失败；真机复现
+**先清空**设置页日志再进 globe，favicon / THREE / 解密三类告警均不再出现。
+
+### 10.260 v2.39.3 二次补丁：release 启动闪退定位（混淆栈还原）+ Meting 空结果噪音（2026-10-20）
+
+用户装 02:43 的 release 包后报崩溃 + 日志告警刷屏。崩溃栈全混淆
+（`xh1.invokeSuspend … m23.getValue()` / DefaultDispatcher-worker）。本轮用
+**mapping.txt + dexdump 双向还原**（不是猜），也是本项目第一次完整走一遍「混淆栈 → 源码」：
+
+**崩溃还原过程（可复用手法）**
+1. `app/build/outputs/mapping/release/mapping.txt`（02:42，与 APK 同轮）反查类名：
+   `xh1 → MainViewModel$setLocalMusicEnabled$1`、`m23 → kotlin.SynchronizedLazyImpl`、
+   `z20 → CoroutineScheduler$Worker`、`hz2 → StandaloneCoroutine`。
+2. **类名不可信**：dexdump 反汇编 `xh1.invokeSuspend`（994 指令单元）后发现它根本不是
+   三行的 toggle lambda，而是 `updateMergedData()` 的协程体（await 状态机 + 读
+   `_albums/_artists/_mergedAlbums/_mergedArtists`）。R8 把多个挂起 lambda **水平合并**，
+   mapping 只保留一个名字 ⇒ 崩溃栈类名张冠李戴（本次误指向 `setLocalMusicEnabled`，
+   与用户实际操作无关）。
+3. 字段级还原：`Lni1;→MainViewModel`、`.G1→resolvedArtistCovers$delegate`、
+   `.D1→resolvedAlbumCovers$delegate`、`.w→constructorReady`、`.v→netVM`；
+   `Liv1;.k→NetworkMusicViewModel.refreshBaiduConnectionState`。
+4. 行号表还原：dex 的 `invokeSuspend` positions 表把崩溃行 **171** 映射到指令偏移
+   `0x00aa` —— 恰是**第一个** `Lm23;.getValue()` 调用，即源码 1775 行
+   `if (resolvedAlbumCovers.isNotEmpty())`。实锤：`resolvedAlbumCovers$delegate` 为 **null**
+   （构造器还没跑到 1848 行的声明）。
+
+**根因**：末尾 init 块 `netVM.restoreBaiduIndexOnStart { _ -> updateMergedData() }`
+触发 Default 协程链；`updateMergedData()` 有 `constructorReady.await()` 守卫
+（v2.37.0 修复），但 dex 显示合并后的类带**两个标签字段**（e/f）——链上前一个挂起点
+（`refreshBaiduConnectionState`）把共享标签置 1，本协程的守卫派发（`if label==0 → await`）
+读到陈旧值，**await 被绕过直插函数体**，读到未初始化的 lazy 委托 ⇒ NPE。
+debug 包无 R8 合并故不复现（与「只在 release 崩」吻合）。
+
+**修复（源码侧根治，不依赖守卫）**
+- `resolvedAlbumCovers` / `resolvedArtistCovers` / `exportCoordinator` 三个 `by lazy`
+  声明**移到类顶部**（159 行附近）：构造器最前几条就赋值委托字段，之后任何协程
+  （哪怕 R8 合并绕过守卫）读到的都不是 null。旧位置留面包屑注释；constructorReady
+  守卫保留作纵深防御。
+- 新增 `MainViewModelConstructionOrderTest`：源码扫描门禁（剥注释 + 词边界），
+  锁死「三个 lazy 声明在首个 init 块之前 + complete() 在全部声明之后」；
+  含 4 组夹具的同谓词正反向自证（违规布局判 false / 声明在注释里判 false /
+  字符串里的 `init {` 不误伤 / 原文确含声明）。
+
+**Meting 空结果噪音（同批用户反馈）**
+`parseSongs: no songs (shape=array@root, body=[])` 与 `getPlaylist: empty from '…'`
+按 W 记录且 W 恒落盘（LogStore）。但 `array@root` + 空 = **端点合法回答空列表**
+（MetingJsonShape 设计注释原话：与「形态认不出来」是两种日志不能混）。改为：
+`array@…` 空结果降 d；`invalid:`/`scalar@`/`object@`/`too-deep@`/`empty` 仍 W 留痕；
+`getPlaylist` 单端点空降 d，「全军覆没」的收尾 W 保留。redcha 端点持续回 `[]` 属
+上游行为，客户端只降噪不改链路（fallback 顺序不变）。
+
+**验证**：免 Gradle 自查（声明移动纯位置变更、无逻辑改动；lazy 初始化时机不变）；
+用户侧已复跑 `testDebugUnitTest`（本轮增量 +9 例：`CryptoUtilsTest` 5 +
+`MainViewModelConstructionOrderTest` 4）与 `assembleRelease`，两次构建均
+BUILD SUCCESSFUL、全量 **2358 例 0 失败**。真机复跑前**先清空设置页日志**再操作
+（日志持久化）：新包启动不再崩溃、日志无告警刷屏（用户确认）。若想进一步证 R8
+因素：同步骤跑 debug 包应不崩。
