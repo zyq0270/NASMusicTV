@@ -114,7 +114,9 @@ internal fun SourcesSettingsSection(
                 label = stringResource(R.string.server_config_title),
                 description = if (state.isConnected) stringResource(R.string.server_connected, state.serverDisplayName)
                     else stringResource(R.string.server_connect_desc),
-                onClick = { actions.onNavigateToServerConnect?.invoke() }
+                onClick = { actions.onNavigateToServerConnect?.invoke() },
+                // 跳到连接页（下一级）
+                trailing = Trail.Arrow,
             )
             // ⛔ 未连接时「断开连接」整段不渲染（不是 enabled = false）—— 保留原形态
             if (state.isConnected && actions.onDisconnect != null) {
@@ -122,7 +124,9 @@ internal fun SourcesSettingsSection(
                 SettingActionButton(
                     label = stringResource(R.string.server_disconnect),
                     description = stringResource(R.string.settings_disconnect_desc),
-                    onClick = actions.onDisconnect
+                    onClick = actions.onDisconnect,
+                    // §4.7-③ S6：断开后要重新走连接流程（找回服务器地址 / 输口令）
+                    danger = true,
                 )
             }
         }
@@ -210,7 +214,9 @@ internal fun SourcesSettingsSection(
                         onClick = {
                             dialogs.onShowBaiduAuthDialog()
                             actions.onStartBaiduDeviceCode?.invoke()
-                        }
+                        },
+                        // 打开设备码授权对话框（下一级）
+                        trailing = Trail.Arrow,
                     )
                 }
             }
@@ -219,13 +225,17 @@ internal fun SourcesSettingsSection(
             SettingActionButton(
                 label = stringResource(R.string.settings_netdisk_music_root),
                 description = state.baiduMusicRootDirLocal,
-                onClick = { dialogs.onShowMusicRootDialog() }
+                onClick = { dialogs.onShowMusicRootDialog() },
+                // 打开路径编辑对话框（下一级）
+                trailing = Trail.Arrow,
             )
             Spacer(modifier = Modifier.height(8.dp))
             SettingActionButton(
                 label = stringResource(R.string.settings_netdisk_mv_dir),
                 description = state.baiduMvDirLocal?.takeIf { it.isNotBlank() } ?: stringResource(R.string.settings_netdisk_mv_dir_desc),
-                onClick = { dialogs.onShowMvDirDialog() }
+                onClick = { dialogs.onShowMvDirDialog() },
+                // 打开路径编辑对话框（下一级）
+                trailing = Trail.Arrow,
             )
         }
 

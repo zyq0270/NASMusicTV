@@ -137,10 +137,12 @@ internal fun DownloadSettingsSection(
                 )
             }
             // P1-17: 清空所有下载
+            // §4.7-③ S6：删掉的是用户主动下载到本机的音乐文件，取 Warning 色。
             SettingActionButton(
                 label = stringResource(R.string.settings_clear_downloads_title),
                 description = stringResource(R.string.settings_clear_downloads_desc),
-                onClick = onClearAllDownloadsRequested
+                onClick = onClearAllDownloadsRequested,
+                danger = true,
             )
         }
         // 卡④ 导出到外接设备（§8.8.9；标题复用原 settings_download_export）
@@ -219,7 +221,9 @@ internal fun DownloadSettingsSection(
                         SettingActionButton(
                             label = stringResource(R.string.settings_download_export),
                             description = "",
-                            onClick = { actions.onExportToDevice?.invoke() }
+                            onClick = { actions.onExportToDevice?.invoke() },
+                            // 走系统目录选择器（下一级）
+                            trailing = Trail.Arrow,
                         )
                     }
                 }

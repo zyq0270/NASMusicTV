@@ -1,5 +1,7 @@
 package com.nasmusic.tv.ui.screens.settings
 
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -12,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -19,10 +22,14 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -220,6 +227,81 @@ private fun SettingsTileBody(
     }
 }
 
+/**
+ * `SettingActionButton` 的尾部形态（§4.7-③ S5）：尾部只表达"这一行让我干什么"。
+ *
+ * - [Arrow]：**进入下一级**（打开页面 / 对话框 / 系统选择器）。
+ * - [None]：**就地执行**（重扫、清除、下载、删除）。
+ *
+ * ⛔ 不再固定挂「确定」—— 每个入口都挂「确定」等于什么都没说（S5 要消灭的现状缺陷）。
+ */
+internal enum class Trail { None, Arrow }
+
+/**
+ * 开关轨（§5.2，用户 2026-10-18 三选一选定的中间款）。
+ *
+ * 尺寸全部来自 [SettingsTokens]，令牌值由 `scripts/measure_switch_reference.py` 量参考图得到，
+ * ⛔ 不要就地改数字。
+ *
+ * ⛔ 轨道**不填充** —— 参考图内部取样就是页面渐变背景本身，只描边。
+ * ⛔ 不套 `portraitTouchTarget` —— 整行瓦片才是热区，这 36dp 高不是触摸目标
+ *   （conventions-adaptive-ui.md §6.5「容器即热区」的同一口径）。
+ * ⛔ 滑块宽度**两态恒定** —— 随文案变宽会让「开」与「OFF」在切换时跳宽。
+ *
+ * @param enabled 置灰时整体降透明度。轨道画的是 `TextPrimary` / `TextSecondary`，
+ *   不跟随 `contentColor`；不降透明度的话「置灰的开关」看起来和能点的一样亮。
+ */
+@Composable
+private fun SwitchTrack(checked: Boolean, enabled: Boolean = true) {
+    val onText = stringResource(R.string.settings_on)
+    val offText = stringResource(R.string.settings_off)
+    Box(
+        modifier = Modifier
+            .alpha(if (enabled) 1f else 0.4f)
+            .width(SettingsTokens.switchTrackWidth)
+            .height(SettingsTokens.switchTrackHeight)
+            .border(
+                SettingsTokens.switchStroke,
+                NasMusicColors.TextPrimary.copy(alpha = 0.8f),
+                SettingsTokens.switchTrackShape,
+            )
+            // 内缩 = 滑块离轨道**外缘**的距离（参考图 11px / 轨道 67px ≈ 16.4% ⇒ 36 × 16.4% ≈ 6dp）。
+            // ⚠️ 方案片段写的是 `switchThumbInset - switchStroke`（5dp），那会得到内宽 118 / 内高 26，
+            //    与方案自己声明的「内宽 116、内高 24、行程 = 116 − 58 = 58」自相矛盾 —— 以几何表为准，取 6dp。
+            .padding(SettingsTokens.switchThumbInset)
+    ) {
+        // 非活动标签先画，贴在另一侧（与滑块不重叠）
+        Text(
+            text = if (checked) offText else onText,
+            color = NasMusicColors.TextSecondary,
+            fontSize = FontSize.caption(),
+            modifier = Modifier
+                .align(if (checked) Alignment.CenterEnd else Alignment.CenterStart)
+                .padding(horizontal = 8.dp),
+        )
+        val travel by animateDpAsState(
+            targetValue = if (checked) 0.dp else SettingsTokens.switchThumbTravel,
+            animationSpec = tween(SettingsTokens.animMs),
+            label = "switchThumb",
+        )
+        Box(
+            modifier = Modifier
+                .offset(x = travel)
+                .width(SettingsTokens.switchThumbWidth)
+                .height(SettingsTokens.switchThumbHeight)
+                .background(NasMusicColors.TextPrimary, SettingsTokens.switchThumbShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                // 参考图：活动标签是深色字，取**页面背景色**而非纯黑
+                text = if (checked) onText else offText,
+                color = NasMusicColors.Background,
+                fontSize = FontSize.caption(),
+            )
+        }
+    }
+}
+
 @OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
 internal fun SettingSwitch(
@@ -229,19 +311,18 @@ internal fun SettingSwitch(
     onClick: () -> Unit,
     enabled: Boolean = true
 ) {
+    // 文字没有消失，而是从"尾部提示"升格成开关本体的一部分（§5.2）：
+    // 短标签进滑块，整词进 TalkBack —— 「开」读出来不成词，所以朗读另给整词。
+    val stateText = stringResource(if (checked) R.string.settings_state_on else R.string.settings_state_off)
     SettingsTile(
         onClick = onClick,
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .semantics { contentDescription = "$label，$stateText" },
         enabled = enabled,
     ) {
         SettingsTileBody(label = label, description = description) {
-            // ⚠️ 尾部这里仍是 WiFi 开关文案（T12 换成 SwitchTrack + settings_on/off）：
-            // T11 只收"取值"，diff 里不许出现语义变化（方案 §4.7 与 T12 开头互证）。
-            Text(
-                text = if (checked) stringResource(R.string.settings_wifi_on) else stringResource(R.string.settings_wifi_off),
-                color = if (checked) NasMusicColors.Primary else NasMusicColors.TextSecondary,
-                fontSize = FontSize.button()
-            )
+            SwitchTrack(checked = checked, enabled = enabled)
         }
     }
 }
@@ -291,18 +372,34 @@ internal fun SettingActionButton(
      * 单靠颜色挡不住遥控器的「确认」键。
      */
     enabled: Boolean = true,
+    /**
+     * 尾部形态（§4.7-③ S5）：进入下一级 → [Trail.Arrow]，就地执行 → [Trail.None]。
+     *
+     * ⛔ 默认 `None`：多数按钮是"就地执行"，让调用方显式声明"这是个入口"。
+     */
+    trailing: Trail = Trail.None,
+    /**
+     * 破坏性动作（§4.7-③ S6）：文字与焦点底都取 `Warning`。
+     *
+     * 用于「清除全部下载 / 清除分离缓存 / 断开连接 / 删除备份」这四处 ——
+     * 它们此前与普通按钮毫无差别，用户看不出"点下去会没东西"。
+     */
+    danger: Boolean = false,
 ) {
     SettingsTile(
         onClick = onClick,
         modifier = modifier,
         enabled = enabled,
+        danger = danger,
     ) {
         SettingsTileBody(label = label, description = description) {
-            Text(
-                text = stringResource(R.string.common_confirm),
-                color = NasMusicColors.Primary,
-                fontSize = FontSize.button()
-            )
+            if (trailing == Trail.Arrow) {
+                Text(
+                    text = "›",
+                    color = if (danger) NasMusicColors.Warning else NasMusicColors.Primary,
+                    fontSize = FontSize.button()
+                )
+            }
         }
     }
 }

@@ -221,7 +221,9 @@ internal fun PhotoWallSettingsSection(
                     SettingActionButton(
                         label = stringResource(R.string.settings_photo_wall_reselect),
                         description = stringResource(R.string.settings_photo_wall_reselect_desc),
-                        onClick = { actions.onReselectPhotos?.invoke() }
+                        onClick = { actions.onReselectPhotos?.invoke() },
+                        // 打开系统相册选择器（下一级）
+                        trailing = Trail.Arrow,
                     )
                 }
             }
@@ -242,7 +244,9 @@ internal fun PhotoWallSettingsSection(
                     } else {
                         s.photoWallDirUri
                     },
-                    onClick = { actions.onPickDirectory?.invoke() }
+                    onClick = { actions.onPickDirectory?.invoke() },
+                    // 打开系统目录选择器（下一级）
+                    trailing = Trail.Arrow,
                 )
                 // ⛔ 选到内部存储必须**当场给理由**（§6.3）：SAF 选择器无法限制可选范围，
                 //    用户点进来一路选到内部存储是常态，不解释就成了「点了没反应」。

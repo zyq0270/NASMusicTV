@@ -188,8 +188,12 @@
     <string name="settings_network_test_error">网络异常: %s</string>
     <string name="settings_scan_transfer">扫描传输设备</string>
     <string name="settings_scan_transfer_desc">手机扫描传输数据，传到手机 / 上传到服务器 / 远程恢复</string>
-    <string name="settings_wifi_on">✓ 开启</string>
-    <string name="settings_wifi_off">   关闭</string>
+    <!-- 开关态语义（§5.2）：短标签进滑块，整词进 contentDescription。
+         ⛔ 短标签不带 ✓/空格对齐（那是旧 settings_wifi_on/off 的 hack）；「开」读出来不成词，故朗读另给整词。 -->
+    <string name="settings_on">开</string>
+    <string name="settings_off">关</string>
+    <string name="settings_state_on">已开启</string>
+    <string name="settings_state_off">已关闭</string>
 
     <!-- Server Connection -->
     <string name="server_connect_title">连接服务器</string>

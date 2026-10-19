@@ -185,8 +185,11 @@
     <string name="settings_network_test_error">Network error: %s</string>
     <string name="settings_scan_transfer">Scan &amp; Transfer</string>
     <string name="settings_scan_transfer_desc">Scan with phone to transfer data / upload to server / remote restore</string>
-    <string name="settings_wifi_on">✓ On</string>
-    <string name="settings_wifi_off">   Off</string>
+    <!-- Switch state semantics (see plan §5.2): short label inside the thumb, full word for TalkBack. -->
+    <string name="settings_on">ON</string>
+    <string name="settings_off">OFF</string>
+    <string name="settings_state_on">On</string>
+    <string name="settings_state_off">Off</string>
 
     <!-- Server Connection -->
     <string name="server_connect_title">Connect Server</string>

@@ -16242,3 +16242,77 @@ KDoc 还写着"供设置页手动清除"，但从来没有调用方**（`CoverUr
 （宽度约束不变：内容只填高、宽度由文字 + `chipHPadding` 决定）。⚠️ 方案 T14 的 G6-C 判据原文
 引用的是 `OptionChip(`，本任务已把方案里那两处同步改成 `SettingsChip(`，否则 T14 建门时抓手会落空。
 
+---
+
+### 10.251 v2.39.0 — 设置区整理 T12：开关改分段式开关轨、尾部按动作种类分、危险动作统一 Warning（2026-10-19）
+
+**问题**：T11 收的是「取值」，本节收的是「这一行让我干什么」。三处「同一件事多种表达」：
+
+1. **开关态靠符号与空格，不靠图形**：尾部是 `✓ 开启` / `␣␣␣␣关闭`（前导 4 个空格是对齐 hack），
+   TV 3 米外看是两行小字，判不出当前是开还是关；符号 `✓` 还把「有勾 = 开」这个约定强加给用户。
+2. **按钮尾部一律「确定」**：14 处入口按钮（进下一级）与就地执行的按钮共用同一个尾部文字，
+   在 197dp 的芯片里抢掉 ~38dp（19%）。「确定」对「服务器配置」这种按钮是**零信息**。
+3. **危险动作与普通动作同色**：除 `BackupFileRow` 删除键外，清空下载 / 清分离缓存 / 断开连接
+   都跟「重扫本地音乐」长得一样。
+
+**`SwitchTrack` 的几何全部来自 §5.2 的实测**（`scripts/measure_switch_reference.py` 量参考图）：
+轨道 `128×36`、描边 `1dp`、滑块 `58×24`、内缩 `6dp`、行程 `58dp`、stadium 圆端。
+⛔ **轨道不填充**（参考图内部取样就是页面渐变背景本身）、⛔ **不套 `portraitTouchTarget`**
+（整行瓦片才是热区，36dp 这条不是触摸目标）、⛔ **滑块两态恒定宽**（随文案变宽会让「开/关」两态
+在视觉上跳动）。
+
+**两处与方案原文的偏离（都记进 KDoc，⛔ 不要按方案片段改回去）**：
+
+- 方案 Step 3 的片段写 `.padding(SettingsTokens.switchThumbInset - SettingsTokens.switchStroke)`，
+  会得内宽 `128 − 2×1 − 2×5 = 116`、内高 `36 − 2 − 10 = 24` —— 数值上**碰巧**对，但那是把「描边」
+  和「内缩」混成同一个量：一旦有人把 `switchStroke` 调成 `2dp`，内宽会跟着变成 114，而滑块宽度
+  是常量 58 ⇒ 行程少 2dp 且**没有任何地方会报错**。实现取 `.padding(switchThumbInset)`（6dp），
+  内宽 `128 − 12 = 116`、内高 `36 − 12 = 24`、行程 `116 − 58 = 58`，与几何表**逐项一致**且与描边解耦。
+- 方案 §4.7-② 的 `SettingsTile` 片段让 `danger` 落进 `else` 分支拿 `Primary@0.15` 焦点底，
+  与 S6「焦点底也取 `Warning`」冲突 —— T11 已按 S6 单列一支（见 §10.250），本节沿用。
+
+**`Trail` 枚举（`None` / `Arrow`）与 15 处接线**：
+
+| 分区 | `Trail.Arrow` 的按钮 |
+|---|---|
+| `DataSettingsSection` | 导出备份、扫码传输、导入歌单、播放统计 |
+| `DownloadSettingsSection` | 导出到外接设备 |
+| `LyricsKaraokeSettingsSection` | 扫码上传模型 ×2、编辑自定义源 |
+| `PhotoWallSettingsSection` | 重新选照片、选择目录 |
+| `PlayerSettingsSection` | 均衡器 |
+| `SourcesSettingsSection` | 服务器配置、百度登录、音乐根目录、MV 目录 |
+
+⚠️ **方案 Step 4 点名的「下载位置」「缓存目录」两处，现状里已经不是 `SettingActionButton`**：
+下载位置是卡②里的两枚 `AdjustButton`（内 / 外接存储，就地切），缓存目录是只读的 `SettingsInfoRow`
+（T8b 把它并进了占用一览）。两者都**没有「进下一级」这个动作** ⇒ 按现状记录，⛔ 不硬加 `Arrow`
+（给只读行挂 `›` 会让用户以为能点）。
+
+`BackupFileRow` 的「导入」尾部**保持文字**：那一行右侧文字是「这颗按钮干什么」的唯一标识，
+去掉后只剩文件名，是**可读性退化**而不是漂移。
+
+**`danger = true` 只上 4 处，这是有意收窄的**：`清除全部下载`、`清除分离缓存`、`断开连接`、
+`BackupFileRow` 删除。缓存页另有 5 个清除按钮（歌词 / 封面 Coil / 解包封面 / 封面地址表 / MV），
+它们都是**秒级可重建**的，给整页刷上 Warning 会让警告本身失效 —— 只有「清除分离缓存」代价最大
+（重建要走一遍完整 HQ 分离，电视上以分钟计），所以只有它上色。
+
+⚠️ **方案 Step 5 附注的「说明写『不会删除已下载的音乐』」不再适用**：§4.5 CACHE ③ 已把该按钮
+改名「清除分离缓存」并把说明定为「删除伴奏与人声副本，含分离临时残留」（≤26 字上限），
+T8b 已按 §4.5 落地。§4.5 是文案唯一真源，再加一句会顶穿字数上限 ⇒ 以 §4.5 为准。
+
+**G7-D 必须同时扫代码与资源，只扫一边是空转**：
+
+- `设置区不得复用 WiFi 开关文案`：`src/main/java` 全树 `walkTopDown`，剥注释后按行找
+  `settings_wifi_on` / `settings_wifi_off`，命中为空才算过；带 `scanned > 0` 空转断言。
+- `WiFi 开关字符串必须从两份 strings 删除`：四个旧定义位（两份 XML × 2）必须消失，
+  且 4 个新 key `settings_on` / `settings_off` / `settings_state_on` / `settings_state_off`
+  **中英齐备** —— 只删不加是编译期就红，但**只加一边**（比如漏了 `values-en`）是运行期
+  `getString` 抛 `IllegalArgumentException`，编译**不会**报错。`LanguageMirrorTest` 补第二道。
+- `G7-D 负向自证`：两个旧 key 必须咬人、4 个新 key 不误伤、注释里的旧 key 不误伤。
+
+**`SettingSwitch` 整行的无障碍**：`contentDescription = "$label，$stateText"`，`$stateText` 取
+`settings_state_on`（已开启）/ `settings_state_off`（已关闭）—— 短标签「开」放进滑块好看，
+但放进朗读里不成词，所以**短标签与朗读词分成两组 key**。
+
+**免 Gradle 自查**：`logs_temp/t12_selfcheck.py` 112 项（G7-A/B/C 回归 + G7-D + 开关轨 11 个令牌
+取值 + 尾部语义 + `danger` 恰 4 处 + 括号配平 + LF + 两份 XML 可解析）。
+

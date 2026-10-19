@@ -191,6 +191,90 @@ class SettingsGroupCoverageTest {
             selectedStyleViolations("    SettingsTile(onClick = {}, selected = true) { }").isEmpty())
     }
 
+    // ───────────────────────── G7-D 开关文案解寄生 ─────────────────────────
+
+    /**
+     * G7-D 的判据：一行里出现 `settings_wifi_on` / `settings_wifi_off` 即违规。
+     *
+     * 抽成函数是为了负向自证能喂**同一份谓词** —— 否则负向用例证明的只是"另写了一段正则"。
+     */
+    private fun wifiStringHits(text: String): List<Int> =
+        stripComments(text).lines().withIndex()
+            .filter { it.value.contains("settings_wifi_on") || it.value.contains("settings_wifi_off") }
+            .map { it.index + 1 }
+            .toList()
+
+    /** main 源集根目录（G7-D 扫全树，不是只扫 `ui/screens/settings/`）。 */
+    private fun mainKotlinRoot(): File {
+        val candidates = listOf(
+            File("src/main/java/com/nasmusic/tv"),
+            File("app/src/main/java/com/nasmusic/tv"),
+            File("../app/src/main/java/com/nasmusic/tv"),
+        )
+        val found = candidates.firstOrNull { it.isDirectory }
+        assertTrue("找不到 main 源集目录（user.dir=${File("").absolutePath}）", found != null)
+        return found!!
+    }
+
+    /** G7-D：开关态不得再寄生 WiFi 字符串（实测全树只有 `SettingSwitch` 一个消费方）。 */
+    @Test
+    fun `设置区不得复用 WiFi 开关文案`() {
+        val root = mainKotlinRoot()
+        var scanned = 0
+        val hits = root.walkTopDown().filter { it.isFile && it.extension == "kt" }
+            .flatMap { f ->
+                scanned++
+                val rel = f.relativeTo(root).path.replace('\\', '/')
+                wifiStringHits(f.readText()).map { "$rel:$it" }
+            }
+            .toList()
+        assertTrue("G7-D 扫到 0 个 .kt 文件 —— 源目录定位失败或谓词失配（空转）", scanned > 0)
+        assertTrue("仍引用 settings_wifi_on/off：$hits（开关态必须用 settings_on/off）", hits.isEmpty())
+    }
+
+    /**
+     * G7-D 的另一半：旧 key 必须从两份 `strings.xml` 里消失。
+     *
+     * 只删代码引用不够 —— 留着死 key，下一个人想加开关态就会把它捡回来，
+     * 于是「WiFi 文案寄生」重新长出来，而 G7-D 只扫 `.kt`，看不见资源文件。
+     * 同一条用例顺带钉住四个新 key **中英齐备**（缺一侧是运行期 `getString` 抛异常，不是编译错误）。
+     */
+    @Test
+    fun `WiFi 开关字符串必须从两份 strings 删除`() {
+        val resCandidates = listOf(File("src/main/res"), File("app/src/main/res"), File("../app/src/main/res"))
+        val res = resCandidates.firstOrNull { it.isDirectory }
+        assertTrue("找不到 res 目录（user.dir=${File("").absolutePath}）", res != null)
+        for (locale in listOf("values", "values-en")) {
+            val f = File(res!!, "$locale/strings.xml")
+            assertTrue("$locale/strings.xml 不存在", f.isFile)
+            val text = f.readText()
+            for (gone in listOf("settings_wifi_on", "settings_wifi_off")) {
+                assertTrue("$locale/strings.xml 仍留着 $gone（死 key 会被下一个人捡回去）",
+                    !text.contains("name=\"$gone\""))
+            }
+            for (added in listOf("settings_on", "settings_off", "settings_state_on", "settings_state_off")) {
+                assertTrue("$locale/strings.xml 缺 $added —— 中英必须同批加，否则运行期 getString 抛 IllegalArgumentException",
+                    text.contains("name=\"$added\""))
+            }
+        }
+    }
+
+    /** 负向自证：同一份谓词必须能咬人，且不得误伤新 key。 */
+    @Test
+    fun `G7-D 负向自证`() {
+        assertTrue("G7-D 空转：样例里的 settings_wifi_on 没被检出",
+            wifiStringHits("text = stringResource(R.string.settings_wifi_on)").isNotEmpty())
+        assertTrue("G7-D 空转：样例里的 settings_wifi_off 没被检出",
+            wifiStringHits("text = stringResource(R.string.settings_wifi_off)").isNotEmpty())
+        assertTrue("G7-D 误伤：新 key settings_on / settings_state_on 被判负",
+            wifiStringHits(
+                "text = stringResource(R.string.settings_on)\n" +
+                    "cd = stringResource(R.string.settings_state_on)",
+            ).isEmpty())
+        assertTrue("G7-D 误伤：注释里举例的旧 key 被判负",
+            wifiStringHits("// 旧写法：R.string.settings_wifi_on").isEmpty())
+    }
+
     // ─────────── 辅助 ───────────
 
     /** 返回每个 `SettingsGroupCard(` 尾随 lambda 体（大括号配对）的字符区间。 */

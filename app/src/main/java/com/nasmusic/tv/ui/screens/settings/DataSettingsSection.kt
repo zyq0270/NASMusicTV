@@ -84,7 +84,8 @@ internal fun DataSettingsSection(
                 SettingActionButton(
                     label = stringResource(R.string.settings_export_backup),
                     description = stringResource(R.string.settings_export_backup_desc),
-                    onClick = { actions.onExportBackup?.invoke() }
+                    onClick = { actions.onExportBackup?.invoke() },
+                    trailing = Trail.Arrow,
                 )
             }
             // 扫码传输（手机下载/上传备份）
@@ -92,7 +93,8 @@ internal fun DataSettingsSection(
                 SettingActionButton(
                     label = stringResource(R.string.settings_scan_transfer),
                     description = stringResource(R.string.settings_scan_transfer_desc),
-                    onClick = { actions.onScanTransferBackup?.invoke() }
+                    onClick = { actions.onScanTransferBackup?.invoke() },
+                    trailing = Trail.Arrow,
                 )
             }
             // 备份文件列表
@@ -127,7 +129,8 @@ internal fun DataSettingsSection(
                 SettingActionButton(
                     label = stringResource(R.string.settings_import_playlist),
                     description = stringResource(R.string.settings_import_playlist_desc),
-                    onClick = { actions.onImportPlaylistFile?.invoke() }
+                    onClick = { actions.onImportPlaylistFile?.invoke() },
+                    trailing = Trail.Arrow,
                 )
             }
             // 最近导入记录（无删除操作；点击打开 → 「我的」，2026-09-18 用户决策）
@@ -159,7 +162,8 @@ internal fun DataSettingsSection(
                 SettingActionButton(
                     label = stringResource(R.string.pstats_title),
                     description = stringResource(R.string.pstats_entry_desc),
-                    onClick = { actions.onOpenPlayStats?.invoke() }
+                    onClick = { actions.onOpenPlayStats?.invoke() },
+                    trailing = Trail.Arrow,
                 )
             }
         }

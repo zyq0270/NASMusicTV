@@ -212,7 +212,9 @@ internal fun LyricsKaraokeSettingsSection(
                                 SettingActionButton(
                                     label = stringResource(R.string.settings_scan_upload_model),
                                     description = stringResource(R.string.settings_scan_upload_model_desc),
-                                    onClick = { actions.onScanTransferModel?.invoke() }
+                                    onClick = { actions.onScanTransferModel?.invoke() },
+                                    // 打开扫码传输对话框（下一级）
+                                    trailing = Trail.Arrow,
                                 )
                             }
                         }
@@ -246,7 +248,9 @@ internal fun LyricsKaraokeSettingsSection(
                                 SettingActionButton(
                                     label = stringResource(R.string.settings_scan_upload_model),
                                     description = stringResource(R.string.settings_scan_upload_model_desc),
-                                    onClick = { actions.onScanTransferModel?.invoke() }
+                                    onClick = { actions.onScanTransferModel?.invoke() },
+                                    // 打开扫码传输对话框（下一级）
+                                    trailing = Trail.Arrow,
                                 )
                             }
                         }
@@ -273,7 +277,9 @@ internal fun LyricsKaraokeSettingsSection(
                     SettingActionButton(
                         label = stringResource(R.string.settings_model_custom_url_edit),
                         description = stringResource(R.string.settings_model_custom_url_desc),
-                        onClick = { actions.onEditCustomModelUrl?.invoke() }
+                        onClick = { actions.onEditCustomModelUrl?.invoke() },
+                        // 打开端点编辑对话框（下一级）
+                        trailing = Trail.Arrow,
                     )
                 }
                 Box(modifier = Modifier.weight(1f)) {

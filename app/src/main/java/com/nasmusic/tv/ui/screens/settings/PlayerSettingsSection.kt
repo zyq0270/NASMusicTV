@@ -207,7 +207,9 @@ internal fun PlayerSettingsSection(
             SettingActionButton(
                 label = stringResource(R.string.settings_equalizer),
                 description = stringResource(R.string.settings_equalizer_desc),
-                onClick = { actions.onOpenEqualizer?.invoke() }
+                onClick = { actions.onOpenEqualizer?.invoke() },
+                // 跳到均衡器页面（下一级）
+                trailing = Trail.Arrow,
             )
             SettingsInfoRow(
                 label = stringResource(R.string.settings_equalizer),

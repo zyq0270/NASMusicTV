@@ -2224,7 +2224,7 @@ git commit -m "refactor(settings): 设置区尺寸动效令牌化，行组件统
 - Consumes：T11 的 `SettingsTile(danger = …)`
 - Produces：`SettingActionButton(label, description, onClick, modifier, enabled, trailing: Trail = Trail.None)`、`enum class Trail { None, Arrow }`、`SwitchTrack`（私有）
 
-- [ ] **Step 1: 写失败的 G7-D + 危险动作门禁**
+- [x] **Step 1: 写失败的 G7-D + 危险动作门禁**
 
 ```kotlin
     /** G7-D：开关态不得再寄生 WiFi 字符串（实测全树只有 SettingsComponents:119 一个消费方）。 */
@@ -2254,8 +2254,9 @@ git commit -m "refactor(settings): 设置区尺寸动效令牌化，行组件统
     }
 ```
 
-- [ ] **Step 2: 加四个 key**（`values/strings.xml` 与 `values-en/strings.xml` 各一份）：滑块内可见短标签 `settings_on` = 「开」/ ON、`settings_off` = 「关」/ OFF；朗读用整词 `settings_state_on` = 「已开启」/ On、`settings_state_off` = 「已关闭」/ Off。⚠️ 现存 `settings_wifi_on` 的值是 `✓ 开启`、`settings_wifi_off` 是 `␣␣␣␣关闭`（前导空格是对齐 hack，strings.xml:187-188 / values-en:184-185）—— 新 key **不带**符号与对齐空格。短标签与朗读词分开，是因为「开」放进滑块好看、放进 `contentDescription` 读出来不成词。
-- [ ] **Step 3: 自绘 `SwitchTrack`（§5.2 的实测几何）**，`SettingSwitch` 尾部改用它：
+- [x] **Step 2: 加四个 key**（`values/strings.xml` 与 `values-en/strings.xml` 各一份）：滑块内可见短标签 `settings_on` = 「开」/ ON、`settings_off` = 「关」/ OFF；朗读用整词 `settings_state_on` = 「已开启」/ On、`settings_state_off` = 「已关闭」/ Off。⚠️ 现存 `settings_wifi_on` 的值是 `✓ 开启`、`settings_wifi_off` 是 `␣␣␣␣关闭`（前导空格是对齐 hack，strings.xml:187-188 / values-en:184-185）—— 新 key **不带**符号与对齐空格。短标签与朗读词分开，是因为「开」放进滑块好看、放进 `contentDescription` 读出来不成词。
+  - ✅ **实做**：4 个 key 中英齐备；另加一条门禁 `WiFi 开关字符串必须从两份 strings 删除` 钉住「只加一边不会编译报错、只会在运行期 `getString` 抛 `IllegalArgumentException`」这个坑。
+- [x] **Step 3: 自绘 `SwitchTrack`（§5.2 的实测几何）**，`SettingSwitch` 尾部改用它：
 
 ```kotlin
 /**
@@ -2316,14 +2317,30 @@ private fun SwitchTrack(checked: Boolean) {
   令牌里补上派生值（注释写清算式，⛔ 不要在组件里现算）：`val switchThumbTravel = 58.dp`（= 内宽 116 − 滑块 58）。
   ⚠️ 动画**不读** `animationsEnabled` —— 现状 `FocusableSurface` 的 `animationDurationMs` 同样不读它；在这里单独加判断会造出"只有开关尊重设置"的不一致，属范围膨胀。
   `SettingSwitch` 尾部改成只有 `SwitchTrack(checked)`、不再挂任何文字，整行加 `contentDescription = "$label，${stringResource(if (checked) R.string.settings_state_on else R.string.settings_state_off)}"`（`FocusableSurface` 支持 `modifier.semantics`，或直接用其 `contentDescription` 形参 —— 以现有 `FocusableSurface` 签名为准，T12 Step 3 落地时先读一遍）。
+  - ✅ **实做**：`FocusableSurface` **没有** `contentDescription` 形参 ⇒ 走 `Modifier.semantics { contentDescription = … }`。
+    ⚠️ 方案片段里 `.padding(switchThumbInset - switchStroke)` **不采用** —— 那会把「描边」与「内缩」混成一个量，
+    日后把 `switchStroke` 调成 2dp 会静默吃掉 2dp 行程且无处报错。实现取 `.padding(switchThumbInset)`，
+    内宽 116 / 内高 24 / 行程 58 与几何表逐项一致且与描边解耦（详见 `technical-overview` §10.251）。
+    另加 `enabled` 形参（整行置灰时轨道同步 `alpha(0.4f)`）。
 
-- [ ] **Step 4: 尾部按动作种类分（S5）**：`SettingActionButton` 加 `trailing: Trail = Trail.None`，删掉固定的 `stringResource(R.string.common_confirm)`（:204-208）。
+- [x] **Step 4: 尾部按动作种类分（S5）**：`SettingActionButton` 加 `trailing: Trail = Trail.None`，删掉固定的 `stringResource(R.string.common_confirm)`（:204-208）。
   - 「进入下一级」的入口按钮 → `Trail.Arrow`（`Text("›", …)`）：服务器配置、均衡器、百度登录/根目录/MV 目录、下载位置、缓存目录、导出/导入备份、扫码传输。
   - "就地执行"的动作按钮 → `Trail.None`：重扫本地音乐、重建索引、清除缓存、清除全部下载、下载/删除模型。
   - ⛔ `BackupFileRow` 的「导入」尾部（:262）保持文字 —— 那一行右侧文字是"这颗按钮干什么"的唯一标识，去掉后只剩文件名，属于**可读性退化**（不是漂移）。
-- [ ] **Step 5: 危险动作上色（S6）**：给四处加 `danger = true` —— `DownloadSettingsSection:135-141`（清除全部下载）、`CacheSettingsSection` 的清除全部缓存、`ServerSettingsSection:53`（断开连接）、`BackupFileRow` 删除（已在 T11 带 `danger = true`）。同时 `CacheSettingsSection` 那条的说明写「不会删除已下载的音乐」（§4.5 表）。
-- [ ] **Step 6: 删旧 key**：`settings_wifi_on` / `settings_wifi_off` 在代码里已 0 引用（Step 1 的门 + `grep -rn "settings_wifi_" app/src` 双证），四处定义（两份 strings × 2）一并删除。⛔ 留"暂时不用"的死 key 就是 §6 里 D5–D7 那类债的重演。
+  - ✅ **实做**：`Trail.Arrow` 实际接线 **15 处**（Data 4 / Download 1 / LyricsKaraoke 3 / PhotoWall 2 / Player 1 / Sources 4）。
+    ⚠️ **「下载位置」「缓存目录」两处按现状不加 `Arrow`** —— 下载位置已变成卡②里的两枚 `AdjustButton`（内 / 外接存储，就地切），
+    缓存目录已被 T8b 并进占用一览成为只读 `SettingsInfoRow`；两者都没有「进下一级」这个动作，给只读行挂 `›` 反而误导。
+- [x] **Step 5: 危险动作上色（S6）**：给四处加 `danger = true` —— `DownloadSettingsSection:135-141`（清除全部下载）、`CacheSettingsSection` 的清除全部缓存、`ServerSettingsSection:53`（断开连接）、`BackupFileRow` 删除（已在 T11 带 `danger = true`）。同时 `CacheSettingsSection` 那条的说明写「不会删除已下载的音乐」（§4.5 表）。
+  - ✅ **实做**：4 处落地 —— `DownloadSettingsSection:145`、`CacheSettingsSection:160`（现名「清除分离缓存」）、
+    `SourcesSettingsSection:129`（`ServerSettingsSection` 已在 T3 搬进 `SourcesSettingsSection.kt`）、`SettingsComponents:460`。
+    ⚠️ 缓存页另有 5 个清除按钮**故意不上色**（歌词 / 封面 Coil / 解包封面 / 封面地址表 / MV 都是秒级可重建），
+    整页刷 Warning 会让警告本身失效。
+    ⚠️ 本步附注的「说明写『不会删除已下载的音乐』」**不再适用**：§4.5 CACHE ③ 已把该按钮改名「清除分离缓存」、
+    说明定为「删除伴奏与人声副本，含分离临时残留」（≤26 字上限），T8b 已按 §4.5 落地；§4.5 是文案唯一真源，以它为准。
+- [x] **Step 6: 删旧 key**：`settings_wifi_on` / `settings_wifi_off` 在代码里已 0 引用（Step 1 的门 + `grep -rn "settings_wifi_" app/src` 双证），四处定义（两份 strings × 2）一并删除。⛔ 留"暂时不用"的死 key 就是 §6 里 D5–D7 那类债的重演。
+  - ✅ **实做**：两份 strings 各删 2 条、各加 4 条；`grep -rn "settings_wifi_" app/src` 归零（含 XML）。
 - [ ] **Step 7: 跑 G7-D + 全量单测 + `LanguageMirrorTest`（中英 key 对称门）+ 编译 + 提交**
+  - ⏳ **待用户编译验证**（与 T11 Step 8 同口径：编译由用户执行，验证命令见交付说明）。
 
 ```bash
 git commit -m "feat(settings): 开关改分段式开关轨、按钮尾部按动作种类区分、危险动作统一 Warning 色"

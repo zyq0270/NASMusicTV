@@ -148,13 +148,16 @@ internal fun CacheSettingsSection(
                 )
             }
             if (actions.onClearSeparationArtifacts != null) {
+                // §4.7-③ S6：这是缓存页代价最大的一颗 —— 删掉的是分离算出来的伴奏，
+                // 重建要走一遍完整分离（HQ 档在电视上以分钟计），故取 Warning 色。
                 SettingActionButton(
                     label = stringResource(R.string.settings_clear_separation_cache),
                     description = stringResource(R.string.settings_clear_separation_cache_desc),
                     onClick = {
                         actions.onClearSeparationArtifacts?.invoke()
                         refreshKey++
-                    }
+                    },
+                    danger = true,
                 )
             }
             if (actions.onClearMvCache != null) {
