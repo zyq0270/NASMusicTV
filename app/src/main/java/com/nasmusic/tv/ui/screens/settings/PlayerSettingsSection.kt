@@ -63,7 +63,8 @@ data class PlayerSettingsActions(
  * 播放设置分区（原 SettingsScreen PLAYBACK 分支，逻辑逐行搬迁；四卡构成见方案 §3.2）。
  *
  * ⚠️ Task 4 只做了「加一层卡片外壳」：行内排布一律未动 ——
- * 卡②的 5 个时长按钮 Row 既不给宽度也没有选中态，属**线上既有缺陷**，由 T13 一并修。
+ * 卡②的 5 个时长按钮 Row 既不给宽度也没有选中态，属**线上既有缺陷**，
+ * 已由 **T13** 修掉（改走 `SettingsChipRow` + `SettingsChip`，并补上选中态）。
  */
 @OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
@@ -87,20 +88,23 @@ internal fun PlayerSettingsSection(
                 onClick = { actions.onToggleCrossfade(!state.crossfadeEnabled) }
             )
             if (state.crossfadeEnabled) {
-                // 时长档位 2/4/6/8/12 秒（TV 遥控适配的离散选择，比滑条更易 D-Pad 操作）
-                // ⚠️ 原样搬：该 Row 既不设宽也无选中态（线上既有缺陷，T13 修排布）
-                val durations = listOf(2, 4, 6, 8, 12)
-                androidx.compose.foundation.layout.Row(
+                // 时长档位 2/4/6/8/12 秒（TV 遥控适配的离散选择，比滑条更易 D-Pad 操作）。
+                // v2.39.0 T13：原来是 `Row + forEach + SettingActionButton`，五枚全走默认
+                // `fillMaxWidth()` ⇒ Row 给 wrap 子项的 maxWidth 是「行内剩余宽度」，
+                // 第一枚「2s」吃满整行、后四档被挤成 0 宽（线上既有缺陷，只有「2s」可见）。
+                // 竖屏 407dp 也放不下 5 枚 ⇒ 每行 3 枚（§4.8 A2）；TV / 手机横屏仍是一行 5 枚（B1）。
+                SettingsChipRow(
+                    items = listOf(2, 4, 6, 8, 12),
+                    tv = 5,
+                    phonePortrait = 3,
                     modifier = Modifier.padding(start = 16.dp, top = 4.dp),
-                    horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)
-                ) {
-                    durations.forEach { sec ->
-                        SettingActionButton(
-                            label = "${sec}s",
-                            description = "",
-                            onClick = { actions.onChangeCrossfadeDuration(sec) }
-                        )
-                    }
+                ) { sec ->
+                    // 顺带补上选中态：原来 5 枚完全看不出当前是哪一档（同一行本来就缺，非新增功能）
+                    SettingsChip(
+                        label = "${sec}s",
+                        selected = state.crossfadeDurationSec == sec,
+                        onClick = { actions.onChangeCrossfadeDuration(sec) },
+                    )
                 }
             }
             // ── 应用内音量（应用级增益 0.0–1.0，独立于系统音量）──

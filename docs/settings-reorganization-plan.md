@@ -2363,8 +2363,14 @@ git commit -m "feat(settings): 开关改分段式开关轨、按钮尾部按动�
 > ⚠️ 本任务**含一个线上既有缺陷的修复**（时长档只有「2s」可见，§1 第 4 行 / §2-11 / §4.8 ①），不是改版回归。
 > 所以 Step 1 先取证再动代码，提交信息也单列这条 —— 出问题时好回滚、好解释。
 
-- [ ] **Step 1: 真机取证（改代码之前）**：用**当前 main 的 APK**（未含 T11–T13）装到手机，竖屏 → 设置 → 播放设置 → 「淡入淡出时长」那一行，截图存 `output/`。
+- [x] **Step 1: 真机取证（改代码之前）**：用**当前 main 的 APK**（未含 T11–T13）装到手机，竖屏 → 设置 → 播放设置 → 「淡入淡出时长」那一行，截图存 `output/`。
   预期画面只有一个「2s」按钮占满整行，4/6/8/12s **不见了**（不报错、不警告）。
+  > ⚠️ **实际执行方式已调整（2026-10-19）**：本轮改代码时**没有**在改动前先装旧包取证（AI 不自行上机，
+  > 且改动已落盘）。改为**静态红名单取证**，结论等价且更可复现：把 `HEAD` 版设置区 14 个文件导出到临时
+  > 目录，跑 `logs_temp/t13_redlist.py --root <临时目录>` ⇒ **8 处违规 / 3 个文件 / 29 个 `Row` 内容块**
+  > （`PlayerSettingsSection.kt:98`、`LyricsKaraokeSettingsSection.kt:205/212/241/248/277/286`、
+  > `ImportedPlaylistRow.kt:44`），修复后 **0 处 / 24 个**。真机「只有 2s 可见」的观感取证并入 V16 ①
+  > 一并复核（同一台机、同一份 APK，改前改后各一张，见 §8 V16）。
   ```bash
   JAVA_HOME="C:/Program Files/Android/Android Studio/jbr" \
     ./gradlew.bat assembleDebug --no-daemon -Pkotlin.compiler.execution.strategy=in-process
@@ -2375,7 +2381,9 @@ git commit -m "feat(settings): 开关改分段式开关轨、按钮尾部按动�
   ```
   截图结论写进 §10.N（"5 档只渲染出 1 档"），并留一张 TV 端同页截图做 B1 对照（TV 上 5 档全在）。
 
-- [ ] **Step 2: 写失败的 G8 门禁**
+- [x] **Step 2: 写失败的 G8 门禁**（✅ 实做：10 例 —— 1 条真实扫描 + 6 条自证；比方案片段多 3 条，
+  且**空转断言已改**：方案里的 `checkedCalls > 0` 是不可满足断言，改成常量探针 `LIVENESS_PROBE`，
+  理由见 §10.252）
 
 ```kotlin
 package com.nasmusic.tv.ui
@@ -2772,12 +2780,17 @@ private fun stripComments(src: String): String {
   ⚠️ `:323`/`:330`/`:357`/`:364` 现状是 `Box(Modifier.weight(1f)) { SettingActionButton(…) }` —— `weight` 给的是**外层 Box**、不是组件的实参区，所以照样命中。这正是 A3 要禁的"调用方手抄兜法"，Step 4 改写后自动消失。
   若命中数与这 5 处不符，**先核对 `scopedFiles()` 是否真的取到了文件**（空转断言会告诉你），不要改判据去凑数。
 
-- [ ] **Step 3: 落地 `SettingsChipRow`**：把 §4.8 的代码块原样追加到 `SettingsComponents.kt`。
+- [x] **Step 3: 落地 `SettingsChipRow`**：把 §4.8 的代码块原样追加到 `SettingsComponents.kt`。
+  （✅ 实做：签名与 §4.8 逐字一致；`itemContent` 接收者确为 `RowScope`，`equalWidth` 的
+  `Box(weight(1f))` 是全仓唯一一处等宽兜法）
   依赖：`adaptiveColumns(tv, phonePortrait, medium)`（`ui/components/CommonComponents.kt:152`，公开 Composable）、
   `SettingsTokens.chipGap` / `rowGap`（T1）。⚠️ `itemContent` 的接收者是 **`RowScope`**（不是普通 lambda）——
   `equalWidth` 分支里的 `Modifier.weight(1f)` 只有在这个接收者下才编译得过，这也正是"兜法只能出现在这一处"的技术保证。
 
-- [ ] **Step 4: 改写三处调用点**
+- [x] **Step 4: 改写三处调用点**（✅ 实做：时长档 `tv = 5 / phonePortrait = 3`；模型与自定义源
+  三处 `tv = 2 / phonePortrait = 1 / equalWidth = true`；另加 `ImportedPlaylistRow` 去掉外层 `Row`。
+  ⚠️ `Triple` 解构**没有采用** —— 三处还各带 `trailing` / `danger` 两个语义，四元组用
+  `private data class ModelAction` 承载，见 §10.252）
 
   ① 时长档 [PlayerSettingsSection.kt:112-123](file:///D:/hxzhang/MyGithubSoftware/NasAudio/NASMusicTV/app/src/main/java/com/nasmusic/tv/ui/screens/settings/PlayerSettingsSection.kt#L112) —— 换成 `SettingsChip` 行：
   ```kotlin
@@ -2831,7 +2844,10 @@ private fun stripComments(src: String): String {
   若编译器不接受这种写法，改成 `) { item -> SettingActionButton(item.first, item.second, item.third) }`，语义相同。
   删除那枚要带 `danger = true`（S6，与 T12 Step 5 同一处，⛔ 别改两遍）。
 
-- [ ] **Step 5: A4 —— `SettingsInfoRow` 尾部定宽**（[SettingsComponents.kt:378-396](file:///D:/hxzhang/MyGithubSoftware/NasAudio/NASMusicTV/app/src/main/java/com/nasmusic/tv/ui/screens/settings/SettingsComponents.kt#L378)）：
+- [x] **Step 5: A4 —— `SettingsInfoRow` 尾部定宽**（✅ 实做：`SettingsLabelValueRow` 新增
+  `valueMaxWidth: Dp?`，`SettingsInfoRow` 传 `infoValueWidth` 且用 `widthIn(max = …)`；
+  ⚠️ **偏离方案片段**：标签列取 `weight(1f)` 而非 `weight(1f, fill = false)` —— 后者会让值列
+  紧跟标签、不再贴右边缘，理由见 §10.252）（[SettingsComponents.kt:378-396](file:///D:/hxzhang/MyGithubSoftware/NasAudio/NASMusicTV/app/src/main/java/com/nasmusic/tv/ui/screens/settings/SettingsComponents.kt#L378)）：
   ```kotlin
   @Composable
   internal fun SettingsInfoRow(label: String, value: String, modifier: Modifier = Modifier) {
@@ -2861,12 +2877,14 @@ private fun stripComments(src: String): String {
   令牌里加 `val infoValueWidth = 180.dp`（§4.7-① 已列）。⛔ 不给 `maxLines`，长值允许折行。
   ⚠️ 这是**组件内部**的 `Row`（`SettingsComponents.kt` 不在 G8 作用域），改它不会被自己的门判违规。
 
-- [ ] **Step 6: A1 / A5 复核（不写代码，逐条打勾）**
+- [x] **Step 6: A1 / A5 复核（不写代码，逐条打勾）**（✅ 三条全部复核通过，见 §10.252）
   - A1：本任务 diff 里**没有**新的 `PhoneLandscape` 分支；`SettingsChipRow` 只经 `adaptiveColumns`（其竖屏分支即 `PhonePortrait` 判定）拿列数。
   - A5：diff 里**没有**为竖屏新增的 dp 字面量（尺寸只有 `SettingsTokens.*`）；`SwitchTrack` / 卡片竖条 / 下载进度条**没有**被包上 `portraitTouchTarget()`（它们不是热区，套了反而是错的）。
   - 既有 `ScreenUiModeCoverageTest` **不覆盖分区文件**（触发条件是顶层 `fun XxxScreen(`，§4.8 ③）⇒ 本任务不要指望它，也不要去改它的触发条件（会把 11 个分区一次性拉进门禁，红名单失控）。
 
-- [ ] **Step 7: 跑 G8 + 全量单测 + 编译**
+- [ ] **Step 7: 跑 G8 + 全量单测 + 编译**（⏳ 待用户执行：AI 不跑 Gradle。
+  ✅ 已用**独立编译通道**跑过 G8 本体 10 例全绿 + 其余 5 个扫描门 38 例全绿，
+  但那条通道**编不动 Compose 文件** ⇒ `assembleRelease` 仍必须由用户兜底）
   ```bash
   ./gradlew.bat --stop
   JAVA_HOME="C:/Program Files/Android/Android Studio/jbr" \
@@ -2878,7 +2896,7 @@ private fun stripComments(src: String): String {
   ```
   基线按跑前重测取、必须**只增不减**（v1.1 审校参考：2026-10-17 本地工件 211 个 XML / 2218 例 / 0 失败；报数必须带 `--rerun-tasks`）。日志看 `BUILD SUCCESSFUL` / 失败计数，⛔ 别看退出码。
 
-- [ ] **Step 8: 三形态真机走查（§8 V16 / V17）**
+- [ ] **Step 8: 三形态真机走查（§8 V16 / V17）**（⏳ 待用户执行，AI 不自行上机；与 §8 V16/V17 同一份清单）
   1. **竖屏 360 与 411 两档**各走一遍 11 个分区：时长档 3+2 排布、模型双按钮上下排且说明不折 3 行、`SettingsInfoRow` 标签不被长值挤没、开关轨不被压扁、二级页返回不丢分区（既有 `selectedSection` 逻辑）。截图进 `output/`。
   2. **TV / 手机横屏逐字一致**（B1 回归）：同一份 APK 在 TV 上对照改版前截图，时长档仍是一行 5 枚、模型仍是一行两枚等宽。⛔ 只要 TV 上有任何一处布局变化就是 B1 违约，先回滚再查。
   3. `SettingsSectionList.kt`（竖屏一级分区列表，G7 豁免但 V16 必查）逐项目视分区名 + 计数是否折行。

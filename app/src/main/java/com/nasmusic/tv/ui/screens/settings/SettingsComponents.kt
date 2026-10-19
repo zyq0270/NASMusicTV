@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -18,6 +19,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Info
@@ -41,6 +43,7 @@ import com.nasmusic.tv.data.model.PlayMode
 import com.nasmusic.tv.data.model.VisualizerTheme
 import com.nasmusic.tv.ui.components.FocusableSurface
 import com.nasmusic.tv.ui.components.LocalFocusableContentColor
+import com.nasmusic.tv.ui.components.adaptiveColumns
 import com.nasmusic.tv.ui.components.portraitTouchTarget
 import com.nasmusic.tv.ui.theme.FontSize
 import com.nasmusic.tv.ui.theme.NasMusicColors
@@ -492,11 +495,24 @@ internal fun AboutRow(label: String, value: String) {
 }
 
 /**
- * 「标签 + 值」的唯一版式（方案 §4.7-④）：标签占 1 份、值占 1.5 份，值恒右对齐。
+ * 「标签 + 值」的唯一版式（方案 §4.7-④ / §4.8 A4）：标签占满剩余宽度、值恒右对齐。
  *
  * 存在理由：`AboutRow` 与 `SettingsInfoRow` 是同一个版式的两套实现，后者用
  * `Arrangement.SpaceBetween` 且**不限宽** —— 长值会把标签挤没（竖屏实测）。收成一份后
- * 两处都吃这个 1 : 1.5 的双栏。⛔ 不要给值加 `maxLines`：长值必须折行，不许省略号截断。
+ * 两处共用同一条 `Row`。⛔ 不要给值加 `maxLines`：长值必须折行，不许省略号截断。
+ *
+ * 两档尾部宽度（[valueMaxWidth]）：
+ * - `null` → 值列按 `weight(1.5f)` 吃 60%（`AboutRow` 用）。**能力说明那几行的值是整句**
+ *   （「网易云 / QQ音乐 / 酷狗 / 酷我 / 咪咕(Meting-API 端点)」），定宽会把 TV 上的一行
+ *   压成三四行，属可感知回退 ⇒ 说明性行保持比例分配。
+ * - 给定值 → 值列**最多**这么宽（`SettingsInfoRow` 传 `infoValueWidth` = 180dp，§4.8 A4）。
+ *   指标行的值都是「1.23 GB」「12」这类短串：用 `widthIn(max = …)` 而不是 `width(…)`，
+ *   短值不占满 180dp（省下的宽度自动还给标签），长值（自定义源 URL）在这个上限内折行。
+ *
+ * ⚠️ 标签列用 `weight(1f)`（`fill = true`），**不能**用 A4 字面的 `fill = false`：
+ * `fill = false` 时长标签只占自身宽度，`Row` 的剩余空间无人认领、值会紧跟标签，
+ * 右侧留一大块空白 —— 正是本函数下方那条「竖屏修正」注释里记的「值把标签挤没 / 值忽左忽右」
+ * 同一类排版事故的另一种形态。
  */
 @Composable
 private fun SettingsLabelValueRow(
@@ -505,6 +521,7 @@ private fun SettingsLabelValueRow(
     labelFontSize: androidx.compose.ui.unit.TextUnit,
     valueFontSize: androidx.compose.ui.unit.TextUnit,
     valueWeight: FontWeight,
+    valueMaxWidth: androidx.compose.ui.unit.Dp? = null,
 ) {
     Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Text(
@@ -513,16 +530,20 @@ private fun SettingsLabelValueRow(
             fontSize = labelFontSize,
             modifier = Modifier.weight(1f)
         )
-        // 竖屏修正（20:40 用户反馈）：值不限定权重时长文本会吃掉整行、把 weight
-        // 标签挤没。改为 标签 1 : 值 1.5 的比例分配（约 40%/60%），长值在右栏内
-        // 换行且恒右对齐，标签任何形态下都保持可见。
+        // 竖屏修正（20:40 用户反馈）：值不限定宽度时长文本会吃掉整行、把 weight
+        // 标签挤没。`valueMaxWidth` 档给值列一个上限（尾部不参与挤压），
+        // 比例档则按 标签 1 : 值 1.5 分配（约 40%/60%），两档都是恒右对齐。
         Text(
             text = value,
             color = NasMusicColors.TextPrimary,
             fontSize = valueFontSize,
             fontWeight = valueWeight,
             textAlign = androidx.compose.ui.text.style.TextAlign.End,
-            modifier = Modifier.weight(1.5f).padding(start = 16.dp)
+            modifier = if (valueMaxWidth != null) {
+                Modifier.widthIn(max = valueMaxWidth).padding(start = 16.dp)
+            } else {
+                Modifier.weight(1.5f).padding(start = 16.dp)
+            }
         )
     }
 }
@@ -619,11 +640,56 @@ internal fun SettingsChip(
 }
 
 /**
+ * 芯片组按形态分行：竖屏每行 [phonePortrait] 枚，TV / 手机横屏每行 [tv] 枚。
+ *
+ * 存在理由：`Row` 不会换行，芯片多了只能被挤扁或压成 0 宽（方案 §4.8 ①②）。
+ * 手动分行而不是 FlowRow / horizontalScroll —— 后两种在 D-Pad 下焦点会跑出屏幕或滚不出去
+ * （`PhotoWallSettingsSection` 的 43 个转场芯片早就是这个做法，本原语把它收成一个调用点）。
+ *
+ * [equalWidth] 是给「带长说明的整行瓦片」（模型下载那类）用的：需要等宽两枚时，
+ * `Box(Modifier.weight(1f))` 这个兜法只在**这里**出现一次（A3：调用方⛔ 不许手抄）；
+ * 芯片（短标签档位）不要开，让它们按内容 wrap。
+ *
+ * ⚠️ 间距统一走 [SettingsTokens.chipGap]（10dp），比原来手写的 12dp 紧 2dp ——
+ * 这是「令牌统一」的直接后果，不是排版回归；V17 判读按「排布形态不变」看，不按逐像素。
+ *
+ * ⚠️ `itemContent` 的接收者是 [RowScope]（不是普通 lambda）—— `equalWidth` 分支里的
+ * `Modifier.weight(1f)` 只有在这个接收者下才编译得过，这也正是"兜法只能出现在这一处"的技术保证。
+ */
+@Composable
+internal fun <T> SettingsChipRow(
+    items: List<T>,
+    tv: Int = items.size,
+    phonePortrait: Int = minOf(items.size, 2),
+    medium: Int = tv,
+    equalWidth: Boolean = false,
+    modifier: Modifier = Modifier,
+    itemContent: @Composable RowScope.(T) -> Unit,
+) {
+    val columns = adaptiveColumns(tv = tv, phonePortrait = phonePortrait, medium = medium)
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(SettingsTokens.rowGap),
+    ) {
+        items.chunked(columns.coerceAtLeast(1)).forEach { rowItems ->
+            Row(horizontalArrangement = Arrangement.spacedBy(SettingsTokens.chipGap)) {
+                rowItems.forEach { item ->
+                    if (equalWidth) Box(modifier = Modifier.weight(1f)) { itemContent(item) }
+                    else itemContent(item)
+                }
+            }
+        }
+    }
+}
+
+/**
  * 下载统计行：标签 + 值（W0 约定重命名：原 InfoRow → SettingsInfoRow）。
  *
- * 版式与 `AboutRow` 共用 [SettingsLabelValueRow]（1 : 1.5 双栏、值恒右对齐）——
+ * 版式与 `AboutRow` 共用 [SettingsLabelValueRow]（标签占满剩余、值恒右对齐）——
  * 此前这里用 `Arrangement.SpaceBetween` 且不限宽，长值会把标签挤没（§4.7-④）。
  * 水平边距取 `rowHPadding`，与行瓦片的内边距对齐，标签不再比上面的开关行凸出 20dp。
+ * 值列走 §4.8 A4 的**封顶**档（`infoValueWidth` = 180dp）：指标行的值都是短串，
+ * 封顶后短值不白占宽度、长值也不会把标签挤没；说明性长句仍归 `AboutRow`（比例档）。
  *
  * @param description 只读行按 §4.5 规范**默认不带**功能说明；只有该项"删了有代价"
  *   需要警示时才给（T8b 的 9 条缓存代价说明）。`null` = 不占第二行。
@@ -649,6 +715,8 @@ internal fun SettingsInfoRow(
                 labelFontSize = FontSize.body(),
                 valueFontSize = FontSize.body(),
                 valueWeight = FontWeight.Medium,
+                // §4.8 A4：指标行的尾部值列封顶 infoValueWidth，长值不许把标签挤没。
+                valueMaxWidth = SettingsTokens.infoValueWidth,
             )
         }
         if (description != null) {

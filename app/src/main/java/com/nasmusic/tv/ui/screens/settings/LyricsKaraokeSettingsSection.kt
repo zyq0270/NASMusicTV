@@ -65,6 +65,22 @@ data class LyricsKaraokeActions(
 )
 
 /**
+ * 分离模型卡里的一枚动作按钮。
+ *
+ * 存在理由：`SettingsChipRow` 要求同构元素（`List<T>` + 同一个 `itemContent`），
+ * 而这三行按钮的 `label` / `description` 各不相同、`trailing` 与 `danger` 也不一致。
+ * 收成一个小 holder 比给 `SettingsChipRow` 加一个「四元组」形参干净得多
+ * （Kotlin 标准库没有 `Quadruple`，硬用 `Triple` 会丢掉 `trailing`/`danger` 两个语义）。
+ */
+private data class ModelAction(
+    val label: String,
+    val description: String,
+    val onClick: () -> Unit,
+    val trailing: Trail = Trail.None,
+    val danger: Boolean = false,
+)
+
+/**
  * 歌词与 K 歌分区（人声分离模式 + 分离模型管理；歌词显示卡由 T10 追加）。
  *
  * 卡片构成（方案 §3.2，编号此后不再变）：卡②人声分离 / 卡③分离模型；
@@ -197,26 +213,36 @@ internal fun LyricsKaraokeSettingsSection(
                             fontSize = FontSize.small()
                         )
                         Spacer(modifier = Modifier.height(8.dp))
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            Box(modifier = Modifier.weight(1f)) {
-                                SettingActionButton(
+                        // §4.8 A3：等宽两枚的 `Box(Modifier.weight(1f))` 兜法已收进 SettingsChipRow，
+                        // 调用方⛔ 不许再手抄；竖屏（407dp）降为每行 1 枚，各占整行 ⇒ 说明不再折 3 行。
+                        SettingsChipRow(
+                            items = listOf(
+                                ModelAction(
                                     label = stringResource(R.string.settings_delete_model),
                                     description = stringResource(R.string.settings_delete_model_desc),
-                                    onClick = { actions.onDeleteModel?.invoke() }
-                                )
-                            }
-                            Box(modifier = Modifier.weight(1f)) {
-                                SettingActionButton(
+                                    onClick = { actions.onDeleteModel?.invoke() },
+                                    // §4.7-③ S6：删的是已下载的分离模型，重建要重下一遍 ⇒ Warning 色
+                                    danger = true,
+                                ),
+                                ModelAction(
                                     label = stringResource(R.string.settings_scan_upload_model),
                                     description = stringResource(R.string.settings_scan_upload_model_desc),
                                     onClick = { actions.onScanTransferModel?.invoke() },
                                     // 打开扫码传输对话框（下一级）
                                     trailing = Trail.Arrow,
-                                )
-                            }
+                                ),
+                            ),
+                            tv = 2,
+                            phonePortrait = 1,
+                            equalWidth = true,
+                        ) { item ->
+                            SettingActionButton(
+                                label = item.label,
+                                description = item.description,
+                                onClick = item.onClick,
+                                trailing = item.trailing,
+                                danger = item.danger,
+                            )
                         }
                     }
                 } else {
@@ -233,26 +259,32 @@ internal fun LyricsKaraokeSettingsSection(
                             fontSize = FontSize.small()
                         )
                         Spacer(modifier = Modifier.height(8.dp))
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            Box(modifier = Modifier.weight(1f)) {
-                                SettingActionButton(
+                        SettingsChipRow(
+                            items = listOf(
+                                ModelAction(
                                     label = stringResource(R.string.settings_download_separation_model),
                                     description = stringResource(R.string.settings_download_separation_model_desc),
-                                    onClick = { actions.onDownloadModel?.invoke() }
-                                )
-                            }
-                            Box(modifier = Modifier.weight(1f)) {
-                                SettingActionButton(
+                                    onClick = { actions.onDownloadModel?.invoke() },
+                                ),
+                                ModelAction(
                                     label = stringResource(R.string.settings_scan_upload_model),
                                     description = stringResource(R.string.settings_scan_upload_model_desc),
                                     onClick = { actions.onScanTransferModel?.invoke() },
                                     // 打开扫码传输对话框（下一级）
                                     trailing = Trail.Arrow,
-                                )
-                            }
+                                ),
+                            ),
+                            tv = 2,
+                            phonePortrait = 1,
+                            equalWidth = true,
+                        ) { item ->
+                            SettingActionButton(
+                                label = item.label,
+                                description = item.description,
+                                onClick = item.onClick,
+                                trailing = item.trailing,
+                                danger = item.danger,
+                            )
                         }
                     }
                 }
@@ -269,26 +301,32 @@ internal fun LyricsKaraokeSettingsSection(
                 },
                 description = stringResource(R.string.settings_model_custom_url_desc)
             )
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Box(modifier = Modifier.weight(1f)) {
-                    SettingActionButton(
+            SettingsChipRow(
+                items = listOf(
+                    ModelAction(
                         label = stringResource(R.string.settings_model_custom_url_edit),
                         description = stringResource(R.string.settings_model_custom_url_desc),
                         onClick = { actions.onEditCustomModelUrl?.invoke() },
                         // 打开端点编辑对话框（下一级）
                         trailing = Trail.Arrow,
-                    )
-                }
-                Box(modifier = Modifier.weight(1f)) {
-                    SettingActionButton(
+                    ),
+                    ModelAction(
                         label = stringResource(R.string.settings_reset_custom_model_url),
                         description = stringResource(R.string.settings_reset_custom_model_url_desc),
-                        onClick = { actions.onResetCustomModelUrl?.invoke() }
-                    )
-                }
+                        onClick = { actions.onResetCustomModelUrl?.invoke() },
+                    ),
+                ),
+                tv = 2,
+                phonePortrait = 1,
+                equalWidth = true,
+            ) { item ->
+                SettingActionButton(
+                    label = item.label,
+                    description = item.description,
+                    onClick = item.onClick,
+                    trailing = item.trailing,
+                    danger = item.danger,
+                )
             }
             // ── 高质量分离失败详情（本轮长期留存，供用户对着屏幕截图回传）──
             state.hqErrorDetail?.let { detail ->

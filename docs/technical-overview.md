@@ -16316,3 +16316,92 @@ T8b 已按 §4.5 落地。§4.5 是文案唯一真源，再加一句会顶穿字
 **免 Gradle 自查**：`logs_temp/t12_selfcheck.py` 112 项（G7-A/B/C 回归 + G7-D + 开关轨 11 个令牌
 取值 + 尾部语义 + `danger` 恰 4 处 + 括号配平 + LF + 两份 XML 可解析）。
 
+### 10.252 v2.39.0 — 设置区整理 T13：`SettingsChipRow` 分行原语 + G8 宽度门（2026-10-19）
+
+**问题**：`Row` 给每个 wrap-content 子项的 `maxWidth` 是**本行剩余宽度**。默认 `fillMaxWidth()`
+的设置组件放进 `Row` 后，第一枚吃满整行、后续兄弟被挤成 **0 宽** —— 线上表现为「选项不见了」，
+不报错、不警告。这不是本轮改版引入的：v2.35.0 音质档、v2.37.0 画面适配、v2.38.x 淡入淡出时长档
+三代同因同症，前两代修在调用点、没留门禁，所以第三代的时长档又长了出来（5 档只渲染出「2s」）。
+竖屏内容宽只有 TV 的 26%，同一段代码还会把芯片压成高块、互相参差（用户 2026-10-18 反馈
+「竖屏下这些组件被挤压变形了」）。
+
+**红名单（`logs_temp/t13_redlist.py --root <HEAD 副本>`，与门禁同一谓词）**：
+
+| 文件 | 违规行 | 说明 |
+|---|---|---|
+| `PlayerSettingsSection.kt` | 98 | 时长档 `Row { durations.forEach { SettingActionButton(…) } }` |
+| `LyricsKaraokeSettingsSection.kt` | 205 / 212 / 241 / 248 / 277 / 286 | 三组模型双按钮，各 2 枚 |
+| `ImportedPlaylistRow.kt` | 44 | 外层 `Row` 里唯一的子项就是整行瓦片 |
+
+修复前 **8 处 / 3 文件 / 29 个 `Row` 内容块**，修复后 **0 处 / 24 个**（差的 5 个内容块正是被
+拆掉的 5 个 `Row`）。⚠️ 时长档在源码里只有 **1 个**调用点（`forEach` 在运行期生成 5 枚），
+所以判据必须落在「组件调用」上、⛔ 不能落在「Row 里有 ≥2 个子项」上 —— 后者会**静默空转**。
+
+**`SettingsChipRow`（`SettingsComponents.kt`，全仓唯一）**：`items` + `tv` / `phonePortrait` /
+`medium` / `equalWidth` + `itemContent: @Composable RowScope.(T) -> Unit`。列数只经
+`adaptiveColumns(tv, phonePortrait, medium)` 取得（⛔ 不自己写 `screenWidthDp` 判断：那个值是
+未缩放 Android dp ≈ 360，与 Compose dp ≈ 439 差 22%，`adaptiveColumns` 内部已把竖屏分支
+直接短路成 `phonePortrait`）。`itemContent` 的接收者是 **`RowScope`** 而不是普通 lambda ——
+`equalWidth` 分支里的 `Modifier.weight(1f)` 只有在这个接收者下才编译得过，这也正是
+「等宽兜法只能出现在这一处」的技术保证（`logs_temp/t13_selfcheck.py` 第 [3] 组守这条：
+设置区 `Box(modifier = Modifier.weight(1f))` 恰好 1 处且必须在 `SettingsComponents.kt`）。
+
+**三处调用点**：
+
+- 时长档 → `SettingsChipRow(listOf(2,4,6,8,12), tv = 5, phonePortrait = 3)`，内部换
+  `SettingsChip(selected = state.crossfadeDurationSec == sec)`。TV / 手机横屏仍是**一行 5 枚**
+  （B1 逐字等价）；竖屏 407dp 放不下 5 枚 ⇒ 3 + 2。顺带补上选中态：原来 5 枚**完全看不出**
+  当前是哪一档，这属于「同一行本来就缺」，不是新增功能。
+- 模型双按钮 ×2（已下载 / 未下载）+ 自定义源双按钮 → `tv = 2, phonePortrait = 1, equalWidth = true`。
+  竖屏每枚独占整行 ⇒ 说明不再折到第三行。三处的 `label` / `description` / `trailing` / `danger`
+  **各不相同**，`Triple` 装不下四个语义（Kotlin 标准库没有 `Quadruple`），因此收了一个
+  `private data class ModelAction`；⛔ 不要为了「少一个类」把它退回 `Triple` 而丢掉 `trailing`/`danger`。
+- `ImportedPlaylistRow` 去掉外层 `Row`：它唯一的子项就是整行瓦片，属「整行一枚请直接从
+  `Column` 调用」那一类；外层 `padding(vertical = 4.dp)` 移到瓦片 `modifier` 上，视觉等价。
+
+**A4：`SettingsInfoRow` 尾部值列封顶** —— `SettingsLabelValueRow` 新增 `valueMaxWidth: Dp?`，
+`SettingsInfoRow` 传 `SettingsTokens.infoValueWidth`（180dp）、用 `widthIn(max = …)` 而非
+`width(…)`（短值不白占宽度）；`AboutRow` **不传**（长句说明行保持 1 : 1.5 比例档）。
+
+⚠️ **与方案 Step 5 的一处偏离（⛔ 不要按方案片段改回 `fill = false`）**：方案写
+`Modifier.weight(1f, fill = false)`。`fill = false` 时标签只占自身内容宽度，`Row` 的剩余空间
+**无人认领**、按 `Arrangement.Start` 全部堆到行尾 ⇒ 值列会**紧跟标签**、不再贴右边缘，
+与全部既有截图和 `AboutRow` 的观感都不一样。实现取 `weight(1f)`（`fill = true`）+
+值列 `widthIn(max = 180.dp)`：标签吃满剩余、值列恒贴右且最多 180dp，两项目的都达到，
+视觉不回退。`logs_temp/t13_selfcheck.py` 第 [6] 组就是钉这一条（剥注释后实现里不得出现
+`fill = false`）。
+
+**A1 / A5 复核**：diff 里**没有**新增 `PhoneLandscape` 分支（`SettingsScreen.kt` 仍是既有 1 处，
+分区文件 0 处）；`SettingsChipRow` 内部**零 dp 字面量**（尺寸只有 `chipGap` / `rowGap` 令牌）；
+`SwitchTrack` 与进度条**没有**被套 `portraitTouchTarget()`（它们不是热区）。
+⚠️ 既有 `ScreenUiModeCoverageTest` 的触发条件是顶层 `fun XxxScreen(`，**不覆盖分区文件** ⇒
+本任务不指望它，也不去改它的触发条件（那会把 11 个分区一次性拉进门禁）。
+
+**G8 门禁（`SettingsRowWidthScanTest.kt`，10 例）**：与 `ChipContentWidthScanTest` 分两层 ——
+旧门守 `FocusableSurface` 的**内容**（`fillMaxSize`），G8 守**调用方**（无宽度的整行瓦片）。
+时长档那个调用点里连 `FocusableSurface` 都没出现（包在 `SettingActionButton` 内），抓手差一层，
+所以三代都没拦住；两层缺任一层都留有一条无人看守的 0 宽路径。
+
+判据里的两个坑（都靠负向自证钉住）：
+
+- **空转自证不能写 `checkedCalls > 0`**（方案原文如此，但那是**不可满足**的断言）：
+  `checkedCalls` 只统计「放进 Row 又没给宽度」的调用，这条门一修绿该数**必然为 0** ——
+  拿它当活性证明等于要求代码永远保持脏。改为**常量探针** `LIVENESS_PROBE`（一段必定违规的
+  常量源码），它不随生产代码变干净而失效。
+- **注释剥离必须是状态机，且必须认原始字符串**：`stripComments` / `matchDelimiter` 都要认
+  `"""`，且**收尾按「连续引号串」整段吃**。Kotlin 允许 `"""…""""`（内容以 `"` 结尾，共 4 个
+  引号），本仓 `VisualizerThemeStringsGateTest` 的 `Regex("""…"""")` 就是这种写法；只吃 3 个
+  会把剩下那个当成普通字符串开头，此后整段代码被判成字符串内容 —— **安静地漏掉一切**，
+  比报错更糟。`logs_temp/t13_selfcheck.py` 的 Python 侧状态机同步补了这条（含 `blank_literals`
+  档：括号配平必须把字面量内容也抹掉，否则 `'{'`、`"("` 会被当成真括号，计数必然失衡）。
+
+**独立编译通道（本任务新增，`logs_temp/kt_standalone.py` + `run_junit.py`）**：用 Gradle 缓存里的
+`kotlin-compiler-embeddable` + Android Studio JBR 直接编译并跑 JUnit，**不经过 Gradle**。
+它抓到了本任务两处只有编译器能发现的错误：① KDoc 正文里写 `/*` 会开一个嵌套块注释、
+② 上面那个 `""""` 收尾。⚠️ 它只编得动不依赖 Compose 的纯 JVM 文件 —— **「全绿」≠ 编译通过**，
+Compose 侧改动仍须 `assembleRelease` 兜底（见 §10.250 的覆盖盲区说明）。
+
+**免 Gradle 自查**：`logs_temp/t13_selfcheck.py` 57 项（G8 干跑 + 原语签名 + A3 兜法唯一 +
+时长档/模型双按钮接线 + A4 + A1/A5 + `ImportedPlaylistRow` + `danger` 5 处 + 注释完整性 +
+括号配平 + LF）。
+
