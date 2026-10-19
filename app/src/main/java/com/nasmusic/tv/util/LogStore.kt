@@ -1,6 +1,7 @@
 package com.nasmusic.tv.util
 
 import java.io.File
+import java.io.FileOutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -15,6 +16,8 @@ import java.util.concurrent.TimeUnit
  * @param tag 模块标签（与 logcat 的 tag 一致）
  * @param message 正文（已反转义，可含换行）
  * @param stackTrace 异常堆栈全文（无异常时为 null）
+ * @param truncated **本条记录在写入时被打断**（文件末尾没有换行结尾），
+ *   内容可能只写了前半截。由 [LogStore.snapshot] 判定，⛔ 不从文件里解码。
  */
 data class LogEntry(
     val timestamp: Long,
@@ -22,9 +25,21 @@ data class LogEntry(
     val tag: String,
     val message: String,
     val stackTrace: String?,
+    val truncated: Boolean = false,
 ) {
     /** 是否为错误级（UI 上色用） */
     val isError: Boolean get() = level == LogStore.LEVEL_ERROR
+
+    /** 正文 + 堆栈的总行数（详情页「共 N 行」用；纯函数，便于单测） */
+    val totalLines: Int
+        get() = countLines(message) + (stackTrace?.let { countLines(it) } ?: 0)
+
+    /** 正文 + 堆栈的总字符数（详情页「共 N 字符」用；纯函数，便于单测） */
+    val totalChars: Int
+        get() = message.length + (stackTrace?.length ?: 0)
+
+    private fun countLines(text: String): Int =
+        if (text.isEmpty()) 0 else text.count { it == '\n' } + 1
 }
 
 /**
@@ -126,7 +141,7 @@ object LogStore {
     fun appendBlocking(level: String, tag: String, message: String, throwable: Throwable? = null) {
         if (logDir == null) return
         val line = encode(level, tag, message, throwable?.stackTraceToString())
-        synchronized(lock) { runCatching { writeLine(line) } }
+        synchronized(lock) { runCatching { writeLine(line, durable = true) } }
     }
 
     /**
@@ -139,10 +154,20 @@ object LogStore {
         val file = logFile() ?: return LogSnapshot()
         val size = if (file.exists()) file.length() else 0L
         val entries = runCatching {
-            file.readLines(Charsets.UTF_8).asReversed().asSequence()
-                .mapNotNull { decode(it) }
-                .take(limit.coerceAtLeast(0))
-                .toList()
+            if (!file.exists()) return@runCatching emptyList()
+            val text = file.readText(Charsets.UTF_8)
+            if (text.isEmpty()) return@runCatching emptyList()
+            // ⚠️ 最后一行没有以换行结尾 ⇒ 那次写入被打断（进程被杀 / 断电 / 存储满），
+            //    这一条**末尾可能缺内容**。不丢弃（崩溃现场最有价值），但必须**标记出来**：
+            //    否则用户只会看到「复制出来的比预期的少」，却不知道为什么（v2.39.2 真机反馈）。
+            val endsWithNewline = text.endsWith("\n")
+            val rawLines = text.split('\n').filter { it.isNotBlank() }
+            val lastIndex = rawLines.lastIndex
+            rawLines.mapIndexedNotNull { idx, line ->
+                decode(line)?.let { entry ->
+                    if (!endsWithNewline && idx == lastIndex) entry.copy(truncated = true) else entry
+                }
+            }.asReversed().take(limit.coerceAtLeast(0))
         }.getOrDefault(emptyList())
         return LogSnapshot(entries = entries, fileSizeBytes = size)
     }
@@ -164,10 +189,24 @@ object LogStore {
         runCatching { io.submit { }.get(2, TimeUnit.SECONDS) }
     }
 
-    private fun writeLine(line: String) {
+    /**
+     * 追加一行（调用方负责持锁）。
+     *
+     * @param durable 崩溃路径必须为 true：进程随即被系统杀掉，只写进页缓存不够，
+     *   必须 `fd.sync()` 真正落盘。普通日志走 [File.appendText]（关闭时已 flush）。
+     */
+    private fun writeLine(line: String, durable: Boolean = false) {
         synchronized(lock) {
             val file = logFile() ?: return
-            file.appendText(line + "\n", Charsets.UTF_8)
+            if (durable) {
+                FileOutputStream(file, true).use { out ->
+                    out.write((line + "\n").toByteArray(Charsets.UTF_8))
+                    out.flush()
+                    out.fd.sync()
+                }
+            } else {
+                file.appendText(line + "\n", Charsets.UTF_8)
+            }
             if (file.length() > MAX_BYTES) rotate(file)
         }
     }

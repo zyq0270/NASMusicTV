@@ -516,6 +516,9 @@
     <string name="settings_logs_stack_label">Stack trace</string>
     <string name="settings_logs_detail_copy">Copy</string>
     <string name="settings_logs_detail_scroll_hint">Press ↑ ↓ to scroll</string>
+    <string name="settings_logs_detail_size">%1$d lines · %2$d chars</string>
+    <string name="settings_logs_detail_truncated">⚠ This entry was cut off while being written; the end may be missing</string>
+    <string name="settings_logs_detail_copied">Copied %1$d chars</string>
     <string name="settings_logs_detail_close">Close</string>
     <!-- Data section three card titles (T8) -->
     <string name="settings_group_backup">Backup &amp; Restore</string>

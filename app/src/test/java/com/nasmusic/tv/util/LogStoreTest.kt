@@ -157,4 +157,99 @@ class LogStoreTest {
         assertTrue("正文必须保留", text.contains("只有正文"))
         assertEquals("无堆栈时只能是 2 行（头 + 正文）", 2, text.lines().size)
     }
+
+    // ───────────────────── 完整性与行数自证（v2.39.2 真机「复制不全」） ─────────────────────
+
+    /**
+     * 真机反馈「复制粘出来本身就少」⇒ 需要能**量出来**完整性的判据。
+     *
+     * 这里走完整链路：`encode` → 落盘 → `snapshot()` → `toClipboardText()`，逐字符比对。
+     * 只要有一个环节吃掉内容（转义、分行、读取、拼接），这条就红。
+     * ⚠️ 不用 `Throwable` 造堆栈：`stackTraceToString()` 会加首行和帧，无法逐字符比对，
+     * 真实异常路径由下一条用例单独锁。
+     */
+    @Test
+    fun `超长堆栈必须无损往返`() {
+        val stack = buildString {
+            append("java.lang.IllegalStateException: boom\t含制表符\r含回车\n")
+            for (i in 1..80) append("\tat com.example.C$i.m$i(F$i.kt:$i)\n")
+            append("Caused by: java.io.IOException: 反斜杠\\路径\\x\n")
+            append("\t... 12 more")
+        }
+        val message = "消息\t带制表符\n第二行\\结尾"
+        val file = File(File(root, "logs"), "app.log")
+        file.parentFile?.mkdirs()
+        file.writeText(
+            LogStore.encode(LogStore.LEVEL_ERROR, "无损\tTAG", message, stack) + "\n",
+            Charsets.UTF_8,
+        )
+
+        val entry = LogStore.snapshot().entries.first()
+        assertEquals("堆栈必须逐字符一致", stack, entry.stackTrace)
+        assertEquals("正文必须逐字符一致", message, entry.message)
+        assertEquals("tag 必须逐字符一致", "无损\tTAG", entry.tag)
+        assertTrue("完整写入的记录不得被标记为截断", !entry.truncated)
+        assertTrue("复制全文必须以完整堆栈结尾", entry.toClipboardText().endsWith(stack))
+        assertEquals(
+            "行数必须与实际一致（正文 2 行 + 堆栈 ${stack.count { it == '\n' } + 1} 行）",
+            2 + stack.count { it == '\n' } + 1,
+            entry.totalLines,
+        )
+    }
+
+    /** 真实异常路径（`appendBlocking` + `stackTraceToString()`）也必须整段留下来。 */
+    @Test
+    fun `真实异常堆栈经同步写入后必须完整`() {
+        val throwable = IllegalStateException("boom")
+        LogStore.appendBlocking(LogStore.LEVEL_ERROR, "REAL", "出错了", throwable)
+        val entry = LogStore.snapshot().entries.first()
+        assertEquals(throwable.stackTraceToString(), entry.stackTrace)
+        assertTrue("首行异常类型不能丢", entry.stackTrace!!.startsWith("java.lang.IllegalStateException: boom"))
+    }
+
+    /** 纯函数：行数/字符数是「全不全」的唯一客观判据，必须单独锁住。 */
+    @Test
+    fun `行数与字符数按正文加堆栈合计`() {
+        val entry = LogEntry(0L, LogStore.LEVEL_ERROR, "T", "a\nb", "c\nd\ne")
+        assertEquals(5, entry.totalLines)
+        assertEquals(8, entry.totalChars)
+        val noStack = LogEntry(0L, LogStore.LEVEL_WARN, "T", "单行", null)
+        assertEquals(1, noStack.totalLines)
+        assertEquals(2, noStack.totalChars)
+        val empty = LogEntry(0L, LogStore.LEVEL_WARN, "T", "", null)
+        assertEquals("空正文不得算成 1 行", 0, empty.totalLines)
+    }
+
+    /**
+     * **写入被打断**的最后一条必须被标记：文件末尾没有换行 ⇒ 那次 `writeLine` 没写完
+     * （进程被杀 / 断电 / 存储满）。不标记的话，用户只会看到「复制出来的比预期的少」。
+     */
+    @Test
+    fun `末尾没有换行的最后一条必须标记为截断`() {
+        val file = File(File(root, "logs"), "app.log")
+        file.parentFile?.mkdirs()
+        val l1 = LogStore.encode(LogStore.LEVEL_WARN, "T1", "第一条", null)
+        val l2 = LogStore.encode(LogStore.LEVEL_ERROR, "T2", "第二条", "完整堆栈\nat a.b(C.kt:1)")
+        val partial = LogStore.encode(LogStore.LEVEL_ERROR, "T3", "第三条", "堆栈前半截")
+        // ⚠️ 末尾故意不写 \n —— 模拟写入被中断
+        file.writeText("$l1\n$l2\n$partial", Charsets.UTF_8)
+
+        val entries = LogStore.snapshot().entries
+        assertEquals(3, entries.size)
+        assertEquals("T3", entries[0].tag)
+        assertTrue("被打断的最后一条必须标记 truncated", entries[0].truncated)
+        assertTrue("前面写完整的记录不得被误标", !entries[1].truncated && !entries[2].truncated)
+    }
+
+    /** 负向自证：正常以换行结尾的文件，任何一条都不得被判成截断。 */
+    @Test
+    fun `负向自证 完整文件不得误判截断`() {
+        val file = File(File(root, "logs"), "app.log")
+        file.parentFile?.mkdirs()
+        val l1 = LogStore.encode(LogStore.LEVEL_WARN, "T1", "第一条", null)
+        file.writeText("$l1\n", Charsets.UTF_8)
+        val entries = LogStore.snapshot().entries
+        assertEquals(1, entries.size)
+        assertTrue("护栏空转：完整文件被误判成截断", !entries[0].truncated)
+    }
 }

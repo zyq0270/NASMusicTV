@@ -15,6 +15,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -25,7 +26,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
-import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -49,6 +50,7 @@ import com.nasmusic.tv.util.toClipboardText
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.delay
 
 /** 日志分区状态（运行期事实，不落盘、不进备份） */
 data class LogsSettingsState(
@@ -153,16 +155,29 @@ internal fun LogsSettingsSection(
         LogDetailDialog(entry = entry, onDismiss = { selectedEntry = null })
     }
     if (showClearConfirm) {
-        ConfirmDialog(
-            title = stringResource(R.string.settings_logs_clear_confirm_title),
-            message = stringResource(R.string.settings_logs_clear_confirm_msg),
-            onConfirm = {
-                showClearConfirm = false
-                actions.onClear()
-            },
-            onDismiss = { showClearConfirm = false },
-            destructive = true,
-        )
+        // ⚠️ `ConfirmDialog` **本身不是弹窗**：它只是一个 `Box(fillMaxSize)` 的遮罩，
+        //    必须由调用方套一层真正的 `Dialog`（全仓既有 4 处调用点都是这个写法）。
+        //    直接放在分区的 `Column` 里会变成「列表下方一整块全屏遮罩」——
+        //    真机反馈「提示框出现在日志信息的最下方」就是这个（v2.39.2）。
+        Dialog(
+            onDismissRequest = { showClearConfirm = false },
+            properties = DialogProperties(
+                dismissOnBackPress = false,
+                dismissOnClickOutside = false,
+                usePlatformDefaultWidth = false,
+            ),
+        ) {
+            ConfirmDialog(
+                title = stringResource(R.string.settings_logs_clear_confirm_title),
+                message = stringResource(R.string.settings_logs_clear_confirm_msg),
+                onConfirm = {
+                    showClearConfirm = false
+                    actions.onClear()
+                },
+                onDismiss = { showClearConfirm = false },
+                destructive = true,
+            )
+        }
     }
 }
 
@@ -258,8 +273,8 @@ private fun LogEntryRow(entry: LogEntry, onOpen: () -> Unit) {
  *    这里不再依赖它分叉，而是自己补一条**与形态无关**的 `heightIn` 上限 +
  *    正文区 `verticalScroll`，页头与按钮固定不动。
  * ③ **「遥控器怎么滚」** —— 纯文本没有子焦点，`BringIntoView` 不会替我们滚。
- *    ⇒ 在对话框根节点挂 `onKeyEvent`，上下键直接翻页。键盘事件从获得焦点的芯片
- *    **冒泡**到根节点，所以不需要额外造一个可聚焦节点（也就不会把焦点困在正文里）。
+ *    ⇒ 在对话框根节点挂 **`onPreviewKeyEvent`**（不是 `onKeyEvent`）：预览阶段先于子节点派发，
+ *    焦点芯片即使吞掉方向键也拦不住翻页；也不需要额外造可聚焦节点（不会把焦点困在正文里）。
  */
 @OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
@@ -268,6 +283,14 @@ private fun LogDetailDialog(entry: LogEntry, onDismiss: () -> Unit) {
     val timeFormat = remember { SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()) }
     val scrollState = rememberScrollState()
     val pagePx = with(LocalDensity.current) { 200.dp.toPx() }
+    // 复制后临时提示「已复制 N 字符」——让「全不全」当场可核对，不用粘到别处才发现
+    var copiedChars by remember { mutableStateOf(0) }
+    LaunchedEffect(copiedChars) {
+        if (copiedChars > 0) {
+            delay(2500)
+            copiedChars = 0
+        }
+    }
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false),
@@ -280,12 +303,15 @@ private fun LogDetailDialog(entry: LogEntry, onDismiss: () -> Unit) {
                 .clip(RoundedCornerShape(16.dp))
                 .background(NasMusicColors.Surface)
                 .padding(20.dp)
-                .onKeyEvent { event ->
-                    if (event.type != KeyEventType.KeyDown) return@onKeyEvent false
+                // ⚠️ 必须用 onPreviewKeyEvent（不是 onKeyEvent）：预览阶段**先于**子节点派发，
+                //    焦点芯片就算吞了方向键也拦不住翻页。onKeyEvent 依赖冒泡，
+                //    一旦哪个子组件消费掉 UP/DOWN 就彻底滚不动（真机「显示不全」的典型形态）。
+                .onPreviewKeyEvent { event ->
+                    if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                     val delta = when (event.key) {
                         Key.DirectionUp -> -pagePx
                         Key.DirectionDown -> pagePx
-                        else -> return@onKeyEvent false
+                        else -> return@onPreviewKeyEvent false
                     }
                     // 恒消费上下键：越界时交给默认焦点搜索会**跑出弹窗**落到背后页面上
                     // （v2.38.10 的四个方向钉死就是踩过这个坑）。
@@ -299,6 +325,26 @@ private fun LogDetailDialog(entry: LogEntry, onDismiss: () -> Unit) {
                 fontSize = FontSize.button(),
                 fontWeight = FontWeight.Bold,
             )
+            Spacer(modifier = Modifier.height(6.dp))
+            // 完整性自证：这条到底有多少行、多少字符。复制粘出去后一对就知有没有丢。
+            Text(
+                text = stringResource(
+                    R.string.settings_logs_detail_size,
+                    entry.totalLines,
+                    entry.totalChars,
+                ),
+                color = NasMusicColors.TextSecondary,
+                fontSize = FontSize.small(),
+            )
+            if (entry.truncated) {
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = stringResource(R.string.settings_logs_detail_truncated),
+                    color = NasMusicColors.Danger,
+                    fontSize = FontSize.small(),
+                    fontWeight = FontWeight.Bold,
+                )
+            }
             Spacer(modifier = Modifier.height(12.dp))
             Column(
                 modifier = Modifier
@@ -342,6 +388,14 @@ private fun LogDetailDialog(entry: LogEntry, onDismiss: () -> Unit) {
                     fontSize = FontSize.small(),
                 )
             }
+            if (copiedChars > 0) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = stringResource(R.string.settings_logs_detail_copied, copiedChars),
+                    color = NasMusicColors.Primary,
+                    fontSize = FontSize.small(),
+                )
+            }
             Spacer(modifier = Modifier.height(16.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 SettingsChip(
@@ -349,7 +403,9 @@ private fun LogDetailDialog(entry: LogEntry, onDismiss: () -> Unit) {
                     selected = false,
                     // 复制的是**全文**（含完整堆栈），不是屏幕上能看见的那几行
                     onClick = {
-                        LinkUtils.copyToClipboard(context, "NASMusicTV-log", entry.toClipboardText())
+                        val text = entry.toClipboardText()
+                        LinkUtils.copyToClipboard(context, "NASMusicTV-log", text)
+                        copiedChars = text.length
                     },
                 )
                 SettingsChip(

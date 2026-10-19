@@ -16797,6 +16797,41 @@ java.lang.IllegalStateException: Expected BEGIN_ARRAY but was BEGIN_OBJECT at li
 **已知取舍**：日志详情仍不分页（一次渲染整段堆栈；单条最长约 256KB 上限内的一行日志，
 实际堆栈多在 2–4KB）；复制不含其他条目，需要多条请逐条复制。
 
+##### F. 第二轮真机反馈（同日）：确认框位置 + 「复制不全」
+
+**F1. 「点击清空日志，提示框出现在日志信息的最下方」**
+根因不在日志分区，而在公共组件：**`ConfirmDialog` 本身不是弹窗** —— 它只是
+`Box(fillMaxSize().background(scrim))` 的遮罩 + 居中卡片，**必须由调用方套一层真正的
+`Dialog`**（全仓既有 4 处调用点都是 `Dialog(usePlatformDefaultWidth = false) { ConfirmDialog(...) }`）。
+我把它直接放在分区的 `Column` 末尾 ⇒ 它变成「列表下方一整块全屏遮罩」。
+修复：按既有写法套 `Dialog`（`dismissOnBackPress = false`，BACK 由 `ConfirmDialog` 内部的
+`RegisterDialogBackHandler` 处理）。
+⛔ 不要去改 `ConfirmDialog` 让它自带 `Dialog`：调用点里已有 `Dialog` 的会变成**窗口套窗口**，
+焦点与返回键行为都会变。⭐ 排查同款缺陷时按「`ConfirmDialog(` 的上一行是不是 `Dialog(`」看，
+`MineScreen` 的「删除歌单」也是裸调用（同批修掉）。
+
+**F2. 「复制粘出来本身就少」**
+数据链路本身是无损的（`encode`/`decode` 转义往返 + `snapshot` 逐行解码，`LogStoreTest` 有
+逐字符用例），所以「少」只可能来自**写入时被打断**：`writeLine` 一次性写 `line + "\n"`，
+进程在写系统调用中间被杀（或断电/存储满）⇒ 该行只落了一半，且**没有换行结尾**。
+以前这种半行会被静默解码成一条「看起来正常但短」的记录 —— 用户只能得出「复制不全」。
+本轮：
+- `snapshot()` 判定「文件末尾没有 `\n`」⇒ 把**最后一条**标记 `LogEntry.truncated = true`，
+  详情页红字提示「本条在写入时被中断，末尾可能不完整」（不丢弃：崩溃现场最有价值）；
+- `appendBlocking` 改走 `FileOutputStream` + `fd.sync()`：进程随即被杀时也保证这条落盘；
+- 详情页头部显示「共 N 行 · N 字符」，复制后提示「已复制 N 字符」——**完整性可当场核对**，
+  不用粘到别处才发现（`LogEntry.totalLines` / `totalChars` 是纯函数，单测直接锁）。
+- 翻页从 `onKeyEvent` 改 `onPreviewKeyEvent`：预览阶段**先于**子节点派发，
+  焦点芯片即使吞掉方向键也拦不住（`onKeyEvent` 靠冒泡，被消费一次就彻底滚不动）。
+
+**F3. 顺带确认：用户贴的两条错误都是「装新包之前」的历史记录**
+`MetingApiService.parseSongs` 那条堆栈里是 `CollectionTypeAdapterFactory$Adapter.read` →
+`JsonReader.beginArray`，正是**旧实现**（`TypeToken<List<JsonObject>>`）的路径；
+新实现走 `MetingJsonShape.extract` → `JsonElement`，堆栈里不可能出现该适配器。
+两条时间戳（`10-19 23:36:04` / `10-20 00:17:51`）也都早于新包构建时间。
+⭐ 日志是持久化的（设计如此），**换包后必须「清空」再重现**，否则看到的全是上一版现场。
+
+
 **验证（真机前最后一道）**：`logs_temp/verify_t19.bat` 四步全绿 ——
 目标用例 3 个 XML 落地、设置区门禁回归通过、全量 `testDebugUnitTest` 0 失败、
 `assembleRelease` BUILD SUCCESSFUL（5m30s）；`test-results` 共 **221 个 XML**

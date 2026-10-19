@@ -242,8 +242,88 @@ class LogsTabWiringGateTest {
         )
     }
 
-    // ─────────────────── 11. Meting 响应形态收敛（v2.39.2） ───────────────────
+    // ─────────────────── 12. 清空确认必须是真弹窗（v2.39.2 真机反馈） ───────────────────
 
+    /**
+     * 真机原话：「点击清空日志，发现提示框出现在日志信息的最下方，应该用弹窗展示」。
+     *
+     * 根因：`ConfirmDialog` **本身不是弹窗** —— 它只是一个 `Box(fillMaxSize)` 遮罩，
+     * 必须由调用方套一层真正的 `Dialog`（全仓既有调用点都是这个写法）。
+     * 直接塞进分区的 `Column` 就会变成「列表下方一整块全屏遮罩」。
+     */
+    @Test
+    fun `清空确认必须套真正的 Dialog`() {
+        val section = stripComments(mainSource("ui/screens/settings/LogsSettingsSection.kt"))
+        val body = bodyOf(section, "internal fun LogsSettingsSection(") ?: ""
+        assertTrue("取不到 LogsSettingsSection 方法体", body.isNotEmpty())
+        assertTrue(
+            "分区里没有 `Dialog(` —— ConfirmDialog 会被当成普通内容插进列表下方",
+            body.contains("Dialog("),
+        )
+        assertTrue(
+            "`ConfirmDialog(` 没有被 `Dialog(` 包住（顺序/距离不对）",
+            Regex("""Dialog\([\s\S]{0,600}ConfirmDialog\(""").containsMatchIn(body),
+        )
+    }
+
+    /** 负向自证：裸 ConfirmDialog（不套 Dialog）必须判负。 */
+    @Test
+    fun `负向自证 裸 ConfirmDialog 必须判负`() {
+        val sample = """
+            if (showClearConfirm) {
+                ConfirmDialog(
+                    title = "t", message = "m", onConfirm = {}, onDismiss = {}, destructive = true,
+                )
+            }
+        """.trimIndent()
+        assertTrue(
+            "护栏空转：没套 Dialog 的 ConfirmDialog 被误判通过",
+            !Regex("""Dialog\([\s\S]{0,600}ConfirmDialog\(""").containsMatchIn(sample),
+        )
+    }
+
+    // ─────────────────── 13. 完整性自证 + 预览阶段拦键 ───────────────────
+
+    /**
+     * 真机反馈「复制粘出来本身就少」—— 光把堆栈渲染出来不够，
+     * 必须让用户当场能核对这条到底有多少内容，以及它是不是写入时被截断的。
+     */
+    @Test
+    fun `日志详情必须能自证内容完整`() {
+        val section = stripComments(mainSource("ui/screens/settings/LogsSettingsSection.kt"))
+        for (needle in listOf(
+            "settings_logs_detail_size",
+            "entry.totalLines",
+            "entry.totalChars",
+            "settings_logs_detail_truncated",
+            "entry.truncated",
+        )) {
+            assertTrue("详情缺 `$needle` —— 无法判断复制出来的是不是全文", section.contains(needle))
+        }
+    }
+
+    /**
+     * 翻页必须走 `onPreviewKeyEvent`：预览阶段**先于**子节点派发，
+     * 焦点芯片即使吞掉方向键也拦不住。`onKeyEvent` 依赖冒泡，一旦被消费就彻底滚不动。
+     */
+    @Test
+    fun `翻页必须用预览阶段拦键`() {
+        val section = stripComments(mainSource("ui/screens/settings/LogsSettingsSection.kt"))
+        assertTrue("缺 onPreviewKeyEvent —— 方向键可能被子节点吞掉，正文滚不动", section.contains("onPreviewKeyEvent"))
+        assertTrue("仍在用 onKeyEvent（冒泡阶段，靠不住）", !section.contains(".onKeyEvent"))
+    }
+
+    /** 负向自证：用 `.onKeyEvent` 的写法必须判负。 */
+    @Test
+    fun `负向自证 冒泡阶段拦键必须判负`() {
+        val sample = "Column(modifier = Modifier.onKeyEvent { e -> e.key == Key.DirectionDown })"
+        assertTrue(
+            "护栏空转：`.onKeyEvent` 的写法被误判为已处理",
+            !(sample.contains("onPreviewKeyEvent") && !sample.contains(".onKeyEvent")),
+        )
+    }
+
+    // ─────────────────── 11. Meting 响应形态收敛（v2.39.2） ───────────────────
     /**
      * 真机日志：`parseSongs error: JsonSyntaxException … Expected BEGIN_ARRAY but was BEGIN_OBJECT`。
      * 端点回对象时旧写法整次搜索报废 ⇒ 必须走 [MetingJsonShape] 收敛形态。

@@ -40,6 +40,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.tv.material3.ExperimentalTvMaterial3Api
 import androidx.tv.material3.Text
 import com.nasmusic.tv.R
@@ -376,17 +378,28 @@ fun MineScreen(
 
     // ===== 删除歌单确认弹窗（2026-09-25 审查修复 #4） =====
     deleteTarget?.let { playlist ->
-        ConfirmDialog(
-            title = stringResource(R.string.mine_delete_playlist),
-            message = stringResource(R.string.mine_delete_playlist_confirm, playlist.name),
-            confirmLabel = stringResource(R.string.mine_delete_playlist),
-            onConfirm = {
-                onDeletePlaylist(playlist.id)
-                deleteTarget = null
-            },
-            onDismiss = { deleteTarget = null },
-            destructive = true
-        )
+        // ⚠️ `ConfirmDialog` 只是遮罩 Box，必须套真 `Dialog`；否则它会作为一块
+        //    全屏遮罩插进本屏的 Column 里（显示在页面最下方）——与日志页同款缺陷。
+        Dialog(
+            onDismissRequest = { deleteTarget = null },
+            properties = DialogProperties(
+                dismissOnBackPress = false,
+                dismissOnClickOutside = false,
+                usePlatformDefaultWidth = false,
+            ),
+        ) {
+            ConfirmDialog(
+                title = stringResource(R.string.mine_delete_playlist),
+                message = stringResource(R.string.mine_delete_playlist_confirm, playlist.name),
+                confirmLabel = stringResource(R.string.mine_delete_playlist),
+                onConfirm = {
+                    onDeletePlaylist(playlist.id)
+                    deleteTarget = null
+                },
+                onDismiss = { deleteTarget = null },
+                destructive = true
+            )
+        }
     }
 
     // ===== 加入歌单选择弹窗 =====
