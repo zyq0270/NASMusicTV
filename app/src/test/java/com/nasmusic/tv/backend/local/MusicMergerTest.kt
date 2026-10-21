@@ -3,6 +3,7 @@ package com.nasmusic.tv.backend.local
 import com.nasmusic.tv.data.model.Artist
 import com.nasmusic.tv.data.model.Song
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -74,5 +75,25 @@ class MusicMergerTest {
         val artists = MusicMerger.buildLocalArtists(songs)
         assertEquals(setOf("周杰伦", "杨瑞代"), artists.map { it.name }.toSet())
         assertTrue(artists.all { it.id.startsWith("local_artist_") })
+    }
+
+    @Test
+    fun `mergeLibrarySongs keeps nas order then local then baidu and dedupes by id`() {
+        val nas = listOf(song("1", "a"), song("2", "b"))
+        val local = listOf(song("local_3", "c"), song("2", "dup"))
+        val baidu = listOf(song("ntwk_baidu_4", "d"), song("local_3", "dup"))
+
+        val merged = MusicMerger.mergeLibrarySongs(nas, local, baidu)
+
+        assertEquals(listOf("1", "2", "local_3", "ntwk_baidu_4"), merged.map { it.id })
+    }
+
+    @Test
+    fun `mergeLibrarySongs returns nas list as-is when other sources are empty`() {
+        val nas = listOf(song("1", "a"))
+
+        val merged = MusicMerger.mergeLibrarySongs(nas, emptyList(), emptyList())
+
+        assertSame(nas, merged)
     }
 }

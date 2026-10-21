@@ -11,6 +11,7 @@ import androidx.tv.material3.ExperimentalTvMaterial3Api
 import com.nasmusic.tv.data.model.Screen
 import com.nasmusic.tv.data.model.Song
 import com.nasmusic.tv.data.model.ServerConfig
+import com.nasmusic.tv.backend.local.MusicMerger
 import com.nasmusic.tv.ui.viewmodel.MainViewModel
 import com.nasmusic.tv.data.model.*
 import com.nasmusic.tv.ui.screens.*
@@ -48,18 +49,24 @@ internal fun LibraryBranch(
                     val songsPaging by viewModel.songsPaging.collectAsState(initial = com.nasmusic.tv.data.model.SongsPagingState())
                     // 本地音乐总开关（§5.4）：visibleLocalSongs 在开关关闭时仅含已下载曲目
                     val localSongsList by viewModel.visibleLocalSongs.collectAsState(initial = emptyList())
+                    // 百度网盘索引歌曲：与专辑/艺术家共用 updateMergedData 的加载结果
+                    val baiduSongsList by viewModel.baiduIndexedSongs.collectAsState(initial = emptyList())
                     val searchResultsState by viewModel.searchVM.searchResults.collectAsState(initial = UiState.Success(emptyList()))
                     val albumList = albums.dataOrNull() ?: emptyList()
                     val songList = songsState.dataOrNull() ?: emptyList()
                     val genreList = genres.dataOrNull() ?: emptyList()
                     val artistsList = artistsState.dataOrNull() ?: emptyList()
                     val yearsList = yearsState.dataOrNull() ?: emptyList()
-                    // 合并 NAS 分页歌曲 + 本地歌曲（含下载歌曲），供曲库歌曲页展示
-                    val mergedSongsPaging = remember(songsPaging, localSongsList) {
-                        if (localSongsList.isEmpty()) songsPaging
+                    // 合并 NAS 分页歌曲 + 本地歌曲（含下载歌曲）+ 百度网盘索引歌曲，供曲库歌曲页展示
+                    val mergedSongsPaging = remember(songsPaging, localSongsList, baiduSongsList) {
+                        if (localSongsList.isEmpty() && baiduSongsList.isEmpty()) songsPaging
                         else songsPaging.copy(
-                            songs = (songsPaging.songs + localSongsList).distinctBy { it.id },
-                            totalCount = songsPaging.totalCount + localSongsList.size
+                            songs = MusicMerger.mergeLibrarySongs(
+                                nasSongs = songsPaging.songs,
+                                localSongs = localSongsList,
+                                baiduSongs = baiduSongsList
+                            ),
+                            totalCount = songsPaging.totalCount + localSongsList.size + baiduSongsList.size
                         )
                     }
                     // 合并 NAS 流派 + 本地歌曲流派（去重）

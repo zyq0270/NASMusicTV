@@ -347,6 +347,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
     // --- 按需加载：歌曲分页状态 ---
     private val _songsPaging = MutableStateFlow(SongsPagingState())
     val songsPaging: StateFlow<SongsPagingState> = _songsPaging.asStateFlow()
+
+    /**
+     * 百度网盘索引歌曲（与专辑/艺术家合并共用同一份 [BaiduFileIndexCache.allSongs] 结果）。
+     * 由 [updateMergedData] 在索引扫描完成 / 启动恢复 / 封面回填后刷新，
+     * 供曲库「歌曲」Tab 与 NAS / 本地歌曲一起展示。
+     */
+    private val _baiduIndexedSongs = MutableStateFlow<List<Song>>(emptyList())
+    val baiduIndexedSongs: StateFlow<List<Song>> = _baiduIndexedSongs.asStateFlow()
     private val pageSize = 500
     /** 网络音乐"播放全部"单次加入队列的上限（去重后取前 N 首） */
     private val maxNetworkBatchPlayCount = 30
@@ -1816,6 +1824,8 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
             val nasArtists = _artists.value.dataOrNull() ?: emptyList()
             val localSongs = visibleLocalSongsNow()
             val baiduSongs = baiduIndexCache.allSongs()  // 全量加载一次，供 buildBaiduAlbums/buildBaiduArtists 共用
+            // 歌曲 Tab 与专辑/艺术家共用这份索引结果，避免 UI 侧再触发一次磁盘解析
+            _baiduIndexedSongs.value = baiduSongs
 
             var mergedAlbums = MusicMerger.mergeAlbums(
                 nasAlbums = nasAlbums,

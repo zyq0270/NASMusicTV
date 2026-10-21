@@ -17273,3 +17273,42 @@ hex 冻结）、`ThemeModeTest`（迁移与解析全矩阵，含 TV SYSTEM → �
   `NASMusicTV-release-v2-39-6.apk` **25,857,251 字节**、md5 `a3d05ac539f8bfc2b6c6d03182e3d2da`、
   `versionCode=191 / versionName=2.39.6`；已覆盖安装到手机（Redmi `91846823`，
   `lastUpdateTime=2026-10-21 20:33:35`）。仍未推送、未打 tag。
+
+### 10.266 v2.39.6 补丁 — 曲库「歌曲」Tab 接入百度网盘索引（2026-10-21）
+
+**触发**：所有者反馈曲库「歌曲」页「已经索引了百度网盘，但并未列出歌曲；搜索时同页可以
+显示搜索到的歌曲」，且空态提示「请连接 NAS 服务器、扫描本地音乐或索引百度网盘」——
+文案把百度索引列为可用来源，列表却只来自 NAS + 本地。
+
+**根因**：`LibraryBranch.mergedSongsPaging` 只合并 NAS 分页 + 本地歌曲；百度索引仅经
+`MainViewModel.updateMergedData()` 并入专辑/艺术家，从未进入 `songsPaging`。搜索路径由
+`SearchAggregator` 独立聚合 `MusicSourceType.BAIDU_PAN`（`BaiduFileIndexCache.searchSongs`
+/ `searchByDirectory`），因此只有搜索页可见。
+
+**改动**：
+
+- `MusicMerger.mergeLibrarySongs(nasSongs, localSongs, baiduSongs)`：纯函数，按
+  NAS → 本地 → 百度顺序拼接、按 `Song.id` 去重；无本地/百度数据时原样返回
+  `nasSongs`（不复制）。跨源同曲 id 不同，仍各保留一条，与本地歌曲既有口径一致。
+- `MainViewModel` 新增 `baiduIndexedSongs: StateFlow<List<Song>>`，在
+  `updateMergedData()` 中复用本已加载的 `baiduIndexCache.allSongs()` 结果写入，
+  不额外触发磁盘解析；索引扫描完成 / 启动恢复 / APIC 封面回填经既有
+  `onMergedDataInvalidated` 自动刷新。启动期本地缓存加载与开关首值均会调用
+  `updateMergedData()`，故无 NAS 时也能显示。
+- `LibraryBranch` 收集该 Flow，把三源一起交给 `mergeLibrarySongs`，
+  `mergedSongsPaging.totalCount` 同步计入本地 + 百度数量。歌曲列表、行内来源角标、
+  「播放全部」沿用现有路径，自动覆盖百度歌曲；搜索聚合路径未改。
+
+**门禁**：新增 `LibrarySongsSourceWiringGateTest`（G1–G4：ViewModel 产出 / 分支收集 /
+三实参消费 + `totalCount` / 扫描自证；含「百度实参退回 emptyList」「删掉收集点」
+「totalCount 不计百度」三条负自检）。`MusicMergerTest` 新增 2 例（顺序+去重、空源原样返回）。
+
+**验证**：`testDebugUnitTest --tests "*MusicMergerTest" --tests "*LibrarySongsSourceWiringGateTest"`
+→ **9 例零失败**（`MusicMergerTest` 6 例、`LibrarySongsSourceWiringGateTest` 3 例，统计自
+`app/build/test-results/testDebugUnitTest/TEST-*.xml`）；`lintDebug` → `BUILD SUCCESSFUL`
+（5m 49s，0 errors）；`assembleRelease` → `BUILD SUCCESSFUL`（6m 54s），产物
+`NASMusicTV-release-v2-39-6.apk` **25,857,326 字节**、md5 `4abc2335d5104c2712d00350fccbf03a`；
+全量 `testDebugUnitTest --rerun-tasks` → **236 类 / 2428 例 / 0 失败 0 错误 0 跳过**（基线
+235 类 / 2423 例，本修复 +1 类 +5 例；统计自 `app/build/test-results/testDebugUnitTest/TEST-*.xml`）；
+**版本号未提升**（`versionCode=191 / versionName=2.39.6`，按所有者要求沿用当前版本）。
+已覆盖安装到手机（Redmi `91846823`，`lastUpdateTime=2026-10-21 21:07:24`）。未提交、未推送。

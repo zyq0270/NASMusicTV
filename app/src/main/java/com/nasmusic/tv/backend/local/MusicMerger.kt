@@ -260,6 +260,23 @@ object MusicMerger {
     }
 
     /**
+     * 合并曲库「歌曲」Tab 的多源歌曲（NAS 分页 + 本地 + 百度索引）。
+     *
+     * 顺序固定 NAS → 本地 → 百度（各源内部保持传入顺序），按 [Song.id] 去重；
+     * 不同源的同一首歌 id 不同，会分别保留（与本地歌曲既有展示口径一致）。
+     * 无本地/百度数据时直接返回原列表，避免无谓复制。
+     */
+    fun mergeLibrarySongs(
+        nasSongs: List<Song>,
+        localSongs: List<Song>,
+        baiduSongs: List<Song> = emptyList()
+    ): List<Song> {
+        if (localSongs.isEmpty() && baiduSongs.isEmpty()) return nasSongs
+        val seen = HashSet<String>(nasSongs.size + localSongs.size + baiduSongs.size)
+        return (nasSongs + localSongs + baiduSongs).filter { seen.add(it.id) }
+    }
+
+    /**
      * 双键拼音排序：主键 groupLetter（A→Z, #排最后），副键 fullPinyin（同组内全拼排序）
      *
      * # 组使用 "{" 作为 sort key（ASCII 码在 'Z' 之后），保证 # 排在所有字母组之后。
