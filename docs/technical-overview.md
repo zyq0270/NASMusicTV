@@ -17110,3 +17110,60 @@ md5 `3f1a1c77dfd67cd21442a17271bc5642`，`install -r` 到手机（Redmi，`91846
 `pm install -d`、`cmd package install-downgrade` 两条路本机均不可用，后者命令不存在；`uninstall -k` 也不行，
 保留的数据目录仍以 190 作为降级基线）。**所有者 2026-10-21 裁决：暂不装手机** —— 手机保留 190 中间包，
 189 包留档，等下次发版或真机验收时再装。
+
+### 10.263 v2.39.5 — 高质量分离：建会话前的系统内存门槛（2026-10-21）
+
+**触发**：v2.38.15 取证轮回传真机诊断（TCL `tcl_mt5879_cn`，Android 11 / API 30）：
+
+```
+std::bad_alloc
+错误码：ORT_RUNTIME_EXCEPTION（OrtException）
+指令集：armeabi-v7a, armeabi（应用以 32 位运行）
+整机内存：共 2801MB，剩余 201MB
+本进程：native 已占 62MB，Java 堆 20MB/上限 512MB
+模型文件：157MB
+耗时：16.9s
+```
+
+**判定：内存，且该机无解**
+
+- `std::bad_alloc` 是 C++ native 分配失败；Java 堆只用了 20MB/512MB，OOM 不在 JVM 侧。
+- SHA-256 门在 `initialize()` **之前**，能走到 `createSession()` 说明模型字节正确
+  （坏文件与 opset/算子不兼容已在 §10.246 排除）。
+- 耗时 16.9s ⇒ 已读完 protobuf、建完图，最后在**权重物化**阶段分配失败。
+- 量纲：**模型 157MB 是磁盘序列化体积，不是内存需求**。fp16 原件 150.9MB + CPU EP 把 148 个
+  初始化器物化成 fp32 的 301.7MB + 24,917 节点图 ⇒ 常驻 ≈459MB；
+  **权重物化总量 301.7MB 就已超过整机剩余的 201MB**。
+- 该机 `SUPPORTED_ABIS` 只有 `armeabi-v7a, armeabi`，是 32 位机型，装 64 位包也改变不了运行位宽；
+  非 fp16 模型实测 ≈461MB 并不省（§10.246）⇒ 没有任何减内存手段能把 459MB 压进 201MB，
+  只能提前拒绝，而不是让它再撑 17 秒。
+
+**所有者口径（2026-10-21）**：**只按系统可用内存拦，≥700MB 才允许尝试；32 位不单独拦。**
+700MB = 实测常驻 459MB × ~1.5（建会话峰值余量）。只认 `ActivityManager.MemoryInfo.availMem`：
+ORT 的权重分配走 native malloc，`separate()` 里那道 `Runtime.maxMemory()` 的 150MB 预检
+只看 JVM 堆，建会话阶段根本够不着（且发生在 init **之后**）。
+
+**实现**
+
+1. `DeviceDiagnostics.availableMemoryMb(context)`（新）—— 与失败诊断快照同源读 `availMem`，
+   避免「拦截口径」与「取证口径」出现两套数字。
+2. `HqSeparationOrchestrator` 文件级 `HQ_MODEL_LOAD_MIN_AVAIL_MB = 700L` + 纯函数
+   `isHqModelLoadMemoryInsufficient(availMb)`：**null（读不到）放行** —— 不让探测失败把入口关掉。
+3. `enableHighQualityRemoval()` 在「伴奏未缓存 + session 未就绪」分支（下载、暂停、建会话之前）调用
+   `modelLoadMemoryError()`：命中即写 `_hqError`（含实际值与门槛）、`rememberHqFailureDetail`
+   （设置页长期留存，H4 链路不变）、置回 `FAST` 并开快速 DSP，`return false`。
+   ⚠️ 已就绪的 session 不再拦：那笔内存已经付过，否则会误伤同一台设备的第二次分离。
+4. 文案 `hq_error_low_system_memory`（中英双语）：
+   「可用内存不足（201MB < 700MB），请关闭其他应用后重试（已切换快速模式）」。
+
+**门禁**：新增 `HqModelLoadGateTest`（4 例：201MB 拒绝 / 699 拒绝 / 700 放行 / null 放行）；
+`HqDiagnosticsGateTest` 增 H6（门槛必须存在、必须排在 `separator.initialize()` 之前、
+必须复用 `isHqModelLoadMemoryInsufficient()` 而非另写阈值）。
+
+**验证**：`assembleDebug lintDebug` → `BUILD SUCCESSFUL`，lint **0 error / 162 warning**（存量）；
+`testDebugUnitTest --rerun-tasks` → **232 个测试类 / 2400 例 / 0 失败 0 错误 0 跳过**
+（统计自 `app/build/test-results/testDebugUnitTest/TEST-*.xml`，不看退出码；
+其中新增 `HqModelLoadGateTest` 4 例、`HqDiagnosticsGateTest` +1 例 = 6 例）；
+`assembleRelease` → `BUILD SUCCESSFUL`，产物 `NASMusicTV-release-v2-39-5.apk`
+**25,842,485 字节**、md5 `850521b2c6bd1f2732d1980ad3b09b22`、`versionCode=190 / versionName=2.39.5`，
+签名证书 `CN=NASMusicTV`（`release-key.jks`）。

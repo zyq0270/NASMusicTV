@@ -867,6 +867,7 @@
     <string name="hq_error_separator_init_failed">Model initialization failed</string>
     <string name="hq_error_separation_failed">HQ separation failed</string>
     <string name="hq_error_oom">Out of memory, switched to fast mode</string>
+    <string name="hq_error_low_system_memory">Not enough free memory (%1$dMB &lt; %2$dMB). Close other apps and retry (switched to fast mode).</string>
     <string name="hq_error_exception_with_suffix">Separation error: %s, switched to fast mode</string>
     <string name="hq_error_with_time_and_suffix">%1$s (%2$.1fs), switched to fast mode</string>
     <string name="hq_progress_downloading">Downloading audio</string>

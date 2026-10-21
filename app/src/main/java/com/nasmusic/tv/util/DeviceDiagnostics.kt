@@ -79,6 +79,13 @@ object DeviceDiagnostics {
         return if (code != null) "$code ($cls)" else cls
     }
 
+    /**
+     * 系统可用内存（MB）。与诊断快照同源（`ActivityManager.MemoryInfo.availMem`），
+     * 避免「拦截口径」与「取证口径」各算各的。读取失败返回 null。
+     */
+    fun availableMemoryMb(context: Context): Long? =
+        readMemoryInfo(context)?.availMem?.let { it / (1024 * 1024) }
+
     private class MemorySnapshot(val totalMem: Long?, val availMem: Long?, val lowMemory: Boolean)
 
     private fun readMemoryInfo(context: Context): MemorySnapshot? {

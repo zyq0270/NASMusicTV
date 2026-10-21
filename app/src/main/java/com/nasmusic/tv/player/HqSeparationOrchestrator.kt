@@ -23,6 +23,27 @@ import okhttp3.Request
 import java.io.File
 
 /**
+ * 建 ONNX 会话所需的最低**系统可用内存**（MB）。
+ *
+ * 依据（docs/technical-overview.md §10.246 实测）：fp16 原件 150.9MB + CPU EP 把 148 个
+ * 初始化器物化为 fp32 的 301.7MB + 24,917 节点图 ⇒ 常驻 ≈459MB，建会话峰值更高；
+ * 这里按 ~1.5× 取 700MB 作为「可以尝试」的下限。
+ *
+ * ⚠️ 只认 `ActivityManager.MemoryInfo.availMem`：ORT 的权重分配走 native malloc，
+ * JVM 堆再空也借不到。2026-10-21 真机诊断就是一个反例：整机剩余 201MB，
+ * `createSession()` 撑了 16.9s 后抛 `std::bad_alloc`。
+ */
+internal const val HQ_MODEL_LOAD_MIN_AVAIL_MB = 700L
+
+/**
+ * 可用内存是否不足到不该尝试建会话。
+ *
+ * @param availMb 系统可用内存；null = 读不到 ⇒ 放行（宁可尝试，也不因探测失败把入口关掉）
+ */
+internal fun isHqModelLoadMemoryInsufficient(availMb: Long?): Boolean =
+    availMb != null && availMb < HQ_MODEL_LOAD_MIN_AVAIL_MB
+
+/**
  * 高质量人声分离编排器（N-4 提取自 PlayerManager）：
  * 负责 HT-Demucs ONNX 模式的完整编排——输入解析（本地文件/下载 streamUrl）、
  * 模型加载、后台分离、伴奏/原唱切换、错误回退。
@@ -368,6 +389,26 @@ class HqSeparationOrchestrator(
     // ── HQ 编排主流程 ──
 
     /**
+     * 建会话前的系统内存预检（只在 session 未就绪时调用）。
+     *
+     * 放在 `initialize()` 之前而不是等它抛 `bad_alloc`：建会话要 16~17s 才失败，
+     * 用户白等一场且拿到的只有 ORT 的 native 错误。这里的判断只看系统可用内存，
+     * 内存不足时立刻给出「差多少」并回快速模式。
+     *
+     * @return 拒绝原因（含回退说明）；null = 可以尝试
+     */
+    private fun modelLoadMemoryError(): String? {
+        val availMb = DeviceDiagnostics.availableMemoryMb(appContext) ?: return null
+        if (!isHqModelLoadMemoryInsufficient(availMb)) return null
+        AppLog.w(TAG, "modelLoadMemoryError: avail ${availMb}MB < ${HQ_MODEL_LOAD_MIN_AVAIL_MB}MB, refuse to create session")
+        return appContext.getString(
+            R.string.hq_error_low_system_memory,
+            availMb.toInt(),
+            HQ_MODEL_LOAD_MIN_AVAIL_MB.toInt(),
+        )
+    }
+
+    /**
      * 高质量模式下开启人声消除：
      * 1. 检查模型是否已下载
      * 2. 检查伴奏文件是否已缓存
@@ -412,6 +453,19 @@ class HqSeparationOrchestrator(
             host.setFastVocalRemoval(false)
             switchToAccompaniment(accompanimentFile.absolutePath)
         } else {
+            // 未缓存 ⇒ 这次要建会话加载模型。先过系统内存门槛，别等下载完、等 17 秒建图
+            // 之后才在 createSession 里抛 bad_alloc。已就绪的 session 说明这笔内存已经付过，
+            // 不再重复拦（否则会误伤同一台的第二次分离）。
+            if (!separator.isReady()) {
+                val lowMemory = modelLoadMemoryError()
+                if (lowMemory != null) {
+                    _hqError.value = lowMemory
+                    rememberHqFailureDetail(lowMemory)
+                    _separationMode.value = SeparationMode.FAST
+                    host.setFastVocalRemoval(true)
+                    return false
+                }
+            }
             // 未缓存：暂停播放 → 后台分离 → 完成后切换到伴奏并恢复播放
             val song = host.currentSong() ?: return false
             _hqError.value = null  // 清除上次错误

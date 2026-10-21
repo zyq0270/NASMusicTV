@@ -22,6 +22,7 @@ import java.io.File
  * | H3 | 横幅 5 秒自动消失（clearHqError）绝不能顺手清掉设置页要留存的详情 |
  * | H4 | 详情从编排器一路接到设置页渲染，任何一环断链都算失败 |
  * | H5 | 负向自证：把 `.take(60)` 塞回文案行，H1 必须挂 |
+ * | H6 | 建会话前必须过系统可用内存门槛，且门槛排在 `initialize()` 之前 |
  */
 class HqDiagnosticsGateTest {
 
@@ -113,6 +114,28 @@ class HqDiagnosticsGateTest {
     fun `H1 不是空转`() {
         val sabotaged = separatorSource + "\n        lastError = msg.take(60)\n"
         assertTrue("护栏失效：塞回 .take(60) 后 H1 仍判通过 —— 这条门禁在空转", hasOffenderLine(sabotaged))
+    }
+
+    // ─────────────────── H6：内存门槛在建会话之前 ───────────────────
+
+    @Test
+    fun `建会话前必须过系统内存门槛`() {
+        val body = functionBody(orchestratorSource, "fun enableHighQualityRemoval()")
+        val gateAt = body.indexOf("modelLoadMemoryError()")
+        val initAt = body.indexOf("separator.initialize(")
+        assertTrue(
+            "enableHighQualityRemoval() 里找不到 modelLoadMemoryError() ——\n" +
+                "门槛一旦被绕过，可用内存不足的设备又要白等十几秒后抛 std::bad_alloc。",
+            gateAt >= 0,
+        )
+        assertTrue(
+            "内存门槛必须排在 separator.initialize() 之前（gateAt=$gateAt, initAt=$initAt）",
+            initAt >= 0 && gateAt < initAt,
+        )
+        assertTrue(
+            "门槛必须由 isHqModelLoadMemoryInsufficient() 判定，不得在编排器里另写阈值",
+            orchestratorSource.contains("isHqModelLoadMemoryInsufficient(availMb)"),
+        )
     }
 
     // ─────────────────── 辅助 ───────────────────

@@ -907,6 +907,7 @@
     <string name="hq_error_separator_init_failed">模型初始化失败</string>
     <string name="hq_error_separation_failed">高质量分离失败</string>
     <string name="hq_error_oom">内存不足，已切换快速模式</string>
+    <string name="hq_error_low_system_memory">可用内存不足（%1$dMB &lt; %2$dMB），请关闭其他应用后重试（已切换快速模式）</string>
     <string name="hq_error_exception_with_suffix">分离过程出错：%s，已切换快速模式</string>
     <string name="hq_error_with_time_and_suffix">%1$s（%2$.1fs），已切换快速模式</string>
     <string name="hq_progress_downloading">下载音频</string>
