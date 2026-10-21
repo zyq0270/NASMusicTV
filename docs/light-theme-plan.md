@@ -250,8 +250,9 @@ fun resolveDarkTheme(mode: ThemeMode, systemDark: Boolean, isTv: Boolean): Boole
 
 ### 4.5 系统栏与启动窗口
 
-- 手机竖屏显示系统栏时（`MainActivity.kt:269-280`）：补 `isAppearanceLightStatusBars = !dark`，API 26+ 再补 `isAppearanceLightNavigationBars = !dark`（minSdk 22，需版本守卫；`WindowInsetsControllerCompat` 在低版本安全降级）。该 `LaunchedEffect` 的 key 必须加上 `dark`，否则在系统栏可见时切换主题，图标颜色不会更新。
-- 主题解析在组合期完成：`val systemDark = isSystemInDarkTheme()`，再 `resolveDarkTheme(mode, systemDark, isTv)`；`isTv` 已在 `MainActivity.kt:178` 计算，不要重复探测。
+- 手机竖屏显示系统栏时（`MainActivity` 的系统栏 `LaunchedEffect`）：补 `isAppearanceLightStatusBars = !dark`，API 26+ 再补 `isAppearanceLightNavigationBars = !dark`（minSdk 22，需版本守卫；`WindowInsetsControllerCompat` 在低版本安全降级）。该 `LaunchedEffect` 的 key 必须加上 `dark`，否则在系统栏可见时切换主题，图标颜色不会更新。
+- ⚠️ **图标明暗 ≠ 底色**（本条为真机补录，见 §12 I12）：本仓从未写过 `window.statusBarColor` / `navigationBarColor`，而父主题 `android:Theme.Material.NoActionBar` 的默认状态栏色是 `?attr/colorPrimaryDark → @color/primary_dark_material_dark → @color/black` —— 一条**不透明纯黑带**盖在内容上方，`PhoneTopBar` 的 `surface` 画得再对也被压住。所以浅色主题下必须同时设底色：`statusBarSurfaceColor(dark)` / `navigationBarSurfaceColor(dark)`（规则在 `Theme.kt`，底色取调色板 `surface`；浅色底要求图标能刷深，状态栏 API 23+、导航栏 API 26+，够不到就退回深色底，避免白图标压白底）。生效点两处：`onCreate`（冷启动，与窗口背景同源）+ 上述 `LaunchedEffect`（切主题）。
+- 主题解析在组合期完成：`val systemDark = isSystemInDarkTheme()`，再 `resolveDarkTheme(mode, systemDark, isTv)`；`isTv` 已在 `MainActivity` 计算，不要重复探测。
 - 冷启动：给 `AppPreferences` 增加 `getThemeModeSync()`（复用 `cachedScreenOrientation` 同款 `@Volatile` 镜像），`onCreate` 里按 `resolveDarkTheme(mode, systemDark = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == UI_MODE_NIGHT_YES, isTv)` 设置 `window.setBackgroundDrawable`，避免浅色主题闪深底（`themes.xml:4`）。
 - 启动窗口无法做到「零闪」的兜底：保持 XML 深色底不变，仅覆盖已解析为浅色的场景。
 
@@ -415,3 +416,4 @@ fun resolveDarkTheme(mode: ThemeMode, systemDark: Boolean, isTv: Boolean): Boole
 | I9 | 门禁数量 | 新增 3 类 23 例（对比度 3 / 解析矩阵 10 / 备份兼容 10）；全量 **235 类 / 2423 例**全绿（基线 232 类 / 2400 例） |
 | I10 | 未完成 | 真机 §8 验收（所有者执行）；G-03「α=0.85 聚焦底 + 白字」需截图实测 —— 1.0 实底已由 `onPrimary / Primary` 门禁覆盖，混色后的实际对比只能看真机 |
 | I11 | 浅色真机缺陷修复（所有者反馈） | ① `PlayerControls` 主按钮图标写死 `tint = TextPrimary`，浅色下近黑压深青实底；改为不写 `tint`，由 `FocusableSurface` 按状态注入（`OnPrimary` / 按下 `TextPrimary`），队列页同型主按钮改 `OnPrimary`。② `KaraokeLineText` 默认 `Color.Yellow` 在白底不可读；新增第 19 个 token `karaokeHighlight`（深色 `#FFFF00` 不变、浅色终值 `#1E3A8A` 藏蓝；取色两轮打回：琥珀 `#92400E`「偏红」→ 蓝 `#1D4ED8` →「还要再压深一档」），门禁加 2 组（浅色 **9.49:1 / 8.73:1**）。③ 品牌色实底徽标（专辑卡歌曲数角标 / 歌单角标 / 首页与顶栏「♪」块）文字由 `TextPrimary`（≈3.26:1）统一改 `OnPrimary`（5.47:1）。全量 235 类 / 2423 例全绿（`--rerun-tasks`）；release md5 `a3d05ac5…`、25,857,251 字节、已覆盖安装手机（20:33:35） |
+| I12 | 系统栏**底色**（真机补录，所有者反馈） | 原 §4.5 只管图标明暗、没管底色：`window.statusBarColor` / `navigationBarColor` 全仓从未写过，而父主题 `Theme.Material.NoActionBar` 的默认状态栏色是 `?attr/colorPrimaryDark → @color/primary_dark_material_dark → @color/black` —— 一条不透明黑带盖在内容上方，`PhoneTopBar` 画对的 `surface` 被压住。新增 `Theme.kt` 的 `systemBarSurfaceColor(dark, lightIconsSupported)`（底色一律取调色板 `surface`；浅色底要求图标能刷深：状态栏 API 23+ / 导航栏 API 26+，够不到退回深色底，避免白图标压白底）+ 两个门限封装 `statusBarSurfaceColor` / `navigationBarSurfaceColor`。生效两处：`onCreate` 冷启动（与窗口背景同一处、同一套 `resolveDarkTheme`）与系统栏 `LaunchedEffect`（key 已含 `darkTheme`）。门禁新增 `SystemBarColorTest` 4 例；`lintDebug` 0 errors。⚠️ 深色侧状态栏由**纯黑**变为 `#162032`（与顶栏同色），属有意变化；TV 走 `isTVDevice` 分支不碰系统栏。版本保持 v2.39.6 不升 |

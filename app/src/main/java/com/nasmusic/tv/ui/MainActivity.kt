@@ -53,6 +53,8 @@ import com.nasmusic.tv.ui.theme.NASMusicTVTheme
 import com.nasmusic.tv.ui.theme.FontSize
 import com.nasmusic.tv.ui.theme.NasMusicColors
 import com.nasmusic.tv.ui.theme.NasPalettes
+import com.nasmusic.tv.ui.theme.navigationBarSurfaceColor
+import com.nasmusic.tv.ui.theme.statusBarSurfaceColor
 import com.nasmusic.tv.ui.viewmodel.MainViewModel
 import com.nasmusic.tv.data.model.Screen
 import com.nasmusic.tv.data.model.ThemeMode
@@ -212,7 +214,8 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        // 冷启动窗口底色：themes.xml 是深色底，浅色主题下会闪一帧深色。
+        // 冷启动窗口底色 + 系统栏底色：themes.xml 是深色底，浅色主题下会闪一帧深色；
+        // 系统栏若不写则恒为 Material 主题默认的纯黑，浅色下留一条与顶栏脱节的黑带。
         // 主题解析必须与 setContent 内完全同源（resolveDarkTheme），并从 @Volatile 镜像同步读。
         try {
             val prefs = (application as NasMusicApp).appPreferences
@@ -221,6 +224,10 @@ class MainActivity : ComponentActivity() {
             val darkTheme = resolveDarkTheme(prefs.getThemeModeSync(), systemDark, isTVDevice)
             val bg = if (darkTheme) NasPalettes.Dark.background else NasPalettes.Light.background
             window.setBackgroundDrawable(ColorDrawable(bg.toArgb()))
+            if (!isTVDevice) {
+                window.statusBarColor = statusBarSurfaceColor(darkTheme).toArgb()
+                window.navigationBarColor = navigationBarSurfaceColor(darkTheme).toArgb()
+            }
         } catch (e: Exception) {
             AppLog.w("MainActivity", "init window background failed", e)
         }
@@ -292,13 +299,16 @@ class MainActivity : ComponentActivity() {
             }
 
             // v2.36.0 D9：竖屏显示系统栏（沉浸模式 / 全屏页仍隐藏），横屏手机保持现状
-            // ⚠️ key 必须含 darkTheme：系统栏可见时切换主题，图标颜色不会自己更新。
+            // ⚠️ key 必须含 darkTheme：系统栏可见时切换主题，图标颜色与底色都不会自己更新。
             LaunchedEffect(uiMode, isImmersiveMode.value, showMv, showKaraoke, showVisualizer, isTVDevice, darkTheme) {
                 if (isTVDevice) return@LaunchedEffect
                 try {
                     val controller = WindowInsetsControllerCompat(window, window.decorView)
                     controller.isAppearanceLightStatusBars = !darkTheme
                     controller.isAppearanceLightNavigationBars = !darkTheme
+                    // 底色与顶栏 / 底部导航的 surface 同色（取色规则见 systemBarSurfaceColor）
+                    window.statusBarColor = statusBarSurfaceColor(darkTheme).toArgb()
+                    window.navigationBarColor = navigationBarSurfaceColor(darkTheme).toArgb()
                     val showBars = uiMode == com.nasmusic.tv.ui.theme.UiMode.PhonePortrait &&
                         !isImmersiveMode.value && !showMv && !showKaraoke && !showVisualizer
                     if (showBars) controller.show(WindowInsetsCompat.Type.systemBars())

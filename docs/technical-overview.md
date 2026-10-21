@@ -17274,6 +17274,39 @@ hex 冻结）、`ThemeModeTest`（迁移与解析全矩阵，含 TV SYSTEM → �
   `versionCode=191 / versionName=2.39.6`；已覆盖安装到手机（Redmi `91846823`，
   `lastUpdateTime=2026-10-21 20:33:35`）。仍未推送、未打 tag。
 
+**手机系统栏底色不跟主题（同日，所有者反馈「打开应用把状态栏改成深色，切浅色主题后状态栏没跟」）**：
+
+- **根因**：全仓**从未设置过** `window.statusBarColor` / `window.navigationBarColor`，只做过
+  图标明暗（`isAppearanceLightStatusBars` / `isAppearanceLightNavigationBars`）。父主题
+  `android:Theme.Material.NoActionBar`（`themes.xml`）由框架链给出**不透明纯黑**底：
+  `Theme.Material → statusBarColor = ?attr/colorPrimaryDark → @color/primary_dark_material_dark
+  → @color/black #ff000000`，且 `windowDrawsSystemBarBackgrounds=true`（取证方式：
+  `aapt2 dump resources $ANDROID_HOME/platforms/android-34/android.jar`）。
+  顶栏 `PhoneTopBar` 的 `background` 画在 `statusBarsPadding()` **之外层**，其实已经正确涂到状态栏区域，
+  只是被这层不透明黑盖住 —— 所以浅色下「顶部一条黑」是**系统栏色遮挡**，不是组件画错。
+  方案原文（§4.5 / §8）本来就只规定了图标明暗，属**方案覆盖缺口**，非深色回归。
+- **取色规则**（`Theme.kt:137-146`，新增三个纯函数）：底色一律取调色板的 `surface`，
+  与顶栏 / 底部导航同色，保证视觉上连成一片；`systemBarSurfaceColor(darkTheme, lightIconsSupported)`
+  为纯函数（不读 `Build`，可单测），`statusBarSurfaceColor` / `navigationBarSurfaceColor`
+  分别以 `SDK_INT >= M`(23) / `>= O`(26) 传入 `lightIconsSupported` —— **浅底必须能刷出深色图标才有意义**，
+  minSdk 22 的机器够不到该门限时**退回深色底**（宁可整条深色，也不要白底 + 白图标）。
+- **生效两处**（缺一即坏）：`MainActivity.kt:228-229` 冷启动 `onCreate`（包在 `if (!isTVDevice)` 内，
+  TV 不碰系统栏）+ `MainActivity.kt:310-311` 系统栏 `LaunchedEffect`（其 key 已含 `darkTheme`，
+  否则运行中切主题时底色不会更新）。
+- ⚠️ **深色侧的有意变化**：状态栏 / 导航栏底色由纯黑 `#000000` 变为深色 `surface` `#162032`。
+  这是本次修复的预期结果（顶栏本就是 `#162032`，现在连成一片），不是回归。
+- **门禁**：新增 `SystemBarColorTest`（纯 JUnit，无 Robolectric）4 例 —— 深色两种 flag 均 `Dark.surface`；
+  浅色 + 可刷深图标 → `Light.surface`；浅色 + 不可刷深 → 退回 `Dark.surface`；
+  两套 `surface` 必须不同色（防止有人把浅色调色板 `surface` 改成与深色相同，使本函数静默失效）。
+- **未处理的边界**（待所有者裁决）：频谱舞台 / K 歌 / MV 页隐藏系统栏，若用户边缘上滑唤出**瞬态**
+  系统栏，浅色主题下那条瞬态条会是白色，而画布强制深色 —— 可读但不协调。本轮未动。
+- 复验：定向 `SystemBarColorTest` 4 例 + 主题三套（`ThemeContrastTest` 3 / 其余 10 + 10）全绿；
+  全量 `testDebugUnitTest --rerun-tasks` → **239 类 / 2448 例 / 0 失败 0 错误 0 跳过**（4m 4s，
+  `BUILD SUCCESSFUL`）；`lintDebug` **0 errors / 163 warnings**（与基线一致）；`assembleRelease` → `BUILD SUCCESSFUL`（7m 3s），
+  产物 **25,857,884 字节**、md5 `f6e332da60ab49d429c8a5f00d776dd7`、`versionCode=191 / versionName=2.39.6`
+  （按所有者口径**版本号不升**）；已覆盖安装手机（`lastUpdateTime=2026-10-21 22:30:06`）。
+  **所有者已于同日手机上验证通过**（浅色/深色两套状态栏与导航栏底色均跟随主题）。改动仍未提交、未推送、未打 tag。
+
 ### 10.266 v2.39.6 补丁 — 曲库「歌曲」Tab 接入百度网盘索引（2026-10-21）
 
 **触发**：所有者反馈曲库「歌曲」页「已经索引了百度网盘，但并未列出歌曲；搜索时同页可以

@@ -1,5 +1,6 @@
 package com.nasmusic.tv.ui.theme
 
+import android.os.Build
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -124,6 +125,25 @@ object NasPalettes {
 
 /** 当前调色板（默认深色，保证未包裹主题的预览/测试不会崩） */
 val LocalNasPalette = staticCompositionLocalOf { NasPalettes.Dark }
+
+/**
+ * 系统栏（状态栏 / 底部导航栏）底色：与顶栏、底部导航的 `surface` 同色，
+ * 让系统栏区域和前后条连成一片（`themes.xml` 继承的 Material 默认是纯黑，不写就永远黑）。
+ *
+ * ⚠️ 浅色底的前提是系统能把图标刷成深色：`FLAG_LIGHT_STATUS_BAR` 需 API 23、
+ * `FLAG_LIGHT_NAVIGATION_BARS` 需 API 26。够不到门槛时**退回深色底** ——
+ * 本项目 minSdk 22，白图标压白底等于看不见。
+ */
+fun systemBarSurfaceColor(darkTheme: Boolean, lightIconsSupported: Boolean): Color =
+    if (darkTheme || !lightIconsSupported) NasPalettes.Dark.surface else NasPalettes.Light.surface
+
+/** 状态栏底色（图标可否刷深由 API 等级决定） */
+fun statusBarSurfaceColor(darkTheme: Boolean): Color =
+    systemBarSurfaceColor(darkTheme, Build.VERSION.SDK_INT >= Build.VERSION_CODES.M)
+
+/** 底部导航栏底色（图标可否刷深由 API 等级决定） */
+fun navigationBarSurfaceColor(darkTheme: Boolean): Color =
+    systemBarSurfaceColor(darkTheme, Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
 
 /**
  * 项目级别的颜色系统（与 HTML index.html 中的 CSS 变量一一对应）。
