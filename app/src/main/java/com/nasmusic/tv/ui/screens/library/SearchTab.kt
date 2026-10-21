@@ -21,7 +21,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -295,9 +294,9 @@ private fun SearchSourceBar(
                 containerColor = if (isEnabled) NasMusicColors.Primary
                 else NasMusicColors.Primary.copy(alpha = 0.2f),
                 focusedContainerColor = NasMusicColors.Primary,
-                contentColor = if (isEnabled) Color(0xFF0C1222)
+                contentColor = if (isEnabled) NasMusicColors.OnPrimary
                 else NasMusicColors.TextPrimary,
-                focusedContentColor = Color(0xFF0C1222)
+                focusedContentColor = NasMusicColors.OnPrimary
             ) {
                 Text(
                     text = (if (isEnabled) "● " else "○ ") + stringResource(source.displayNameRes),
@@ -316,7 +315,7 @@ private fun SearchSourceBar(
             containerColor = NasMusicColors.Primary.copy(alpha = 0.3f),
             focusedContainerColor = NasMusicColors.Primary,
             contentColor = NasMusicColors.TextPrimary,
-            focusedContentColor = NasMusicColors.TextPrimary
+            focusedContentColor = NasMusicColors.OnPrimary
         ) {
             Text(
                 text = stringResource(R.string.search_all_sources),

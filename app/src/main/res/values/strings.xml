@@ -409,8 +409,11 @@
     <string name="settings_group_connection_info">连接信息</string>
     <string name="settings_group_capabilities">能力说明</string>
     <string name="settings_group_opensource">开源与许可</string>
-    <string name="settings_dark_theme">暗色主题</string>
-    <string name="settings_dark_theme_desc">使用深色背景保护视力</string>
+    <string name="settings_theme_mode">主题模式</string>
+    <string name="settings_theme_desc">跟随系统时手机自动切换，电视固定深色</string>
+    <string name="settings_theme_system">跟随系统</string>
+    <string name="settings_theme_dark">深色</string>
+    <string name="settings_theme_light">浅色</string>
     <string name="settings_animations">界面动画</string>
     <string name="settings_animations_desc">页面切换和焦点动画</string>
     <string name="settings_font_size">字体字号</string>

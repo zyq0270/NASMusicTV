@@ -76,6 +76,7 @@ import com.nasmusic.tv.util.QrCodeGenerator
 import com.nasmusic.tv.ui.theme.NasMusicBrushes
 import com.nasmusic.tv.ui.theme.FontSize
 import com.nasmusic.tv.ui.theme.NasMusicColors
+import com.nasmusic.tv.ui.theme.NasOverlayColors
 import com.nasmusic.tv.util.AppLog
 import kotlinx.coroutines.delay
 
@@ -360,7 +361,7 @@ fun MvPlaybackScreen(
                 Text(
                     text = stringResource(R.string.mv_load_failed),
                     fontSize = FontSize.button(),
-                    color = Color.White
+                    color = NasOverlayColors.OnArtwork
                 )
             }
         }
@@ -375,7 +376,7 @@ fun MvPlaybackScreen(
                     .background(Color(0x99000000), RoundedCornerShape(12.dp))
                     .padding(horizontal = 28.dp, vertical = 14.dp)
             ) {
-                Text(text = mvMessage, fontSize = FontSize.body(), color = Color.White)
+                Text(text = mvMessage, fontSize = FontSize.body(), color = NasOverlayColors.OnArtwork)
             }
         }
 

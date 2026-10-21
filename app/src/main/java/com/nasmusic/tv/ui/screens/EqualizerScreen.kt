@@ -41,7 +41,6 @@ import androidx.tv.material3.Surface
 import androidx.tv.material3.Text
 import com.nasmusic.tv.R
 import com.nasmusic.tv.data.model.EqualizerPreset
-import com.nasmusic.tv.ui.theme.Accent
 import com.nasmusic.tv.ui.theme.LocalUiMode
 import com.nasmusic.tv.ui.theme.NasMusicColors
 import com.nasmusic.tv.ui.theme.UiMode
@@ -221,8 +220,7 @@ items(presets, key = { it.name }) { preset ->
                                          else "${"%.1f".format(band)} dB"
                             Text(
                                 text = dbText,
-                                color = if (band > 0) NasMusicColors.Primary
-                                        else if (band < 0) Accent
+                                color = if (band != 0f) NasMusicColors.Primary
                                         else NasMusicColors.TextSecondary,
                                 fontSize = FontSize.button()
                             )

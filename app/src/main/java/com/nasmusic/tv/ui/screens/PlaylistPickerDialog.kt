@@ -189,15 +189,15 @@ fun PlaylistPickerDialog(
                         focusedScale = 1.06f,
                         animationDurationMs = 150,
                         containerColor = NasMusicColors.Primary.copy(alpha = 0.8f),
-                        contentColor = NasMusicColors.TextPrimary,
+                        contentColor = NasMusicColors.OnPrimary,
                         focusedContainerColor = NasMusicColors.Primary,
-                        focusedContentColor = NasMusicColors.TextPrimary,
+                        focusedContentColor = NasMusicColors.OnPrimary,
                         pressedScale = 0.95f,
                         requestFocusOnLaunch = playlists.isEmpty()
                     ) {
                         Text(
                             text = "+ " + stringResource(R.string.mine_create_playlist),
-                            color = NasMusicColors.TextPrimary,
+                            color = NasMusicColors.OnPrimary,
                             fontSize = FontSize.body(),
                             modifier = Modifier.padding(horizontal = 18.dp, vertical = 9.dp)
                         )

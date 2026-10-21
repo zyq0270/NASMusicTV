@@ -334,11 +334,11 @@ private fun ButtonChipSmall(text: String, onClick: () -> Unit) {
         focusedScale = 1.08f,
         animationDurationMs = 200,
         containerColor = NasMusicColors.Primary.copy(alpha = 0.8f),
-        contentColor = NasMusicColors.TextPrimary,
+        contentColor = NasMusicColors.OnPrimary,
         focusedContainerColor = NasMusicColors.Primary,
-        focusedContentColor = NasMusicColors.TextPrimary,
+        focusedContentColor = NasMusicColors.OnPrimary,
         pressedScale = 0.95f
     ) {
-        Text(text = text, color = NasMusicColors.TextPrimary, fontSize = FontSize.body(), modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp))
+        Text(text = text, color = LocalFocusableContentColor.current, fontSize = FontSize.body(), modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp))
     }
 }

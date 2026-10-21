@@ -62,13 +62,15 @@ fun PlayHeatmapChart(
     if (cols == 0) return
 
     // 0 = 无播放；1…4 由浅到深（与 PlayHeatmapBuilder.LEVELS 对应）
-    val levelColors = remember {
+    // ⚠️ remember 必须把 palette 当 key：否则切主题后仍沿用旧色阶（浅色下热力图可能完全看不清）
+    val palette = com.nasmusic.tv.ui.theme.LocalNasPalette.current
+    val levelColors = remember(palette) {
         listOf(
-            NasMusicColors.SurfaceVariant,
-            NasMusicColors.Primary.copy(alpha = 0.28f),
-            NasMusicColors.Primary.copy(alpha = 0.50f),
-            NasMusicColors.Primary.copy(alpha = 0.74f),
-            NasMusicColors.Primary
+            palette.surfaceVariant,
+            palette.primary.copy(alpha = 0.28f),
+            palette.primary.copy(alpha = 0.50f),
+            palette.primary.copy(alpha = 0.74f),
+            palette.primary
         )
     }
     val labelColor = NasMusicColors.TextSecondary

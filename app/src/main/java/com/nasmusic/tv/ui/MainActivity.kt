@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.Configuration
+import android.graphics.drawable.ColorDrawable
 import android.net.Uri
 import android.os.Bundle
 import android.view.KeyEvent
@@ -18,6 +19,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.media3.common.util.UnstableApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -32,6 +34,7 @@ import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 
 import androidx.compose.ui.text.font.FontWeight
@@ -49,8 +52,11 @@ import com.nasmusic.tv.ui.screens.ExitConfirmDialog
 import com.nasmusic.tv.ui.theme.NASMusicTVTheme
 import com.nasmusic.tv.ui.theme.FontSize
 import com.nasmusic.tv.ui.theme.NasMusicColors
+import com.nasmusic.tv.ui.theme.NasPalettes
 import com.nasmusic.tv.ui.viewmodel.MainViewModel
 import com.nasmusic.tv.data.model.Screen
+import com.nasmusic.tv.data.model.ThemeMode
+import com.nasmusic.tv.data.model.resolveDarkTheme
 import com.nasmusic.tv.util.AppLog
 import com.nasmusic.tv.util.MediaKeyHandler
 import com.nasmusic.tv.util.NetworkMonitor
@@ -206,6 +212,19 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+        // 冷启动窗口底色：themes.xml 是深色底，浅色主题下会闪一帧深色。
+        // 主题解析必须与 setContent 内完全同源（resolveDarkTheme），并从 @Volatile 镜像同步读。
+        try {
+            val prefs = (application as NasMusicApp).appPreferences
+            val systemDark = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
+                Configuration.UI_MODE_NIGHT_YES
+            val darkTheme = resolveDarkTheme(prefs.getThemeModeSync(), systemDark, isTVDevice)
+            val bg = if (darkTheme) NasPalettes.Dark.background else NasPalettes.Light.background
+            window.setBackgroundDrawable(ColorDrawable(bg.toArgb()))
+        } catch (e: Exception) {
+            AppLog.w("MainActivity", "init window background failed", e)
+        }
+
         // 2026-10-06 权限瘦身：原「电池优化白名单检查」（辅助类已随 C1 裁决整链路删除）
         // 与「Android 13+ POST_NOTIFICATIONS 开机申请」已移除 ——
         // 前者不再主动把用户弹到系统设置；后者是媒体通知，平台按 MediaStyle 模板豁免，
@@ -240,6 +259,13 @@ class MainActivity : ComponentActivity() {
                 packageManager.hasSystemFeature("android.software.leanback") ||
                 packageManager.hasSystemFeature("android.hardware.type.television")
             }
+            // 主题三态解析（唯一真源 resolveDarkTheme）：TV 的 SYSTEM 固定深色（D5），
+            // 手机 SYSTEM 跟随系统。isSystemInDarkTheme() 是可组合读取，配置变化自动重组。
+            val darkTheme = resolveDarkTheme(
+                mode = settings.themeMode ?: ThemeMode.SYSTEM,
+                systemDark = isSystemInDarkTheme(),
+                isTv = isTVDevice
+            )
             // v2.36.0（方案 §3.2 / C4）：形态因子 —— 直接读 LocalConfiguration.current。
             // ⚠️ 不能用 `remember { derivedStateOf { configuration.orientation } }`：
             // `configuration` 不是 State，remember 会永久读到初值，方向变化永不生效。
@@ -266,10 +292,13 @@ class MainActivity : ComponentActivity() {
             }
 
             // v2.36.0 D9：竖屏显示系统栏（沉浸模式 / 全屏页仍隐藏），横屏手机保持现状
-            LaunchedEffect(uiMode, isImmersiveMode.value, showMv, showKaraoke, showVisualizer, isTVDevice) {
+            // ⚠️ key 必须含 darkTheme：系统栏可见时切换主题，图标颜色不会自己更新。
+            LaunchedEffect(uiMode, isImmersiveMode.value, showMv, showKaraoke, showVisualizer, isTVDevice, darkTheme) {
                 if (isTVDevice) return@LaunchedEffect
                 try {
                     val controller = WindowInsetsControllerCompat(window, window.decorView)
+                    controller.isAppearanceLightStatusBars = !darkTheme
+                    controller.isAppearanceLightNavigationBars = !darkTheme
                     val showBars = uiMode == com.nasmusic.tv.ui.theme.UiMode.PhonePortrait &&
                         !isImmersiveMode.value && !showMv && !showKaraoke && !showVisualizer
                     if (showBars) controller.show(WindowInsetsCompat.Type.systemBars())
@@ -295,7 +324,7 @@ class MainActivity : ComponentActivity() {
                 com.nasmusic.tv.ui.theme.LocalUiMode provides uiMode,
                 com.nasmusic.tv.ui.theme.LocalFontAdjustment provides settings.fontAdjustment
             ) {
-            NASMusicTVTheme(darkTheme = settings.darkTheme) {
+            NASMusicTVTheme(darkTheme = darkTheme) {
                 // 暴露当前 Activity 给子组件，用于注册对话框的 BACK 键处理
                 CompositionLocalProvider(
                     LocalDialogBackHandler provides dialogBackHandler,

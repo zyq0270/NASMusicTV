@@ -268,7 +268,7 @@ internal fun karaokeRowBoundaryX(
  * 单行 KARAOKE 渲染：双层叠加实现平滑进度
  *
  * - 底层（[baseColor]）：整行歌词
- * - 顶层（[highlightColor]）：与底层完全相同的歌词，按 [progress]（0..1）从左到右裁剪揭示，
+ * - 顶层（[highlightColor]，默认取 [NasMusicColors.KaraokeHighlight]）：与底层完全相同的歌词，按 [progress]（0..1）从左到右裁剪揭示，
  *   进度边界落在字符中间时即实现"半个字被覆盖"，非逐字跳变
  *
  * 使用 TextLayoutResult 定位边界像素，文本左对齐/右对齐均正确。
@@ -282,10 +282,12 @@ internal fun KaraokeLineText(
     fontSize: TextUnit = 50.sp,
     textAlign: TextAlign = TextAlign.Start,
     baseColor: Color = Color.White,
-    highlightColor: Color = Color.Yellow,
+    highlightColor: Color? = null,
     modifier: Modifier = Modifier
 ) {
     var layout by remember(text) { mutableStateOf<TextLayoutResult?>(null) }
+    // 默认跟随主题：深色纯黄（KARAOKE 页为强制深色，行为不变），浅色换成品牌次色的深阶藏蓝
+    val sungColor = highlightColor ?: NasMusicColors.KaraokeHighlight
 
     Box(modifier = modifier) {
         // 底色层：白色（未播放部分 / 预览行）
@@ -307,7 +309,7 @@ internal fun KaraokeLineText(
                 fontSize = fontSize,
                 fontWeight = FontWeight.Bold,
                 textAlign = textAlign,
-                color = highlightColor,
+                color = sungColor,
                 modifier = Modifier
                     .fillMaxWidth()
                     .drawWithContent {

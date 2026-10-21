@@ -171,7 +171,7 @@ internal fun SettingsBranch(
                             coroutineScope.launch { viewModel.prefs.display.setScreenOrientation(value) }
                         },
                         settings = settings,
-                        onToggleDarkTheme = { viewModel.updateDarkTheme(it) },
+                        onChangeThemeMode = { viewModel.updateThemeMode(it) },
                         onToggleAnimations = { viewModel.updateAnimationsEnabled(it) },
                         onToggleAutoPlayNext = { viewModel.updateAutoPlayNext(it) },
                         onChangePlayMode = { viewModel.updateDefaultPlayMode(it) },

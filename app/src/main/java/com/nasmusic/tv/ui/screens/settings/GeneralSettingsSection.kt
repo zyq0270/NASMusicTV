@@ -16,6 +16,7 @@ import androidx.tv.material3.ExperimentalTvMaterial3Api
 import androidx.tv.material3.Text
 import com.nasmusic.tv.R
 import com.nasmusic.tv.data.model.AppSettings
+import com.nasmusic.tv.data.model.ThemeMode
 import com.nasmusic.tv.ui.theme.FontSize
 import com.nasmusic.tv.ui.theme.NasMusicColors
 
@@ -31,7 +32,7 @@ data class GeneralSettingsState(
 /** 通用设置分区动作 */
 data class GeneralSettingsActions(
     val onChangeLanguage: ((String) -> Unit)?,
-    val onToggleDarkTheme: (Boolean) -> Unit,
+    val onChangeThemeMode: (ThemeMode) -> Unit,
     val onToggleAnimations: (Boolean) -> Unit,
     val onChangeFontAdjustment: (Int) -> Unit,
     /** v2.36.0：改屏幕方向（L1 全局策略，唯一真相之源） */
@@ -71,9 +72,30 @@ internal fun GeneralSettingsSection(
                 }
             }
         }
-        // 卡② 外观与动效：暗色主题 / 动画效果 / 字号调整（原 settings_font_size 小节并入）
-        SettingsGroupCard(title = stringResource(R.string.settings_group_theme)) {
-            SettingSwitch(label = stringResource(R.string.settings_dark_theme), description = stringResource(R.string.settings_dark_theme_desc), checked = state.settings.darkTheme, onClick = { actions.onToggleDarkTheme(!state.settings.darkTheme) })
+        // 卡② 外观与动效：主题模式（三态） / 动画效果 / 字号调整（原 settings_font_size 小节并入）
+        SettingsGroupCard(
+            title = stringResource(R.string.settings_group_theme),
+            description = stringResource(R.string.settings_theme_desc),
+        ) {
+            SettingsHint(stringResource(R.string.settings_theme_mode))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                listOf(
+                    ThemeMode.SYSTEM to stringResource(R.string.settings_theme_system),
+                    ThemeMode.DARK to stringResource(R.string.settings_theme_dark),
+                    ThemeMode.LIGHT to stringResource(R.string.settings_theme_light)
+                ).forEach { (mode, label) ->
+                    SettingsChip(
+                        label = label,
+                        selected = state.settings.themeMode == mode,
+                        onClick = { actions.onChangeThemeMode(mode) },
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
             SettingSwitch(label = stringResource(R.string.settings_animations), description = stringResource(R.string.settings_animations_desc), checked = state.settings.animationsEnabled, onClick = { actions.onToggleAnimations(!state.settings.animationsEnabled) })
             // 字体字号调整（在当前Theme档位基础上增减）
             // 芯片/调整行的说明位走 SettingsHint（§4.5）—— 此前这行**没有任何说明**

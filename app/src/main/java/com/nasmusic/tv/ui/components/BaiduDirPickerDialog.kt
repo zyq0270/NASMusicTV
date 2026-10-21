@@ -169,10 +169,10 @@ fun BaiduDirPickerDialog(
                                     containerColor = NasMusicColors.SurfaceVariant,
                                     focusedContainerColor = NasMusicColors.Primary.copy(alpha = 0.85f),
                                     contentColor = NasMusicColors.TextPrimary,
-                                    focusedContentColor = NasMusicColors.TextPrimary
+                                    focusedContentColor = NasMusicColors.OnPrimary
                                 ) {
                                     Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                                        Text(text = stringResource(R.string.netdisk_dir_picker_retry), color = NasMusicColors.TextPrimary, fontSize = FontSize.body())
+                                        Text(text = stringResource(R.string.netdisk_dir_picker_retry), color = LocalFocusableContentColor.current, fontSize = FontSize.body())
                                     }
                                 }
                             }
@@ -215,10 +215,10 @@ fun BaiduDirPickerDialog(
                         containerColor = NasMusicColors.SurfaceVariant,
                         focusedContainerColor = NasMusicColors.Primary.copy(alpha = 0.85f),
                         contentColor = NasMusicColors.TextPrimary,
-                        focusedContentColor = NasMusicColors.TextPrimary
+                        focusedContentColor = NasMusicColors.OnPrimary
                     ) {
                         Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                            Text(text = stringResource(R.string.netdisk_dir_picker_select), color = NasMusicColors.TextPrimary, fontSize = FontSize.button())
+                            Text(text = stringResource(R.string.netdisk_dir_picker_select), color = LocalFocusableContentColor.current, fontSize = FontSize.button())
                         }
                     }
                     FocusableSurface(
@@ -233,10 +233,10 @@ fun BaiduDirPickerDialog(
                         containerColor = NasMusicColors.SurfaceVariant,
                         focusedContainerColor = NasMusicColors.Primary.copy(alpha = 0.85f),
                         contentColor = NasMusicColors.TextPrimary,
-                        focusedContentColor = NasMusicColors.TextPrimary
+                        focusedContentColor = NasMusicColors.OnPrimary
                     ) {
                         Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                            Text(text = stringResource(R.string.common_cancel), color = NasMusicColors.TextPrimary, fontSize = FontSize.button())
+                            Text(text = stringResource(R.string.common_cancel), color = LocalFocusableContentColor.current, fontSize = FontSize.button())
                         }
                     }
                 }

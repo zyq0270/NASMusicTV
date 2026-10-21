@@ -249,10 +249,10 @@ internal fun QualityDialogButton(
         animationDurationMs = 200,
         containerColor = if (primary) NasMusicColors.Primary.copy(alpha = 0.85f)
                          else NasMusicColors.SurfaceVariant,
-        contentColor = if (primary) Color.Black else NasMusicColors.TextPrimary,
+        contentColor = if (primary) NasMusicColors.OnPrimary else NasMusicColors.TextPrimary,
         focusedContainerColor = if (primary) NasMusicColors.Primary
                                 else NasMusicColors.Primary.copy(alpha = 0.25f),
-        focusedContentColor = if (primary) Color.Black else NasMusicColors.TextPrimary,
+        focusedContentColor = if (primary) NasMusicColors.OnPrimary else NasMusicColors.TextPrimary,
         pressedScale = 0.97f,
         focusBorderColor = NasMusicColors.FocusRing.copy(alpha = 0.6f)
     ) {

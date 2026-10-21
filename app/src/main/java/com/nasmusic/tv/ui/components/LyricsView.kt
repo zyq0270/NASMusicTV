@@ -226,20 +226,26 @@ private fun LyricsViewInner(
 
     // Box 叠加：下方是滚动歌词，上下各一层 fade mask
     // 沉浸播放页为纯黑底 → 用同色遮罩，渐隐边缘与背景无缝
-    val topFadeMask = remember(fadeMaskColor) {
+    // Brush 是 composable getter，必须先在组合期取出，再作为 remember 的输入；
+    // key 带 palette，主题切换时重新生成（否则浅色下沿用深色渐隐底）。
+    val palette = com.nasmusic.tv.ui.theme.LocalNasPalette.current
+    val themeTopFade = NasMusicBrushes.topFadeMask
+    val themeBottomFade = NasMusicBrushes.bottomFadeMask
+    val topFadeMask = remember(fadeMaskColor, palette) {
         if (fadeMaskColor != null) {
             Brush.verticalGradient(colors = listOf(fadeMaskColor, Color.Transparent))
         } else {
-            NasMusicBrushes.topFadeMask
+            themeTopFade
         }
     }
-    val bottomFadeMask = remember(fadeMaskColor) {
+    val bottomFadeMask = remember(fadeMaskColor, palette) {
         if (fadeMaskColor != null) {
             Brush.verticalGradient(colors = listOf(Color.Transparent, fadeMaskColor))
         } else {
-            NasMusicBrushes.bottomFadeMask
+            themeBottomFade
         }
     }
+    val seekLineColor = NasMusicColors.Primary
     Box(
         modifier = modifier.fillMaxSize().then(
             if (longPressSeekEnabled) {
@@ -382,7 +388,7 @@ private fun LyricsViewInner(
                         .fillMaxWidth()
                 ) {
                     drawLine(
-                        color = NasMusicColors.Primary,
+                        color = seekLineColor,
                         start = Offset(0f, size.height / 2),
                         end = Offset(size.width, size.height / 2),
                         strokeWidth = 2.dp.toPx(),

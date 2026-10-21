@@ -51,7 +51,6 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import com.nasmusic.tv.R
 
@@ -258,7 +257,7 @@ fun ProgressSection(
                         }
                         .size(thumbDiameter)
                         .clip(CircleShape)
-                        .background(if (isProgressFocused) Color.Yellow else NasMusicColors.Primary)
+                        .background(if (isProgressFocused) NasMusicColors.Warning else NasMusicColors.Primary)
                 )
                 }
             }
@@ -326,7 +325,9 @@ fun ControlButtonsRow(
             focusRequester = playPauseFocusRequester, icon = {
             Icon(imageVector = if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
                 contentDescription = "Play/Pause",
-                tint = NasMusicColors.TextPrimary,
+                // 不写 tint：主按钮的前景色由 FocusableSurface 按状态注入
+                // （默认/聚焦 OnPrimary，按下 TextPrimary），写死 TextPrimary 会让
+                // 浅色主题的近黑图标压在深青实底上，整颗按钮看起来仍是深色
                 modifier = Modifier.size(if (compact) 28.dp else 40.dp))
         })
         Spacer(modifier = Modifier.width(btnGap))
@@ -420,8 +421,8 @@ private fun IconButton(
         containerColor = if (primary) NasMusicColors.Primary else NasMusicColors.Surface,
         // 主按钮聚焦时整体变亮（Primary → PrimaryBright）；普通按钮 Surface → 青色 0.3f
         focusedContainerColor = if (primary) NasMusicColors.PrimaryBright else NasMusicColors.Primary.copy(alpha = 0.3f),
-        contentColor = NasMusicColors.TextPrimary,
-        focusedContentColor = NasMusicColors.TextPrimary,
+        contentColor = if (primary) NasMusicColors.OnPrimary else NasMusicColors.TextPrimary,
+        focusedContentColor = if (primary) NasMusicColors.OnPrimary else NasMusicColors.TextPrimary,
         pressedContainerColor = NasMusicColors.SurfaceVariant,
         pressedContentColor = NasMusicColors.TextPrimary,
         pressedScale = 0.90f,

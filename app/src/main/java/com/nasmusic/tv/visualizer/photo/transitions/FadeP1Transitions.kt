@@ -5,7 +5,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
-import com.nasmusic.tv.ui.theme.NasMusicColors
+import com.nasmusic.tv.ui.theme.NasPalettes
 import com.nasmusic.tv.visualizer.photo.PhotoGeometry
 import com.nasmusic.tv.visualizer.photo.PhotoTransition
 import com.nasmusic.tv.visualizer.photo.PhotoTransitionId
@@ -50,8 +50,8 @@ internal class FadeWhiteTransition : PhotoTransition {
  * 主题色过渡：交叉淡化 + 主题色纱幕（浓度在中点最浓）。
  *
  * ⚠️ 实现期偏差：`RenderContext` / [PhotoGeometry] 都没有「当前主题色」这个输入
- * （§14.2.3 的签名里没有），为了不为此改全部转场的接口，纱幕用**固定的品牌色**
- * [NasMusicColors.Primary]（静态值，非绘制路径分配）。
+ * （§14.2.3 的签名里没有），为了不为此改全部转场的接口，纱幕用**固定的品牌色**。
+ * 照片墙属频谱舞台、恒为强制深色 ⇒ 直接取深色调色板（非绘制路径分配，也不是主题读取）。
  */
 internal class FadeColorTransition : PhotoTransition {
 
@@ -64,7 +64,7 @@ internal class FadeColorTransition : PhotoTransition {
         val veil = VEIL_ALPHA * (1f - kotlin.math.abs(p * 2f - 1f))
         if (veil > 0.01f) {
             drawRect(
-                color = NasMusicColors.Primary.copy(alpha = veil),
+                color = NasPalettes.Dark.primary.copy(alpha = veil),
                 topLeft = Offset.Zero,
                 size = Size(geom.canvasW, geom.canvasH),
             )

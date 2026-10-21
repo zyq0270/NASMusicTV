@@ -4,6 +4,7 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -31,13 +32,16 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.tv.material3.LocalContentColor
 import com.nasmusic.tv.ui.theme.ButtonColors
+import com.nasmusic.tv.ui.theme.LocalNasPalette
 import com.nasmusic.tv.ui.theme.NasMusicColors
+import com.nasmusic.tv.ui.theme.NasPalettes
 import com.nasmusic.tv.util.AppLog
 
 /**
  * 供 FocusableSurface 子组件读取的当前内容颜色
  */
-val LocalFocusableContentColor = staticCompositionLocalOf { NasMusicColors.TextPrimary }
+// 默认值在非组合上下文求值 ⇒ 只能用固定深色常量（实际值由 FocusableSurface 在组合期提供）
+val LocalFocusableContentColor = staticCompositionLocalOf { NasPalettes.Dark.textPrimary }
 
 /**
  * 当前设备是否按 **TV** 处理。
@@ -126,6 +130,7 @@ fun FocusableSurface(
     content: @Composable () -> Unit
 ) {
     var isFocused by remember { mutableStateOf(false) }
+    val palette = LocalNasPalette.current
     val animScale = remember { Animatable(1f) }
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
@@ -180,6 +185,9 @@ fun FocusableSurface(
         activeFocus -> focusedContentColor
         else -> contentColor
     }
+    // 浅色下 Surface(#FFFFFF) 与 Background(#F3F5F9) 仅 1.06:1，白卡贴浅底发平 ⇒ 描边补层级。
+    // 深色下 Border 已由各页面自行使用，这里只在浅色且容器恰为 Surface 时加线。
+    val showSurfaceOutline = palette.isLight && targetContainerColor == palette.surface
 
     Box(
         modifier = modifier
@@ -193,6 +201,10 @@ fun FocusableSurface(
                 onFocusChanged?.invoke(it.isFocused)
             }
             .background(targetContainerColor, shape)
+            .then(
+                if (showSurfaceOutline) Modifier.border(1.dp, palette.border, shape)
+                else Modifier
+            )
             .combinedClickable(
                 interactionSource = interactionSource,
                 indication = null,

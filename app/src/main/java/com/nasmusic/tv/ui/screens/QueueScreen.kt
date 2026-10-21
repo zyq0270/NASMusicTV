@@ -236,7 +236,8 @@ fun QueueScreen(
                 ) {
                     Icon(imageVector = if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
                         contentDescription = if (isPlaying) "Pause" else "Play",
-                        tint = NasMusicColors.TextPrimary,
+                        // 实底为 Primary / PrimaryBright → 前景必须用 OnPrimary
+                        tint = NasMusicColors.OnPrimary,
                         modifier = Modifier.size(28.dp)
                     )
                 }
@@ -564,10 +565,10 @@ fun QueueActionButton(text: String, onClick: () -> Unit, icon: androidx.compose.
         containerColor = NasMusicColors.Surface,
         contentColor = NasMusicColors.TextPrimary,
         focusedContainerColor = NasMusicColors.Danger.copy(alpha = 0.85f),
-        focusedContentColor = androidx.compose.ui.graphics.Color.White,
+        focusedContentColor = NasMusicColors.OnDanger,
         pressedScale = 0.95f
     ) {
-        Text(text = text, color = NasMusicColors.TextPrimary, fontSize = FontSize.button(), modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp))
+        Text(text = text, color = LocalFocusableContentColor.current, fontSize = FontSize.button(), modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp))
     }
 }
 

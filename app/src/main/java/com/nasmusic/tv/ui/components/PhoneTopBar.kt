@@ -84,7 +84,7 @@ fun PhoneTopBar(
                 .background(NasMusicColors.Primary, RoundedCornerShape(8.dp)),
             contentAlignment = Alignment.Center
         ) {
-            Text(text = "\u266A", color = NasMusicColors.TextPrimary, fontSize = FontSize.button())
+            Text(text = "\u266A", color = NasMusicColors.OnPrimary, fontSize = FontSize.button())
         }
         Spacer(modifier = Modifier.width(10.dp))
         Text(

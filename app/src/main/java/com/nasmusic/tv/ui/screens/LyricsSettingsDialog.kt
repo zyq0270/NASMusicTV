@@ -83,14 +83,14 @@ fun LyricsSettingsDialog(
                         NasMusicColors.Surface.copy(alpha = 0.7f),
                     focusedContainerColor = NasMusicColors.Primary,
                     contentColor = if (isSelected)
-                        NasMusicColors.Surface
+                        NasMusicColors.OnPrimary
                     else
                         NasMusicColors.TextPrimary,
-                    focusedContentColor = NasMusicColors.Surface
+                    focusedContentColor = NasMusicColors.OnPrimary
                 ) {
                     Text(
                         text = label,
-                        color = if (isSelected) NasMusicColors.Surface else NasMusicColors.TextPrimary,
+                        color = if (isSelected) NasMusicColors.OnPrimary else NasMusicColors.TextPrimary,
                         fontSize = FontSize.body(),
                         modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp)
                     )

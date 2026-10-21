@@ -121,8 +121,8 @@ fun ExportDeviceDialog(
                     animationDurationMs = 150,
                     containerColor = NasMusicColors.Primary,
                     focusedContainerColor = NasMusicColors.Primary.copy(alpha = 0.85f),
-                    contentColor = Color.Black,
-                    focusedContentColor = Color.Black,
+                    contentColor = NasMusicColors.OnPrimary,
+                    focusedContentColor = NasMusicColors.OnPrimary,
                     pressedScale = 0.95f,
                     focusRequester = cancelFocusRequester,
                     requestFocusOnLaunch = true
@@ -133,7 +133,7 @@ fun ExportDeviceDialog(
                     ) {
                         Text(
                             text = stringResource(R.string.common_cancel),
-                            color = Color.Black,
+                            color = NasMusicColors.OnPrimary,
                             fontSize = FontSize.button(),
                             fontWeight = FontWeight.Bold
                         )

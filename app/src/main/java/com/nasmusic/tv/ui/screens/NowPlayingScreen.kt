@@ -86,7 +86,9 @@ import com.nasmusic.tv.ui.components.SongInfoPanel
 import com.nasmusic.tv.ui.components.VolumeControl
 import com.nasmusic.tv.ui.components.PHONE_TOUCH_TARGET
 import com.nasmusic.tv.ui.components.portraitTouchTarget
+import com.nasmusic.tv.ui.theme.NasMusicBrushes
 import com.nasmusic.tv.ui.theme.NasMusicColors
+import com.nasmusic.tv.ui.theme.NasOverlayColors
 
 /**
  * 正在播放屏幕（主界面）
@@ -200,41 +202,45 @@ fun NowPlayingScreen(
 
     // ── 全屏 KARAOKE 页面 ──
     if (showKaraoke) {
-        KaraokePlaybackScreen(
-            currentSong = currentSong,
-            isPlaying = isPlaying,
-            lyrics = lyrics,
-            coverCandidates = coverCandidates,
-            coverFilterEnabled = coverFilterEnabled,
-            coverFilterBlurRadius = coverFilterBlurRadius,
-            progressMs = progressMs,
-            durationMs = durationMs,
-            vocalRemovalEnabled = vocalRemovalEnabled,
-            onToggleVocalRemoval = onToggleVocalRemoval,
-            onExitKaraoke = { onExitKaraoke() },
-            onPlayPause = onPlayPause,
-            onNext = onNext,
-            onPrevious = onPrevious,
-            pitchSemitones = pitchSemitones,
-            playbackSpeed = playbackSpeed,
-            onPreviewPitch = onPreviewPitch,
-            onCommitPitch = onCommitPitch,
-            onPreviewSpeed = onPreviewSpeed,
-            onCommitSpeed = onCommitSpeed,
-            onResetPitch = onResetPitch,
-            onResetSpeed = onResetSpeed,
-            isHighQualityMode = isHighQualityMode,
-            isSeparating = isSeparating,
-            separationProgress = separationProgress,
-            hqError = hqError,
-            onToggleSeparationMode = onToggleSeparationMode,
-            onClearHqError = onClearHqError,
-            hqSuccess = hqSuccess,
-            onClearHqSuccess = onClearHqSuccess,
-            modelDownloaded = modelDownloaded,
-            playPauseFocusRequester = playPauseFocusRequester,
-            remoteControlUrl = remoteControlUrl
-        )
+        val karaoke: @Composable () -> Unit = {
+            KaraokePlaybackScreen(
+                currentSong = currentSong,
+                isPlaying = isPlaying,
+                lyrics = lyrics,
+                coverCandidates = coverCandidates,
+                coverFilterEnabled = coverFilterEnabled,
+                coverFilterBlurRadius = coverFilterBlurRadius,
+                progressMs = progressMs,
+                durationMs = durationMs,
+                vocalRemovalEnabled = vocalRemovalEnabled,
+                onToggleVocalRemoval = onToggleVocalRemoval,
+                onExitKaraoke = { onExitKaraoke() },
+                onPlayPause = onPlayPause,
+                onNext = onNext,
+                onPrevious = onPrevious,
+                pitchSemitones = pitchSemitones,
+                playbackSpeed = playbackSpeed,
+                onPreviewPitch = onPreviewPitch,
+                onCommitPitch = onCommitPitch,
+                onPreviewSpeed = onPreviewSpeed,
+                onCommitSpeed = onCommitSpeed,
+                onResetPitch = onResetPitch,
+                onResetSpeed = onResetSpeed,
+                isHighQualityMode = isHighQualityMode,
+                isSeparating = isSeparating,
+                separationProgress = separationProgress,
+                hqError = hqError,
+                onToggleSeparationMode = onToggleSeparationMode,
+                onClearHqError = onClearHqError,
+                hqSuccess = hqSuccess,
+                onClearHqSuccess = onClearHqSuccess,
+                modelDownloaded = modelDownloaded,
+                playPauseFocusRequester = playPauseFocusRequester,
+                remoteControlUrl = remoteControlUrl
+            )
+        }
+        // K 歌画布 = 封面图 + 固定暗纱（0xCC0C1222），恒为暗底 ⇒ 强制深色调色板
+        com.nasmusic.tv.ui.theme.ForceDarkPalette(karaoke)
         return
     }
 
@@ -305,16 +311,11 @@ fun NowPlayingScreen(
             .fillMaxSize()
             .background(
                 // 沉浸模式：整屏纯黑（左半封面右缘渐黑 + 右半歌词区均落在黑底上，无缝衔接）
-                // 普通模式：保持原有纵向渐变背景
+                // 普通模式：主题纵向渐变（深色与历史逐字节一致）
                 if (isImmersiveMode) {
                     Brush.verticalGradient(listOf(Color.Black, Color.Black))
                 } else {
-                    Brush.verticalGradient(
-                        listOf(
-                            NasMusicColors.Background,
-                            Color(0xFF0A1020)
-                        )
-                    )
+                    NasMusicBrushes.pageBackground
                 }
             )
     ) {
@@ -765,7 +766,7 @@ private fun ImmersiveCoverHalf(
                         if (songTitle != null) {
                             VerticalText(
                                 text = songTitle,
-                                color = Color.White,
+                                color = NasOverlayColors.OnArtwork,
                                 fontSize = titleSize,
                                 fontWeight = FontWeight.Bold,
                                 maxChars = maxTitleChars
@@ -1153,16 +1154,16 @@ private fun SourceTag(
         focusedContainerColor = if (selected) NasMusicColors.Primary
                                 else NasMusicColors.Primary.copy(alpha = 0.3f),
         contentColor = if (!available) NasMusicColors.TextSecondary.copy(alpha = 0.4f)
-                       else if (selected) Color.Black
+                       else if (selected) NasMusicColors.OnPrimary
                        else NasMusicColors.TextPrimary,
-        focusedContentColor = if (selected) Color.Black else NasMusicColors.Primary,
+        focusedContentColor = if (selected) NasMusicColors.OnPrimary else NasMusicColors.Primary,
         pressedScale = 0.95f,
         showFocusBorder = available && onClick != null  // L11：无行为标签不画焦点框
     ) {
         Text(
             text = label,
             color = if (!available) NasMusicColors.TextSecondary.copy(alpha = 0.4f)
-                    else if (selected) Color.Black
+                    else if (selected) NasMusicColors.OnPrimary
                     else NasMusicColors.TextPrimary,
             fontSize = FontSize.small(),
             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
@@ -1463,7 +1464,7 @@ private fun NowPlayingPortrait(
             .fillMaxSize()
             .background(
                 // 沉浸态已在上方提前返回，这里只剩普通态背景
-                Brush.verticalGradient(listOf(NasMusicColors.Background, Color(0xFF0A1020)))
+                NasMusicBrushes.pageBackground
             )
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
@@ -2088,7 +2089,7 @@ private fun PortraitImmersiveLyrics(
                     if (songTitle != null) {
                         Text(
                             text = songTitle,
-                            color = Color.White,
+                            color = NasOverlayColors.OnArtwork,
                             fontSize = FontSize.title(),
                             fontWeight = FontWeight.Bold,
                             maxLines = 1,

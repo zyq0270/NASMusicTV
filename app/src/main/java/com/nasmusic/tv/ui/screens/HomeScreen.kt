@@ -318,7 +318,7 @@ private fun WelcomeSection(
                     .background(NasMusicColors.Primary, RoundedCornerShape(10.dp)),
                 contentAlignment = Alignment.Center
             ) {
-                Text(text = "\u266A", color = NasMusicColors.TextPrimary, fontSize = FontSize.title())
+                Text(text = "\u266A", color = NasMusicColors.OnPrimary, fontSize = FontSize.title())
             }
             Spacer(modifier = Modifier.width(14.dp))
             Column {
@@ -786,8 +786,7 @@ private fun HomeWeatherCard(
     onClick: () -> Unit = {}
 ) {
     val bgColor = if (weatherData != null) {
-        val mood = WeatherMood.fromWeather(weatherData)
-        Color(0x332DD4BF)
+        NasMusicColors.Primary.copy(alpha = 0.2f)
     } else {
         NasMusicColors.Surface.copy(alpha = 0.3f)
     }

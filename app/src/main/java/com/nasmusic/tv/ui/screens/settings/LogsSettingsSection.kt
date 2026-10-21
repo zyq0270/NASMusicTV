@@ -249,6 +249,8 @@ private val LOG_LEVEL_FILTERS = listOf(
 )
 
 /** 级别配色：E 红、W 橙、D/I 次要色（列表与详情共用）。 */
+@androidx.compose.runtime.Composable
+@androidx.compose.runtime.ReadOnlyComposable
 private fun levelColor(level: String): Color = when (level) {
     LogStore.LEVEL_ERROR -> NasMusicColors.Danger
     LogStore.LEVEL_WARN -> NasMusicColors.Warning

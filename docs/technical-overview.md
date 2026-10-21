@@ -17167,3 +17167,109 @@ ORT 的权重分配走 native malloc，`separate()` 里那道 `Runtime.maxMemory
 `assembleRelease` → `BUILD SUCCESSFUL`，产物 `NASMusicTV-release-v2-39-5.apk`
 **25,842,485 字节**、md5 `850521b2c6bd1f2732d1980ad3b09b22`、`versionCode=190 / versionName=2.39.5`，
 签名证书 `CN=NASMusicTV`（`release-key.jks`）。
+
+### 10.264 v2.39.6 — 我的页歌单卡片：竖屏两行布局（2026-10-21）
+
+**触发**：所有者反馈竖屏「我的」页歌单卡片两处问题：① 歌单名称显示不全；
+② 操作按钮应与歌单名称分行（与歌曲条目一致），横屏 / TV 仍同行。
+
+**根因**：`PlaylistCard` 原为单行布局，「播放 / 重命名 / 补全 / 删除」四个
+`PlaylistActionButton` 与左侧名称共享同一 Row；竖屏（Compose 宽约 439dp、卡片内宽约 375dp）
+下按钮占去大半宽度，名称 `Text` 仅剩极窄空间且 `maxLines = 1`，被省略号截断。
+
+**实现**（`MineScreen.kt` / `PlaylistCard`）：
+
+1. 左侧信息（图标 + 名称 + 歌曲数/导入状态）与按钮组抽成 `infoContent` / `actionContent`
+   两个局部 composable，供两个布局分支共用。
+2. 竖屏（`LocalUiMode == PhonePortrait`）：Column 两行 —— 第一行名称独占整行
+   （`maxLines = 2`、`weight(1f, fill = false)` 给「导入」标签让位），
+   第二行按钮右对齐并套 `horizontalScroll`（字号调大 / 按钮多时不裁切）。
+3. 非竖屏：保持原单行 `Row(height(100.dp))` + `infoContent(Modifier.weight(1f))` +
+   `actionContent()`，与改动前逐字等价（B1）。
+
+**验证**：`compileDebugKotlin`、`lintDebug` → `BUILD SUCCESSFUL`；
+`testDebugUnitTest` → **232 个测试类 / 2400 例 / 0 失败 0 错误 0 跳过**
+（统计自 `app/build/test-results/testDebugUnitTest/TEST-*.xml`，不看退出码）；
+`assembleRelease` → `BUILD SUCCESSFUL`，产物 `NASMusicTV-release-v2-39-6.apk`
+**25,843,372 字节**、md5 `37a2dd9f68c8764c7481a330db80f9f1`、`versionCode=191 / versionName=2.39.6`，
+签名证书 `CN=NASMusicTV`（`release-key.jks`）；已通过 adb 安装到手机
+（Redmi `91846823`，`lastUpdateTime=2026-10-21 18:20:46`），真机视觉验收待所有者确认。
+
+### 10.265 v2.39.6 — 浅色主题（跟随系统 / 深色 / 浅色 三态）（2026-10-21）
+
+**触发**：所有者要求「增加浅色主题配色」，并拍板：除频谱效果页外全部支持浅色；
+开关改为三态；配色由品牌青绿派生并用脚本核算对比度；默认跟随系统、TV 的 SYSTEM 回退深色；
+照片墙随频谱页保持深色。开发计划见 `docs/light-theme-plan.md`（实施偏差见其 §12）。
+
+**机制**（`Theme.kt`）：新增 `NasPalette`（19 个颜色 token + `isLight`）与
+`NasPalettes.Dark/Light`；`NasMusicColors` 全部属性改为 **@Composable getter**，
+读 `LocalNasPalette.current` —— 1228 处业务调用点零改动即自动跟随主题；非组合上下文
+（`remember` / `DrawScope` / 顶层 `val`）由编译器强制暴露并逐处上提。
+`NasMusicBrushes`、`LyricsTheme`、`ButtonColors`、`HighContrastColors` 同改为组合期派生；
+`MaterialTheme` 由 palette 生成完整 ColorScheme。新增 `pageBackground` 渐变：
+深色 `Background → #0A1020`（逐字节不变），浅色 `Background → SurfaceVariant`。
+
+**三态与迁移**：新增 `ThemeMode { SYSTEM, DARK, LIGHT }`（`SYSTEM` 必须是首个常量，
+`backupGson` 未知名字回落到首个常量）与纯函数 `resolveThemeMode` / `resolveDarkTheme`。
+`AppSettings.themeMode` **声明为可空** —— 老备份缺该字段时 Gson 把非空字段写成 null，
+可空值是区分「老备份只有 `darkTheme`」与「新备份显式 SYSTEM」的唯一手段。
+`AppPreferences` 新增 `settings_theme_mode` 键，读取/导入统一走 `resolveThemeMode`；
+写模式时同步维护旧布尔键（SYSTEM 落 true），保证降级安装旧 APK 不突变；
+`getThemeModeSync()`（`@Volatile` 镜像）供 `MainActivity.onCreate` 决定冷启动窗口底色，
+避免浅色闪深底。
+
+**UI 与例外**：
+
+- 设置「外观与动效」卡改为三枚 chips（跟随系统 / 深色 / 浅色），中英文案 5 增 2 删。
+- `NasOverlayColors`（4 常量，不随主题）承接封面 / 视频上的黑纱与白字；MV 白色提示文字
+  改 `OnArtwork`；对话框 `0xB3000000` scrim、视频区与沉浸页黑色画布保持固定。
+- `ForceDarkPalette` 覆盖：频谱舞台（含照片墙）、沉浸播放页（横屏 + 竖屏）、K 歌页
+  —— 这三处是纯黑 / 固定暗纱画布，浅色 token 会不可读。
+- 语义容器前景统一：31 个文件、93 行、94 处 `onPrimary / onDanger / onWarning`
+  （§3.2 计划的 12 处之外，同类「实底或 α≥0.8 聚焦底 + `TextPrimary` / `White`」一并收敛）。
+- 浅色白卡层级：`FocusableSurface` 在「浅色 + 容器为 `Surface`」时补 1dp `Border`；
+  焦点环保持 modifier 链条最末。
+- 删除 `Color.kt`（`Accent` → `NasMusicColors.Primary`），`PrimaryVariant` /
+  `TextBrightHighlight` 同删。
+
+**门禁**（新增 3 类 23 例）：`ThemeContrastTest`（26 组 × 深/浅两套：正文 4.5:1、
+非文本 3:1，失败打印完整对比度表；另含浅色 Background `#F3F5F9` 锁定与深色 19 token
+hex 冻结）、`ThemeModeTest`（迁移与解析全矩阵，含 TV SYSTEM → 深色）、
+`ThemeBackupCompatTest`（老备份、未知枚举名、缺字段、导出双布尔、源码接线扫描）。
+
+**验证**：`compileDebugKotlin` / `lintDebug` / `assembleDebug` → `BUILD SUCCESSFUL`
+（lint **0 errors / 163 warnings**）；`testDebugUnitTest` → **235 类 / 2423 例 /
+0 失败 0 错误 0 跳过**（统计自 `app/build/test-results/testDebugUnitTest/TEST-*.xml`；
+基线 232 类 / 2400 例）；`assembleDebug` 产物 `NASMusicTV-debug-v2-39-6.apk`
+**48,591,397 字节**、md5 `6007c3c3b373e7bb3e75618561b3377d`。
+后续按所有者要求执行 `assembleRelease` → `BUILD SUCCESSFUL`（7m 38s，含
+`lintVitalAnalyzeRelease` / R8），产物 `NASMusicTV-release-v2-39-6.apk`
+**25,857,111 字节**、md5 `c39a4928fe7629c0f239a9380d7f45e7`、
+`versionCode=191 / versionName=2.39.6`，签名证书 `CN=NASMusicTV`（`release-key.jks`）；
+已通过 adb 覆盖安装到手机（Redmi `91846823`，`lastUpdateTime=2026-10-21 19:29:51`）；
+未推送、未打 tag，真机视觉验收待所有者确认。
+真机双端（手机 + 创维 TV）双主题验收待所有者按方案 §8 执行；G-03（α=0.85 聚焦底 + 白字）
+需截图实测，是唯一未被门禁覆盖的对比度面。
+
+**浅色真机缺陷修复（同日，所有者反馈）**：
+
+- **播放/暂停按钮仍显深色**：`PlayerControls` 的主按钮图标写死 `tint = TextPrimary`，
+  覆盖了 `FocusableSurface` 注入的 `OnPrimary` —— 浅色下 `#0F172A` 压在 `#0F766E` 实底上
+  （≈3.2:1），整颗按钮糊成深色块。改为不写 `tint`，由 `FocusableSurface` 按状态注入内容色
+  （默认/聚焦 `OnPrimary`，按下 `TextPrimary`）；队列页同型主按钮同步改 `OnPrimary`。
+- **逐字歌词已唱部分不可读**：`KaraokeLineText` 的默认高亮是 `Color.Yellow`，浅色白底上
+  几乎不可见。新增第 19 个 token `karaokeHighlight`（深色保持纯黄 `#FFFF00`，深色零变化；
+  浅色终值 `#1E3A8A` 藏蓝）。取色经所有者两轮打回：首版琥珀 `#92400E` 被判「偏红、与蓝绿
+  风格不搭」→ 品牌次色蓝 `#1D4ED8`（6.14:1 / 5.65:1）→「还要再压深一档」→ 藏蓝。
+  `KaraokeLineText` 默认改为取该 token（KARAOKE 页为强制深色，行为不变）。门禁 2 组：
+  浅色 `KaraokeHighlight / Background` **9.49:1**、`/ SurfaceVariant` **8.73:1**
+  （深色对应 17.38:1 / 12.96:1）。
+- **品牌色实底徽标文字**：专辑卡歌曲数角标（`BrowseComponents.AlbumCard`）、歌单角标
+  （`UnifiedPlaylistCard`）、首页与手机顶栏的「♪」品牌块，文字原为 `TextPrimary`
+  （`#0F172A` 压 `#0F766E`，≈3.26:1），浅色下与深青底难分；统一改 `OnPrimary`（白字，
+  实底 5.47:1、α=0.95 合白底 4.96:1，由既有 `onPrimary / Primary` 门禁覆盖）。
+- 复验：`testDebugUnitTest --rerun-tasks` → **235 类 / 2423 例零失败**（含
+  `ThemeContrastTest` 3 例）；`assembleRelease` → `BUILD SUCCESSFUL`（6m 44s），产物
+  `NASMusicTV-release-v2-39-6.apk` **25,857,251 字节**、md5 `a3d05ac539f8bfc2b6c6d03182e3d2da`、
+  `versionCode=191 / versionName=2.39.6`；已覆盖安装到手机（Redmi `91846823`，
+  `lastUpdateTime=2026-10-21 20:33:35`）。仍未推送、未打 tag。

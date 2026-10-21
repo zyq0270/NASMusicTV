@@ -1,6 +1,7 @@
 package com.nasmusic.tv.data.prefs
 
 import com.nasmusic.tv.data.model.PlayMode
+import com.nasmusic.tv.data.model.ThemeMode
 import com.nasmusic.tv.player.SeparationMode
 import kotlinx.coroutines.flow.Flow
 
@@ -37,5 +38,5 @@ class PlayerPrefs internal constructor(private val prefs: AppPreferences) {
     suspend fun setAutoPlayNext(enabled: Boolean) = prefs.setAutoPlayNext(enabled)
     suspend fun setDefaultPlayMode(mode: PlayMode) = prefs.setDefaultPlayMode(mode)
     suspend fun setAnimationsEnabled(enabled: Boolean) = prefs.setAnimationsEnabled(enabled)
-    suspend fun setDarkTheme(enabled: Boolean) = prefs.setDarkTheme(enabled)
+    suspend fun setThemeMode(mode: ThemeMode) = prefs.setThemeMode(mode)
 }

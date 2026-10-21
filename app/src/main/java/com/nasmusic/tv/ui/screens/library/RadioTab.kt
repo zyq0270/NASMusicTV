@@ -28,7 +28,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -94,12 +93,12 @@ fun RadioTab(
                         containerColor = if (isSelected) NasMusicColors.Primary
                                         else NasMusicColors.Surface.copy(alpha = 0.6f),
                         focusedContainerColor = NasMusicColors.Primary,
-                        contentColor = if (isSelected) Color.Black else NasMusicColors.TextPrimary,
-                        focusedContentColor = NasMusicColors.TextPrimary
+                        contentColor = if (isSelected) NasMusicColors.OnPrimary else NasMusicColors.TextPrimary,
+                        focusedContentColor = NasMusicColors.OnPrimary
                     ) {
                         Text(
                             text = tag,
-                            color = if (isSelected) Color.Black else NasMusicColors.TextPrimary,
+                            color = LocalFocusableContentColor.current,
                             fontSize = FontSize.small(),
                             modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
                         )
@@ -157,8 +156,8 @@ fun RadioTab(
                         animationDurationMs = 150,
                         containerColor = NasMusicColors.Primary.copy(alpha = 0.85f),
                         focusedContainerColor = NasMusicColors.Primary,
-                        contentColor = NasMusicColors.TextPrimary,
-                        focusedContentColor = NasMusicColors.TextPrimary
+                        contentColor = NasMusicColors.OnPrimary,
+                        focusedContentColor = NasMusicColors.OnPrimary
                     ) {
                         Text(
                             text = stringResource(R.string.network_radio_retry),

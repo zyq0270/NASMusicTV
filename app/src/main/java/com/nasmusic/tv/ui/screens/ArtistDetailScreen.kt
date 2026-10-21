@@ -114,12 +114,12 @@ fun ArtistDetailScreen(
                 animationDurationMs = 150,
                 containerColor = NasMusicColors.Primary.copy(alpha = 0.85f),
                 focusedContainerColor = NasMusicColors.Primary,
-                contentColor = NasMusicColors.TextPrimary,
-                focusedContentColor = NasMusicColors.TextPrimary
+                contentColor = NasMusicColors.OnPrimary,
+                focusedContentColor = NasMusicColors.OnPrimary
             ) {
                 Text(
                     text = stringResource(R.string.action_play_all),
-                    color = NasMusicColors.TextPrimary,
+                    color = NasMusicColors.OnPrimary,
                     fontSize = FontSize.button(),
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
                 )

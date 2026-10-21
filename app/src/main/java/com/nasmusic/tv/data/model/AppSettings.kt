@@ -16,7 +16,22 @@ import com.nasmusic.tv.visualizer.photo.PhotoTransitionId
  * InstanceCreator / 迁移逻辑。
  */
 data class AppSettings(
+    /**
+     * 旧布尔字段（备份 JSON 字段名不可变）。
+     *
+     * - 备份导出：写「当前模式 != LIGHT」（SYSTEM 落 true），保证降级安装旧 APK 不突变
+     * - 备份导入：仅在 [themeMode] 为 null（老备份没有该字段）时作为迁移依据
+     */
     val darkTheme: Boolean = true,
+    /**
+     * 三态主题模式。
+     *
+     * ⚠️ **必须可空**：Gson 反序列化老备份时字段缺失 → no-arg 构造器把这里留成 null，
+     * 这是「老备份只有 darkTheme」与「新备份显式选了 SYSTEM」的唯一区分手段。
+     * 若声明为非空 + 默认 SYSTEM，老备份会被误判成 SYSTEM，用户选过的浅色丢失。
+     * 生产链路（`AppPreferences.appSettings`）永远填非空值。
+     */
+    val themeMode: ThemeMode? = null,
     val animationsEnabled: Boolean = true,
     val autoPlayNext: Boolean = true,
     val defaultPlayMode: PlayMode = PlayMode.SEQUENTIAL,

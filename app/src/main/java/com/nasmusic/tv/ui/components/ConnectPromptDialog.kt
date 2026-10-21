@@ -117,8 +117,8 @@ private fun DialogButton(
         containerColor = if (isPrimary) NasMusicColors.Primary else NasMusicColors.SurfaceVariant,
         focusedContainerColor = if (isPrimary) NasMusicColors.Primary.copy(alpha = 0.85f)
                                 else NasMusicColors.Primary.copy(alpha = 0.25f),
-        contentColor = if (isPrimary) Color.Black else NasMusicColors.TextPrimary,
-        focusedContentColor = if (isPrimary) Color.Black else NasMusicColors.TextPrimary,
+        contentColor = if (isPrimary) NasMusicColors.OnPrimary else NasMusicColors.TextPrimary,
+        focusedContentColor = if (isPrimary) NasMusicColors.OnPrimary else NasMusicColors.TextPrimary,
         pressedScale = 0.95f,
         focusRequester = focusRequester,
         requestFocusOnLaunch = requestFocusOnLaunch
@@ -129,7 +129,7 @@ private fun DialogButton(
         ) {
             Text(
                 text = label,
-                color = if (isPrimary) Color.Black else NasMusicColors.TextPrimary,
+                color = if (isPrimary) NasMusicColors.OnPrimary else NasMusicColors.TextPrimary,
                 fontSize = FontSize.button(),
                 fontWeight = FontWeight.Bold
             )

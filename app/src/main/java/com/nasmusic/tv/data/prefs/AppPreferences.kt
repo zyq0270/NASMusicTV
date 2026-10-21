@@ -31,6 +31,8 @@ import com.nasmusic.tv.data.model.ServerConfig
 import com.nasmusic.tv.data.model.VisualizerTheme
 import com.nasmusic.tv.data.model.VisualQuality
 import com.nasmusic.tv.data.model.Song
+import com.nasmusic.tv.data.model.ThemeMode
+import com.nasmusic.tv.data.model.resolveThemeMode
 import com.nasmusic.tv.util.AppLog
 import com.nasmusic.tv.util.CryptoUtils
 import com.nasmusic.tv.util.LogStore
@@ -104,6 +106,9 @@ class AppPreferences internal constructor(private val context: Context) {
 
         /** 屏幕方向 SharedPreferences 镜像键（v2.36.0） */
         internal const val KEY_ORIENTATION_MIRROR = "screen_orientation"
+
+        /** 主题模式 SharedPreferences 镜像键（冷启动窗口底色） */
+        internal const val KEY_THEME_MODE_MIRROR = "theme_mode"
 
         @Volatile
         private var INSTANCE: AppPreferences? = null
@@ -187,6 +192,10 @@ class AppPreferences internal constructor(private val context: Context) {
     @Volatile private var cachedScreenOrientation: String =
         displayMirrorPrefs.getString(KEY_ORIENTATION_MIRROR, null) ?: "auto"
 
+    /** 主题模式镜像（冷启动首帧窗口背景，默认跟随系统） */
+    @Volatile private var cachedThemeMode: String =
+        displayMirrorPrefs.getString(KEY_THEME_MODE_MIRROR, null) ?: ThemeMode.SYSTEM.key
+
     /** 镜像已启动收集标志（ensureMirrorScopeLoaded 只执行一次） */
     @Volatile private var mirrorStarted = false
     private val mirrorLock = Any()
@@ -259,6 +268,20 @@ class AppPreferences internal constructor(private val context: Context) {
                     displayMirrorPrefs.edit().putString(KEY_ORIENTATION_MIRROR, it).apply()
                 }
         }
+        // 主题模式镜像（MainActivity.onCreate 同步读，决定冷启动窗口底色）
+        // ⚠️ 迁移必须走 resolveThemeMode：老用户只有 settings_dark_theme，
+        //    直接 fromKey(null) 会回落 SYSTEM 并丢掉「显式选过浅色」。
+        scope.launch {
+            dataStore.data.map { prefs ->
+                resolveThemeMode(
+                    stored = prefs[keyThemeMode]?.let { ThemeMode.fromKey(it) },
+                    legacyDark = prefs[keyDarkTheme]
+                )
+            }.distinctUntilChanged().collect {
+                cachedThemeMode = it.key
+                displayMirrorPrefs.edit().putString(KEY_THEME_MODE_MIRROR, it.key).apply()
+            }
+        }
         // （F-7：weather 镜像改读加密键，见上方 migrateWeatherApiKeyIfNeeded 后的收集块）
     }
 
@@ -278,7 +301,10 @@ class AppPreferences internal constructor(private val context: Context) {
     private val keyServerDisplayName = stringPreferencesKey("server_display_name")
 
     // --- 通用设置 ---
+    /** 旧布尔键：保留用于迁移与降级兼容，写入 [setThemeMode] 时同步维护 */
     private val keyDarkTheme = booleanPreferencesKey("settings_dark_theme")
+    /** 三态主题模式："system" / "dark" / "light" */
+    private val keyThemeMode = stringPreferencesKey("settings_theme_mode")
     private val keyAnimations = booleanPreferencesKey("settings_animations")
     private val keyAutoPlayNext = booleanPreferencesKey("settings_auto_play_next")
     private val keyPlayMode = intPreferencesKey("settings_play_mode")
@@ -817,8 +843,14 @@ class AppPreferences internal constructor(private val context: Context) {
 
     // --- AppSettings Flow ---
     val appSettings: Flow<AppSettings> = dataStore.data.map { prefs ->
+        // 新键缺失 ⇒ 走旧布尔迁移（true=深色 / false=浅色）；两者都缺失 ⇒ 跟随系统
+        val themeMode = resolveThemeMode(
+            stored = prefs[keyThemeMode]?.let { ThemeMode.fromKey(it) },
+            legacyDark = prefs[keyDarkTheme]
+        )
         AppSettings(
-            darkTheme = prefs[keyDarkTheme] ?: true,
+            darkTheme = themeMode != ThemeMode.LIGHT,
+            themeMode = themeMode,
             animationsEnabled = prefs[keyAnimations] ?: true,
             autoPlayNext = prefs[keyAutoPlayNext] ?: true,
             defaultPlayMode = PlayMode.fromOrdinal(prefs[keyPlayMode] ?: 0),
@@ -867,7 +899,18 @@ class AppPreferences internal constructor(private val context: Context) {
     suspend fun setFontAdjustment(adjustment: Int) =
         dataStore.edit { it[keyFontAdjustment] = adjustment }
 
-    suspend fun setDarkTheme(enabled: Boolean) = dataStore.edit { it[keyDarkTheme] = enabled }
+    /**
+     * 写主题模式：新键为准，**同步维护旧布尔键**（`SYSTEM` 落 true）。
+     *
+     * 旧键是降级安装旧 APK 时的唯一真相 —— 不同步会让用户回退版本后主题突变。
+     */
+    suspend fun setThemeMode(mode: ThemeMode) = dataStore.edit {
+        it[keyThemeMode] = mode.key
+        it[keyDarkTheme] = mode != ThemeMode.LIGHT
+    }
+
+    /** 冷启动同步读（@Volatile 镜像，零 IO）；仅供 `MainActivity.onCreate` 使用 */
+    fun getThemeModeSync(): ThemeMode = ThemeMode.fromKey(cachedThemeMode)
 
     suspend fun setDownloadEnabled(v: Boolean) = dataStore.edit { it[keyDownloadEnabled] = v }
     suspend fun setAutoDownloadOnPlay(v: Boolean) = dataStore.edit { it[keyAutoDownloadOnPlay] = v }
@@ -2040,7 +2083,12 @@ class AppPreferences internal constructor(private val context: Context) {
         }
         data.appSettings?.let { settings ->
             dataStore.edit { prefs ->
-                prefs[keyDarkTheme] = settings.darkTheme
+                // ⚠️ themeMode 必须可空解析、禁止直接 `.name`：老备份没有该字段，
+                //    Gson 会把非空字段写成 null（`BackupGson.kt` 记录过整份导入失败的 NPE）；
+                //    缺失/为 null 时用旧布尔迁移，显式选过的深/浅色不能丢。
+                val restoredMode = resolveThemeMode(settings.themeMode, settings.darkTheme)
+                prefs[keyThemeMode] = restoredMode.key
+                prefs[keyDarkTheme] = restoredMode != ThemeMode.LIGHT
                 prefs[keyAnimations] = settings.animationsEnabled
                 prefs[keyAutoPlayNext] = settings.autoPlayNext
                 prefs[keyPlayMode] = settings.defaultPlayMode.ordinalOrDefault()

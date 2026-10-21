@@ -125,7 +125,7 @@ internal fun AlbumCard(
                             .padding(horizontal = 6.dp, vertical = 2.dp),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text(text = stringResource(R.string.library_song_count_short, album.songCount), color = NasMusicColors.TextPrimary, fontSize = FontSize.small())
+                        Text(text = stringResource(R.string.library_song_count_short, album.songCount), color = NasMusicColors.OnPrimary, fontSize = FontSize.small())
                     }
                 }
             }
@@ -239,11 +239,11 @@ internal fun ButtonChip(text: String, onClick: () -> Unit, modifier: Modifier = 
         animationDurationMs = 200,
         containerColor = NasMusicColors.Primary,
         focusedContainerColor = NasMusicColors.Primary.copy(alpha = 0.85f),
-        contentColor = NasMusicColors.TextPrimary,
-        focusedContentColor = NasMusicColors.TextPrimary,
+        contentColor = NasMusicColors.OnPrimary,
+        focusedContentColor = NasMusicColors.OnPrimary,
         pressedScale = 0.95f
     ) {
-        Text(text = text, color = NasMusicColors.TextPrimary, fontSize = FontSize.button(), modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+        Text(text = text, color = NasMusicColors.OnPrimary, fontSize = FontSize.button(), modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
     }
 }
 

@@ -930,8 +930,8 @@ private fun <T> KaraokeStepPickerDialog(
                         animationDurationMs = 200,
                         containerColor = NasMusicColors.Primary,
                         focusedContainerColor = NasMusicColors.Primary,
-                        contentColor = NasMusicColors.TextPrimary,
-                        focusedContentColor = NasMusicColors.TextPrimary,
+                        contentColor = NasMusicColors.OnPrimary,
+                        focusedContentColor = NasMusicColors.OnPrimary,
                         pressedScale = 0.95f,
                         focusBorderColor = NasMusicColors.FocusRing
                     ) {

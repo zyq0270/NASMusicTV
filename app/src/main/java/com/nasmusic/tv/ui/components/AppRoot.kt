@@ -266,24 +266,35 @@ fun AppRoot(
                     currentSong = currentSong,
                     coverCandidates = coverCandidates
                 )
-                Screen.NowPlaying -> NowPlayingBranch(
-                    viewModel = viewModel,
-                    isTV = isTV,
-                    isImmersiveMode = isImmersiveMode,
-                    currentSong = currentSong,
-                    // v2.35.0 多码率：当前生效档位（单曲覆盖 ?: 全局默认，方案 §5.1）
-                    qualityTier = qualityTier,
-                    isPlaying = isPlaying,
-                    playMode = playMode,
-                    coverCandidates = coverCandidates,
-                    coverFilterEnabled = coverFilterEnabled,
-                    coverFilterBlurRadius = coverFilterBlurRadius,
-                    coverFilterDarkOverlay = coverFilterDarkOverlay,
-                    settings = settings,
-                    showMv = showMv,
-                    mvState = mvState,
-                    isConnected = isConnected
-                )
+                Screen.NowPlaying -> {
+                    val nowPlaying: @Composable () -> Unit = {
+                        NowPlayingBranch(
+                            viewModel = viewModel,
+                            isTV = isTV,
+                            isImmersiveMode = isImmersiveMode,
+                            currentSong = currentSong,
+                            // v2.35.0 多码率：当前生效档位（单曲覆盖 ?: 全局默认，方案 §5.1）
+                            qualityTier = qualityTier,
+                            isPlaying = isPlaying,
+                            playMode = playMode,
+                            coverCandidates = coverCandidates,
+                            coverFilterEnabled = coverFilterEnabled,
+                            coverFilterBlurRadius = coverFilterBlurRadius,
+                            coverFilterDarkOverlay = coverFilterDarkOverlay,
+                            settings = settings,
+                            showMv = showMv,
+                            mvState = mvState,
+                            isConnected = isConnected
+                        )
+                    }
+                    // 沉浸播放页是纯黑画布（封面下沿渐黑 + 歌词区纯黑）⇒ 强制深色调色板，
+                    // 否则浅色主题的深色文字/深青主色会压在黑底上不可读。
+                    if (isImmersiveMode.value) {
+                        com.nasmusic.tv.ui.theme.ForceDarkPalette(nowPlaying)
+                    } else {
+                        nowPlaying()
+                    }
+                }
                 Screen.Library -> LibraryBranch(
                     viewModel = viewModel,
                     songsState = songs,
@@ -608,25 +619,29 @@ private fun VisualizerOverlay(
         vm.loadCover(url, currentSong?.id)
     }
 
-    VisualizerStage(
-        song = currentSong,
-        // T6 双缓冲：传 provider 而非快照引用——绘制循环每帧求值，拿到当前 front
-        frame = { vm.frame },
-        cover = cover,
-        palette = palette,
-        lyrics = lyrics?.lines,
-        progressMs = progress,
-        theme = effectiveTheme,
-        quality = quality,
-        // 照片墙编排器（阶段 10）：控制器在 ViewModel 里（跨重组存活），本组件只接线。
-        // ⚠️ 访问 `vm.photoWall` 会触发 `by lazy` 构造 —— 成本只等于几个纯 Kotlin 对象。
-        photoWall = vm.photoWall,
-        // 三来源开关之「或」—— 与 `VisualizerViewModel.step()` 用的是**同一个** StateFlow
-        // ⇒ 指示器与左右键看到的是同一份列表（不会出现「指示器上没有、却切得到」）。
-        photoWallAvailable = photoWallAvailable,
-        isTV = isTV,
-        onExit = { vm.exitVisualizer() },
-        onNextTheme = { vm.nextTheme() },
-        onPrevTheme = { vm.prevTheme() }
-    )
+    // 频谱舞台（含照片墙）**恒为深色**：浅色主题不得漏入舞台与转场绘制。
+    // 所有舞台内的 NasMusicColors / MaterialTheme 读取都被这里覆盖为深色调色板。
+    com.nasmusic.tv.ui.theme.ForceDarkPalette {
+        VisualizerStage(
+            song = currentSong,
+            // T6 双缓冲：传 provider 而非快照引用——绘制循环每帧求值，拿到当前 front
+            frame = { vm.frame },
+            cover = cover,
+            palette = palette,
+            lyrics = lyrics?.lines,
+            progressMs = progress,
+            theme = effectiveTheme,
+            quality = quality,
+            // 照片墙编排器（阶段 10）：控制器在 ViewModel 里（跨重组存活），本组件只接线。
+            // ⚠️ 访问 `vm.photoWall` 会触发 `by lazy` 构造 —— 成本只等于几个纯 Kotlin 对象。
+            photoWall = vm.photoWall,
+            // 三来源开关之「或」—— 与 `VisualizerViewModel.step()` 用的是**同一个** StateFlow
+            // ⇒ 指示器与左右键看到的是同一份列表（不会出现「指示器上没有、却切得到」）。
+            photoWallAvailable = photoWallAvailable,
+            isTV = isTV,
+            onExit = { vm.exitVisualizer() },
+            onNextTheme = { vm.nextTheme() },
+            onPrevTheme = { vm.prevTheme() }
+        )
+    }
 }

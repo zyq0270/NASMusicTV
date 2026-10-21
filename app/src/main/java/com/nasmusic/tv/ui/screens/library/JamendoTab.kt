@@ -33,6 +33,7 @@ import com.nasmusic.tv.backend.download.model.downloadKey
 import com.nasmusic.tv.data.model.Song
 import com.nasmusic.tv.data.model.UiState
 import com.nasmusic.tv.ui.components.FocusableSurface
+import com.nasmusic.tv.ui.components.LocalFocusableContentColor
 import com.nasmusic.tv.ui.components.SearchField
 import com.nasmusic.tv.ui.components.song.SongRowMode
 import com.nasmusic.tv.ui.components.song.UnifiedSongRow
@@ -122,12 +123,12 @@ fun JamendoTab(
                 containerColor = if (hotSelected) NasMusicColors.Primary
                                 else NasMusicColors.Surface.copy(alpha = 0.6f),
                 focusedContainerColor = NasMusicColors.Primary,
-                contentColor = if (hotSelected) Color.Black else NasMusicColors.TextPrimary,
-                focusedContentColor = NasMusicColors.TextPrimary
+                contentColor = if (hotSelected) NasMusicColors.OnPrimary else NasMusicColors.TextPrimary,
+                focusedContentColor = NasMusicColors.OnPrimary
             ) {
                 Text(
                     text = stringResource(R.string.network_jamendo_hot),
-                    color = if (hotSelected) Color.Black else NasMusicColors.TextPrimary,
+                    color = LocalFocusableContentColor.current,
                     fontSize = FontSize.small(),
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
                 )
@@ -144,12 +145,12 @@ fun JamendoTab(
                     containerColor = if (isSelected) NasMusicColors.Primary
                                     else NasMusicColors.Surface.copy(alpha = 0.6f),
                     focusedContainerColor = NasMusicColors.Primary,
-                    contentColor = if (isSelected) Color.Black else NasMusicColors.TextPrimary,
-                    focusedContentColor = NasMusicColors.TextPrimary
+                    contentColor = if (isSelected) NasMusicColors.OnPrimary else NasMusicColors.TextPrimary,
+                    focusedContentColor = NasMusicColors.OnPrimary
                 ) {
                     Text(
                         text = tag,
-                        color = if (isSelected) Color.Black else NasMusicColors.TextPrimary,
+                        color = LocalFocusableContentColor.current,
                         fontSize = FontSize.small(),
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
                     )

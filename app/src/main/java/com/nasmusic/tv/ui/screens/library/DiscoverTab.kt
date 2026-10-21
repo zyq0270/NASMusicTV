@@ -42,6 +42,7 @@ import com.nasmusic.tv.backend.download.model.downloadKey
 import com.nasmusic.tv.data.model.Song
 import com.nasmusic.tv.ui.LocalListBackHandler
 import com.nasmusic.tv.ui.components.FocusableSurface
+import com.nasmusic.tv.ui.components.LocalFocusableContentColor
 import com.nasmusic.tv.ui.components.common.LoadingIndicator
 import com.nasmusic.tv.ui.components.common.SectionHeader
 import com.nasmusic.tv.ui.components.song.UnifiedSongRow
@@ -162,13 +163,13 @@ currentDimensionValues: Map<Int, Int> = emptyMap(),
                                 animationDurationMs = 150,
                                 containerColor = NasMusicColors.Primary.copy(alpha = 0.85f),
                                 focusedContainerColor = NasMusicColors.Primary,
-                                contentColor = NasMusicColors.TextPrimary,
-                                focusedContentColor = NasMusicColors.TextPrimary
+                                contentColor = NasMusicColors.OnPrimary,
+                                focusedContentColor = NasMusicColors.OnPrimary
                             ) {
                                 Text(
                                     text = stringResource(R.string.discover_play_all),
                                     fontSize = FontSize.button(),
-                                    color = NasMusicColors.TextPrimary,
+                                    color = NasMusicColors.OnPrimary,
                                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
                                 )
                             }
@@ -272,7 +273,7 @@ private fun DimensionRow(
                     label = "dim_bg"
                 )
                 val textColor by animateColorAsState(
-                    targetValue = if (isSelected) Color(0xFF0C1222)
+                    targetValue = if (isSelected) NasMusicColors.OnPrimary
                     else NasMusicColors.TextPrimary,
                     label = "dim_text"
                 )
@@ -284,12 +285,12 @@ private fun DimensionRow(
                     containerColor = bgColor,
                     focusedContainerColor = NasMusicColors.Primary,
                     contentColor = textColor,
-                    focusedContentColor = Color(0xFF0C1222)
+                    focusedContentColor = NasMusicColors.OnPrimary
                 ) {
                     Text(
                         text = stringResource(option.labelRes),
                         fontSize = FontSize.body(),
-                        color = textColor,
+                        color = LocalFocusableContentColor.current,
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
                     )
                 }

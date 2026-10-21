@@ -226,10 +226,10 @@ val downloadStates by viewModel.songDownloadStates.collectAsState(initial = empt
                         animationDurationMs = 150,
                         containerColor = NasMusicColors.Primary.copy(alpha = 0.85f),
                         focusedContainerColor = NasMusicColors.Primary,
-                        contentColor = NasMusicColors.TextPrimary,
-                        focusedContentColor = NasMusicColors.TextPrimary
+                        contentColor = NasMusicColors.OnPrimary,
+                        focusedContentColor = NasMusicColors.OnPrimary
                     ) {
-                        Text(stringResource(R.string.netdisk_play_all), color = NasMusicColors.TextPrimary, fontSize = FontSize.small(), fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp))
+                        Text(stringResource(R.string.netdisk_play_all), color = NasMusicColors.OnPrimary, fontSize = FontSize.small(), fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp))
                     }
                     if (currentDir != "/" && currentDir.isNotBlank()) {
                         Spacer(modifier = Modifier.width(8.dp))

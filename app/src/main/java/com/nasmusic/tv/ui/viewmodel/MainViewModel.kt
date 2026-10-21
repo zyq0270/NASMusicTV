@@ -3124,8 +3124,8 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
     }
 
     // --- 设置 ---
-    fun updateDarkTheme(enabled: Boolean) = viewModelScope.launch {
-        prefs.player.setDarkTheme(enabled)
+    fun updateThemeMode(mode: com.nasmusic.tv.data.model.ThemeMode) = viewModelScope.launch {
+        prefs.player.setThemeMode(mode)
     }
 
     fun updateAnimationsEnabled(enabled: Boolean) = viewModelScope.launch {

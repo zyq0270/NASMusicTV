@@ -241,7 +241,7 @@ val backendRegistry = remember { (appContext.applicationContext as NasMusicApp).
 
                     Text(
                         text = stringResource(R.string.server_config_title),
-                        color = Color.White,
+                        color = NasMusicColors.TextPrimary,
                         fontSize = FontSize.displayLarge()
                     )
                     Spacer(modifier = Modifier.height(8.dp))
@@ -324,9 +324,9 @@ val backendRegistry = remember { (appContext.applicationContext as NasMusicApp).
                         focusedScale = 1.08f,
                         animationDurationMs = 150,
                         containerColor = NasMusicColors.Danger,
-                        contentColor = Color.White,
+                        contentColor = NasMusicColors.OnDanger,
                         focusedContainerColor = NasMusicColors.Danger.copy(alpha = 0.85f),
-                        focusedContentColor = Color.White,
+                        focusedContentColor = NasMusicColors.OnDanger,
                         pressedScale = 0.95f
                     ) {
                         Text(
@@ -521,9 +521,9 @@ val backendRegistry = remember { (appContext.applicationContext as NasMusicApp).
                 focusedScale = 1.08f,
                 animationDurationMs = 150,
                 containerColor = NasMusicColors.Primary,
-                contentColor = NasMusicColors.TextPrimary,
+                contentColor = NasMusicColors.OnPrimary,
                 focusedContainerColor = NasMusicColors.Primary.copy(alpha = 0.85f),
-                focusedContentColor = NasMusicColors.TextPrimary,
+                focusedContentColor = NasMusicColors.OnPrimary,
                 pressedScale = 0.95f
             ) {
                 Text(
@@ -737,10 +737,10 @@ FocusableSurface(
         animationDurationMs = 150,
         containerColor = NasMusicColors.Primary,
         focusedContainerColor = NasMusicColors.Primary,
-        contentColor = if (isTesting) NasMusicColors.TextSecondary else NasMusicColors.TextPrimary,
-        focusedContentColor = NasMusicColors.TextPrimary,
+        contentColor = if (isTesting) NasMusicColors.OnPrimary.copy(alpha = 0.7f) else NasMusicColors.OnPrimary,
+        focusedContentColor = NasMusicColors.OnPrimary,
         pressedContainerColor = NasMusicColors.Primary.copy(alpha = 0.8f),
-        pressedContentColor = NasMusicColors.TextPrimary,
+        pressedContentColor = NasMusicColors.OnPrimary,
         pressedScale = 0.96f,
         focusBorderColor = NasMusicColors.FocusRing
     ) {

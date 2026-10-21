@@ -405,8 +405,11 @@
     <string name="settings_group_connection_info">Connection Info</string>
     <string name="settings_group_capabilities">Capabilities</string>
     <string name="settings_group_opensource">Open Source &amp; License</string>
-    <string name="settings_dark_theme">Dark Theme</string>
-    <string name="settings_dark_theme_desc">Use dark background to protect eyes</string>
+    <string name="settings_theme_mode">Theme Mode</string>
+    <string name="settings_theme_desc">Phone follows system; TV stays dark</string>
+    <string name="settings_theme_system">Follow System</string>
+    <string name="settings_theme_dark">Dark</string>
+    <string name="settings_theme_light">Light</string>
     <string name="settings_animations">Animations</string>
     <string name="settings_animations_desc">Page transitions and focus animations</string>
     <string name="settings_font_size">Font Size</string>

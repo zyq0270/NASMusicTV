@@ -9,10 +9,12 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -23,6 +25,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -221,9 +224,9 @@ fun MineScreen(
                         focusedScale = 1.08f,
                         animationDurationMs = 250,
                         containerColor = NasMusicColors.Primary.copy(alpha = 0.8f),
-                        contentColor = NasMusicColors.TextPrimary,
+                        contentColor = NasMusicColors.OnPrimary,
                         focusedContainerColor = NasMusicColors.Primary,
-                        focusedContentColor = NasMusicColors.TextPrimary,
+                        focusedContentColor = NasMusicColors.OnPrimary,
                         pressedScale = 0.96f
                     ) {
                         Text(
@@ -601,9 +604,9 @@ private fun PlaylistsPane(
                 focusedScale = 1.08f,
                 animationDurationMs = 250,
                 containerColor = NasMusicColors.Primary.copy(alpha = 0.8f),
-                contentColor = NasMusicColors.TextPrimary,
+                contentColor = NasMusicColors.OnPrimary,
                 focusedContainerColor = NasMusicColors.Primary,
-                focusedContentColor = NasMusicColors.TextPrimary,
+                focusedContentColor = NasMusicColors.OnPrimary,
                 pressedScale = 0.96f
             ) {
                 Text(
@@ -710,6 +713,7 @@ private fun PlaylistCard(
     var isRowFocused by remember { mutableStateOf(false) }
     val animScale = remember { Animatable(1f) }
     val scope = rememberCoroutineScope()
+    val isPortraitPhone = LocalUiMode.current == UiMode.PhonePortrait
 
     Column(modifier = Modifier.fillMaxWidth()) {
         Box(
@@ -736,15 +740,10 @@ private fun PlaylistCard(
                     }
                 }
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth().height(100.dp).padding(horizontal = 16.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                // 左侧：点击展开/收起
+            // 左侧：点击展开/收起（TV / 手机横屏 / 竖屏共用）
+            val infoContent: @Composable (Modifier) -> Unit = { infoModifier ->
                 Row(
-                    modifier = Modifier
-                        .weight(1f)
-                        .clickable { onToggleExpand() },
+                    modifier = infoModifier.clickable { onToggleExpand() },
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
@@ -760,8 +759,11 @@ private fun PlaylistCard(
                                 text = playlist.name,
                                 color = NasMusicColors.TextPrimary,
                                 fontSize = FontSize.subtitle(),
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
+                                // 竖屏下名称独占整行宽度，允许折到第二行，长歌单名不再被截断
+                                maxLines = if (isPortraitPhone) 2 else 1,
+                                overflow = TextOverflow.Ellipsis,
+                                // 竖屏用 weight 把宽度让给「导入」标签，名称仍可换行
+                                modifier = if (isPortraitPhone) Modifier.weight(1f, fill = false) else Modifier
                             )
                             // 「导入」标签（§4.5）：含 stub 歌曲的导入歌单才显示
                             if (stubCount > 0) {
@@ -795,7 +797,9 @@ private fun PlaylistCard(
                         }
                     }
                 }
-                // 右侧操作按钮
+            }
+            // 操作按钮组（播放 / 重命名 / 补全 / 删除）
+            val actionContent: @Composable RowScope.() -> Unit = {
                 Spacer(modifier = Modifier.width(10.dp))
                 PlaylistActionButton(
                     text = stringResource(R.string.mine_play_playlist),
@@ -803,9 +807,9 @@ private fun PlaylistCard(
                     onClick = onPlay
                 )
                 Spacer(modifier = Modifier.width(10.dp))
-                    PlaylistActionButton(
-                        text = stringResource(R.string.mine_rename_playlist),
-                        color = NasMusicColors.TextPrimary,
+                PlaylistActionButton(
+                    text = stringResource(R.string.mine_rename_playlist),
+                    color = NasMusicColors.TextPrimary,
                     onClick = onRename
                 )
                 // 「补全」按钮（§5.3）：stub 歌曲存在时手动触发补全
@@ -823,6 +827,35 @@ private fun PlaylistCard(
                     color = NasMusicColors.Warning,
                     onClick = onDelete
                 )
+            }
+
+            if (isPortraitPhone) {
+                // 竖屏：操作按钮独立成第二行（与 UnifiedSongRow 同款），不再与歌单名称抢宽度。
+                // 超长歌单名可折行；按钮多 / 字号大时整行可横向滚动，不会被裁掉。
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)
+                ) {
+                    infoContent(Modifier.fillMaxWidth())
+                    Box(
+                        modifier = Modifier.fillMaxWidth().padding(top = 2.dp),
+                        contentAlignment = Alignment.CenterEnd
+                    ) {
+                        Row(
+                            modifier = Modifier.horizontalScroll(rememberScrollState()),
+                            verticalAlignment = Alignment.CenterVertically,
+                            content = actionContent
+                        )
+                    }
+                }
+            } else {
+                // TV / 手机横屏：保持原单行布局（操作按钮在行内右侧）
+                Row(
+                    modifier = Modifier.fillMaxWidth().height(100.dp).padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    infoContent(Modifier.weight(1f))
+                    actionContent()
+                }
             }
         }
         // 展开提示（歌曲列表由外层 LazyColumn 作为独立 item 渲染）

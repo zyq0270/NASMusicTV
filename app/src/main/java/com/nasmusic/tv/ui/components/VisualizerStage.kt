@@ -795,6 +795,8 @@ private fun ThemeIndicator(
     val radiusDp = 5.dp
     val smallRadiusDp = 3.5.dp
     val totalWidthDp = (themes.size - 1).coerceAtLeast(0) * spacingDp.value + 2 * radiusDp.value
+    // 当前主题点色先在组合期读取（舞台恒为强制深色，取到的就是深色 palette）
+    val activeDotColor = NasMusicColors.Primary
     Canvas(
         modifier = modifier
             .padding(vertical = 10.dp)
@@ -810,7 +812,7 @@ private fun ThemeIndicator(
                     // 浅底（怀旧黄白）上白点不可见 → 换深色点
                     !supported -> if (onLightBg) Color.Black.copy(alpha = 0.22f)
                     else Color.White.copy(alpha = 0.18f)
-                    active -> NasMusicColors.Primary
+                    active -> activeDotColor
                     else -> if (onLightBg) Color.Black.copy(alpha = 0.45f)
                     else Color.White.copy(alpha = 0.42f)
                 },

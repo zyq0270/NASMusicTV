@@ -1,26 +1,23 @@
 package com.nasmusic.tv.ui.theme
 
-import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.tv.material3.ColorScheme
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.ShapeDefaults
 import androidx.tv.material3.Shapes
@@ -29,59 +26,241 @@ import androidx.tv.material3.darkColorScheme
 import androidx.tv.material3.lightColorScheme
 
 /**
- * 项目级别的颜色系统（与 HTML index.html 中的 CSS 变量一一对应）
+ * 主题调色板 —— 深浅两套 token 的唯一真源。
+ *
+ * 业务界面**不要**直接引用 [NasPalettes.Dark] / [NasPalettes.Light]：
+ * 一律走 [NasMusicColors] 的 composable getter。允许直接引用的只有三类：
+ * `ui/theme/` 内部、`ForceDarkPalette` 强制深色区（频谱舞台）、
+ * 以及由调用方注入颜色的纯绘制类。
+ */
+@Immutable
+data class NasPalette(
+    val isLight: Boolean,
+    // 背景
+    val background: Color,
+    val surface: Color,
+    val surfaceVariant: Color,
+    // 主色
+    val primary: Color,
+    val onPrimary: Color,
+    val secondary: Color,
+    /** 主按钮聚焦强调（原 PrimaryBright） */
+    val primaryEmphasis: Color,
+    // 文字
+    val textPrimary: Color,
+    val textSecondary: Color,
+    // 歌词
+    /** 逐字歌词的「已唱」高亮：深色保持纯黄，浅色用品牌次色的深阶藏蓝（与青绿同属冷色系） */
+    val karaokeHighlight: Color,
+    // 边框
+    val border: Color,
+    // 状态
+    val danger: Color,
+    val onDanger: Color,
+    val warning: Color,
+    val onWarning: Color,
+    val success: Color,
+    // 焦点
+    val focusRing: Color,
+    // glow / accent
+    val accentGlow: Color,
+    val accentGlowStrong: Color,
+)
+
+/**
+ * 深色 = 现有线上值（**冻结**）；浅色 = 品牌青绿派生（对比度由 `ThemeContrastTest` 断言）。
+ *
+ * ⚠️ 深色 hex 除 `onPrimary` / `onDanger` / `onWarning`（新增的语义容器前景）外，
+ * 一律不得改动 —— 深色回归是本次改造的硬约束。
+ */
+object NasPalettes {
+
+    val Dark = NasPalette(
+        isLight = false,
+        background = Color(0xFF0C1222),
+        surface = Color(0xFF162032),
+        surfaceVariant = Color(0xFF1E2D42),
+        primary = Color(0xFF2DD4BF),
+        onPrimary = Color(0xFF0C1222),
+        secondary = Color(0xFF60A5FA),
+        primaryEmphasis = Color(0xFF5EEAD4),
+        textPrimary = Color(0xFFE8EDF5),
+        textSecondary = Color(0xFF8899B0),
+        karaokeHighlight = Color(0xFFFFFF00),
+        border = Color(0xFF2A3A52),
+        danger = Color(0xFFF87171),
+        onDanger = Color(0xFF0C1222),
+        warning = Color(0xFFFBBF24),
+        onWarning = Color(0xFF0C1222),
+        success = Color(0xFF34D399),
+        focusRing = Color(0xFF2DD4BF),
+        accentGlow = Color(0x262DD4BF),
+        accentGlowStrong = Color(0x4D2DD4BF),
+    )
+
+    val Light = NasPalette(
+        isLight = true,
+        background = Color(0xFFF3F5F9),
+        surface = Color(0xFFFFFFFF),
+        surfaceVariant = Color(0xFFE7ECF3),
+        primary = Color(0xFF0F766E),
+        onPrimary = Color(0xFFFFFFFF),
+        secondary = Color(0xFF1D4ED8),
+        primaryEmphasis = Color(0xFF115E59),
+        textPrimary = Color(0xFF0F172A),
+        textSecondary = Color(0xFF475569),
+        karaokeHighlight = Color(0xFF1E3A8A),
+        border = Color(0xFFCBD5E1),
+        danger = Color(0xFFB91C1C),
+        onDanger = Color(0xFFFFFFFF),
+        warning = Color(0xFFB45309),
+        onWarning = Color(0xFFFFFFFF),
+        success = Color(0xFF047857),
+        focusRing = Color(0xFF0F766E),
+        accentGlow = Color(0x1F0F766E),
+        accentGlowStrong = Color(0x330F766E),
+    )
+}
+
+/** 当前调色板（默认深色，保证未包裹主题的预览/测试不会崩） */
+val LocalNasPalette = staticCompositionLocalOf { NasPalettes.Dark }
+
+/**
+ * 项目级别的颜色系统（与 HTML index.html 中的 CSS 变量一一对应）。
+ *
+ * 全部属性为 **composable getter**：1228 处 `NasMusicColors.X` 调用点零改动，
+ * 在组合期自动读当前调色板。代价是非组合上下文（`remember` / `DrawScope` /
+ * 顶层 `val`）会**编译失败**，必须把读取上提到 `@Composable` 作用域 —— 这是特性，
+ * 不是缺陷（见 `docs/light-theme-plan.md` §2.3）。
  */
 object NasMusicColors {
     // 背景
-    val Background = Color(0xFF0C1222)        // var(--bg)
-    val Surface = Color(0xFF162032)            // var(--card-bg)
-    val SurfaceVariant = Color(0xFF1E2D42)     // var(--card-hover)
+    val Background: Color
+        @Composable @ReadOnlyComposable get() = LocalNasPalette.current.background
+    val Surface: Color
+        @Composable @ReadOnlyComposable get() = LocalNasPalette.current.surface
+    val SurfaceVariant: Color
+        @Composable @ReadOnlyComposable get() = LocalNasPalette.current.surfaceVariant
     // 主色
-    val Primary = Color(0xFF2DD4BF)            // var(--primary)
-    val PrimaryVariant = Color(0xFF2DD4BF)
-    val Secondary = Color(0xFF60A5FA)          // var(--secondary)
+    val Primary: Color
+        @Composable @ReadOnlyComposable get() = LocalNasPalette.current.primary
+    /** 主色实底上的前景（⛔ 不要再用 TextPrimary / 纯黑纯白） */
+    val OnPrimary: Color
+        @Composable @ReadOnlyComposable get() = LocalNasPalette.current.onPrimary
+    val Secondary: Color
+        @Composable @ReadOnlyComposable get() = LocalNasPalette.current.secondary
+    /** 主按钮聚焦强调（原 PrimaryBright） */
+    val PrimaryBright: Color
+        @Composable @ReadOnlyComposable get() = LocalNasPalette.current.primaryEmphasis
     // 文字
-    val TextPrimary = Color(0xFFE8EDF5)        // var(--text-primary)
-    val TextSecondary = Color(0xFF8899B0)      // var(--text-secondary)
+    val TextPrimary: Color
+        @Composable @ReadOnlyComposable get() = LocalNasPalette.current.textPrimary
+    val TextSecondary: Color
+        @Composable @ReadOnlyComposable get() = LocalNasPalette.current.textSecondary
+    // 歌词
+    /** 逐字歌词的「已唱」高亮（⛔ 不要再用 Color.Yellow，浅色白底不可读） */
+    val KaraokeHighlight: Color
+        @Composable @ReadOnlyComposable get() = LocalNasPalette.current.karaokeHighlight
     // 边框
-    val Border = Color(0xFF2A3A52)             // var(--border)
+    val Border: Color
+        @Composable @ReadOnlyComposable get() = LocalNasPalette.current.border
     // 状态
-    val Danger = Color(0xFFF87171)
-    val Warning = Color(0xFFFBBF24)
-    val Success = Color(0xFF34D399)
+    val Danger: Color
+        @Composable @ReadOnlyComposable get() = LocalNasPalette.current.danger
+    /** 危险色实底上的前景 */
+    val OnDanger: Color
+        @Composable @ReadOnlyComposable get() = LocalNasPalette.current.onDanger
+    val Warning: Color
+        @Composable @ReadOnlyComposable get() = LocalNasPalette.current.warning
+    /** 警告色实底上的前景 */
+    val OnWarning: Color
+        @Composable @ReadOnlyComposable get() = LocalNasPalette.current.onWarning
+    val Success: Color
+        @Composable @ReadOnlyComposable get() = LocalNasPalette.current.success
     // 焦点
-    val FocusRing = Color(0xFF2DD4BF)          // var(--focus-ring)
+    val FocusRing: Color
+        @Composable @ReadOnlyComposable get() = LocalNasPalette.current.focusRing
     // glow / accent
-    val AccentGlow = Color(0x262DD4BF)          // rgba(45, 212, 191, 0.15)
-    val AccentGlowStrong = Color(0x4D2DD4BF)    // rgba(45, 212, 191, 0.30)
-    // 主按钮（播放/暂停）聚焦高亮色 — 比 Primary 更亮，用于"聚焦时整体变色"反馈
-    val PrimaryBright = Color(0xFF5EEAD4)
-    // Karaoke word highlight (B-3)
-    val TextBrightHighlight = Color(0xFF5EEAD4)  // brighter teal for active karaoke words
+    val AccentGlow: Color
+        @Composable @ReadOnlyComposable get() = LocalNasPalette.current.accentGlow
+    val AccentGlowStrong: Color
+        @Composable @ReadOnlyComposable get() = LocalNasPalette.current.accentGlowStrong
 }
 
 /**
- * 常用渐变 — 例如进度条、背景遮罩、渐隐 mask
+ * 常用渐变 — 例如进度条、背景遮罩、渐隐 mask。
+ *
+ * 颜色全部从**当前**调色板派生，浅色主题自动跟随。
  */
 object NasMusicBrushes {
-    val progressBar = Brush.horizontalGradient(
-        colors = listOf(NasMusicColors.Primary, NasMusicColors.Secondary)
-    )
-    val topFadeMask = Brush.verticalGradient(
-        colors = listOf(Color(0xCC0C1222), Color.Transparent)
-    )
-    val bottomFadeMask = Brush.verticalGradient(
-        colors = listOf(Color.Transparent, Color(0xCC0C1222))
-    )
-    val overlayGradient = Brush.verticalGradient(
-        colors = listOf(
-            NasMusicColors.Background.copy(alpha = 0.85f),
-            NasMusicColors.Background
+    val progressBar: Brush
+        @Composable @ReadOnlyComposable get() = Brush.horizontalGradient(
+            colors = listOf(NasMusicColors.Primary, NasMusicColors.Secondary)
         )
-    )
-    val coverGlow = Brush.radialGradient(
-        colors = listOf(NasMusicColors.AccentGlowStrong, Color.Transparent)
-    )
+    val topFadeMask: Brush
+        @Composable @ReadOnlyComposable get() = Brush.verticalGradient(
+            colors = listOf(NasMusicColors.Background.copy(alpha = 0.8f), Color.Transparent)
+        )
+    val bottomFadeMask: Brush
+        @Composable @ReadOnlyComposable get() = Brush.verticalGradient(
+            colors = listOf(Color.Transparent, NasMusicColors.Background.copy(alpha = 0.8f))
+        )
+    val overlayGradient: Brush
+        @Composable @ReadOnlyComposable get() = Brush.verticalGradient(
+            colors = listOf(
+                NasMusicColors.Background.copy(alpha = 0.85f),
+                NasMusicColors.Background
+            )
+        )
+    /** 播放页整页底：深色维持 `#0C1222 → #0A1020`，浅色用 Background → SurfaceVariant */
+    val pageBackground: Brush
+        @Composable @ReadOnlyComposable get() = Brush.verticalGradient(
+            colors = listOf(
+                NasMusicColors.Background,
+                if (LocalNasPalette.current.isLight) NasMusicColors.SurfaceVariant
+                else Color(0xFF0A1020)
+            )
+        )
+    val coverGlow: Brush
+        @Composable @ReadOnlyComposable get() = Brush.radialGradient(
+            colors = listOf(NasMusicColors.AccentGlowStrong, Color.Transparent)
+        )
+}
+
+/**
+ * 内容遮罩色（**不随主题变**）。
+ *
+ * 封面 / 视频上的黑纱与白字必须恒为这套值：若跟随主题，浅色模式会把
+ * 「白字压作品图」变成深字压图或白底白字，两向都不可读。
+ * §6 光学走查时，业务文件里的 `Color.Black/White` 要么归类到这里，要么换成主题 token。
+ */
+object NasOverlayColors {
+    /** 作品图上的强遮罩（底部文字区） */
+    val ArtworkScrimStrong = Color(0xCC000000)
+    /** 作品图上的弱遮罩（渐变起始） */
+    val ArtworkScrimSoft = Color(0x66000000)
+    /** 作品图上的主文字 */
+    val OnArtwork = Color(0xFFFFFFFF)
+    /** 作品图上的次要文字 */
+    val OnArtworkSecondary = Color(0xB3FFFFFF)
+}
+
+/** 在指定调色板下强制渲染子树（频谱舞台 / 照片墙专用） */
+@Composable
+fun ForceDarkPalette(content: @Composable () -> Unit) {
+    val scheme = remember { colorSchemeFor(NasPalettes.Dark) }
+    val lyrics = remember { lyricsThemeData(NasPalettes.Dark) }
+    CompositionLocalProvider(
+        LocalNasPalette provides NasPalettes.Dark,
+        LocalLyricsTheme provides lyrics
+    ) {
+        MaterialTheme(
+            colorScheme = scheme,
+            typography = MaterialTheme.typography,
+            shapes = MaterialTheme.shapes,
+            content = content
+        )
+    }
 }
 
 object NasMusicDimens {
@@ -171,47 +350,32 @@ private fun adjustedSize(phone: TextUnit, tv: TextUnit): TextUnit {
  * 按钮文字颜色系统
  *
  * 统一管理按钮在不同状态下的文字颜色：
- * - 默认（未选中）：TextPrimary（亮白色），确保可读性
- * - 聚焦：Primary（青色），视觉反馈
+ * - 默认（未选中）：TextPrimary，确保可读性
+ * - 聚焦：Primary，视觉反馈
  * - 按下：Primary，与聚焦一致
- * - 禁用：TextSecondary（灰色），降低视觉权重
+ * - 禁用：TextSecondary，降低视觉权重
  */
 object ButtonColors {
-    /** 默认（未选中）文字颜色 —— 亮色，确保可读性 */
-    val DefaultContent = NasMusicColors.TextPrimary
+    /** 默认（未选中）文字颜色 */
+    val DefaultContent: Color
+        @Composable @ReadOnlyComposable get() = NasMusicColors.TextPrimary
 
-    /** 聚焦时文字颜色 —— Primary 青色 */
-    val FocusedContent = NasMusicColors.Primary
+    /** 聚焦时文字颜色 */
+    val FocusedContent: Color
+        @Composable @ReadOnlyComposable get() = NasMusicColors.Primary
 
-    /** 按下时文字颜色 —— Primary 青色 */
-    val PressedContent = NasMusicColors.Primary
+    /** 按下时文字颜色 */
+    val PressedContent: Color
+        @Composable @ReadOnlyComposable get() = NasMusicColors.Primary
 
-    /** 禁用时文字颜色 —— TextSecondary 灰色 */
-    val DisabledContent = NasMusicColors.TextSecondary
+    /** 禁用时文字颜色 */
+    val DisabledContent: Color
+        @Composable @ReadOnlyComposable get() = NasMusicColors.TextSecondary
 }
 
 /**
  * 类型系统
  */
-private val DarkColorScheme = darkColorScheme(
-    background = NasMusicColors.Background,
-    surface = NasMusicColors.Surface,
-    primary = NasMusicColors.Primary,
-    onPrimary = Color(0xFF000000),
-    onBackground = NasMusicColors.TextPrimary,
-    onSurface = NasMusicColors.TextPrimary,
-    onSurfaceVariant = NasMusicColors.TextSecondary
-)
-
-private val LightColorScheme = lightColorScheme(
-    background = Color(0xFFFFFFFF),
-    surface = Color(0xFFF5F7FA),
-    primary = Color(0xFF0D9488),
-    onPrimary = Color(0xFFFFFFFF),
-    onBackground = Color(0xFF1A1A1A),
-    onSurface = Color(0xFF1A1A1A)
-)
-
 private val AppTypography = Typography(
     displayLarge = TextStyle(
         fontSize = FontSize.DisplayLarge,
@@ -264,18 +428,38 @@ private val AppShapes = Shapes(
     extraLarge = ShapeDefaults.ExtraLarge
 )
 
+/**
+ * 调色板 → TV M3 ColorScheme。
+ *
+ * 业务代码不读 `MaterialTheme.colorScheme`（自定义 token 才是唯一真源），
+ * 这里只为 TV M3 组件（Dialog / Surface 等）提供一套与 palette 一致的角色色。
+ */
+private fun colorSchemeFor(palette: NasPalette): ColorScheme {
+    val scheme = if (palette.isLight) lightColorScheme() else darkColorScheme()
+    return scheme.copy(
+        primary = palette.primary,
+        onPrimary = palette.onPrimary,
+        secondary = palette.secondary,
+        onSecondary = palette.onPrimary,
+        background = palette.background,
+        onBackground = palette.textPrimary,
+        surface = palette.surface,
+        onSurface = palette.textPrimary,
+        surfaceVariant = palette.surfaceVariant,
+        onSurfaceVariant = palette.textSecondary,
+        error = palette.danger,
+        onError = palette.onDanger,
+    )
+}
+
 @Composable
 fun NASMusicTVTheme(
     darkTheme: Boolean = true,
     content: @Composable () -> Unit
 ) {
-    val colorScheme = if (darkTheme) DarkColorScheme else LightColorScheme
-    // TV 端字号由 FontSize.xx() @Composable 函数返回 +6sp 的 TV 值，无需 fontScale 缩放
-    val lyricsTheme = LyricsThemeData(
-        currentLine = LyricsTheme.currentLine,
-        normalLine = LyricsTheme.normalLine,
-        dimLine = LyricsTheme.dimLine
-    )
+    val palette = if (darkTheme) NasPalettes.Dark else NasPalettes.Light
+    val colorScheme = remember(palette) { colorSchemeFor(palette) }
+    val lyricsTheme = remember(palette) { lyricsThemeData(palette) }
     // Task 12: 检测系统高对比度模式
     // L15 修复（2026-10-06，代码审查报告 §5）：旧实现用 `uiMode and 0x20000` 掩码判断，
     // 但 0x20000 不是任何 Android 高对比度标志位（UI_MODE_NIGHT_MASK=0x30）⇒ 恒为 false，
@@ -284,8 +468,8 @@ fun NASMusicTVTheme(
     // AccessibilityManager.isHighTextContrastTextEnabled 是 API 36+ 不可用），
     // 并注册 ContentObserver 监听系统开关变化 ⇒ 状态变化时自动重组。
     val context = androidx.compose.ui.platform.LocalContext.current
-    var isHighContrast by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
-    androidx.compose.runtime.DisposableEffect(context) {
+    var isHighContrast by remember { mutableStateOf(false) }
+    DisposableEffect(context) {
         fun readFlag(): Boolean = android.provider.Settings.Secure.getInt(
             context.contentResolver,
             "high_text_contrast_enabled", 0
@@ -302,7 +486,8 @@ fun NASMusicTVTheme(
         )
         onDispose { context.contentResolver.unregisterContentObserver(observer) }
     }
-    androidx.compose.runtime.CompositionLocalProvider(
+    CompositionLocalProvider(
+        LocalNasPalette provides palette,
         LocalLyricsTheme provides lyricsTheme,
         LocalHighContrast provides isHighContrast
     ) {
@@ -316,24 +501,18 @@ fun NASMusicTVTheme(
 }
 
 /**
- * 歌词相关主题
+ * 歌词相关主题（composable getter，跟随当前调色板）。
+ *
+ * 实际消费走 [LocalLyricsTheme]（由主题在组合期构造）；本对象保留给
+ * 需要「按当前主题取单个样式」的调用点。
  */
 object LyricsTheme {
-    val currentLine = TextStyle(
-        fontSize = FontSize.DisplayLarge,
-        fontWeight = FontWeight.SemiBold,
-        color = NasMusicColors.Primary
-    )
-    val normalLine = TextStyle(
-        fontSize = FontSize.Display,
-        fontWeight = FontWeight.Normal,
-        color = NasMusicColors.TextPrimary
-    )
-    val dimLine = TextStyle(
-        fontSize = FontSize.Title,
-        fontWeight = FontWeight.Normal,
-        color = NasMusicColors.TextSecondary
-    )
+    val currentLine: TextStyle
+        @Composable @ReadOnlyComposable get() = lyricsThemeData(LocalNasPalette.current).currentLine
+    val normalLine: TextStyle
+        @Composable @ReadOnlyComposable get() = lyricsThemeData(LocalNasPalette.current).normalLine
+    val dimLine: TextStyle
+        @Composable @ReadOnlyComposable get() = lyricsThemeData(LocalNasPalette.current).dimLine
 }
 
 /** 歌词主题容器（TV/手机自动切换） */
@@ -343,14 +522,27 @@ data class LyricsThemeData(
     val dimLine: TextStyle
 )
 
-/** CompositionLocal：提供当前设备对应的歌词主题 */
-val LocalLyricsTheme = androidx.compose.runtime.staticCompositionLocalOf {
-    LyricsThemeData(
-        currentLine = LyricsTheme.currentLine,
-        normalLine = LyricsTheme.normalLine,
-        dimLine = LyricsTheme.dimLine
+/** 由调色板构造歌词样式（纯函数，可供 CompositionLocal 默认值使用） */
+private fun lyricsThemeData(palette: NasPalette): LyricsThemeData = LyricsThemeData(
+    currentLine = TextStyle(
+        fontSize = FontSize.DisplayLarge,
+        fontWeight = FontWeight.SemiBold,
+        color = palette.primary
+    ),
+    normalLine = TextStyle(
+        fontSize = FontSize.Display,
+        fontWeight = FontWeight.Normal,
+        color = palette.textPrimary
+    ),
+    dimLine = TextStyle(
+        fontSize = FontSize.Title,
+        fontWeight = FontWeight.Normal,
+        color = palette.textSecondary
     )
-}
+)
+
+/** CompositionLocal：提供当前设备对应的歌词主题 */
+val LocalLyricsTheme = staticCompositionLocalOf { lyricsThemeData(NasPalettes.Dark) }
 
 /**
  * 手机端紧凑 UI 尺度
@@ -382,15 +574,18 @@ val LocalPhoneCompact = androidx.compose.runtime.staticCompositionLocalOf { fals
 val LocalHighContrast = androidx.compose.runtime.staticCompositionLocalOf { false }
 
 /**
- * 高对比度模式下的颜色增强
+ * 高对比度模式下的颜色增强（composable getter，随当前调色板）。
  */
 object HighContrastColors {
-    /** 加强的主色 — 比 Primary 更亮 */
-    val PrimaryBright = NasMusicColors.PrimaryBright
-    /** 加强的文字色 — 纯白 */
-    val TextPrimary = Color(0xFFFFFFFF)
-    /** 加强的分割线色 */
-    val BorderStrong = Color(0xFF4A5A72)
+    /** 加强的主色 — 取 primaryEmphasis */
+    val PrimaryBright: Color
+        @Composable @ReadOnlyComposable get() = NasMusicColors.PrimaryBright
+    /** 加强的文字色 — 深色下纯白，浅色下纯黑 */
+    val TextPrimary: Color
+        @Composable @ReadOnlyComposable get() =
+            if (LocalNasPalette.current.isLight) Color(0xFF000000) else Color(0xFFFFFFFF)
+    /** 加强的分割线色 — 比 Border 深一档 */
+    val BorderStrong: Color
+        @Composable @ReadOnlyComposable get() =
+            if (LocalNasPalette.current.isLight) Color(0xFF94A3B8) else Color(0xFF4A5A72)
 }
-
-

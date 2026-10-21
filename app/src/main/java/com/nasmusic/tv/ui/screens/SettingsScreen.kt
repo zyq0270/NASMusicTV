@@ -51,6 +51,7 @@ import com.nasmusic.tv.data.model.AppSettings
 import com.nasmusic.tv.data.model.BaiduFile
 import com.nasmusic.tv.data.model.NetworkSource
 import com.nasmusic.tv.data.model.PlayMode
+import com.nasmusic.tv.data.model.ThemeMode
 import com.nasmusic.tv.data.model.VisualQuality
 import com.nasmusic.tv.ui.components.BaiduDirPickerDialog
 import com.nasmusic.tv.ui.components.ConfirmDialog
@@ -126,7 +127,7 @@ import com.nasmusic.tv.ui.theme.UiMode
 @Composable
 fun SettingsScreen(
     settings: AppSettings,
-    onToggleDarkTheme: (Boolean) -> Unit,
+    onChangeThemeMode: (ThemeMode) -> Unit,
     onToggleAnimations: (Boolean) -> Unit,
     onToggleAutoPlayNext: (Boolean) -> Unit,
     onChangePlayMode: (PlayMode) -> Unit,
@@ -583,7 +584,7 @@ var activeSection by remember { mutableStateOf(SettingsSection.GENERAL) }
                         ),
                         actions = GeneralSettingsActions(
                             onChangeLanguage = onChangeLanguage,
-                            onToggleDarkTheme = onToggleDarkTheme,
+                            onChangeThemeMode = onChangeThemeMode,
                             onToggleAnimations = onToggleAnimations,
                             onChangeFontAdjustment = onChangeFontAdjustment,
                             onChangeScreenOrientation = onChangeScreenOrientation,
@@ -1117,14 +1118,14 @@ var activeSection by remember { mutableStateOf(SettingsSection.GENERAL) }
                         focusedScale = 1.08f,
                         animationDurationMs = 150,
                         containerColor = NasMusicColors.Warning,
-                        contentColor = NasMusicColors.TextPrimary,
+                        contentColor = NasMusicColors.OnWarning,
                         focusedContainerColor = NasMusicColors.Warning.copy(alpha = 0.85f),
-                        focusedContentColor = NasMusicColors.TextPrimary,
+                        focusedContentColor = NasMusicColors.OnWarning,
                         requestFocusOnLaunch = true
                     ) {
                         Text(
                             text = stringResource(R.string.settings_delete_backup),
-                            color = NasMusicColors.TextPrimary,
+                            color = NasMusicColors.OnWarning,
                             fontSize = FontSize.button(),
                             textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                             modifier = Modifier.fillMaxSize().padding(vertical = 12.dp)

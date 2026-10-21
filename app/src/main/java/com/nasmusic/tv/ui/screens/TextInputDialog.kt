@@ -61,6 +61,7 @@ import com.nasmusic.tv.R
 import com.nasmusic.tv.data.model.SearchHistoryItem
 import com.nasmusic.tv.net.LocalInputServer
 import com.nasmusic.tv.ui.components.FocusableSurface
+import com.nasmusic.tv.ui.components.LocalFocusableContentColor
 import com.nasmusic.tv.ui.components.responsiveDialogSize
 import com.nasmusic.tv.ui.components.portraitTouchTarget
 import com.nasmusic.tv.ui.theme.FontSize
@@ -719,15 +720,15 @@ private fun ActionButton(
         containerColor = color,
         focusedContainerColor = if (isPrimary) NasMusicColors.Primary.copy(alpha = 0.85f)
                                 else NasMusicColors.Primary.copy(alpha = 0.25f),
-        contentColor = NasMusicColors.TextPrimary,
-        focusedContentColor = NasMusicColors.TextPrimary,
+        contentColor = if (isPrimary) NasMusicColors.OnPrimary else NasMusicColors.TextPrimary,
+        focusedContentColor = if (isPrimary) NasMusicColors.OnPrimary else NasMusicColors.TextPrimary,
         pressedScale = 0.92f,
         focusRequester = focusRequester,
         requestFocusOnLaunch = requestFocusOnLaunch
     ) {
         Text(
             text = label,
-            color = NasMusicColors.TextPrimary,
+            color = if (isPrimary) NasMusicColors.OnPrimary else LocalFocusableContentColor.current,
             fontSize = FontSize.body(),
             textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxSize().padding(vertical = 9.dp, horizontal = 4.dp),

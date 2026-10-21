@@ -39,6 +39,7 @@ import androidx.tv.material3.Text
 import com.nasmusic.tv.R
 import com.nasmusic.tv.backend.network.baidu.BaiduOAuthClient
 import com.nasmusic.tv.ui.components.FocusableSurface
+import com.nasmusic.tv.ui.components.LocalFocusableContentColor
 import com.nasmusic.tv.ui.components.responsiveDialogSize
 import com.nasmusic.tv.ui.components.portraitTouchTarget
 import com.nasmusic.tv.ui.theme.FontSize
@@ -196,8 +197,8 @@ fun BaiduAuthDialog(
                                 animationDurationMs = 120,
                                 containerColor = NasMusicColors.Primary,
                                 focusedContainerColor = NasMusicColors.Primary.copy(alpha = 0.85f),
-                                contentColor = NasMusicColors.TextPrimary,
-                                focusedContentColor = NasMusicColors.TextPrimary
+                                contentColor = NasMusicColors.OnPrimary,
+                                focusedContentColor = NasMusicColors.OnPrimary
                             ) {
                                 Text(
                                     text = stringResource(R.string.netdisk_auth_copy),
@@ -287,10 +288,10 @@ fun BaiduAuthDialog(
                         containerColor = NasMusicColors.SurfaceVariant,
                         focusedContainerColor = NasMusicColors.Primary.copy(alpha = 0.85f),
                         contentColor = NasMusicColors.TextPrimary,
-                        focusedContentColor = NasMusicColors.TextPrimary
+                        focusedContentColor = NasMusicColors.OnPrimary
                     ) {
                         Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                            Text(text = stringResource(R.string.common_cancel), color = NasMusicColors.TextPrimary, fontSize = FontSize.button())
+                            Text(text = stringResource(R.string.common_cancel), color = LocalFocusableContentColor.current, fontSize = FontSize.button())
                         }
                     }
                 }

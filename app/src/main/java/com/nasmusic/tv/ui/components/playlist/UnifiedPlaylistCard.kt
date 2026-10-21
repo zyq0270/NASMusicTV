@@ -89,7 +89,7 @@ fun UnifiedPlaylistCard(
                     ) {
                         Text(
                             text = stringResource(R.string.library_song_count_short, playlist.songCount),
-                            color = NasMusicColors.TextPrimary,
+                            color = NasMusicColors.OnPrimary,
                             fontSize = FontSize.small()
                         )
                     }

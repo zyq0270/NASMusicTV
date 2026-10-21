@@ -564,6 +564,9 @@ private fun CopyrightSuspectMark(modifier: Modifier = Modifier) {
     val slashStroke = remember(markSize) {
         Stroke(width = with(density) { (markSize * 0.11f).toPx() })
     }
+    // drawBehind 是纯绘制上下文：颜色必须先在组合期读出
+    val markInk = NasMusicColors.TextSecondary
+    val markBackground = NasMusicColors.SurfaceVariant
     Box(
         modifier = modifier
             .size(markSize + 6.dp)
@@ -571,13 +574,13 @@ private fun CopyrightSuspectMark(modifier: Modifier = Modifier) {
                 val g = markSize.toPx()          // 图标本体边长（药丸四周各留 3.dp）
                 val cx = size.width / 2f
                 val cy = size.height / 2f
-                val ink = NasMusicColors.TextSecondary
+                val ink = markInk
                 val stemX = cx - g * 0.13f
                 val ringR = g / 2f - markStroke.width / 2f
                 // ① 药丸底：照 VisualizerStage 的 drawBehind 圆角底写法，
                 //    避开 RoundedCornerShape.clip 在 Android 5.1 的 hwui Region 段错误。
                 drawRoundRect(
-                    color = NasMusicColors.SurfaceVariant,
+                    color = markBackground,
                     cornerRadius = CornerRadius(4.dp.toPx())
                 )
                 // ② ℗ 的圆环
