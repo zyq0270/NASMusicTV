@@ -17336,3 +17336,50 @@ K 歌并恢复导航栏。
 `assembleRelease` → `BUILD SUCCESSFUL`（4m 49s），产物 `NASMusicTV-release-v2-39-6.apk`
 **25,857,111 字节**、md5 `3dd21aea17fd57a6b20022bf137e8091`；**版本号未提升**
 （`versionCode=191 / versionName=2.39.6`，按所有者要求沿用当前版本）。已覆盖安装到手机（Redmi `91846823`，`lastUpdateTime=2026-10-21 21:30:21`），待真机验收；本地提交，未推送、未 tag。
+
+### 10.268 v2.39.6 补丁 — 曲库浏览卡片风格统一（专辑块 = 艺术家块）（2026-10-21）
+
+**触发**：所有者指出曲库页里「艺术家块与专辑块风格不一样」，要求「艺术家块的歌曲数量显示方式与专辑一致，放在右上角」，其余差异由 agent 自行分析。
+
+**改前先量取值分布**（同一 `ui/screens/library/browse/` 包，专辑卡与艺术家卡是两份手抄参数）：
+
+| 语义 | 专辑块（改前） | 艺术家块（改前） |
+|---|---|---|
+| 卡片内边距 | 8dp | 12dp |
+| 网格间距 | 12dp | 10dp |
+| 文字排版 | 左对齐 | `CenterHorizontally` 居中 |
+| 歌曲数量 | 封面右上角徽标 | 名字下方正文行（与「N专辑」拼一行） |
+| 占位符颜色 | `LocalFocusableContentColor`（随焦点变） | 写死 `NasMusicColors.Primary`（不随焦点变） |
+| 封面判空 | `isNullOrBlank()` | `!= null`（空串仍进 `AsyncImage` ⇒ 空白封面） |
+| 播放提示 | 末行 Row 内与艺术家名并排 | 单独一行居中 |
+| 来源徽标 | 在卡片内自己画 Box（裸 `9.sp` + `Color.White`），未复用公共 `SourceBadge` | — |
+| A-Z 分组头 | 两份逐行重复，字母字号裸 `20.sp`（不随 TV 档位与用户字体调整放大） | 同 |
+| 骨架屏 | 方形封面 | 圆形 48dp 头像（与真卡片不同形，加载完成即跳版）；骨架网格间距也不同 |
+
+另发现两个 Tab 各有一段 `canScrollHorizontally`（Task 11 渐变提示遗留）从未被消费 —— 死代码。
+
+**改动（唯一真源 + 唯一委托点，按所有者「风格要统一」口径）**：
+
+1. 新增 `browse/BrowseTokens.kt`：卡片形状 / 封面圆角 / 徽标几何 / 内边距 / 网格间距 / 聚焦缩放 / 时长 / alpha 全部集中一处。
+2. `BrowseComponents.kt` 新增两个委托点：`MediaCardShell`（外壳参数块只有一份，专辑 / 艺术家 / 流派 / 年代四种块共用）与 `BoxScope.CoverCountBadge`（右上角数量徽标唯一出口，`library_song_count_short` 全包只出现一次）。
+3. 艺术家块改为与专辑块同结构、行语义一一对应：方形封面 + 右上角数量徽标 + 左对齐三行（标题=艺术家名；副信息行=`N专辑`，对应专辑块的「年份 · 流派」；末行=主要流派 + 播放，对应专辑块的「艺术家名 + 播放」）。数量徽标此前在 `songCount == 0` 时整行隐藏，现与专辑块一致常显徽标。
+4. 专辑块的来源徽标改走公共 `ui/components/common/SourceBadge`；数量徽标与来源徽标同为 caption 档，同一角落不再两种字号（原 `9.sp` 裸值在 TV 端小到大看不清）。
+5. 艺术家封面判空收紧到 `isNullOrBlank()`；占位首字母改用 `LocalFocusableContentColor`（随焦点变色，与专辑占位「♪」同口径）。
+6. A-Z 分组头抽出 `LetterGroupHeader`，字号改 `FontSize.button()` 档。
+7. 流派 / 年代块外壳走 `MediaCardShell`（顺带补齐此前缺的 `pressedContainerColor`，按下反馈与另两种块一致），网格间距统一 12dp。
+8. `ArtistSkeletonGrid` 委托 `AlbumSkeletonGrid`（同结构后骨架必然同形），删除圆形头像骨架 `ArtistCardSkeleton`；顺手清掉 `Shimmer.kt` 里因此失效的 `CircleShape` / `size` / `Row` / `GridItemSpan` 导入。
+
+**门禁**：新增 `LibraryBrowseCardStyleGateTest`（源码扫描 13 例）—— 三个委托点必须存在；两张卡都必须走 `MediaCardShell` + `CoverCountBadge`、都不得出现 `CenterHorizontally`；卡片函数体内禁 `focusedScale` / `animationDurationMs` / `RoundedCornerShape` / `containerColor` 与任何 `.dp` 字面量；`library_song_count_short` 全包唯一出口；三个网格文件禁 `spacedBy(<数字>.dp)` 与 `padding(bottom = <数字>.dp)`；分组头必须复用 `LetterGroupHeader` 且不得残留 `dividerThickness`；令牌取值（10 / 8 / 12dp、gridGap 12dp、focusScale 1.06f）；来源标签必须走 `SourceBadge` 且浏览包内禁 `Color.White`、徽标前景必须 `OnPrimary`；分组头禁裸 `.sp`；艺术家骨架必须复用专辑骨架且 `CircleShape` 不得残留。三条负向自证：重写外壳参数 / 数量文案两处出口 / `functionBody` 取不到函数体时必须抛（防断言空转）。
+
+⚠️ **源码扫描类门禁的两条本机陷阱**（这次连踩两次假失败）：AGP 单测 `user.dir` 是**模块目录** `…/app`，候选路径按此定位（别在已含 `ui` 的根上再拼 `ui/...`）；仓库源文件是 **CRLF**，必须先 `replace("
+", "
+")` 再按 `
+}
+` 定位函数体，否则顶格右括号永不命中。
+
+**验证**：`compileDebugKotlin lintDebug` → `BUILD SUCCESSFUL`（6m 10s，lint 无 error）；`testDebugUnitTest --tests "*LibraryBrowseCardStyleGateTest"` → **13 例零失败**；`--tests "com.nasmusic.tv.ui.*"` → 31 类 **283 例零失败**；`assembleRelease` → `BUILD SUCCESSFUL`（4m 29s），产物 `NASMusicTV-release-v2-39-6.apk` **25,857,676 字节**、md5 `a01a05678dd6a43de276bea05fcc71f7`；版本号未提升（191 / 2.39.6）。已覆盖安装到手机（Redmi `91846823`，`lastUpdateTime=2026-10-21 21:58:36`）与创维 TV（`192.168.0.114:5555`，`21:59:12`），待真机验收。
+
+**留档未做（供后续批次裁决）**：
+- 专辑 / 艺术家两个 Tab 的网格脚手架（Level 1.5 返回、A-Z 分组、右边缘焦点、索引条接线约 120 行）仍是两份逐行重复 —— 抽成一个 `LetterGroupedGrid` 才是「永不分家」的根因修法，但触及焦点与返回行为，需要单独一轮真机回归。
+- `ui/components/album/UnifiedAlbumCard.kt` 与 `ui/components/artist/UnifiedArtistCard.kt` 零调用（注释仍写「替代 LibraryScreen 中的卡片」），与本次统一方向重复，属 tracked source，删除需所有者确认。
+- `EmptyHint` 的「重试」按钮与 `ButtonChip` 仍是各自手抄的参数块（不是「块」，本次未动）；公共 `SourceBadge` 的文字色仍是裸 `Color.White`（浅色主题下压在浅蓝 NAS 源色上对比偏低），改它影响 4 个调用点，留给浅色主题批次。

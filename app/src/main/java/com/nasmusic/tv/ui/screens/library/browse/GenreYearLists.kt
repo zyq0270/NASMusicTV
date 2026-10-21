@@ -10,7 +10,6 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.remember
@@ -26,7 +25,6 @@ import com.nasmusic.tv.R
 import com.nasmusic.tv.data.model.Genre
 import com.nasmusic.tv.data.model.Song
 import com.nasmusic.tv.ui.LocalListBackHandler
-import com.nasmusic.tv.ui.components.FocusableSurface
 import com.nasmusic.tv.ui.components.LocalFocusableContentColor
 import com.nasmusic.tv.ui.components.adaptiveColumns
 import com.nasmusic.tv.ui.theme.FontSize
@@ -69,7 +67,7 @@ internal fun GenresTab(
             text = stringResource(R.string.library_genres_count, genres.size),
             color = NasMusicColors.TextPrimary,
             fontSize = FontSize.subtitle(),
-            modifier = Modifier.padding(bottom = 12.dp)
+            modifier = Modifier.padding(bottom = BrowseTokens.headerCountGap)
         )
         if (genres.isEmpty()) {
             Text(
@@ -83,11 +81,11 @@ internal fun GenresTab(
                 state = listState,
                 columns = GridCells.Fixed(adaptiveColumns(4, 2, 3)),
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                horizontalArrangement = Arrangement.spacedBy(BrowseTokens.gridGap),
+                verticalArrangement = Arrangement.spacedBy(BrowseTokens.gridGap)
             ) {
                 itemsIndexed(genres, key = { _, it -> it.name }) { index, genre ->
-                    FocusableSurface(
+                    MediaCardShell(
                         onClick = {
                             if (onSongsByGenre != null) {
                                 onSongsByGenre(genre.name) { songs ->
@@ -95,14 +93,6 @@ internal fun GenresTab(
                                 }
                             }
                         },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(10.dp),
-                        focusedScale = 1.06f,
-                        animationDurationMs = 200,
-                        containerColor = NasMusicColors.Surface,
-                        focusedContainerColor = NasMusicColors.Primary.copy(alpha = 0.2f),
-                        contentColor = NasMusicColors.TextPrimary,
-                        focusedContentColor = NasMusicColors.Primary,
                         focusRequester = if (index == 0) firstItemFocusRequester else null
                     ) {
                         Column(
@@ -166,7 +156,7 @@ internal fun YearsTab(
             text = stringResource(R.string.library_years_count, years.size),
             color = NasMusicColors.TextPrimary,
             fontSize = FontSize.subtitle(),
-            modifier = Modifier.padding(bottom = 12.dp)
+            modifier = Modifier.padding(bottom = BrowseTokens.headerCountGap)
         )
         if (years.isEmpty()) {
             Text(
@@ -180,11 +170,11 @@ internal fun YearsTab(
                 state = listState,
                 columns = GridCells.Fixed(adaptiveColumns(5, 2, 3)),
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                horizontalArrangement = Arrangement.spacedBy(BrowseTokens.gridGap),
+                verticalArrangement = Arrangement.spacedBy(BrowseTokens.gridGap)
             ) {
                 itemsIndexed(years, key = { _, it -> it }) { index, year ->
-                    FocusableSurface(
+                    MediaCardShell(
                         onClick = {
                             // 点击年份时按需加载该年份歌曲
                             if (onSongsByYear != null) {
@@ -193,14 +183,6 @@ internal fun YearsTab(
                                 }
                             }
                         },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(10.dp),
-                        focusedScale = 1.06f,
-                        animationDurationMs = 200,
-                        containerColor = NasMusicColors.Surface,
-                        focusedContainerColor = NasMusicColors.Primary.copy(alpha = 0.2f),
-                        contentColor = NasMusicColors.TextPrimary,
-                        focusedContentColor = NasMusicColors.Primary,
                         focusRequester = if (index == 0) firstItemFocusRequester else null
                     ) {
                         Column(

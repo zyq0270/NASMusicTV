@@ -1,19 +1,16 @@
 package com.nasmusic.tv.ui.screens.library.browse
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.derivedStateOf
@@ -32,9 +29,7 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.tv.material3.Text
 import com.nasmusic.tv.R
 import com.nasmusic.tv.data.model.Album
@@ -42,8 +37,6 @@ import com.nasmusic.tv.data.model.Song
 import com.nasmusic.tv.ui.LocalListBackHandler
 import com.nasmusic.tv.ui.components.adaptiveColumns
 import com.nasmusic.tv.ui.theme.FontSize
-import com.nasmusic.tv.ui.theme.HighContrastColors
-import com.nasmusic.tv.ui.theme.LocalHighContrast
 import com.nasmusic.tv.ui.theme.NasMusicColors
 import com.nasmusic.tv.util.PinyinUtils
 import kotlinx.coroutines.launch
@@ -114,13 +107,9 @@ internal fun AlbumsTab(
             text = stringResource(R.string.library_albums_count, albums.size),
             color = NasMusicColors.TextPrimary,
             fontSize = FontSize.subtitle(),
-            modifier = Modifier.padding(bottom = 12.dp)
+            modifier = Modifier.padding(bottom = BrowseTokens.headerCountGap)
         )
         Box(modifier = Modifier.fillMaxSize()) {
-            // Task 11: 横向滚动边缘渐变提示
-            val canScrollHorizontally by remember {
-                derivedStateOf { listState.canScrollForward || listState.canScrollBackward }
-            }
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -140,29 +129,14 @@ internal fun AlbumsTab(
                     state = listState,
                     columns = GridCells.Fixed(adaptiveColumns(6, 3, 6)),
                     modifier = Modifier.fillMaxSize().padding(end = 24.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                    horizontalArrangement = Arrangement.spacedBy(BrowseTokens.gridGap),
+                    verticalArrangement = Arrangement.spacedBy(BrowseTokens.gridGap)
                 ) {
                     groupedItems.forEachIndexed { index, (letter, album) ->
                         if (letter != null) {
                             // 分组 header：横跨整行
                             item(key = "header_$letter", span = { GridItemSpan(maxLineSpan) }) {
-                                Column {
-                                    Text(
-                                        text = letter.toString(),
-                                        color = NasMusicColors.Primary,
-                                        fontSize = 20.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        modifier = Modifier.padding(start = 4.dp, top = 8.dp, bottom = 4.dp)
-                                    )
-                                    val dividerThickness = if (LocalHighContrast.current) 2.dp else 1.dp
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .height(dividerThickness)
-                                            .background(if (LocalHighContrast.current) HighContrastColors.BorderStrong else NasMusicColors.Border)
-                                    )
-                                }
+                                LetterGroupHeader(letter)
                             }
                         } else {
                             // 数据行（key 加 index 防重名：同名专辑可来自多个源）

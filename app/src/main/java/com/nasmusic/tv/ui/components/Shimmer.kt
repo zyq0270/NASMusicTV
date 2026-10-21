@@ -10,17 +10,13 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -62,7 +58,7 @@ fun Modifier.shimmer(): Modifier {
 }
 
 /**
- * 专辑卡片骨架 — 与 AlbumCard 布局一致：方形封面 + 两行文字。
+ * 曲库卡片骨架 — 与 AlbumCard / ArtistCard 布局一致：方形封面 + 三行文字。
  */
 @Composable
 fun AlbumCardSkeleton() {
@@ -74,7 +70,7 @@ fun AlbumCardSkeleton() {
                 .clip(RoundedCornerShape(8.dp))
                 .shimmer()
         )
-        Spacer(modifier = Modifier.height(6.dp))
+        Spacer(modifier = Modifier.height(4.dp))
         Box(
             modifier = Modifier
                 .fillMaxWidth(0.8f)
@@ -86,40 +82,6 @@ fun AlbumCardSkeleton() {
         Box(
             modifier = Modifier
                 .fillMaxWidth(0.55f)
-                .height(10.dp)
-                .clip(RoundedCornerShape(4.dp))
-                .shimmer()
-        )
-    }
-}
-
-/**
- * 艺术家卡片骨架 — 与 ArtistCard 布局一致：圆形头像 + 两行文字。
- */
-@Composable
-fun ArtistCardSkeleton() {
-    Column(
-        modifier = Modifier.fillMaxWidth().padding(12.dp),
-        horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally
-    ) {
-        Box(
-            modifier = Modifier
-                .size(48.dp)
-                .clip(CircleShape)
-                .shimmer()
-        )
-        Spacer(modifier = Modifier.height(6.dp))
-        Box(
-            modifier = Modifier
-                .fillMaxWidth(0.7f)
-                .height(12.dp)
-                .clip(RoundedCornerShape(4.dp))
-                .shimmer()
-        )
-        Spacer(modifier = Modifier.height(4.dp))
-        Box(
-            modifier = Modifier
-                .fillMaxWidth(0.5f)
                 .height(10.dp)
                 .clip(RoundedCornerShape(4.dp))
                 .shimmer()
@@ -147,19 +109,11 @@ fun AlbumSkeletonGrid() {
 }
 
 /**
- * 艺术家骨架屏 — 12 张占位卡片。列数走 `adaptiveColumns`，与真数据一致。
+ * 艺术家骨架屏 — 与 [AlbumSkeletonGrid] 同形：艺术卡片与专辑卡片统一为
+ * 「方形封面 + 右上角数量徽标 + 三行文字」后，两种块的骨架必然一致，
+ * 骨架期到数据期的跳转不再出现布局跳动。
  */
 @Composable
 fun ArtistSkeletonGrid() {
-    LazyVerticalGrid(
-        columns = GridCells.Fixed(adaptiveColumns(tv = 6, phonePortrait = 3, medium = 6)),
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-        userScrollEnabled = false
-    ) {
-        items(12) {
-            ArtistCardSkeleton()
-        }
-    }
+    AlbumSkeletonGrid()
 }

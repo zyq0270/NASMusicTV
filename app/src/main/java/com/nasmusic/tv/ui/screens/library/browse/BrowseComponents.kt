@@ -3,6 +3,7 @@ package com.nasmusic.tv.ui.screens.library.browse
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -55,6 +56,7 @@ import com.nasmusic.tv.R
 import com.nasmusic.tv.data.model.Album
 import com.nasmusic.tv.ui.components.FocusableSurface
 import com.nasmusic.tv.ui.components.LocalFocusableContentColor
+import com.nasmusic.tv.ui.components.common.SourceBadge
 import com.nasmusic.tv.ui.screens.LibraryTab
 import com.nasmusic.tv.ui.theme.FontSize
 import com.nasmusic.tv.ui.theme.LocalHighContrast
@@ -71,6 +73,85 @@ import com.nasmusic.tv.util.PinyinUtils
  * 一律 `import com.nasmusic.tv.ui.components.adaptiveColumns`。
  */
 
+/**
+ * 曲库卡片外壳 —— **唯一委托点**。
+ *
+ * 专辑 / 艺术家 / 流派 / 年代四种块共用同一个参数块（形状、聚焦缩放、时长、三态配色）。
+ * ⛔ 不要在卡片文件里重写这些参数 —— 手抄第二份就是漂移的开始。
+ */
+@OptIn(ExperimentalTvMaterial3Api::class)
+@Composable
+internal fun MediaCardShell(
+    onClick: () -> Unit,
+    focusRequester: FocusRequester? = null,
+    content: @Composable () -> Unit
+) {
+    FocusableSurface(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
+        shape = BrowseTokens.cardShape,
+        focusedScale = BrowseTokens.focusScale,
+        animationDurationMs = BrowseTokens.animMs,
+        containerColor = NasMusicColors.Surface,
+        focusedContainerColor = NasMusicColors.Primary.copy(alpha = BrowseTokens.focusedContainerAlpha),
+        contentColor = NasMusicColors.TextPrimary,
+        focusedContentColor = NasMusicColors.Primary,
+        pressedContainerColor = NasMusicColors.Background,
+        focusRequester = focusRequester,
+        content = content
+    )
+}
+
+/**
+ * 封面右上角数量徽标 —— 专辑与艺术家共用。
+ *
+ * 此前艺术家把「N首」写在名字下方的正文行里，专辑写在封面右上角徽标里，
+ * 两种块并排时读起来不是同一种组件；数量口径统一放徽标位。
+ * 字号与来源标签（`SourceBadge`）同为 caption 档，保证同一角落两种徽标等大。
+ */
+@Composable
+internal fun BoxScope.CoverCountBadge(count: Int) {
+    Box(
+        modifier = Modifier
+            .align(Alignment.TopEnd)
+            .padding(BrowseTokens.badgeInset)
+            .background(NasMusicColors.Primary.copy(alpha = BrowseTokens.badgeFillAlpha), shape = BrowseTokens.countBadgeShape)
+            .padding(horizontal = BrowseTokens.badgeHPadding, vertical = BrowseTokens.badgeVPadding),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = stringResource(R.string.library_song_count_short, count),
+            color = NasMusicColors.OnPrimary,
+            fontSize = FontSize.caption()
+        )
+    }
+}
+
+/** A-Z 分组标题（字母 + 分隔线）—— 专辑与艺术家网格共用，两处曾逐行重复。 */
+@Composable
+internal fun LetterGroupHeader(letter: Char) {
+    Column {
+        Text(
+            text = letter.toString(),
+            color = NasMusicColors.Primary,
+            fontSize = FontSize.button(),
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(
+                start = BrowseTokens.headerLetterStart,
+                top = BrowseTokens.headerLetterTop,
+                bottom = BrowseTokens.headerLetterBottom
+            )
+        )
+        val dividerThickness = if (LocalHighContrast.current) 2.dp else 1.dp
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(dividerThickness)
+                .background(if (LocalHighContrast.current) HighContrastColors.BorderStrong else NasMusicColors.Border)
+        )
+    }
+}
+
 @OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
 internal fun AlbumCard(
@@ -79,22 +160,10 @@ internal fun AlbumCard(
     onPlay: (() -> Unit)? = null,
     focusRequester: FocusRequester? = null
 ) {
-    FocusableSurface(
-        onClick = onClick,
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(10.dp),
-        focusedScale = 1.06f,
-        animationDurationMs = 200,
-        containerColor = NasMusicColors.Surface,
-        focusedContainerColor = NasMusicColors.Primary.copy(alpha = 0.2f),
-        contentColor = NasMusicColors.TextPrimary,
-        focusedContentColor = NasMusicColors.Primary,
-        pressedContainerColor = NasMusicColors.Background,
-        focusRequester = focusRequester
-    ) {
-        Column(modifier = Modifier.fillMaxWidth().padding(8.dp)) {
+    MediaCardShell(onClick = onClick, focusRequester = focusRequester) {
+        Column(modifier = Modifier.fillMaxWidth().padding(BrowseTokens.cardPadding)) {
             Box(
-                modifier = Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(8.dp)).background(NasMusicColors.SurfaceVariant)
+                modifier = Modifier.fillMaxWidth().aspectRatio(1f).clip(BrowseTokens.coverShape).background(NasMusicColors.SurfaceVariant)
             ) {
                 if (!album.coverUrl.isNullOrBlank()) {
                     AsyncImage(model = album.coverUrl, contentDescription = album.name, modifier = Modifier.fillMaxSize())
@@ -103,33 +172,17 @@ internal fun AlbumCard(
                         Text(text = "♪", color = LocalFocusableContentColor.current, fontSize = FontSize.displayLarge())
                     }
                 }
-                // Task 9: 右上角来源徽标
+                // Task 9: 右上角来源徽标（走公共 SourceBadge）；无来源时同位置显示歌曲数
                 if (album.sourceType != null) {
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .padding(4.dp)
-                            .background(album.sourceType.color.copy(alpha = 0.9f), shape = RoundedCornerShape(4.dp))
-                            .padding(horizontal = 4.dp, vertical = 1.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(text = stringResource(album.sourceType.displayNameRes), color = androidx.compose.ui.graphics.Color.White, fontSize = 9.sp)
-                    }
+                    SourceBadge(
+                        source = album.sourceType,
+                        modifier = Modifier.align(Alignment.TopEnd).padding(BrowseTokens.badgeInset)
+                    )
                 } else {
-                    // 无来源时仍显示歌曲数
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .padding(4.dp)
-                            .background(NasMusicColors.Primary.copy(alpha = 0.95f), shape = RoundedCornerShape(12.dp))
-                            .padding(horizontal = 6.dp, vertical = 2.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(text = stringResource(R.string.library_song_count_short, album.songCount), color = NasMusicColors.OnPrimary, fontSize = FontSize.small())
-                    }
+                    CoverCountBadge(album.songCount)
                 }
             }
-            Spacer(modifier = Modifier.height(4.dp))
+            Spacer(modifier = Modifier.height(BrowseTokens.coverTextGap))
             Text(text = album.name, color = NasMusicColors.TextPrimary, fontSize = FontSize.body(), maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
             // Task 9: 年份 + 流派行
             val infoText = buildString {
@@ -145,13 +198,19 @@ internal fun AlbumCard(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(text = album.artist.ifBlank { "—" }, color = LocalFocusableContentColor.current, fontSize = FontSize.small(), maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                 if (onPlay != null) {
-                    Text(text = "▶" + stringResource(R.string.player_play), color = NasMusicColors.Primary, fontSize = FontSize.small(), modifier = Modifier.padding(start = 4.dp))
+                    Text(text = "▶" + stringResource(R.string.player_play), color = NasMusicColors.Primary, fontSize = FontSize.small(), modifier = Modifier.padding(start = BrowseTokens.inlineGap))
                 }
             }
         }
     }
 }
 
+/**
+ * 艺术家卡片 —— 与 [AlbumCard] 同结构：方形封面 + 右上角数量徽标 + 左对齐三行文字。
+ *
+ * 行的语义对应关系：标题=艺术家名，副信息行=`N专辑`（专辑卡在同类位置是「年份 · 流派」），
+ * 末行=主要流派 + 播放（专辑卡同类位置是艺术家名 + 播放）。
+ */
 @OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
 internal fun ArtistCard(
@@ -164,65 +223,48 @@ internal fun ArtistCard(
     onPlay: (() -> Unit)? = null,
     focusRequester: FocusRequester? = null
 ) {
-    FocusableSurface(
-        onClick = onClick,
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(10.dp),
-        focusedScale = 1.06f,
-        animationDurationMs = 200,
-        containerColor = NasMusicColors.Surface,
-        focusedContainerColor = NasMusicColors.Primary.copy(alpha = 0.2f),
-        contentColor = NasMusicColors.TextPrimary,
-        focusedContentColor = NasMusicColors.Primary,
-        pressedContainerColor = NasMusicColors.Background,
-        focusRequester = focusRequester
-    ) {
-        Column(
-            modifier = Modifier.fillMaxWidth().padding(12.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
+    MediaCardShell(onClick = onClick, focusRequester = focusRequester) {
+        Column(modifier = Modifier.fillMaxWidth().padding(BrowseTokens.cardPadding)) {
             Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(1f)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(NasMusicColors.SurfaceVariant),
-                contentAlignment = Alignment.Center
+                modifier = Modifier.fillMaxWidth().aspectRatio(1f).clip(BrowseTokens.coverShape).background(NasMusicColors.SurfaceVariant)
             ) {
-                if (coverUrl != null) {
-                    AsyncImage(
-                        model = coverUrl,
-                        contentDescription = artist,
-                        modifier = Modifier.fillMaxSize()
-                    )
+                if (!coverUrl.isNullOrBlank()) {
+                    AsyncImage(model = coverUrl, contentDescription = artist, modifier = Modifier.fillMaxSize())
                 } else {
-                    Text(
-                        text = artist.firstOrNull()?.uppercase() ?: "?",
-                        color = NasMusicColors.Primary,
-                        fontSize = FontSize.displayLarge()
-                    )
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text(
+                            text = artist.firstOrNull()?.uppercase() ?: "?",
+                            color = LocalFocusableContentColor.current,
+                            fontSize = FontSize.displayLarge()
+                        )
+                    }
                 }
+                CoverCountBadge(songCount)
             }
-            Spacer(modifier = Modifier.height(4.dp))
+            Spacer(modifier = Modifier.height(BrowseTokens.coverTextGap))
             Text(text = artist, color = NasMusicColors.TextPrimary, fontSize = FontSize.body(), maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
-            // Task 10: 专辑数 + 歌曲数
-            val countText = buildString {
-                if (albumCount > 0) append(stringResource(R.string.library_album_count_short, albumCount))
-                if (songCount > 0) {
-                    if (isNotEmpty()) append(" · ")
-                    append(stringResource(R.string.library_song_count_short, songCount))
+            // Task 10: 专辑数（与专辑卡副信息行同位同档）
+            if (albumCount > 0) {
+                Text(
+                    text = stringResource(R.string.library_album_count_short, albumCount),
+                    color = NasMusicColors.TextSecondary,
+                    fontSize = FontSize.caption(),
+                    maxLines = 1
+                )
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                // Task 10: 主要流派（与专辑卡末行「艺术家名」同位）
+                Text(
+                    text = primaryGenre ?: "—",
+                    color = LocalFocusableContentColor.current,
+                    fontSize = FontSize.small(),
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
+                )
+                if (onPlay != null) {
+                    Text(text = "▶" + stringResource(R.string.player_play), color = NasMusicColors.Primary, fontSize = FontSize.small(), modifier = Modifier.padding(start = BrowseTokens.inlineGap))
                 }
-            }
-            if (countText.isNotEmpty()) {
-                Text(text = countText, color = NasMusicColors.TextSecondary, fontSize = FontSize.small(), maxLines = 1)
-            }
-            // Task 10: 流派标签
-            if (!primaryGenre.isNullOrBlank()) {
-                Text(text = primaryGenre, color = NasMusicColors.TextSecondary.copy(alpha = 0.7f), fontSize = FontSize.caption(), maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
-            }
-            if (onPlay != null) {
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(text = "▶" + stringResource(R.string.player_play), color = NasMusicColors.Primary, fontSize = FontSize.small())
             }
         }
     }
