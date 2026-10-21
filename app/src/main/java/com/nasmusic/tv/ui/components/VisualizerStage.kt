@@ -25,6 +25,7 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -50,6 +51,7 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -75,6 +77,7 @@ import com.nasmusic.tv.visualizer.RenderContext
 import com.nasmusic.tv.visualizer.RendererSwapper
 import com.nasmusic.tv.visualizer.VisualizerRenderer
 import com.nasmusic.tv.visualizer.VisualizerRendererFactory
+import com.nasmusic.tv.visualizer.pixel.LofiCityCursor
 
 /**
  * 帧率读数的开关键（`Settings.Global`，只读）。
@@ -151,6 +154,12 @@ fun VisualizerStage(
 
     // ── 渲染器生命周期（自动导演档 600ms 交叉淡入）────────────
     val renderCtx = remember { RenderContext() }
+    // E51「像素城市」：渲染器在绘制阶段写这座对象的普通字段，右下角卡用 LaunchedEffect 读
+    // （⛔ 不能是 mutableStateOf —— 绘制里写快照状态会招来重组，见 LofiCityCursor 的类注释）。
+    // 生命周期与 renderCtx 一样长 ⇒ 切主题时渲染器 onExitContent 会 clear() 它。
+    val lofiCityCursor = remember { LofiCityCursor() }
+    // 手机竖屏要把城市卡抬到底部指示器之上（§12.3）。⛔ 数值不许猜 ⇒ 量出来。
+    var bottomStripPx by remember { mutableIntStateOf(0) }
     // LocalContext 供默认工厂创建 View 型渲染器（three-globe WebView）用
     val context = LocalContext.current
     val swapper = remember { RendererSwapper(context) }
@@ -194,6 +203,8 @@ fun VisualizerStage(
             lyricInfo.line, lyricInfo.nextLine, lyricInfo.progress,
             lyricInfo.hasWords, lyricInfo.lineIndex, lyricInfo.wordStartTimes,
             lyricInfo.maxLineChars, lyricInfo.longestLine, song?.id)
+        // 像素城市的传参通道必须在 `sync` **之前**接好：`onEnterContent` 就要读它
+        renderCtx.lofiCityCursor = lofiCityCursor
         // 照片墙生命周期（阶段 10）：进入 → 开始扫描（若未扫过）；离开 → 停时钟、停预取。
         // ⛔ 必须在帧循环**之前**：本 `LaunchedEffect` 声明在前，先启动 ⇒ `onFrame` 第一帧
         //    就已经是 `active` 状态。放在帧循环之后会白跑一帧。
@@ -533,15 +544,39 @@ fun VisualizerStage(
             }
 
             // 底部：指示器（控制栏已移除）
-            ThemeIndicator(
-                themes = VisualizerTheme.selectable(photoWallAvailable),
-                current = theme,
-                quality = quality,
-                onLightBg = isVintageTv,
-                modifier = Modifier.align(Alignment.CenterHorizontally)
-            )
+            // 包一层 Column 只为了量出"底部条"的真实高度：手机竖屏的城市卡要抬到它之上
+            // （§12.3）。⛔ 那个距离不许写成猜出来的 dp ⇒ 由 onSizeChanged 现量。
+            Column(
+                modifier = Modifier
+                    .align(Alignment.CenterHorizontally)
+                    .onSizeChanged { bottomStripPx = it.height }
+            ) {
+                ThemeIndicator(
+                    themes = VisualizerTheme.selectable(photoWallAvailable),
+                    current = theme,
+                    quality = quality,
+                    onLightBg = isVintageTv
+                )
 
-            Spacer(Modifier.size(24.dp))
+                Spacer(Modifier.size(24.dp))
+            }
+        }
+
+        // 右下（仅 E51「像素城市」）：城市名 + 标语 + 该城当地时间（§12.3）
+        // ⛔ 这里**不读**双变体的编译开关：公开版里这个主题根本进不了 `selectable()`，
+        //   判据只有"当前主题是不是它"（开关收口只允许存在于两个接缝，
+        //   由 `LofiCityVariantGateTest` V3 拦）。
+        if (theme == VisualizerTheme.LOFI_CITY) {
+            LofiCityCard(
+                cursor = lofiCityCursor,
+                modifier = Modifier.align(Alignment.BottomEnd),
+                bottomPadding = if (isTV) {
+                    8.dp
+                } else {
+                    // 手机：底部条之上再留 8dp（bottomStripPx 量出来之前先按 0，卡片 20 分钟后才出现）
+                    with(density) { (bottomStripPx + 8.dp.toPx()).toDp() }
+                }
+            )
         }
 
         // 右上：帧率读数（真机验收用，⛔ 默认关闭 ⇒ 常驻 UI 上不可见）

@@ -17458,3 +17458,31 @@ K 歌并恢复导航栏。
 | `显示=false`、`按键到达[window]` 有、`按键到达[compose]` 没有 | 按键从没进 Compose 焦点树 ⇒ 焦点树本身空（布局 / `focusable` 缺失），窗口层兜底已把判据 5 打开却无处可画 |
 | `显示=false`、`DPAD设备=false`、`按键形态配置=false`、`无触摸屏=false` | 三道静态门全落空 ⇒ 该 ROM 连 `Configuration` 都被伪造，需要新证据（把 `输入设备[…]` 那行的 `src=0x…` 回传，按位再判） |
 | `显示=true` 只在 `已按过方向键=true` 之后出现 | 判据 3/4 在该设备上失效，只剩兜底 ⇒ 进场即见这条需求没满足，得按清单加第六道（能力探测） |
+
+---
+
+### 10.270 v2.39.7 — E51「像素城市」全量落地：引擎 + 地球过场 + 四城直译（2026-10-22）
+
+**是什么**：新频谱效果主题 `LOFI_CITY`（显示名「像素城市」，`ordinalLabel = "51"`，`Tier.ADV`），逐行直译 loficities.com 的像素城市夜景。方案与全部裁决见 `docs/e51-lofi-city-plan.md`（§2 改判「允许逐行照搬」、§2.5 双变体、§12 双层城市名）；本节只记**落地事实**与**方案之外学到的东西**。规模：新增 `visualizer/pixel/` 20 个文件 + `scenes/lofi/` 6 个 + 渲染器/叠层卡/11 个测试类，共 23,563 行。
+
+**四条不可协商的地基（引擎层）**：
+
+1. **纯 Canvas 2D，零 `android.*`**：`PixelCanvas` 就是一个 `IntArray` + 自实现的 `PixCtx`（`fillRect` / `drawImage` / `save`-`restore` / 仿射变换 / `Comp{SOURCE_OVER,LIGHTER,COPY}`）。这条不是洁癖，是**唯一能在 JVM 里把整座城渲染出来**的前提 ⇒ `LofiSceneSnapshotTest` 才能在单测里做"看图"（见下）。`LofiUpstreamHygieneTest` H3 钉死「像素层不许 import android」。⚠️ WebView + three.js 在这台创维上根本不显示（[[project-webview-threejs-dead-on-tv]]），所以没有第二条路。
+2. **确定性 240 秒循环**：⛔ 不许 `java.util.Random` / `System.currentTimeMillis` / `java.time`，时间与随机全部由 `t` 派生（`hash`/`hashD`/`PxRng(seed)`/`wave`/`step`/`env`/`Cyc`）。S3 门禁就是拿这个立的：**同一 `t` 渲染两遍必须逐像素相等**。
+3. **`hash()` 的 JS 语义是 ToInt32 截断**，不是四舍五入 ⇒ 非整数参数**必须**走 `hashD`，`jsRound` 之后再 `hash` 会静默改变随机序列（直译第一号坑）。
+4. **rng 消耗次序承重**：逐像素表达式不许提取公因子、不许"顺手优化"，哪怕结果等价——少调一次 `r()` 后面每一盏窗灯都换位置。
+
+**受控差异（直译不是零成本，这 8 类是**故意**不逐行的）**：`drawWeather` 跨城共享件未移植 ⇒ 各城留空壳、只搬本城母题（`weatherDrizzle` / `weatherShared` 由上游 `weatherPlans`/`SHARED` 反推 `wet`）；人群 `crowd` 无传参通道 ⇒ 恒退 `CROWD20`；坐标参数放宽成 `Number`（`num()`）以免满屏 `toDouble()`；音频三系数（`lightGain`/`neonPulse`/`tailGain`）**只许乘加在 halo 的 α 上**，⛔ 不得进坐标/几何/颜色（D-a）。
+
+**双变体收口**：`lofi.city`（`local.properties` 或 `-P`）→ `BuildConfig.LOFI_CITY_ENABLED`，**只许在两个接缝被读**——`AppSettings.kt` 的 `selectable()`（公开版列表里"没有"这个主题）与 `VisualizerRendererFactory.kt:58`（公开版即便从备份 JSON 回灌 `"visualizerTheme":"LOFI_CITY"` 也回落默认渲染器）。⚠️ 第二处才是核心发现：枚举常量在公开版里**依然存在**，`fromKey` 按名反查会成功 ⇒ 只堵列表挡不住备份导入。`LofiCityVariantGateTest` 8 例钉"CI 缺省态"；⛔ 该门禁扫的是**未剥注释的原文**，所以这个 token 除两处接缝外**任何地方（含注释）都不许出现**。
+
+**城市表是生成的，不是手抄的**：`CityRegistry.kt`（50 城 / 7 look）由 `scripts/lofi_city_registry_sync.py` 离线再生，⛔ 运行时零网络、不进 CI、不发网络断言（所有者三条纪律）。三列人工维护、脚本按 id 读回：`nameZh` / `taglineZh` / `SCENES_BUILT`。**本轮新增第四列**：`focusX` 在上游常写成符号表达式（台北 `T2.cx`、大阪 `HERO3.x + 27`、有的城是 `Math.round(proj2(...)[0])`），正则取不到数 ⇒ 脚本改为"取不到就沿用表里既有值"，译者按上游常量手工填一次即可长期存活。这条是 `LofiCityRegistryGateTest` R6（场景类 `focusX` 必须等于表里 `focusX`）逼出来的——没有 R6，台北的竖屏裁切锚点会静默停在 0。
+
+**"看图"这件事本机就能做**：`LofiSceneSnapshotTest` 在 JVM 里真渲染四时刻（0 / 60 / 120 / 228s），三条口径 S1 非空（不透明 ≥20%）、S2 随时间变化、S3 逐位确定性；`LOFI_SNAPSHOT=1` 才写 4× PNG 到 `logs_temp/lofi_render/`，且**导出的判读图必须叠站牌**（§12.2 的定位是"看这张图"定的）。台北本轮实测：与上游页面并排比对，101 塔冠紫 + 塔尖红灯、右侧南山双塔、左侧信义住宅上的「MOON BOBA TEA」广告牌、象鼻山观景台的巨石 / 木栈道 / 水洼倒影 / 右侧台阶与庭院灯 / 新月 / 棕榈全部到位。⚠️ 这**不等于**真机验收——放大硬边与帧耗时仍属 P0（见"未做"）。
+
+**直译纪律中最容易写错的六处**（全部有实据，下次移植照单核对）：JS 对象字面量**键序 = Kotlin 构造参数序**；同包内 `private class` 会跨文件撞名（大阪那次 `Redeclaration`）⇒ 场景数据类一律**嵌套进场景类**，且**类名不得与同类字段同名**（`Conflicting declarations`，台北的 `BB36` 因此拆成 `BB36` 字段 + `BB36Box` 类）；`s.moving && Math.floor(x/4) & 1` 的优先级是 `&&` 低于 `&`；`T2.modW1 + 2 >> 1` 是 `(round+2)>>1` 不是 `round+(2>>1)`；JS 浮点循环边界 `for (k=0; k<=n2; k++)` 在 Kotlin 必须 `while` + `+= 1.0`；上游数组下标会越界（车头/车尾索引），JS 拿到 `undefined` 靠 `!s` 兜住 ⇒ Kotlin 侧必须 `getOrNull` 而不是 `[]`。
+
+**验证**：`testDebugUnitTest --tests "*Lofi*"` → **11 类 87 例零失败**（2 例 skip = 未开 `LOFI_SNAPSHOT` 的 PNG 导出）；全量 `testDebugUnitTest` → **251 类 / 2557 例零失败**；`lintDebug` → **0 errors / 164 warnings**（既有告警，无新增）。版本号 192 / 2.39.7。
+
+**未做**：① **P0 真机探针仍未跑**——`Filter.Nearest` 放大在创维 5.1.1 上是否硬边、`PixelBuffer`→`ImageBitmap`→`drawImage` 的每帧成本，这两项只能上电视量（低于 15 fps 按 §5 内节流处置）；② 四城的地标相似度人工评分（≥4 才收）按分工归所有者；③ 未推送、未 tag。
+
