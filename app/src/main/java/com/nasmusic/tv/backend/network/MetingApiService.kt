@@ -161,9 +161,9 @@ class MetingApiService(
      * - lrc → 实际就是歌词文本端点，由 resolveLyrics() 请求获取
      */
     override suspend fun search(keyword: String, limit: Int): List<Song> = withContext(Dispatchers.IO) {
-        AppLog.i(DIAG, "=== search start === keyword='$keyword'")
+        AppLog.d(DIAG, "=== search start === keyword='$keyword'")
         if (keyword.isBlank()) {
-            AppLog.i(DIAG, "search: keyword blank, return empty")
+            AppLog.d(DIAG, "search: keyword blank, return empty")
             return@withContext emptyList()
         }
 
@@ -177,9 +177,9 @@ class MetingApiService(
      *   一起换源（Q5 裁定「其他页面功能不受影响」）。
      */
     override suspend fun searchNativeFirst(keyword: String, limit: Int): List<Song> = withContext(Dispatchers.IO) {
-        AppLog.i(DIAG, "=== search start === keyword='$keyword'")
+        AppLog.d(DIAG, "=== search start === keyword='$keyword'")
         if (keyword.isBlank()) {
-            AppLog.i(DIAG, "search: keyword blank, return empty")
+            AppLog.d(DIAG, "search: keyword blank, return empty")
             return@withContext emptyList()
         }
 
@@ -191,15 +191,15 @@ class MetingApiService(
                 netease.searchSongs(keyword)
             } catch (e: Exception) {
                 // 网易随时下线（R1）是预期内常态：这里只降级，绝不上抛、绝不返回空集
-                AppLog.w(DIAG, "search: netease-native threw ${e.javaClass.simpleName}: ${e.message}")
+                AppLog.d(DIAG, "search: netease-native threw ${e.javaClass.simpleName}: ${e.message}")
                 emptyList()
             }
             if (nativeSongs.isNotEmpty()) {
-                AppLog.i(DIAG, "search: netease-native hit=${nativeSongs.size}, endpoint chain skipped")
-                AppLog.i(DIAG, "=== search end ===")
+                AppLog.d(DIAG, "search: netease-native hit=${nativeSongs.size}, endpoint chain skipped")
+                AppLog.d(DIAG, "=== search end ===")
                 return@withContext nativeSongs
             }
-            AppLog.e(DIAG, "search: netease-native empty/offline, falling back to endpoint chain")
+            AppLog.d(DIAG, "search: netease-native empty/offline, falling back to endpoint chain")
         }
 
         searchViaEndpoints(keyword)
@@ -218,21 +218,21 @@ class MetingApiService(
         // 构造端点尝试顺序：当前选中的端点优先，然后是其他预设端点
         val currentBase = baseUrl
         val endpoints = buildEndpointFallbackOrder(currentBase)
-        AppLog.i(DIAG, "search: endpoint fallback order=${endpoints.map { it.take(40) }}")
+        AppLog.d(DIAG, "search: endpoint fallback order=${endpoints.map { it.take(40) }}")
 
         for ((index, endpoint) in endpoints.withIndex()) {
-            AppLog.i(DIAG, "search: trying endpoint[$index]='${endpoint.take(60)}'")
+            AppLog.d(DIAG, "search: trying endpoint[$index]='${endpoint.take(60)}'")
             val songs = searchWithEndpoint(keyword, endpoint)
             if (songs.isNotEmpty()) {
-                AppLog.i(DIAG, "search: endpoint[$index] returned ${songs.size} songs, success")
-                AppLog.i(DIAG, "=== search end ===")
+                AppLog.d(DIAG, "search: endpoint[$index] returned ${songs.size} songs, success")
+                AppLog.d(DIAG, "=== search end ===")
                 return@withContext songs
             }
-            AppLog.w(DIAG, "search: endpoint[$index] returned empty, trying next")
+            AppLog.d(DIAG, "search: endpoint[$index] returned empty, trying next")
         }
 
         AppLog.w(DIAG, "search: all endpoints failed or empty")
-        AppLog.i(DIAG, "=== search end ===")
+        AppLog.d(DIAG, "=== search end ===")
         emptyList()
     }
 
@@ -270,22 +270,22 @@ class MetingApiService(
         val server = serverProvider()
         return try {
             val url = "$endpoint?server=$server&type=search&id=${URLEncoder.encode(keyword, "UTF-8")}"
-            AppLog.i(DIAG, "searchWithEndpoint: url='$url'")
+            AppLog.d(DIAG, "searchWithEndpoint: url='$url'")
             val request = Request.Builder()
                 .url(url)
                 .header("User-Agent", "Mozilla/5.0")
                 .build()
             client.newCall(request).execute().use { response ->
                 val body = response.body?.string()
-                AppLog.i(DIAG, "searchWithEndpoint: response code=${response.code} bodyLen=${body?.length ?: 0}")
+                AppLog.d(DIAG, "searchWithEndpoint: response code=${response.code} bodyLen=${body?.length ?: 0}")
                 if (!response.isSuccessful || body.isNullOrBlank()) {
-                    AppLog.w(DIAG, "searchWithEndpoint: failed code=${response.code} bodyEmpty=${body.isNullOrBlank()}")
+                    AppLog.d(DIAG, "searchWithEndpoint: failed code=${response.code} bodyEmpty=${body.isNullOrBlank()}")
                     return@use emptyList()
                 }
                 parseSongs(body)
             }
         } catch (e: Exception) {
-            AppLog.w(DIAG, "searchWithEndpoint error: ${e.javaClass.simpleName}: ${e.message}")
+            AppLog.d(DIAG, "searchWithEndpoint error: ${e.javaClass.simpleName}: ${e.message}")
             emptyList()
         }
     }
@@ -384,8 +384,8 @@ class MetingApiService(
      * 单次请求的响应形态（302 / 200 / 非-302 3xx 跟一跳）见 [fetchPlayUrl]。
      * 注入 `probe` 时，来自重定向链的直链会跟一跳探测可播性（§3.8 第 1 步）：仅 DEAD 跳过该档位×端点组合，UNKNOWN 与 PLAYABLE 一律放行。
      *
-     * ⚠️ 全链失败时逐「端点×档位」的失败原因并进**e 级**汇总日志：`AppLog.w` 在 release 里被
-     * `BuildConfig.DEBUG` 折掉，设备侧只剩这一行可看。
+     * ⚠️ 逐「端点×档位」的失败原因走 **d 级**（仅 Debug 落盘）；全链失败汇总进 **e 级**，
+     * 设备侧（release）只需这一行就能判断「这首歌彻底不可播」。
      */
     override suspend fun resolvePlayUrlDetailed(song: Song, quality: Int): ResolveResult =
         withContext(Dispatchers.IO) {
@@ -413,7 +413,7 @@ class MetingApiService(
                                 if (fetched.fromRedirect && probe?.probe(fetched.url) == Playability.DEAD) {
                                     probedDead = true
                                     misses += "$endpoint br=$br → probe DEAD"
-                                    AppLog.w(TAG, "resolvePlayUrl: probe DEAD via '$endpoint' br=$br for netId=$netId")
+                                    AppLog.d(TAG, "resolvePlayUrl: probe DEAD via '$endpoint' br=$br for netId=$netId")
                                     continue   // 只跳内层 for(br)：该端点×该档失败，继续降级链
                                 }
                                 AppLog.d(TAG, "resolvePlayUrl: resolved via '$endpoint' br=$br (actual=$actual) for netId=$netId")
@@ -421,13 +421,13 @@ class MetingApiService(
                             }
                             is PlayUrlFetch.Miss -> {
                                 misses += "$endpoint br=$br → ${fetched.reason}"
-                                AppLog.w(TAG, "resolvePlayUrl: empty from '$endpoint' br=$br for netId=$netId")
+                                AppLog.d(TAG, "resolvePlayUrl: empty from '$endpoint' br=$br for netId=$netId")
                             }
                         }
                     } catch (e: Exception) {
                         // 异常类型名是**唯一**能在 release 里区分"TLS 不信任 / DNS / 连接被拒 / 超时"的信息
                         misses += "$endpoint br=$br → ${e.javaClass.simpleName}: ${e.message?.take(80)}"
-                        AppLog.w(TAG, "resolvePlayUrl: endpoint '$endpoint' br=$br failed: ${e.message}")
+                        AppLog.d(TAG, "resolvePlayUrl: endpoint '$endpoint' br=$br failed: ${e.message}")
                     }
                 }
             }
@@ -461,9 +461,9 @@ class MetingApiService(
                         return@withContext text
                     }
                 }
-                AppLog.w(TAG, "resolveLyrics: empty from '$endpoint' for netId=$netId")
+                AppLog.d(TAG, "resolveLyrics: empty from '$endpoint' for netId=$netId")
             } catch (e: Exception) {
-                AppLog.w(TAG, "resolveLyrics: endpoint '$endpoint' failed: ${e.message}")
+                AppLog.d(TAG, "resolveLyrics: endpoint '$endpoint' failed: ${e.message}")
             }
         }
         AppLog.w(TAG, "resolveLyrics: all endpoints failed for netId=$netId")
@@ -518,7 +518,7 @@ class MetingApiService(
         for (endpoint in endpoints) {
             try {
                 val url = "$endpoint?server=$server&type=playlist&id=${URLEncoder.encode(playlistId, "UTF-8")}"
-                AppLog.i(DIAG, "getPlaylist: trying endpoint='$endpoint' url='$url'")
+                AppLog.d(DIAG, "getPlaylist: trying endpoint='$endpoint' url='$url'")
                 val request = Request.Builder()
                     .url(url)
                     .header("User-Agent", "Mozilla/5.0")
@@ -526,13 +526,13 @@ class MetingApiService(
                 var songs: List<Song>? = null
                 client.newCall(request).execute().use { response ->
                     val body = response.body?.string()
-                    AppLog.i(DIAG, "getPlaylist: code=${response.code} bodyLen=${body?.length ?: 0}")
+                    AppLog.d(DIAG, "getPlaylist: code=${response.code} bodyLen=${body?.length ?: 0}")
                     if (response.isSuccessful && !body.isNullOrBlank()) {
                         songs = parseSongs(body)
                     }
                 }
                 if (!songs.isNullOrEmpty()) {
-                    AppLog.i(DIAG, "getPlaylist: loaded ${songs.size} songs via '$endpoint'")
+                    AppLog.d(DIAG, "getPlaylist: loaded ${songs.size} songs via '$endpoint'")
                     return@withContext songs
                 }
                 // 「本端点返回空」是合法结果（歌单就是空的/不存在，或换了端点才有）——
@@ -541,7 +541,7 @@ class MetingApiService(
                 // 真的全军覆没（所有端点都空）才由循环后的 W 留痕。
                 AppLog.d(DIAG, "getPlaylist: empty from '$endpoint'")
             } catch (e: Exception) {
-                AppLog.w(DIAG, "getPlaylist: endpoint '$endpoint' failed: ${e.javaClass.simpleName}: ${e.message}")
+                AppLog.d(DIAG, "getPlaylist: endpoint '$endpoint' failed: ${e.javaClass.simpleName}: ${e.message}")
             }
         }
         AppLog.w(DIAG, "getPlaylist: all endpoints failed for playlistId=$playlistId")
@@ -638,12 +638,12 @@ class MetingApiService(
                         networkId = netId
                     )
                 } catch (e: Exception) {
-                    AppLog.w(DIAG, "parseSongs[$idx] error: ${e.message}")
+                    AppLog.d(DIAG, "parseSongs[$idx] error: ${e.message}")
                     null
                 }
             }
             // 汇总日志：一次请求只打一条 INFO，避免逐条日志刷屏
-            AppLog.i(DIAG, "parseSongs: result=${result.size}/${items.size}" +
+            AppLog.d(DIAG, "parseSongs: result=${result.size}/${items.size}" +
                 (if (skippedNoTitle > 0) " skippedNoTitle=$skippedNoTitle" else "") +
                 (if (skippedNoId > 0) " skippedNoId=$skippedNoId" else ""))
             result
@@ -669,13 +669,13 @@ class MetingApiService(
             val id = android.net.Uri.parse(url).getQueryParameter("id")
             if (!id.isNullOrBlank()) return id
         } catch (e: Exception) {
-            AppLog.w(DIAG, "extractIdFromUrl: Uri.parse failed: ${e.message}")
+            AppLog.d(DIAG, "extractIdFromUrl: Uri.parse failed: ${e.message}")
         }
         // 兜底：正则提取（Uri.parse 失败或无 query parameter 时）
         return try {
             Regex("[?&]id=([^&]+)").find(url)?.groupValues?.getOrNull(1)
         } catch (e: Exception) {
-            AppLog.w(DIAG, "extractIdFromUrl: regex fallback failed: ${e.message}")
+            AppLog.d(DIAG, "extractIdFromUrl: regex fallback failed: ${e.message}")
             null
         }
     }

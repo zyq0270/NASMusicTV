@@ -240,7 +240,7 @@ class MvSearchViewModel(
             val result = try {
                 mvSearchManager.searchMvFor(nextSong)
             } catch (e: Exception) {
-                AppLog.w("MvSearchViewModel", "preSearchNextMv failed: ${e.message}", e)
+                AppLog.d("MvSearchViewModel", "preSearchNextMv failed: ${e.message}", e)
                 null
             }
             pendingNextResult = result

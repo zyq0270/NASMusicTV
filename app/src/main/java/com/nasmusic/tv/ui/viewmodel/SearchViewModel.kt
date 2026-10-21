@@ -215,9 +215,9 @@ class SearchViewModel(
                 // ⛔ 先发的结果不得覆盖后发的（否则"改词后看到的是上一个词的行"）
                 if (gen != searchGeneration) return@launch
                 // F6 留痕打在**闸门之后**（审查 I-1）：⛔ 被改词覆盖掉的陈旧搜索一律不留痕，
-                // 否则 release 上唯一的权威痕迹会说谎（`AppLog.d/i/w` 在 release 是被折掉的）。
+                // 否则日志会留下一条根本不该发布的结果（release 下 W/E 会落盘，痕迹很显眼）。
                 if (artistPageFetchFailed) {
-                    AppLog.e(
+                    AppLog.w(
                         "MetingDiag",
                         "searchSongsOnServer: '$query' 命中艺人但 getArtistSongs 返回 null，放弃展开（交回原网络段 ${metingPart.size} 行）"
                     )
@@ -225,7 +225,7 @@ class SearchViewModel(
                 _searchResults.value = UiState.Success(merged)
                 _searchUnplayableIds.value = artistExpansion.unplayableIds
                 _artistPaging.value = artistExpansion.paging
-                AppLog.e(
+                AppLog.d(
                     "MetingDiag",
                     "searchSongsOnServer: '$query' merged=${merged.size} (meting ${metingPart.size}→${expanded.size}) hit=${artistExpansion.lastHitSource}"
                 )
@@ -288,9 +288,9 @@ class SearchViewModel(
      * 搜索结果为统一 Song 模型（isNetworkSong=true）。
      */
     fun searchNetworkSongs(keyword: String) {
-        AppLog.i("MetingDiag", "=== SearchViewModel.searchNetworkSongs === keyword='$keyword'")
+        AppLog.d("MetingDiag", "=== SearchViewModel.searchNetworkSongs === keyword='$keyword'")
         if (keyword.isBlank()) {
-            AppLog.i("MetingDiag", "searchNetworkSongs: keyword blank")
+            AppLog.d("MetingDiag", "searchNetworkSongs: keyword blank")
             _networkSearchResults.value = UiState.Success(emptyList())
             _networkSearchKeyword.value = ""
             networkSearchBaseKeyword = ""
@@ -359,7 +359,7 @@ class SearchViewModel(
         viewModelScope.launch {
             val results = searchNetworkSongsBlocking(keyword)
             if (results != null) {
-                AppLog.i("MetingDiag", "doNetworkSearch: got ${results.size} results for '$keyword'")
+                AppLog.d("MetingDiag", "doNetworkSearch: got ${results.size} results for '$keyword'")
                 _networkSearchResults.value = UiState.Success(results)
                 // 搜索成功后才记录历史（空结果也算成功；shuffleNetworkSearch 不走此路径，不会重复记录）
                 prefs.history.recordSearch(keyword)

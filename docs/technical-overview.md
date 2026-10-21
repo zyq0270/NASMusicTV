@@ -17026,3 +17026,87 @@ md5 `3f1a1c77dfd67cd21442a17271bc5642`，`install -r` 到手机（Redmi，`91846
 **取证手法（同类问题直接照用）**：`/proc/net/tcp` 看 `SYN_SENT`、`/sys/fs/cgroup/.../cgroup.freeze`
 判冻结、`dumpsys activity recents` 读浏览器真实 URL、`content query --uri content://media/external/downloads`
 看 `owner_package_name`；release 包没有 `run-as`，现场可观测通道只有落盘日志。
+
+### 10.262 v2.39.4 补丁 — 真机日志分诊后重做日志分级 + 日志页级别筛选 + 空端点回落（2026-10-21）
+
+**上报**：手机（Redmi 22081212C / `diting`，Android 15，release v2.39.4 `versionCode=189`）日志页
+「很多报警项目」；同时提出两条产品要求：①不重要的调试信息只在 Debug 版产生，release 只留重要日志；
+②日志页要能按级别筛选。
+
+**真机日志分诊**（`adb` 无线 + uiautomator 驱动日志页逐屏读取，14:35:40 → 14:50:55 共 70 条去重，全部为 `W`）
+- 标签分布：`MetingDiag` 63、`BilibiliMvService` 5、`MetingApiService` 1、`MvSearchManager` 1。
+- Meting 端点 `https://meting.api.redcha.cn/api`：`failed code=429` ×7、`SocketException: Connection reset` ×6、
+  `endpoint[0/1/2] returned empty` ×19、`all endpoints failed or empty` ×6、`getPlaylist ... failed` ×3、
+  `resolveLyrics ... failed` ×1 —— 属上游可用性/限流，客户端无 bug，但**逐端点**记录不该在 release 落盘。
+- **真实 bug**：MV 端点为**空串**（设置里清空过或备份里为空），`BilibiliMvService` 因此拼出无 scheme/host 的
+  相对 URL，抛 `IllegalArgumentException: Expected URL scheme 'http' or 'https'`（`/x/web-interface/nav`），
+  连带 `signWbi: mixinKey unavailable`、`searchMv: no candidates`。
+- `MvSearchManager: no MV found` 是正常「没搜到」，UI 已置暗，不该记为告警。
+- 10-20 02:46:31 的历史崩溃（R8 混淆 lazy NPE）已由 v2.39.3 `a246949` 修复，本版未再复现。
+
+**日志分级模型（本版落地）**
+
+| 级别 | Debug 构建 | Release 构建 |
+|---|---|---|
+| `d` / `i` | logcat + 落盘 | **完全不产生**（调用点仍编译，方法体内 `BuildConfig.DEBUG` 守卫） |
+| `w` | logcat + 落盘 | 落盘（logcat 不出，避免刷系统日志） |
+| `e` | logcat + 落盘 | logcat + 落盘 |
+
+`LogStore` 增加 `LEVEL_DEBUG/LEVEL_INFO`、`ALL_LEVELS`、`severityOf`（D=0…E=3）、`filterAtLeast`、
+`normalizeLevel`（脏值回落 D=全部）；`decode` 接受四级。`AppLog.d/i` 增加可选 `throwable`，
+避免降级时丢堆栈。分级准则写进 `AppLog` KDoc：逐端点/逐请求/缓存命中用 `d`；聚合失败用 `w`；
+崩溃、数据丢失、用户操作失败用 `e`。
+
+**日志页级别筛选**
+
+- 偏好 `settings_logs_min_level`（设备本地，不进备份 JSON；与屏幕方向同待遇），
+  `@Volatile cachedLogsMinLevel` + DataStore collector，`MainViewModel` 用 Flow 补齐冷启动窗口。
+- UI 用单选芯片行（全部 / 信息 / 警告 / 错误），**不是下拉菜单**：项目没有 DropdownMenu 原语，
+  TV D-Pad 下的菜单焦点是已知坑，档位选择统一走 `SettingsChipRow`（与时长档、画面适配同一原语）。
+  手机竖屏下四枚短标签同样排成一行（`phonePortrait = 4`），所有者要求不折行。
+- 读取窗口改为 `snapshot(limit = KEEP_LINES)`（400）后再过滤、渲染前截到 `READ_LIMIT`（100）——
+  否则「只看错误」会被「最近 100 条恰好全是警告」骗成空列表。
+- 摘要改为「显示 X / Y 条 · 占用 Z」；过滤后为空时给出「选择全部可查看更低级别」的提示。
+
+**空端点回落（四处）**
+
+1. 读取端：`AppPreferences.endpointOrDefault()` 对空串/非法值回落默认端点（Meting / MV 的 collector）；
+2. 写入端：`setMetingApiBaseUrl` / `setMvApiBaseUrl` 空白输入改为 `remove(key)`，不再写空串；
+3. 导出 `appSettings` 时四处端点（Meting / MV / 酷狗歌词 / 网易歌词）同样回落默认值；
+4. 备份恢复时走同一回落（`modelDownloadUrl` 保留「空=内置候选」语义，不参与）。
+
+**诊断日志降噪**（逐请求/逐源降为 `d`，聚合失败与真实异常保留 `w/e`）
+
+- `MetingApiService`：17 处 `i` 降 `d`；逐端点空结果、单端点失败、逐档探测失败、解析单条失败降 `d`；
+  保留 `all endpoints failed or empty`（`w`）、`resolvePlayUrl` 全链失败（`e`）、`artistId` 非数字（`e`）。
+- `NetworkMusicManager`：6 处 `MetingDiag` `i` 降 `d`；单源搜索异常与 cross-source 逐源替换降 `d`；
+  最终「所有源均无可播替代曲」保留 `w`。
+- `BilibiliMvService`：空关键词、无候选、最佳候选解析失败、`searchMv OK`、`mixinKey` 缺失、
+  单次 GET 失败/异常降 `d`；全候选解析失败（`w`）、`searchMv` 异常（`e`）、B 站业务码异常（`w`）保留。
+- `MvSearchManager`：持久缓存 bvid 解析失败、单源异常、`no MV found`、`no non-baidu MV found` 降 `d`。
+- `NetworkMusicViewModel`：播放入口 `e`→`d`；百度服务自愈注册 `e`→`w`（用户可见但要处理）。
+- `SearchViewModel`：艺人作品取数失败降 `w`（用户可见降级）；合并摘要 `e`→`d`；搜索里程碑 `i`→`d`；
+  保留 `searchSongsOnServer failed`（`e`）与 `doNetworkSearch failed`（`e`）；同步更新过时注释
+  「release 上唯一权威痕迹是 `AppLog.e`」——`w` 现在也落盘。
+- `SearchAggregator` 两条 `i`→`d`；`MvSearchViewModel` 预搜下一首失败 `w`→`d`。
+
+**门禁变更**
+
+| 测试类 | 变更 | 锁什么 |
+|---|---|---|
+| `LogStoreTest` | +3 例（共 17） | 四级落盘与解码 / 过滤含更高级别 / 未知级别回落全部 |
+| `LogsTabWiringGateTest` | +2 例（共 30） | `AppLog.d/i` 必须带 `BuildConfig.DEBUG` 守卫且落盘；日志页必须渲染四级筛选与过滤调用 |
+| `EndpointUrlPrefTest`（新） | 4 例 | 清空/备份空/备份非法端点均回落默认；合法自定义端点保留 |
+| `ArtistSongsPagingTest` | 1 例判据更新 | F6 留痕仍须在代数闸门之后，级别从 `e` 改为 `w`（release 仍落盘，且属用户可见降级而非崩溃） |
+
+**验证**：`assembleDebug lintDebug` → `BUILD SUCCESSFUL`，lint **0 error / 162 warning**（存量）；
+`testDebugUnitTest` → **231 个测试类 / 2395 例 / 0 失败 0 错误 0 跳过**（统计自
+`app/build/test-results/testDebugUnitTest/TEST-*.xml`，不看退出码）；`assembleRelease` → `BUILD SUCCESSFUL`，
+产物 `NASMusicTV-release-v2-39-4.apk` **25,841,705 字节**、md5 `4cf2db478bfd854ace505e63cb20dfd6`、
+`versionCode=189 / versionName=2.39.4`，签名证书 `CN=NASMusicTV`（`release-key.jks`）。
+
+⚠️ 手机（`91846823`）上此前误装了 `versionCode=190 / 2.40.0` 的中间包，再装 189 被系统以
+`INSTALL_FAILED_VERSION_DOWNGRADE` 拒绝（Android 12+ 对**非 debuggable** 包不接受 `adb install -d` 降级；
+`pm install -d`、`cmd package install-downgrade` 两条路本机均不可用，后者命令不存在；`uninstall -k` 也不行，
+保留的数据目录仍以 190 作为降级基线）。**所有者 2026-10-21 裁决：暂不装手机** —— 手机保留 190 中间包，
+189 包留档，等下次发版或真机验收时再装。

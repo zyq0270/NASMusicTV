@@ -404,13 +404,13 @@ class ArtistSongsPagingTest {
 
     /**
      * 审查 I-1 的 **VM 侧源码门**：F6 留痕必须①紧接着 `expand()` 取进局部量、
-     * ②打在代数闸门**之后**、③用 `AppLog.e`（`AppLog.d/i/w` 方法体有 `if (BuildConfig.DEBUG)` 守卫，
-     * release 下 R8 连字符串一起折掉，只有 `e` 必然存活）。
+     * ②打在代数闸门**之后**、③用 `AppLog.w`（`d/i` 在 release 完全不产生，
+     * `w/e` 才落盘留痕；这一条属「用户可见降级」而非崩溃，故用 `w`）。
      * ⚠️ VM 的**行为**可测（`ArtistExpansionGenerationGateTest`），但「日志落在闸门哪一侧」
      * 不是可观测行为 ⇒ 这一条只能靠源码门钉。
      */
     @Test
-    fun `I-1 源码门 F6 留痕必须先取信号、过闸门后再打且必须是 AppLog_e`() {
+    fun `I-1 源码门 F6 留痕必须先取信号、过闸门后再打且必须是 AppLog_w`() {
         val flat = Regex("""\s+""").replace(mainSourceFile("ui/viewmodel/SearchViewModel.kt"), " ")
         val expandAt = flat.indexOf("artistExpansion.expand(query, metingPart)")
         val readAt = flat.indexOf("artistExpansion.lastArtistPageFetchFailed")
@@ -422,13 +422,13 @@ class ArtistSongsPagingTest {
         val gate = flat.indexOf("if (gen != searchGeneration) return@launch", readAt)
         assertTrue("I-1：取信号之后找不到代数闸门 ⇒ 陈旧发布会带着留痕一起出去", gate >= 0)
         assertTrue("I-1：留痕必须打在闸门**之后**（被改词覆盖的陈旧搜索不该在 release 里留痕）", logAt > gate)
-        // 「最近的一次 AppLog.* 调用必须是 .e」——⛔ 不要按固定字符窗口找：
+        // 「最近的一次 AppLog.* 调用必须是 .w」——⛔ 不要按固定字符窗口找：
         // tag / `$query` 插值的长度一变就会假红（本仓库第一次跑就栽在 40 字符窗口上）。
         val head = flat.substring((logAt - 200).coerceAtLeast(0), logAt)
         val lastCall = head.lastIndexOf("AppLog.")
         assertTrue(
             "F6：留痕日志前找不到任何 AppLog 调用 ⇒ 文案可能被搬出调用：$head",
-            lastCall >= 0 && head.substring(lastCall).startsWith("AppLog.e")
+            lastCall >= 0 && head.substring(lastCall).startsWith("AppLog.w")
         )
     }
 

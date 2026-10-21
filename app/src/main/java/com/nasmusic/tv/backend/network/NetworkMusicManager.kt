@@ -134,22 +134,22 @@ class NetworkMusicManager(
      */
     suspend fun search(keyword: String, nativeFirst: Boolean = false): List<Song> = withContext(Dispatchers.IO) {
         val currentDefault = defaultSource
-        AppLog.i("MetingDiag", "=== NetworkMusicManager.search === keyword='$keyword' defaultSource='$currentDefault'")
+        AppLog.d("MetingDiag", "=== NetworkMusicManager.search === keyword='$keyword' defaultSource='$currentDefault'")
         if (keyword.isBlank()) return@withContext emptyList()
 
         val ordered = orderedServices()
-        AppLog.i("MetingDiag", "search: orderedServices=${ordered.map { it.sourceId }}")
+        AppLog.d("MetingDiag", "search: orderedServices=${ordered.map { it.sourceId }}")
         for (svc in ordered) {
             try {
-                AppLog.i("MetingDiag", "search: trying source=${svc.sourceId}")
+                AppLog.d("MetingDiag", "search: trying source=${svc.sourceId}")
                 val results = if (nativeFirst) svc.searchNativeFirst(keyword) else svc.search(keyword)
                 if (results.isNotEmpty()) {
-                    AppLog.i("MetingDiag", "search '$keyword' hit source=${svc.sourceId} count=${results.size}")
+                    AppLog.d("MetingDiag", "search '$keyword' hit source=${svc.sourceId} count=${results.size}")
                     return@withContext results
                 }
-                AppLog.i("MetingDiag", "search '$keyword' empty on source=${svc.sourceId}, trying next")
+                AppLog.d("MetingDiag", "search '$keyword' empty on source=${svc.sourceId}, trying next")
             } catch (e: Exception) {
-                AppLog.e("MetingDiag", "search '$keyword' error on source=${svc.sourceId}: ${e.message}", e)
+                AppLog.d("MetingDiag", "search '$keyword' error on source=${svc.sourceId}: ${e.message}", e)
             }
         }
         AppLog.w("MetingDiag", "search '$keyword' no results from any source")
@@ -380,7 +380,7 @@ class NetworkMusicManager(
             .joinToString(separator = " ")
             .trim()
         if (query.isBlank()) return emptyList()
-        AppLog.i("MetingDiag", "searchByKeywords: combined='$query'")
+        AppLog.d("MetingDiag", "searchByKeywords: combined='$query'")
         return search(query)
     }
 
@@ -395,7 +395,7 @@ class NetworkMusicManager(
      */
     fun registerService(service: NetworkMusicService) {
         services[service.sourceId] = service
-        AppLog.i(TAG, "registerService: ${service.sourceId} (total=${services.size})")
+        AppLog.d(TAG, "registerService: ${service.sourceId} (total=${services.size})")
     }
 
     /**
@@ -407,7 +407,7 @@ class NetworkMusicManager(
         // playUrlKey() 生成为 "<networkSource>:<networkId>:<quality>"，原过滤串
         // "ntwk_<sourceId>_" 是歌曲 id 的格式，永远匹配不上（注销后旧直链残留至 TTL）。
         playUrlCache.entries.removeAll { it.key.startsWith("${sourceId}:") }
-        AppLog.i(TAG, "unregisterService: $sourceId (total=${services.size})")
+        AppLog.d(TAG, "unregisterService: $sourceId (total=${services.size})")
     }
 
     /**
@@ -459,12 +459,12 @@ class NetworkMusicManager(
         val originalUrl = resolvePlayUrl(song, forceRefresh)
         if (!originalUrl.isNullOrBlank()) return null  // 原源可播，无需降级
 
-        AppLog.w(TAG, "cross-source: 原源 source=$src 解析失败，尝试其他源重搜 title='${song.title}' artist='${song.artist}'")
+        AppLog.d(TAG, "cross-source: 原源 source=$src 解析失败，尝试其他源重搜 title='${song.title}' artist='${song.artist}'")
 
         // 用 title+artist 构造搜索关键词（artist 为空时仅用 title）
         val keywords = listOf(song.title, song.artist).filter { it.isNotBlank() }
         if (keywords.isEmpty()) {
-            AppLog.w(TAG, "cross-source: title 与 artist 均为空，无法重搜")
+            AppLog.d(TAG, "cross-source: title 与 artist 均为空，无法重搜")
             return null
         }
         val query = keywords.joinToString(" ").trim()
@@ -473,15 +473,15 @@ class NetworkMusicManager(
         for (svc in orderedServices()) {
             if (svc.sourceId == src) continue  // 跳过原源
             if (!services.containsKey(svc.sourceId)) continue
-            AppLog.w(TAG, "cross-source: 尝试候选源 ${svc.sourceId} 搜索 '$query'")
+            AppLog.d(TAG, "cross-source: 尝试候选源 ${svc.sourceId} 搜索 '$query'")
             val candidates = try {
                 svc.search(query)
             } catch (e: Exception) {
-                AppLog.w(TAG, "cross-source: ${svc.sourceId} 搜索失败: ${e.message}")
+                AppLog.d(TAG, "cross-source: ${svc.sourceId} 搜索失败: ${e.message}")
                 emptyList()
             }
             if (candidates.isEmpty()) {
-                AppLog.w(TAG, "cross-source: ${svc.sourceId} 无搜索结果")
+                AppLog.d(TAG, "cross-source: ${svc.sourceId} 无搜索结果")
                 continue
             }
 
@@ -492,17 +492,17 @@ class NetworkMusicManager(
                 val candidateUrl = try {
                     svc.resolvePlayUrl(candidate)
                 } catch (e: Exception) {
-                    AppLog.w(TAG, "cross-source: ${svc.sourceId} 候选 ${candidate.title} 解析异常: ${e.message}")
+                    AppLog.d(TAG, "cross-source: ${svc.sourceId} 候选 ${candidate.title} 解析异常: ${e.message}")
                     null
                 }
                 if (!candidateUrl.isNullOrBlank()) {
                     // 把解析好的 URL 写回替代曲，保证替换即可播
                     val replacement = candidate.copy(streamUrl = candidateUrl)
-                    AppLog.w(TAG, "cross-source: 命中源 ${svc.sourceId} 替代 '${candidate.title}' -> $candidateUrl")
+                    AppLog.d(TAG, "cross-source: 命中源 ${svc.sourceId} 替代 '${candidate.title}' -> $candidateUrl")
                     return CrossSourceResult(replacement, candidateUrl, svc.sourceId)
                 }
             }
-            AppLog.w(TAG, "cross-source: ${svc.sourceId} 候选均不可播")
+            AppLog.d(TAG, "cross-source: ${svc.sourceId} 候选均不可播")
         }
 
         AppLog.w(TAG, "cross-source: 所有源均无可播替代曲")

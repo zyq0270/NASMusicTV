@@ -12,7 +12,7 @@ import java.util.concurrent.TimeUnit
  * 一条持久化的运行日志。
  *
  * @param timestamp 毫秒时间戳（`System.currentTimeMillis()`）
- * @param level [LogStore.LEVEL_WARN] / [LogStore.LEVEL_ERROR]
+ * @param level [LogStore.LEVEL_DEBUG] / [LogStore.LEVEL_INFO] / [LogStore.LEVEL_WARN] / [LogStore.LEVEL_ERROR]
  * @param tag 模块标签（与 logcat 的 tag 一致）
  * @param message 正文（已反转义，可含换行）
  * @param stackTrace 异常堆栈全文（无异常时为 null）
@@ -27,9 +27,6 @@ data class LogEntry(
     val stackTrace: String?,
     val truncated: Boolean = false,
 ) {
-    /** 是否为错误级（UI 上色用） */
-    val isError: Boolean get() = level == LogStore.LEVEL_ERROR
-
     /** 正文 + 堆栈的总行数（详情页「共 N 行」用；纯函数，便于单测） */
     val totalLines: Int
         get() = countLines(message) + (stackTrace?.let { countLines(it) } ?: 0)
@@ -58,8 +55,14 @@ data class LogSnapshot(
  *
  * ## 为什么要落盘
  * 电视上没法连着 adb 看 logcat，用户报「刚才闪退了/一直加载不出来」时，
- * 现场早就没了。这里把 **警告与错误** 追加到 `filesDir/logs/app.log`，
- * 重启后仍可回看；崩溃（未捕获异常）走同步写，尽量保证最后一条留得下来。
+ * 现场早就没了。这里把日志追加到 `filesDir/logs/app.log`，重启后仍可回看；
+ * 崩溃（未捕获异常）走同步写，尽量保证最后一条留得下来。
+ *
+ * ## 级别与 release
+ * - **W / E 始终落盘**（release 日志页只应有这两级）；
+ * - **D / I 只在 Debug 构建落盘**（由 [AppLog] 在入口处按 `BuildConfig.DEBUG` 拦截）——
+ *   release 既不打 logcat 也不写盘，调试信息不会把现场挤掉；
+ * - 页面按「最低级别」过滤（[filterAtLeast]），级别是字符串而非枚举，保持文格式向后兼容。
  *
  * ## 格式（单行 TSV + 转义）
  * `时间戳 \t 级别 \t tag \t 正文 [\t 堆栈]`，其中字段内的
@@ -80,11 +83,43 @@ data class LogSnapshot(
  */
 object LogStore {
 
-    /** 警告级 */
+    /** 调试级（仅 Debug 构建落盘） */
+    const val LEVEL_DEBUG = "D"
+
+    /** 信息级（仅 Debug 构建落盘） */
+    const val LEVEL_INFO = "I"
+
+    /** 警告级（始终落盘） */
     const val LEVEL_WARN = "W"
 
-    /** 错误级（含崩溃） */
+    /** 错误级（含崩溃，始终落盘） */
     const val LEVEL_ERROR = "E"
+
+    /** 全部级别（日志页「全部」筛选项的取值） */
+    val ALL_LEVELS: Set<String> = setOf(LEVEL_DEBUG, LEVEL_INFO, LEVEL_WARN, LEVEL_ERROR)
+
+    /**
+     * 级别严重度：D=0 < I=1 < W=2 < E=3。未知级别按 D 处理——
+     * 旧文件里若出现未识别字母，宁可显示也不要整条丢掉（decode 已挡掉，这里是兜底）。
+     */
+    fun severityOf(level: String): Int = when (level) {
+        LEVEL_ERROR -> 3
+        LEVEL_WARN -> 2
+        LEVEL_INFO -> 1
+        LEVEL_DEBUG -> 0
+        else -> 0
+    }
+
+    /** 过滤出「严重度 ≥ [minLevel]」的条目；顺序保持不变。 */
+    fun filterAtLeast(entries: List<LogEntry>, minLevel: String): List<LogEntry> {
+        val floor = severityOf(minLevel)
+        if (floor <= 0) return entries
+        return entries.filter { severityOf(it.level) >= floor }
+    }
+
+    /** 校验级别取值：不认识的级别回落「全部」（D），避免持久化的脏值把日志页滤成空白。 */
+    fun normalizeLevel(level: String): String =
+        if (level in ALL_LEVELS) level else LEVEL_DEBUG
 
     /** 单文件上限：256KB（约 2000 条短日志） */
     internal const val MAX_BYTES = 256L * 1024L
@@ -122,7 +157,8 @@ object LogStore {
     private fun logFile(): File? = logDir?.let { File(it, FILE_NAME) }
 
     /**
-     * 异步追加一条日志（[LogStore.LEVEL_WARN] / [LogStore.LEVEL_ERROR]）。
+     * 异步追加一条日志（[LogStore.LEVEL_DEBUG] / [LogStore.LEVEL_INFO] /
+     * [LogStore.LEVEL_WARN] / [LogStore.LEVEL_ERROR]）。
      *
      * 未初始化时静默丢弃 —— 应用启动最早期（`LogStore.init` 之前）的日志没有落点，
      * 此时 `AppLog` 仍照常输出 logcat。
@@ -238,7 +274,7 @@ object LogStore {
         if (parts.size < 4) return null
         val ts = parts[0].toLongOrNull() ?: return null
         val level = parts[1]
-        if (level != LEVEL_WARN && level != LEVEL_ERROR) return null
+        if (level !in ALL_LEVELS) return null
         return LogEntry(
             timestamp = ts,
             level = level,

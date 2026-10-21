@@ -329,7 +329,7 @@ val baiduOAuthClient: BaiduOAuthClient by lazy { BaiduOAuthClient(this, baiduOkH
 
     override fun onCreate() {
         super.onCreate()
-        // v2.40.0：运行日志落盘（设置页「日志」tab）+ 崩溃留痕。
+        // v2.39.4：运行日志落盘（设置页「日志」tab）+ 崩溃留痕。
         // ⚠️ 必须在其他初始化之前：越早装好，越能接住启动期的闪退。
         LogStore.init(filesDir)
         installCrashLogger()

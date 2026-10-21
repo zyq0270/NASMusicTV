@@ -3381,7 +3381,7 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
         }
     }
 
-    // ===================== v2.40.0：运行日志（设置页「日志」tab） =====================
+    // ===================== v2.39.4：运行日志（设置页「日志」tab） =====================
     // 数据源是 LogStore 落盘的 filesDir/logs/app.log（AppLog.w/e 与崩溃处理器写入）。
     // 这里只负责「读快照 / 清空」，写入路径不经过 ViewModel —— 日志产生点遍布全应用，
     // 不能反过来依赖 UI 层。
@@ -3391,10 +3391,29 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
     /** 最近日志（时间倒序）+ 文件占用；进入 LOGS 分区或点「刷新」时更新 */
     val logs: StateFlow<LogSnapshot> = _logs.asStateFlow()
 
+    /** 日志页级别过滤（持久化的设备本地偏好；默认 D=全部） */
+    private val _logsMinLevel = MutableStateFlow(prefs.getLogsMinLevelSync())
+    val logsMinLevel: StateFlow<String> = _logsMinLevel.asStateFlow()
+
+    init {
+        // 冷启动时 @Volatile 镜像可能还没收到 DataStore 的首次发射，用 Flow 补齐
+        viewModelScope.launch {
+            prefs.logsMinLevel.collect { _logsMinLevel.value = it }
+        }
+    }
+
+    fun setLogsMinLevel(level: String) {
+        val normalized = LogStore.normalizeLevel(level)
+        _logsMinLevel.value = normalized
+        viewModelScope.launch { prefs.setLogsMinLevel(normalized) }
+    }
+
     /** 重新读取日志文件（进入分区 / 手动刷新）。 */
     fun refreshLogs() {
         viewModelScope.launch {
-            _logs.value = withContext(Dispatchers.IO) { LogStore.snapshot() }
+            // 读满整个保留窗口（轮转只留 KEEP_LINES 行）：级别过滤要在全窗口里找，
+            // 否则「只看错误」会被「最近 100 条恰好全是警告」骗成空列表。
+            _logs.value = withContext(Dispatchers.IO) { LogStore.snapshot(limit = LogStore.KEEP_LINES) }
         }
     }
 
@@ -3403,7 +3422,7 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
         viewModelScope.launch {
             _logs.value = withContext(Dispatchers.IO) {
                 LogStore.clear()
-                LogStore.snapshot()
+                LogStore.snapshot(limit = LogStore.KEEP_LINES)
             }
         }
     }

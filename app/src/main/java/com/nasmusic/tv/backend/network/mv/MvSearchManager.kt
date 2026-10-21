@@ -62,7 +62,7 @@ class MvSearchManager(
                     return result
                 }
                 // resolveMv 失败（视频被删/风控）-> 删旧条目，继续走搜索
-                AppLog.w(TAG, "searchMvFor: persistent bvid=${entry.bvid} resolve failed, removing")
+                AppLog.d(TAG, "searchMvFor: persistent bvid=${entry.bvid} resolve failed, removing")
                 persistentCache.remove(song.id)
             }
         }
@@ -86,10 +86,10 @@ class MvSearchManager(
                     }
                 } catch (e: Exception) {
                     // 单个源失败不阻断其他源
-                    AppLog.w(TAG, "searchMvFor: service ${svc::class.java.simpleName} error: ${e.message}", e)
+                    AppLog.d(TAG, "searchMvFor: service ${svc::class.java.simpleName} error: ${e.message}", e)
                 }
             }
-            AppLog.w(TAG, "searchMvFor: no MV found for '$key'")
+            AppLog.d(TAG, "searchMvFor: no MV found for '$key'")
             null
         }
     }
@@ -127,7 +127,7 @@ class MvSearchManager(
                     val mv = svc.resolveMv(bvid)
                     if (mv != null) return@withContext mv
                 } catch (e: Exception) {
-                    AppLog.w(TAG, "resolveMv: service error: ${e.message}", e)
+                    AppLog.d(TAG, "resolveMv: service error: ${e.message}", e)
                 }
             }
             null
@@ -152,10 +152,10 @@ class MvSearchManager(
                         return@withContext result
                     }
                 } catch (e: Exception) {
-                    AppLog.w(TAG, "searchBilibiliFallback: service ${svc::class.java.simpleName} error: ${e.message}", e)
+                    AppLog.d(TAG, "searchBilibiliFallback: service ${svc::class.java.simpleName} error: ${e.message}", e)
                 }
             }
-            AppLog.w(TAG, "searchBilibiliFallback: no non-baidu MV found for '${song.title}'")
+            AppLog.d(TAG, "searchBilibiliFallback: no non-baidu MV found for '${song.title}'")
             null
         }
     }

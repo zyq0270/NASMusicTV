@@ -1,5 +1,6 @@
 package com.nasmusic.tv.ui.screens.settings
 
+import androidx.annotation.StringRes
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -23,6 +24,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
@@ -46,6 +48,7 @@ import com.nasmusic.tv.ui.theme.FontSize
 import com.nasmusic.tv.ui.theme.NasMusicColors
 import com.nasmusic.tv.util.LinkUtils
 import com.nasmusic.tv.util.LogEntry
+import com.nasmusic.tv.util.LogStore
 import com.nasmusic.tv.util.toClipboardText
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -54,27 +57,33 @@ import kotlinx.coroutines.delay
 
 /** 日志分区状态（运行期事实，不落盘、不进备份） */
 data class LogsSettingsState(
-    /** 最近若干条（时间倒序，最新在前） */
+    /** 保留窗口内的全部条目（时间倒序，最新在前；渲染时再截到 READ_LIMIT） */
     val entries: List<LogEntry> = emptyList(),
     /** 日志文件占用字节数 */
     val fileSizeBytes: Long = 0L,
+    /** 当前显示的最低级别（D/I/W/E；D=全部） */
+    val minLevel: String = LogStore.LEVEL_DEBUG,
 )
 
 /** 日志分区动作（清空确认弹窗由本分区自己持有） */
 data class LogsSettingsActions(
     val onRefresh: () -> Unit = {},
     val onClear: () -> Unit = {},
+    val onSelectMinLevel: (String) -> Unit = {},
 )
 
 /**
- * 日志分区（v2.40.0）：运行期警告/错误的持久化回看。
+ * 日志分区（v2.39.4）：运行期日志的持久化回看。
  *
  * 数据源是 [com.nasmusic.tv.util.LogStore] 落盘的 `filesDir/logs/app.log`，
- * 所以**重启后仍在**；写入发生在 `AppLog.w/e` 与崩溃处理器里，本页只读 + 清空。
+ * 所以**重启后仍在**；写入发生在 `AppLog` 与崩溃处理器里，本页只读 + 清空。
+ * D/I 只在 Debug 构建产生，W/E 在 release 也始终落盘；级别过滤是设备本地偏好。
  *
  * 排版取舍：
- *  - 卡片里先给一行摘要（条数 + 占用），再给「刷新 / 清空」两枚芯片，
- *    最后是日志行 —— 手机上 2×2/等宽芯片与时长档同一原语（`SettingsChipRow`）。
+ *  - 卡片里先给一行摘要（过滤后条数 / 总条数 + 占用），再给级别单选芯片
+ *    （「至少显示」语义），然后「刷新 / 清空」两枚芯片，最后是日志行 ——
+ *    手机竖屏下四枚级别芯片同样一行排开（所有者要求不折行），与时长档同一原语
+ *    （`SettingsChipRow`）。
  *  - 日志行**可聚焦**：遥控器确认 → 弹出详情，看**完整消息 + 完整堆栈**
  *    （列表里只放 3 行正文 + 堆栈首行，否则一屏放不下两条）。
  *    ⚠️ 行本身是「就地查看」，不是「进下一级」⇒ 不加 `Trail.Arrow`。
@@ -88,6 +97,9 @@ internal fun LogsSettingsSection(
     var showClearConfirm by remember { mutableStateOf(false) }
     // 非空 = 正在查看某条日志的详情
     var selectedEntry by remember { mutableStateOf<LogEntry?>(null) }
+    val visibleEntries = remember(state.entries, state.minLevel) {
+        LogStore.filterAtLeast(state.entries, state.minLevel).take(LogStore.READ_LIMIT)
+    }
     Column {
         SectionTitle(stringResource(R.string.settings_logs))
         Text(
@@ -100,10 +112,11 @@ internal fun LogsSettingsSection(
             title = stringResource(R.string.settings_group_runtime_logs),
             description = stringResource(R.string.settings_group_runtime_logs_desc),
         ) {
-            // 摘要：条数 + 文件占用
+            // 摘要：过滤后条数 / 总条数 + 文件占用
             Text(
                 text = stringResource(
                     R.string.settings_logs_summary,
+                    visibleEntries.size,
                     state.entries.size,
                     formatLogSize(state.fileSizeBytes),
                 ),
@@ -111,6 +124,27 @@ internal fun LogsSettingsSection(
                 fontSize = FontSize.small(),
                 modifier = Modifier.padding(start = 4.dp, bottom = 8.dp)
             )
+            Text(
+                text = stringResource(R.string.settings_logs_level_title),
+                color = NasMusicColors.TextSecondary,
+                fontSize = FontSize.small(),
+                modifier = Modifier.padding(start = 4.dp, bottom = 8.dp)
+            )
+            // 单选芯片组而不是下拉菜单：TV 上 D-Pad 的菜单焦点是已知坑，
+            // 「单选档位」在本项目里统一走 SettingsChipRow（与时长档、画面适配同一原语）。
+            // 手机竖屏也排成一行（四枚短标签放得下，所有者要求不折行）。
+            SettingsChipRow(
+                items = LOG_LEVEL_FILTERS,
+                tv = 4,
+                phonePortrait = 4,
+            ) { item ->
+                SettingsChip(
+                    label = stringResource(item.labelRes),
+                    selected = state.minLevel == item.level,
+                    onClick = { actions.onSelectMinLevel(item.level) },
+                )
+            }
+            Spacer(modifier = Modifier.height(12.dp))
             SettingsChipRow(
                 items = listOf(
                     LogsAction(
@@ -137,15 +171,24 @@ internal fun LogsSettingsSection(
                 )
             }
             Spacer(modifier = Modifier.height(12.dp))
-            if (state.entries.isEmpty()) {
-                Text(
-                    text = stringResource(R.string.settings_logs_empty),
-                    color = NasMusicColors.TextSecondary,
-                    fontSize = FontSize.body(),
-                    modifier = Modifier.padding(start = 4.dp, top = 4.dp)
-                )
-            } else {
-                state.entries.forEach { entry ->
+            when {
+                state.entries.isEmpty() -> {
+                    Text(
+                        text = stringResource(R.string.settings_logs_empty),
+                        color = NasMusicColors.TextSecondary,
+                        fontSize = FontSize.body(),
+                        modifier = Modifier.padding(start = 4.dp, top = 4.dp)
+                    )
+                }
+                visibleEntries.isEmpty() -> {
+                    Text(
+                        text = stringResource(R.string.settings_logs_empty_filtered),
+                        color = NasMusicColors.TextSecondary,
+                        fontSize = FontSize.body(),
+                        modifier = Modifier.padding(start = 4.dp, top = 4.dp)
+                    )
+                }
+                else -> visibleEntries.forEach { entry ->
                     LogEntryRow(entry = entry, onOpen = { selectedEntry = entry })
                 }
             }
@@ -193,6 +236,26 @@ private data class LogsAction(
 )
 
 /**
+ * 日志级别筛选项（「至少显示」语义：选中项及以上都显示）。
+ * 「全部」用 [LogStore.LEVEL_DEBUG] 表示 —— D 是严重度最低的一级。
+ */
+private data class LogLevelFilter(val level: String, @StringRes val labelRes: Int)
+
+private val LOG_LEVEL_FILTERS = listOf(
+    LogLevelFilter(LogStore.LEVEL_DEBUG, R.string.settings_logs_level_all),
+    LogLevelFilter(LogStore.LEVEL_INFO, R.string.settings_logs_level_info),
+    LogLevelFilter(LogStore.LEVEL_WARN, R.string.settings_logs_level_warn),
+    LogLevelFilter(LogStore.LEVEL_ERROR, R.string.settings_logs_level_error),
+)
+
+/** 级别配色：E 红、W 橙、D/I 次要色（列表与详情共用）。 */
+private fun levelColor(level: String): Color = when (level) {
+    LogStore.LEVEL_ERROR -> NasMusicColors.Danger
+    LogStore.LEVEL_WARN -> NasMusicColors.Warning
+    else -> NasMusicColors.TextSecondary
+}
+
+/**
  * 单条日志（列表里的**摘要**）：第一行 = 级别 + 时间 + TAG，下面是正文（最多 3 行），
  * 再下面是异常首行。遥控器确认 → [LogDetailDialog] 看全文。
  *
@@ -218,7 +281,7 @@ private fun LogEntryRow(entry: LogEntry, onOpen: () -> Unit) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     text = entry.level,
-                    color = if (entry.isError) NasMusicColors.Danger else NasMusicColors.Warning,
+                    color = levelColor(entry.level),
                     fontSize = FontSize.small(),
                     fontWeight = FontWeight.Bold,
                 )
@@ -321,7 +384,7 @@ private fun LogDetailDialog(entry: LogEntry, onDismiss: () -> Unit) {
         ) {
             Text(
                 text = "${entry.level} · ${timeFormat.format(Date(entry.timestamp))} · ${entry.tag}",
-                color = if (entry.isError) NasMusicColors.Danger else NasMusicColors.Warning,
+                color = levelColor(entry.level),
                 fontSize = FontSize.button(),
                 fontWeight = FontWeight.Bold,
             )

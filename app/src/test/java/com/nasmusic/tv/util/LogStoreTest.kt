@@ -70,6 +70,53 @@ class LogStoreTest {
         assertNull("级别非法", LogStore.decode("123\tX\tTAG\tmsg"))
     }
 
+    @Test
+    fun `四个级别都必须能落盘并解码`() {
+        for (level in LogStore.ALL_LEVELS) {
+            LogStore.appendBlocking(level, "L", "msg-$level", null)
+        }
+        val levels = LogStore.snapshot().entries.map { it.level }
+        assertEquals(
+            "D/I 曾是非法级别（decode 会丢），现在必须完整保留（倒序）",
+            listOf(LogStore.LEVEL_ERROR, LogStore.LEVEL_WARN, LogStore.LEVEL_INFO, LogStore.LEVEL_DEBUG),
+            levels,
+        )
+    }
+
+    @Test
+    fun `级别过滤必须按严重度包含更高级别`() {
+        val entries = listOf(
+            LogStore.LEVEL_DEBUG,
+            LogStore.LEVEL_INFO,
+            LogStore.LEVEL_WARN,
+            LogStore.LEVEL_ERROR,
+        ).map { LogStore.decode(LogStore.encode(it, "T", "m", null))!! }
+
+        assertEquals("全部（D）必须一条不少", 4, LogStore.filterAtLeast(entries, LogStore.LEVEL_DEBUG).size)
+        assertEquals("I 及以上", 3, LogStore.filterAtLeast(entries, LogStore.LEVEL_INFO).size)
+        assertEquals("W 及以上", 2, LogStore.filterAtLeast(entries, LogStore.LEVEL_WARN).size)
+        val errors = LogStore.filterAtLeast(entries, LogStore.LEVEL_ERROR)
+        assertEquals("E 只留错误", 1, errors.size)
+        assertEquals(LogStore.LEVEL_ERROR, errors[0].level)
+        assertEquals(
+            "过滤不得改变原顺序",
+            listOf(LogStore.LEVEL_WARN, LogStore.LEVEL_ERROR),
+            LogStore.filterAtLeast(entries, LogStore.LEVEL_WARN).map { it.level },
+        )
+    }
+
+    @Test
+    fun `未知过滤级别必须回落全部而不是滤空`() {
+        assertEquals(LogStore.LEVEL_DEBUG, LogStore.normalizeLevel("X"))
+        assertEquals(LogStore.LEVEL_WARN, LogStore.normalizeLevel(LogStore.LEVEL_WARN))
+        val entries = listOf("D", "W").map { LogStore.decode(LogStore.encode(it, "T", "m", null))!! }
+        assertEquals(
+            "持久化的脏值不能把日志页滤成空白",
+            entries.size,
+            LogStore.filterAtLeast(entries, "X").size,
+        )
+    }
+
     // ───────────────────── 读写顺序 ─────────────────────
 
     @Test

@@ -64,7 +64,7 @@ enum class SettingsSection(val titleRes: Int, val icon: ImageVector) {
     /** 版本信息 · 连接信息 · 能力说明 · 开源与许可 */
     ABOUT(R.string.settings_about, Icons.Default.Info),
     /**
-     * v2.40.0 新增：运行日志（警告/错误持久化，可反复回看）。
+     * v2.39.4 新增：运行日志（警告/错误持久化，可反复回看）。
      *
      * 排在最后：它是排障用的"兜底入口"，不是日常配置项。
      * 图标 `BugReport` 已对照 icons 1.7.8 的 jar 实证存在（⛔ 别换成未验证的名字，

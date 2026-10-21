@@ -135,7 +135,7 @@ enum class SearchType {
         baiduLocalSongs: List<Song> = emptyList()
     ): SearchAggregatorResult = coroutineScope {
         val baiduKw = baiduKeyword ?: keyword
-        AppLog.i(TAG, "search: keyword='$keyword' baiduKeyword='$baiduKw' sources=${sources.map { it.name }} directoryMode=$directoryMode filterMode=$filterMode")
+        AppLog.d(TAG, "search: keyword='$keyword' baiduKeyword='$baiduKw' sources=${sources.map { it.name }} directoryMode=$directoryMode filterMode=$filterMode")
 
         if (keyword.isBlank()) {
             return@coroutineScope SearchAggregatorResult(
@@ -337,7 +337,7 @@ enum class SearchType {
         // 各源命中数统计
         val sourceBreakdown = sorted.groupBy { it.source }.mapValues { it.value.size }
 
-        AppLog.i(TAG, "search complete: ${sorted.size} results, breakdown=$sourceBreakdown")
+        AppLog.d(TAG, "search complete: ${sorted.size} results, breakdown=$sourceBreakdown")
 
         SearchAggregatorResult(
             allResults = sorted,

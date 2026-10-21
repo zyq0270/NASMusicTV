@@ -105,7 +105,7 @@ class NetworkMusicViewModel(app: Application) : AndroidViewModel(app) {
      * 解析失败时显示错误提示。
      */
     fun playNetworkSong(song: Song, onPlaySong: (Song) -> Unit) {
-        AppLog.e("NetworkMusicViewModel", "playNetworkSong ENTRY: id=${song.id} title=${song.title} networkSource=${song.networkSource} networkId=${song.networkId} isNetworkSong=${song.isNetworkSong}")
+        AppLog.d("NetworkMusicViewModel", "playNetworkSong ENTRY: id=${song.id} title=${song.title} networkSource=${song.networkSource} networkId=${song.networkId} isNetworkSong=${song.isNetworkSong}")
         if (!song.isNetworkSong) {
             // 非 network 歌曲，走普通播放流程
             onPlaySong(song)
@@ -116,7 +116,7 @@ class NetworkMusicViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             // T2 第一批：注册改 suspend，移入协程内保证"先注册、后解析播放"
             if (song.networkSource == "baidu" && !nasMusicApp.networkMusicManager.isServiceRegistered("baidu")) {
-                AppLog.e("NetworkMusicViewModel", "playNetworkSong: 检测到 baidu 服务未注册，尝试自愈注册后播放")
+                AppLog.w("NetworkMusicViewModel", "playNetworkSong: 检测到 baidu 服务未注册，尝试自愈注册后播放")
                 nasMusicApp.refreshBaiduServiceRegistration()
             }
             try {

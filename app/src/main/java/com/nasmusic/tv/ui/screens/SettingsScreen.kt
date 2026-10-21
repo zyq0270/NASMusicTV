@@ -79,6 +79,7 @@ import com.nasmusic.tv.ui.screens.settings.LogsSettingsActions
 import com.nasmusic.tv.ui.screens.settings.LogsSettingsSection
 import com.nasmusic.tv.ui.screens.settings.LogsSettingsState
 import com.nasmusic.tv.util.LogSnapshot
+import com.nasmusic.tv.util.LogStore
 import com.nasmusic.tv.ui.screens.settings.NetworkMusicDialogActions
 import com.nasmusic.tv.ui.screens.settings.NetworkMusicSection
 import com.nasmusic.tv.ui.screens.settings.NetworkMusicSettingsActions
@@ -326,7 +327,7 @@ fun SettingsScreen(
     onSetLocalMusicEnabled: (Boolean) -> Unit = {},
     onRescanLocalMusic: () -> Unit = {},
     /**
-     * v2.40.0：运行日志快照（LOGS 分区）。
+     * v2.39.4：运行日志快照（LOGS 分区）。
      *
      * 数据来自 `LogStore` 的落盘文件，**重启后仍在**；与 [settings] 分开传
      * ——它是运行时事实，不落盘、不进备份（同 [photoWallRuntime] 的口径）。
@@ -334,6 +335,8 @@ fun SettingsScreen(
     logs: LogSnapshot = LogSnapshot(),
     onRefreshLogs: () -> Unit = {},
     onClearLogs: () -> Unit = {},
+    logsMinLevel: String = LogStore.LEVEL_DEBUG,
+    onSelectLogsMinLevel: (String) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
 var activeSection by remember { mutableStateOf(SettingsSection.GENERAL) }
@@ -421,7 +424,7 @@ var activeSection by remember { mutableStateOf(SettingsSection.GENERAL) }
         if (displaySection == SettingsSection.DATA) onRefreshBackupFiles?.invoke()
     }
 
-    // v2.40.0：进入「日志」分区时刷新一次 —— 日志是外部（AppLog / 崩溃处理器）随时
+    // v2.39.4：进入「日志」分区时刷新一次 —— 日志是外部（AppLog / 崩溃处理器）随时
     // 追加的，不在进页时读一次，页面会一直停在进页前的旧快照上。
     LaunchedEffect(displaySection) {
         if (displaySection == SettingsSection.LOGS) onRefreshLogs()
@@ -971,10 +974,12 @@ var activeSection by remember { mutableStateOf(SettingsSection.GENERAL) }
                         state = LogsSettingsState(
                             entries = logs.entries,
                             fileSizeBytes = logs.fileSizeBytes,
+                            minLevel = logsMinLevel,
                         ),
                         actions = LogsSettingsActions(
                             onRefresh = onRefreshLogs,
                             onClear = onClearLogs,
+                            onSelectMinLevel = onSelectLogsMinLevel,
                         ),
                     )
                 }

@@ -159,8 +159,9 @@ internal fun SettingsBranch(
                     // T16（§5.4）：网络探针状态（MainViewModel 持有，UI 只渲染 + 发意图）
                     val networkProbeRunning by viewModel.networkProbeRunning.collectAsState(initial = false)
                     val networkProbeStatus by viewModel.networkProbeStatus.collectAsState(initial = "")
-                    // v2.40.0：运行日志快照（LOGS 分区；进页/刷新时由 VM 读 LogStore）
+                    // v2.39.4：运行日志快照（LOGS 分区；进页/刷新时由 VM 读 LogStore）
                     val logs by viewModel.logs.collectAsState()
+                    val logsMinLevel by viewModel.logsMinLevel.collectAsState()
                     SettingsScreen(
                         selectedSection = settingsSection,
                         onOpenSection = { viewModel.navVM.openSettingsSection(it) },
@@ -438,10 +439,12 @@ internal fun SettingsBranch(
                     localMusicLibraryCount = localMusicSongs.size,
                     onSetLocalMusicEnabled = { v -> viewModel.setLocalMusicEnabled(v) },
                     onRescanLocalMusic = { viewModel.refreshLocalMusic() },
-                    // v2.40.0：运行日志（LOGS 分区）—— 快照来自 LogStore 落盘文件
+                    // v2.39.4：运行日志（LOGS 分区）—— 快照来自 LogStore 落盘文件
                     logs = logs,
                     onRefreshLogs = { viewModel.refreshLogs() },
                     onClearLogs = { viewModel.clearLogs() },
+                    logsMinLevel = logsMinLevel,
+                    onSelectLogsMinLevel = { viewModel.setLogsMinLevel(it) },
                     )
                     // 扫码传输备份弹窗
                     if (showBackupTransferDialog) {

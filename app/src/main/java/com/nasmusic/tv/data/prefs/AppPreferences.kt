@@ -33,6 +33,7 @@ import com.nasmusic.tv.data.model.VisualQuality
 import com.nasmusic.tv.data.model.Song
 import com.nasmusic.tv.util.AppLog
 import com.nasmusic.tv.util.CryptoUtils
+import com.nasmusic.tv.util.LogStore
 import com.nasmusic.tv.visualizer.photo.PhotoTransitionId
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -178,6 +179,8 @@ class AppPreferences internal constructor(private val context: Context) {
     @Volatile private var cachedModelDownloadUrl: String = ""
     @Volatile private var cachedLyricsKugouBaseUrl: String = com.nasmusic.tv.lyrics.LyricsNetworkProvider.DEFAULT_KUGOU_BASE_URL
     @Volatile private var cachedLyricsNeteaseBaseUrl: String = com.nasmusic.tv.lyrics.LyricsNetworkProvider.DEFAULT_NETEASE_BASE_URL
+    /** 日志页级别过滤（设备本地偏好，默认「全部」） */
+    @Volatile private var cachedLogsMinLevel: String = LogStore.LEVEL_DEBUG
     @Volatile private var cachedWeatherApiKey: String = ""
 
     /** 屏幕方向镜像（v2.36.0：冷启动首帧方向，默认 auto） */
@@ -225,11 +228,11 @@ class AppPreferences internal constructor(private val context: Context) {
                 .distinctUntilChanged().collect { cachedJamendoClientId = it }
         }
         scope.launch {
-            dataStore.data.map { it[keyMetingApiBaseUrl] ?: MetingApiService.DEFAULT_BASE_URL }
+            dataStore.data.map { endpointOrDefault(it[keyMetingApiBaseUrl], MetingApiService.DEFAULT_BASE_URL) }
                 .distinctUntilChanged().collect { cachedMetingApiBaseUrl = it }
         }
         scope.launch {
-            dataStore.data.map { it[keyMvApiBaseUrl] ?: BilibiliMvService.DEFAULT_BASE_URL }
+            dataStore.data.map { endpointOrDefault(it[keyMvApiBaseUrl], BilibiliMvService.DEFAULT_BASE_URL) }
                 .distinctUntilChanged().collect { cachedMvApiBaseUrl = it }
         }
         scope.launch {
@@ -239,6 +242,10 @@ class AppPreferences internal constructor(private val context: Context) {
         scope.launch {
             dataStore.data.map { it[keyLyricsNeteaseBaseUrl] ?: com.nasmusic.tv.lyrics.LyricsNetworkProvider.DEFAULT_NETEASE_BASE_URL }
                 .distinctUntilChanged().collect { cachedLyricsNeteaseBaseUrl = it }
+        }
+        scope.launch {
+            dataStore.data.map { LogStore.normalizeLevel(it[keyLogsMinLevel] ?: LogStore.LEVEL_DEBUG) }
+                .distinctUntilChanged().collect { cachedLogsMinLevel = it }
         }
         scope.launch {
             dataStore.data.map { it[keyModelDownloadUrl] ?: "" }
@@ -403,6 +410,25 @@ class AppPreferences internal constructor(private val context: Context) {
      * 首帧设置 `requestedOrientation` 使用（避免闪一帧 manifest 默认值）。
      */
     fun getScreenOrientationSync(): String = cachedScreenOrientation
+
+    // =====================================================================
+    // v2.39.4 运行日志：级别过滤（设备本地偏好，**不进 AppSettings 备份 JSON**）
+    // 与屏幕方向同理：这是「这台设备上想看到多少日志」的查看偏好，
+    // 恢复到别的设备上没有意义。取值见 LogStore.LEVEL_*，默认 D（全部）。
+    // =====================================================================
+    private val keyLogsMinLevel = stringPreferencesKey("settings_logs_min_level")
+
+    /** 日志页级别过滤（响应式；供 MainViewModel 在冷启动时补齐镜像尚未发射的窗口）。 */
+    val logsMinLevel: Flow<String> = dataStore.data.map {
+        LogStore.normalizeLevel(it[keyLogsMinLevel] ?: LogStore.LEVEL_DEBUG)
+    }
+
+    /** 同步读日志页级别过滤（LOGS 分区渲染时用，读 @Volatile 镜像）。 */
+    fun getLogsMinLevelSync(): String = cachedLogsMinLevel
+
+    suspend fun setLogsMinLevel(level: String) {
+        dataStore.edit { it[keyLogsMinLevel] = LogStore.normalizeLevel(level) }
+    }
 
     // --- 首次曲库快捷键提示 Flow ---
     val showLibraryShortcutHint: Flow<Boolean> = dataStore.data.map { it[keyShowLibraryShortcutHint] ?: true }
@@ -799,10 +825,10 @@ class AppPreferences internal constructor(private val context: Context) {
             cacheLyrics = prefs[keyCacheLyrics] ?: true,
             cacheCover = prefs[keyCacheCover] ?: true,
             defaultNetworkSource = prefs[keyDefaultNetworkSource]?.let { NetworkSource.fromKey(it) ?: NetworkSource.fromName(it) } ?: NetworkSource.DEFAULT,
-            metingApiBaseUrl = prefs[keyMetingApiBaseUrl] ?: MetingApiService.DEFAULT_BASE_URL,
-            mvApiBaseUrl = prefs[keyMvApiBaseUrl] ?: BilibiliMvService.DEFAULT_BASE_URL,
-            lyricsKugouBaseUrl = prefs[keyLyricsKugouBaseUrl] ?: com.nasmusic.tv.lyrics.LyricsNetworkProvider.DEFAULT_KUGOU_BASE_URL,
-            lyricsNeteaseBaseUrl = prefs[keyLyricsNeteaseBaseUrl] ?: com.nasmusic.tv.lyrics.LyricsNetworkProvider.DEFAULT_NETEASE_BASE_URL,
+            metingApiBaseUrl = endpointOrDefault(prefs[keyMetingApiBaseUrl], MetingApiService.DEFAULT_BASE_URL),
+            mvApiBaseUrl = endpointOrDefault(prefs[keyMvApiBaseUrl], BilibiliMvService.DEFAULT_BASE_URL),
+            lyricsKugouBaseUrl = endpointOrDefault(prefs[keyLyricsKugouBaseUrl], com.nasmusic.tv.lyrics.LyricsNetworkProvider.DEFAULT_KUGOU_BASE_URL),
+            lyricsNeteaseBaseUrl = endpointOrDefault(prefs[keyLyricsNeteaseBaseUrl], com.nasmusic.tv.lyrics.LyricsNetworkProvider.DEFAULT_NETEASE_BASE_URL),
             visualizerTheme = VisualizerTheme.fromKey(prefs[keyVisualizerTheme]),
             visualizerQuality = VisualQuality.fromKey(prefs[keyVisualizerQuality]),
             fontAdjustment = prefs[keyFontAdjustment] ?: 0,
@@ -966,13 +992,29 @@ class AppPreferences internal constructor(private val context: Context) {
         return if (valid) u else null
     }
 
+    /**
+     * 端点配置的**有效值**：空串/空白/非法存值一律回落 [default]。
+     *
+     * ⚠️ 空串在 DataStore 里表示「未定制」，不是端点本身。直接当端点用会拼出相对
+     * 路径（`Expected URL scheme 'http' or 'https'`）——备份导入的空字段踩过这个坑
+     * （v2.39.4 真机日志：BilibiliMvService 的 `/x/web-interface/nav` 没有 host）。
+     * 读取端做兜底而不是只堵写入端：历史上已写进去的空值也要能自愈。
+     */
+    private fun endpointOrDefault(stored: String?, default: String): String {
+        val normalized = stored?.let { normalizeEndpointUrl(it) }
+        return if (normalized.isNullOrEmpty()) default else normalized
+    }
+
     suspend fun setMetingApiBaseUrl(url: String) {
         val normalized = normalizeEndpointUrl(url)
         if (url.isNotBlank() && normalized == null) {
             AppLog.w(TAG, "setMetingApiBaseUrl rejected invalid url: " + url.take(80))
             return
         }
-        dataStore.edit { it[keyMetingApiBaseUrl] = normalized.orEmpty() }
+        dataStore.edit {
+            if (normalized.isNullOrEmpty()) it.remove(keyMetingApiBaseUrl)
+            else it[keyMetingApiBaseUrl] = normalized
+        }
         // 换端点＝换可播性判据的来源：被拒绝的写入走上面的 return，绝不进这里（终审 B3）
         runCatching { onPlayUrlCacheInvalidated?.invoke() }
             .onFailure { AppLog.w(TAG, "onPlayUrlCacheInvalidated failed: ${it.message}") }
@@ -984,7 +1026,10 @@ class AppPreferences internal constructor(private val context: Context) {
             AppLog.w(TAG, "setMvApiBaseUrl rejected invalid url: " + url.take(80))
             return
         }
-        dataStore.edit { it[keyMvApiBaseUrl] = normalized.orEmpty() }
+        dataStore.edit {
+            if (normalized.isNullOrEmpty()) it.remove(keyMvApiBaseUrl)
+            else it[keyMvApiBaseUrl] = normalized
+        }
     }
 
     // --- 网络音乐平台来源 ---
@@ -2004,10 +2049,12 @@ class AppPreferences internal constructor(private val context: Context) {
                 prefs[keyDefaultNetworkSource] = settings.defaultNetworkSource.keyOrDefault()
                 // P2 修复（2026-09-22 审查）：恢复路径同样过端点校验——恶意/异常
                 // 备份不能把请求流量重定向到任意字符串端点；非法值回落默认。
+                // ⚠️ 空串同样回落默认（[endpointOrDefault]）：备份里未定制字段就是空串，
+                //    原样写入会让服务端拼出相对 URL（v2.39.4 真机日志的 MV 空端点）。
                 prefs[keyMetingApiBaseUrl] =
-                    normalizeEndpointUrl(settings.metingApiBaseUrl) ?: MetingApiService.DEFAULT_BASE_URL
+                    endpointOrDefault(settings.metingApiBaseUrl, MetingApiService.DEFAULT_BASE_URL)
                 prefs[keyMvApiBaseUrl] =
-                    normalizeEndpointUrl(settings.mvApiBaseUrl) ?: BilibiliMvService.DEFAULT_BASE_URL
+                    endpointOrDefault(settings.mvApiBaseUrl, BilibiliMvService.DEFAULT_BASE_URL)
                 prefs[keyModelDownloadUrl] =
                     normalizeEndpointUrl(settings.modelDownloadUrl) ?: ""
                 prefs[keyVisualizerTheme] = settings.visualizerTheme.nameOrDefault()

@@ -54,6 +54,14 @@ class LogsTabWiringGateTest {
             "SettingsScreen 没有调用 `LogsSettingsSection(` —— 分支可能渲染了空 item",
             screen.contains("LogsSettingsSection("),
         )
+        assertTrue(
+            "SettingsScreen 没有把过滤级别传进 LogsSettingsState（minLevel = logsMinLevel）",
+            screen.contains("minLevel = logsMinLevel"),
+        )
+        assertTrue(
+            "SettingsScreen 没有把级别切换动作接到 LogsSettingsActions",
+            screen.contains("onSelectMinLevel = onSelectLogsMinLevel"),
+        )
     }
 
     @Test
@@ -69,14 +77,24 @@ class LogsTabWiringGateTest {
     // ─────────────────── 3. SettingsBranch 接线 ───────────────────
 
     @Test
-    fun `SettingsBranch 必须接线日志状态与两个动作`() {
+    fun `SettingsBranch 必须接线日志状态与动作`() {
         val branch = stripComments(mainSource("ui/components/branches/SettingsBranch.kt"))
-        for (needle in listOf("logs = logs", "onRefreshLogs =", "onClearLogs =")) {
+        for (needle in listOf(
+            "logs = logs",
+            "onRefreshLogs =",
+            "onClearLogs =",
+            "logsMinLevel = logsMinLevel",
+            "onSelectLogsMinLevel =",
+        )) {
             assertTrue("SettingsBranch 缺 `$needle` —— 日志页拿不到状态或点了没反应", branch.contains(needle))
         }
         assertTrue(
             "SettingsBranch 没有收集 viewModel.logs",
             branch.contains("viewModel.logs.collectAsState"),
+        )
+        assertTrue(
+            "SettingsBranch 没有收集 viewModel.logsMinLevel（切换级别后芯片选中态不会更新）",
+            branch.contains("viewModel.logsMinLevel.collectAsState"),
         )
     }
 
@@ -88,6 +106,37 @@ class LogsTabWiringGateTest {
         for (sig in listOf("fun w(", "fun e(")) {
             assertTrue("AppLog.$sig 方法体里没有 LogStore.append( —— 该类日志不会进日志页", persistedIn(src, sig))
         }
+    }
+
+    /**
+     * D/I 是调试级别：**必须**在 Debug 构建落盘（日志页才能按级别过滤），
+     * 同时**必须**被 `BuildConfig.DEBUG` 门控（release 既不打 logcat 也不写盘）。
+     * 缺门控 ⇒ release 的 D/I 会把 W/E 挤出 400 行窗口（用户报障现场丢失）。
+     */
+    @Test
+    fun `AppLog 的 debug 与 info 必须受 DEBUG 门控并落盘`() {
+        val src = stripComments(mainSource("util/AppLog.kt"))
+        for (sig in listOf("fun d(", "fun i(")) {
+            assertTrue("AppLog.$sig 方法体里没有 LogStore.append( —— Debug 构建日志页看不到该级别", persistedIn(src, sig))
+            assertTrue(
+                "AppLog.$sig 没有 BuildConfig.DEBUG 门控 —— release 会白写盘并挤掉 W/E",
+                Regex("""\Q$sig\E[\s\S]{0,240}BuildConfig\.DEBUG""").containsMatchIn(src),
+            )
+        }
+    }
+
+    /** 负向自证：没有 BuildConfig.DEBUG 门控的 `fun d(` 必须判负。 */
+    @Test
+    fun `负向自证 未门控的 debug 落盘必须判负`() {
+        val sample = """
+            fun d(tag: String, message: String) {
+                LogStore.append(LogStore.LEVEL_DEBUG, tag, message)
+            }
+        """.trimIndent()
+        assertTrue(
+            "护栏空转：未门控的 debug 落盘被误判为已门控",
+            !Regex("""\Qfun d(\E[\s\S]{0,240}BuildConfig\.DEBUG""").containsMatchIn(sample),
+        )
     }
 
     // ─────────────────── 5. 崩溃落盘 ───────────────────
@@ -161,6 +210,38 @@ class LogsTabWiringGateTest {
             "列表行必须可聚焦（SettingsTile）—— 否则遥控器根本点不开详情；" +
                 "⛔ 分区里不许手写 FocusableSurface（令牌只在 SettingsComponents 定义一次）",
             section.contains("SettingsTile("),
+        )
+    }
+
+    // ─────────────────── 8b. 级别过滤（v2.39.4） ───────────────────
+
+    /**
+     * 四个级别芯片 + 过滤纯函数 + 切换动作缺一不可：
+     * 只画芯片不接 `filterAtLeast`（列表不变）或只过滤不落动作（点了没反应）
+     * 都能编译通过，必须在源码层面锁住。
+     */
+    @Test
+    fun `日志页必须提供级别过滤`() {
+        val section = stripComments(mainSource("ui/screens/settings/LogsSettingsSection.kt"))
+        for (needle in listOf(
+            "settings_logs_level_all",
+            "settings_logs_level_info",
+            "settings_logs_level_warn",
+            "settings_logs_level_error",
+            "LogStore.filterAtLeast(",
+            "onSelectMinLevel",
+        )) {
+            assertTrue("日志页缺 `$needle` —— 无法按级别筛选", section.contains(needle))
+        }
+    }
+
+    /** 负向自证：只渲染列表、不带过滤的样例必须判负。 */
+    @Test
+    fun `负向自证 无级别过滤的日志页必须判负`() {
+        val sample = "state.entries.forEach { LogEntryRow(entry = it, onOpen = {}) }"
+        assertTrue(
+            "护栏空转：没有过滤的样例被误判通过",
+            !(sample.contains("LogStore.filterAtLeast(") && sample.contains("onSelectMinLevel")),
         )
     }
 

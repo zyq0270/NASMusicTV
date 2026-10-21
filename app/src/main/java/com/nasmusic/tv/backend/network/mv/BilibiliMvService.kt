@@ -82,14 +82,14 @@ class BilibiliMvService(
         try {
             val keyword = buildKeyword(title, artist)
             if (keyword.isBlank()) {
-                AppLog.w(TAG, "searchMv: empty keyword")
+                AppLog.d(TAG, "searchMv: empty keyword")
                 return@withContext null
             }
             AppLog.d(TAG, "searchMv: keyword='$keyword' exclude=${excludeBvids.size} minSim=$minSimilarity")
 
             val candidates = searchCandidates(keyword, excludeBvids, minSimilarity)
             if (candidates.isEmpty()) {
-                AppLog.w(TAG, "searchMv: no candidates for '$keyword'")
+                AppLog.d(TAG, "searchMv: no candidates for '$keyword'")
                 return@withContext null
             }
 
@@ -97,7 +97,7 @@ class BilibiliMvService(
             val best = candidates[0]
             val mv = resolveMvInternal(best.bvid) ?: run {
                 if (candidates.size > 1) {
-                    AppLog.w(TAG, "searchMv: best resolve failed, trying ${candidates[1].bvid}")
+                    AppLog.d(TAG, "searchMv: best resolve failed, trying ${candidates[1].bvid}")
                     resolveMvInternal(candidates[1].bvid)?.also { resolved ->
                         return@withContext MvSearchResult(resolved, candidates.filter { it.bvid != candidates[1].bvid })
                     }
@@ -106,7 +106,7 @@ class BilibiliMvService(
                 return@withContext null
             }
 
-            AppLog.i(TAG, "searchMv: OK '${mv.title}' url=${mv.videoUrl.take(60)} candidates=${candidates.size}")
+            AppLog.d(TAG, "searchMv: OK '${mv.title}' url=${mv.videoUrl.take(60)} candidates=${candidates.size}")
             MvSearchResult(mv, candidates.drop(1))
         } catch (e: Exception) {
             AppLog.e(TAG, "searchMv failed: ${e.message}", e)
@@ -317,7 +317,7 @@ class BilibiliMvService(
      */
     private fun signWbi(params: Map<String, String>): String? {
         val mixinKey = getMixinKey() ?: run {
-            AppLog.w(TAG, "signWbi: mixinKey unavailable, skip wbi signing")
+            AppLog.d(TAG, "signWbi: mixinKey unavailable, skip wbi signing")
             return null
         }
         val withTs = params.toMutableMap()
@@ -349,14 +349,14 @@ class BilibiliMvService(
                 .build()
             client.newCall(request).execute().use { resp ->
                 if (!resp.isSuccessful) {
-                    AppLog.w(TAG, "GET ${url.requestUrl()} failed: ${resp.code}")
+                    AppLog.d(TAG, "GET ${url.requestUrl()} failed: ${resp.code}")
                     null
                 } else {
                     resp.body?.string()
                 }
             }
         } catch (e: Exception) {
-            AppLog.w(TAG, "GET ${url.requestUrl()} error: ${e.message}", e)
+            AppLog.d(TAG, "GET ${url.requestUrl()} error: ${e.message}", e)
             null
         }
     }
