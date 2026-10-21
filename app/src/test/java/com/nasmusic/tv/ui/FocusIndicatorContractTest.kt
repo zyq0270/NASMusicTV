@@ -1,8 +1,10 @@
 package com.nasmusic.tv.ui
 
+import android.content.res.Configuration
 import android.view.InputDevice
 import android.view.KeyEvent
 import com.nasmusic.tv.ui.components.isDirectionalNavigationKey
+import com.nasmusic.tv.ui.components.isKeyNavigationConfiguration
 import com.nasmusic.tv.ui.components.isRemoteNavigationDevice
 import com.nasmusic.tv.ui.components.nextDirectionalSeen
 import org.junit.Assert.assertFalse
@@ -14,7 +16,7 @@ import java.io.File
 /**
  * 门禁：焦点指示器的**绘制顺序**与**设备判据** —— 真机反馈「遥控器导航完全看不到焦点在哪」。
  *
- * ## 根因（两道独立的，都必须防住）
+ * ## 根因（各自独立，每一道都必须防住）
  *
  * ① **绘制顺序**：Compose 的绘制顺序 = 修饰符链顺序，越靠前越靠下。
  *    `FocusableSurface` 此前是 `border(...)` → `background(...)`，不透明容器色把焦点环整个盖住。
@@ -29,13 +31,27 @@ import java.io.File
  *    ⇒ 必须存在**基于输入能力**的判据：`InputDevice` 里有没有声明 `SOURCE_DPAD` 的设备。
  *    遥控器本身就是注册在系统里的 input device，盒子瞒不掉它的能力。
  *
+ * ③ **判据来源不能只有一路**（v2.39.6，用户盒子复现、开发机正常）：`hasSystemFeature` 读的是
+ *    厂商手写的 permissions.xml，`Configuration.touchscreen/keyboard` 读的是框架按**真实输入
+ *    设备**聚合出来的全局配置 —— 两者独立。大量盒子为装手机应用把 touchscreen 声明成
+ *    `required="false"`，于是「无触摸屏」这条直接落空，只剩触摸来源能认出它。
+ *
+ * ④ **按键兜底有自举循环**（同一轮）：判据 5 只挂在 Compose 根节点的 `onPreviewKeyEvent` 上，
+ *    而那是「按键已经进入 Compose 焦点树」之后才有机会执行的地方 —— 老盒子冷启动没有焦点时，
+ *    「要有焦点环才认得方向键，要认得方向键才有焦点环」。⇒ 必须同时存在**窗口层**兜底
+ *    （`MainActivity.onKeyDown`，source="window"）。
+ *
  * ## 判定规则
  *
  * 1. `FocusableSurface.kt` / `UnifiedSongRow.kt` 内，`.focusRing(` 必须出现在 `.background(` **之后**
  *    —— 否则会被容器色盖住。
  * 2. 焦点视觉的判据必须是 `shouldShowFocusVisuals()`，不得再直接用 `isTVDevice()`。
- * 3. 四条核心判据（无触摸屏 / TV feature / **D-PAD 输入设备** / 按键兜底）一条都不能被删，
+ * 3. 五条核心判据（无触摸屏 / TV feature / **按键形态的 Configuration** /
+ *    **D-PAD 输入设备** / 按键兜底）一条都不能被删，
  *    且 D-PAD 探测必须真的 or 进 `shouldShowFocusVisuals()` 的返回值、且必须被缓存。
+ * 4. 按键兜底必须**两个来源都在**（compose + window），少一个就退回上面 ④ 的自举循环。
+ * 5. 判据翻转与按键到达记录必须走 `AppLog.diag`（release 也落盘），⛔ 不许退回 `AppLog.i` ——
+ *    出问题的设备在用户那边，连不上 adb，日志页「调试」档是唯一取证通道。
  *
  * ⚠️ 与 [FocusableSurfaceColorContractTest] 同款：这是**启发式**护栏（只看出现次序），
  * 目的是「别删 / 别挪」。护栏本身的有效性由末尾的负向用例守住。
@@ -130,12 +146,13 @@ class FocusIndicatorContractTest {
     }
 
     @Test
-    fun `四条核心判据一条都不能被删`() {
+    fun `五条核心判据一条都不能被删`() {
         val text = uiSourceRoot().resolve("components/FocusIndicator.kt").readText()
         val required = mapOf(
             "无触摸屏（FEATURE_TOUCHSCREEN）" to "FEATURE_TOUCHSCREEN",
             "电视特征 FEATURE_LEANBACK" to "FEATURE_LEANBACK",
             "电视特征 type.television" to "android.hardware.type.television",
+            "按键形态的 Configuration" to "isKeyNavigationConfiguration",
             "D-PAD 输入设备能力" to "dpadInputDevicePresent",
             "按键兜底 directionalNavigationSeen" to "DpadInputTracker.directionalNavigationSeen",
         )
@@ -145,14 +162,160 @@ class FocusIndicatorContractTest {
                 buildString {
                     appendLine("焦点视觉判据被删减：$missing")
                     appendLine()
-                    appendLine("四条判据任一成立即显示焦点环，删掉任何一条都会让某类设备退回")
-                    appendLine("「看不见焦点」。尤其 D-PAD 探测是「切页面立刻可见」的唯一保证，")
-                    appendLine("按键兜底必须先按一次键才会翻转 —— 那是用户明确拒绝的行为。")
+                    appendLine("五条判据任一成立即显示焦点环，删掉任何一条都会让某类设备退回")
+                    appendLine("「看不见焦点」。尤其：")
+                    appendLine("· D-PAD 探测是「切页面立刻可见」的保证；")
+                    appendLine("· Configuration 那条与 hasSystemFeature **来源独立**，")
+                    appendLine("  是「盒子把 touchscreen 声明成 required=false」时唯一的出路；")
+                    appendLine("· 按键兜底必须先按一次键才会翻转 —— 那是用户明确拒绝的行为，")
+                    appendLine("  所以它只能当兜底，不能当唯一判据。")
                     appendLine()
                     appendLine("详见 docs/conventions-adaptive-ui.md §11。")
                 }
             )
         }
+    }
+
+    @Test
+    fun `Configuration 判据必须 or 进 shouldShowFocusVisuals 的返回`() {
+        // 只写一个 isKeyNavigationConfiguration 函数不够：它没进返回值就是死代码，
+        // 「谎报 touchscreen feature」的盒子照样看不见焦点环。
+        val text = uiSourceRoot().resolve("components/FocusIndicator.kt").readText()
+        val body = functionBody(text, "fun shouldShowFocusVisuals()")
+        assertTrue(
+            "keyNavigationConfig 未参与 shouldShowFocusVisuals 的判定",
+            body.contains("keyNavigationConfig"),
+        )
+    }
+
+    // ─────────────── 兜底通道：窗口层 + 可回传的调试日志 ───────────────
+
+    @Test
+    fun `按键兜底必须同时挂在 Compose 层与窗口层`() {
+        // 只挂 onPreviewKeyEvent ⇒ 自举循环（按键要先有焦点才进得来）。
+        // 只挂 onKeyDown ⇒ 按键被 Compose 消费后根本不会走到，release 无痕。
+        val activity = uiSourceRoot().resolve("MainActivity.kt").readText()
+        assertTrue("根节点 onPreviewKeyEvent 没接 noteKeyEvent", activity.contains("noteKeyEvent("))
+        assertTrue("缺 source=\"compose\" 记录点", activity.contains("source = \"compose\""))
+        assertTrue("缺 source=\"window\" 记录点（窗口层兜底）", activity.contains("source = \"window\""))
+
+        val onKeyDownBody = functionBody(activity, "override fun onKeyDown(keyCode: Int, event: KeyEvent?)")
+        assertTrue(
+            "onKeyDown 里没有 noteKeyEvent —— 按键没进 Compose 焦点树时判据 5 永远不会翻转",
+            onKeyDownBody.contains("noteKeyEvent("),
+        )
+    }
+
+    @Test
+    fun `焦点判据的翻转与到达必须写进 release 可见的调试档`() {
+        val text = uiSourceRoot().resolve("components/FocusIndicator.kt").readText()
+        // 取整个 object（`fun noteKeyEvent(` 的签名里带 `device: InputDevice? = null`，
+        // functionBody 会把它误判成表达式体只取一行 —— 按 object 取整块才可靠）
+        val trackerBody = functionBody(text, "object DpadInputTracker")
+        assertTrue("DpadInputTracker 不写 AppLog.diag ⇒ release 无痕，用户侧无从取证", trackerBody.contains("AppLog.diag("))
+        assertTrue(
+            "仍在用 AppLog.i（release 完全不产生）：这就是「用户盒子看不见焦点环却什么日志都没有」的形态",
+            !trackerBody.contains("AppLog.i("),
+        )
+        // 启动时的一次快照读数：不按键也能看到五条判据的实测值
+        val activity = uiSourceRoot().resolve("MainActivity.kt").readText()
+        assertTrue("MainActivity 没调用 logFocusVisualDiagnostics —— 焦点判据没有可回传的读数", activity.contains("logFocusVisualDiagnostics("))
+    }
+
+    /** 负向自证：只挂 Compose 层的写法必须判负。 */
+    @Test
+    fun `负向自证 只挂 Compose 层的兜底必须判负`() {
+        val sample = """
+            Modifier.onPreviewKeyEvent { event ->
+                DpadInputTracker.noteKeyEvent(event.nativeKeyEvent.keyCode, event.nativeKeyEvent.action)
+                false
+            }
+        """.trimIndent()
+        assertTrue(
+            "护栏空转：只有 compose 来源的样例被误判为已有窗口层兜底",
+            !sample.contains("source = \"window\""),
+        )
+    }
+
+    /** 负向自证：翻转只写 AppLog.i 的写法必须判负（与上一条同口径，取 object 整块）。 */
+    @Test
+    fun `负向自证 用 AppLog 记录 release 无痕的翻转必须判负`() {
+        val sample = """
+            object DpadInputTracker {
+                var directionalNavigationSeen by mutableStateOf(false)
+                    private set
+
+                fun noteKeyEvent(keyCode: Int, action: Int, device: InputDevice? = null) {
+                    directionalNavigationSeen = true
+                    AppLog.i("FocusIndicator", "directional key detected")
+                }
+            }
+        """.trimIndent()
+        val body = functionBody(sample, "object DpadInputTracker")
+        assertTrue("没取到 object 块体，负向用例在空转", body.contains("AppLog.i("))
+        assertTrue(
+            "护栏空转：AppLog.i 在 release 不产生，却被误判为已留痕",
+            !(body.contains("AppLog.diag(") && !body.contains("AppLog.i(")),
+        )
+    }
+
+    // ─────────────────── Configuration 判据的纯逻辑（误判面） ───────────────────
+
+    @Test
+    fun `裸机手机的输入配置一律不得命中按键形态判据`() {
+        // 手机：手指触摸 + 无实体键盘（软键盘不进 Configuration.keyboard）
+        assertFalse(
+            "FINGER + NOKEYS 是手机的标准读数",
+            isKeyNavigationConfiguration(
+                touchscreen = Configuration.TOUCHSCREEN_FINGER,
+                keyboard = Configuration.KEYBOARD_NOKEYS,
+            ),
+        )
+        assertFalse(
+            "手指触摸 + 未定义键盘（软键盘从不进 Configuration.keyboard）是手机的另一种读数",
+            isKeyNavigationConfiguration(
+                touchscreen = Configuration.TOUCHSCREEN_FINGER,
+                keyboard = Configuration.KEYBOARD_UNDEFINED,
+            ),
+        )
+    }
+
+    @Test
+    fun `没有手指触摸的设备必须命中按键形态判据`() {
+        // 电视盒子的常态：框架按真实输入设备聚合出 NOTOUCH，
+        // 哪怕厂商在 permissions.xml 里把 touchscreen 声明成 required=false
+        assertTrue(
+            "NOTOUCH 必须命中",
+            isKeyNavigationConfiguration(
+                touchscreen = Configuration.TOUCHSCREEN_NOTOUCH,
+                keyboard = Configuration.KEYBOARD_NOKEYS,
+            ),
+        )
+        assertTrue(
+            "STYLUS（触控笔电视 / 手写板）同样不是手指触摸导航",
+            isKeyNavigationConfiguration(
+                touchscreen = Configuration.TOUCHSCREEN_STYLUS,
+                keyboard = Configuration.KEYBOARD_NOKEYS,
+            ),
+        )
+        assertTrue(
+            "实体键盘（QWERTY，蓝牙遥控常被识别成键盘）必须命中",
+            isKeyNavigationConfiguration(
+                touchscreen = Configuration.TOUCHSCREEN_FINGER,
+                keyboard = Configuration.KEYBOARD_QWERTY,
+            ),
+        )
+        // `TOUCHSCREEN_UNDEFINED` 只能是合成 Configuration 或畸形 ROM 的读数 —— 真机（含手机）
+        // 由框架按真实输入设备聚合，恒为 NOTOUCH / STYLUS / FINGER 之一。
+        // 「不知道是不是手指触摸」不是「有手指触摸」的证据：把它判负等于在最需要这条判据的
+        // 设备上把它关掉，而手机侧永远不会走到这个分支，误判面为空。
+        assertTrue(
+            "未定义同样不是手指触摸的证据，必须命中",
+            isKeyNavigationConfiguration(
+                touchscreen = Configuration.TOUCHSCREEN_UNDEFINED,
+                keyboard = Configuration.KEYBOARD_UNDEFINED,
+            ),
+        )
     }
 
     @Test

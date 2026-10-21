@@ -61,7 +61,7 @@ data class LogsSettingsState(
     val entries: List<LogEntry> = emptyList(),
     /** 日志文件占用字节数 */
     val fileSizeBytes: Long = 0L,
-    /** 当前显示的最低级别（D/I/W/E；D=全部） */
+    /** 当前筛选档（D/I/W/E 为「至少该级别」；X=调试 为「只看调试」） */
     val minLevel: String = LogStore.LEVEL_DEBUG,
 )
 
@@ -79,11 +79,18 @@ data class LogsSettingsActions(
  * 所以**重启后仍在**；写入发生在 `AppLog` 与崩溃处理器里，本页只读 + 清空。
  * D/I 只在 Debug 构建产生，W/E 在 release 也始终落盘；级别过滤是设备本地偏好。
  *
+ * X（[LogStore.LEVEL_DIAG]，「调试」）是**另一类**而非更高/更低级别：它是设备侧读数
+ * （当前是焦点判据实测值），release 也落盘。它与 D 同严重度 ⇒ 「全部」带上它，
+ * I/W/E 三档把它挡在门外，选中「调试」时**只看**它。
+ * 这样分档是为了让电视/盒子用户**不连 adb** 就能把现场截图回传，
+ * 而不必在几百行 I/W 里找那三条读数。
+ *
  * 排版取舍：
  *  - 卡片里先给一行摘要（过滤后条数 / 总条数 + 占用），再给级别单选芯片
- *    （「至少显示」语义），然后「刷新 / 清空」两枚芯片，最后是日志行 ——
- *    手机竖屏下四枚级别芯片同样一行排开（所有者要求不折行），与时长档同一原语
- *    （`SettingsChipRow`）。
+ *    （D/I/W/E 为「至少显示」，「调试」为「只看它」），然后「刷新 / 清空」两枚芯片，
+ *    最后是日志行 ——
+ *    芯片一律走 `SettingsChipRow`（与时长档同一原语），TV 一行 5 枚、
+ *    手机竖屏 3 + 2 两行（芯片恒单行，绝不折字）。
  *  - 日志行**可聚焦**：遥控器确认 → 弹出详情，看**完整消息 + 完整堆栈**
  *    （列表里只放 3 行正文 + 堆栈首行，否则一屏放不下两条）。
  *    ⚠️ 行本身是「就地查看」，不是「进下一级」⇒ 不加 `Trail.Arrow`。
@@ -98,7 +105,9 @@ internal fun LogsSettingsSection(
     // 非空 = 正在查看某条日志的详情
     var selectedEntry by remember { mutableStateOf<LogEntry?>(null) }
     val visibleEntries = remember(state.entries, state.minLevel) {
-        LogStore.filterAtLeast(state.entries, state.minLevel).take(LogStore.READ_LIMIT)
+        // filterForSelection 而不是 filterAtLeast：X（调试）不是「更高级别」，
+        // 走严重度阶梯会让它要么挤进 W/E 视图、要么永远显示不出来。
+        LogStore.filterForSelection(state.entries, state.minLevel).take(LogStore.READ_LIMIT)
     }
     Column {
         SectionTitle(stringResource(R.string.settings_logs))
@@ -132,11 +141,13 @@ internal fun LogsSettingsSection(
             )
             // 单选芯片组而不是下拉菜单：TV 上 D-Pad 的菜单焦点是已知坑，
             // 「单选档位」在本项目里统一走 SettingsChipRow（与时长档、画面适配同一原语）。
-            // 手机竖屏也排成一行（四枚短标签放得下，所有者要求不折行）。
+            // TV 一行 5 枚；手机竖屏 3 + 2 分两行 —— 5 枚芯片每枚约 68dp（芯片内边距
+            // 18dp×2 + 两字标签），加 10dp 间距共 380dp，竖屏可用宽度放不下，
+            // 只能分行（`Row` 不换行，硬排会被挤成 0 宽）。
             SettingsChipRow(
                 items = LOG_LEVEL_FILTERS,
-                tv = 4,
-                phonePortrait = 4,
+                tv = 5,
+                phonePortrait = 3,
             ) { item ->
                 SettingsChip(
                     label = stringResource(item.labelRes),
@@ -236,8 +247,12 @@ private data class LogsAction(
 )
 
 /**
- * 日志级别筛选项（「至少显示」语义：选中项及以上都显示）。
+ * 日志级别筛选项（D/I/W/E 是「至少显示」语义：选中项及以上都显示）。
  * 「全部」用 [LogStore.LEVEL_DEBUG] 表示 —— D 是严重度最低的一级。
+ *
+ * [LogStore.LEVEL_DIAG]（「调试」）**排在最后而不是按严重度插在中间**：它是另一类
+ * （设备侧读数，不参与阶梯），选中它时只显示 X 自身；放在 D 旁边会被读成
+ * 「比全部更低一档」，而实际上「全部」里已经含 X。
  */
 private data class LogLevelFilter(val level: String, @StringRes val labelRes: Int)
 
@@ -246,14 +261,16 @@ private val LOG_LEVEL_FILTERS = listOf(
     LogLevelFilter(LogStore.LEVEL_INFO, R.string.settings_logs_level_info),
     LogLevelFilter(LogStore.LEVEL_WARN, R.string.settings_logs_level_warn),
     LogLevelFilter(LogStore.LEVEL_ERROR, R.string.settings_logs_level_error),
+    LogLevelFilter(LogStore.LEVEL_DIAG, R.string.settings_logs_level_diag),
 )
 
-/** 级别配色：E 红、W 橙、D/I 次要色（列表与详情共用）。 */
+/** 级别配色：E 红、W 橙、X 用主色（调试读数不是告警，不得看起来像报错）、D/I 次要色。 */
 @androidx.compose.runtime.Composable
 @androidx.compose.runtime.ReadOnlyComposable
 private fun levelColor(level: String): Color = when (level) {
     LogStore.LEVEL_ERROR -> NasMusicColors.Danger
     LogStore.LEVEL_WARN -> NasMusicColors.Warning
+    LogStore.LEVEL_DIAG -> NasMusicColors.Primary
     else -> NasMusicColors.TextSecondary
 }
 

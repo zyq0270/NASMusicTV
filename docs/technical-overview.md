@@ -17416,3 +17416,45 @@ K 歌并恢复导航栏。
 - 专辑 / 艺术家两个 Tab 的网格脚手架（Level 1.5 返回、A-Z 分组、右边缘焦点、索引条接线约 120 行）仍是两份逐行重复 —— 抽成一个 `LetterGroupedGrid` 才是「永不分家」的根因修法，但触及焦点与返回行为，需要单独一轮真机回归。
 - `ui/components/album/UnifiedAlbumCard.kt` 与 `ui/components/artist/UnifiedArtistCard.kt` 零调用（注释仍写「替代 LibraryScreen 中的卡片」），与本次统一方向重复，属 tracked source，删除需所有者确认。
 - `EmptyHint` 的「重试」按钮与 `ButtonChip` 仍是各自手抄的参数块（不是「块」，本次未动）；公共 `SourceBadge` 的文字色仍是裸 `Color.White`（浅色主题下压在浅蓝 NAS 源色上对比偏低），改它影响 4 个调用点，留给浅色主题批次。
+
+### 10.269 v2.39.6 补丁 — 遥控器焦点高亮在用户盒子上消失：判据补源 + 窗口层兜底 + 「调试」日志档（2026-10-21）
+
+**触发**：用户反馈「遥控器上下左右菜单热点消失，大白话就是不知道现在按到了哪个菜单选项」，环境是 Android 4+ 的盒子。**所有者的测试电视正常，出问题的是用户侧设备** ⇒ 复现不可得，只能靠代码定根因 + 把设备侧读数回传。
+
+**定位（症状是「画不出来」而不是「焦点丢了」）**：焦点视觉由 `shouldShowFocusVisuals()` 单点控制，它为 false 时 `FocusableSurface` 的 `activeFocus` 恒 false ⇒ 缩放 / 焦点环 / 容器色 / 内容色**全部**关闭；而 `NavItem` 的 `containerColor = Color.Transparent`，于是菜单项在总开关关闭时**零反馈**，与用户描述完全一致。开发机（创维 API 22）三道门全开，所以本机不复现。四条可各自独立落空的失效路径：
+
+| 路径 | 为什么落空 |
+|---|---|
+| `!hasSystemFeature(FEATURE_TOUCHSCREEN)` | 读的是**厂商手写的 permissions.xml**；盒子为能装手机应用普遍把 `android.hardware.touchscreen` 写成 `required="false"` |
+| `FEATURE_LEANBACK` / `type.television` | 非 Google 认证盒子双双 false（本仓库历史上已为这条判据补过两次） |
+| `InputDevice` 里存在 `SOURCE_DPAD` 设备 | `isRemoteNavigationDevice` 有意排除「既 DPAD 又 TOUCHSCREEN」的设备（保护手机侧）；部分 ROM 把两个 source 报在同一个 device 上 |
+| `DpadInputTracker` 按键兜底 | 此前只挂在 Compose 根节点的 `onPreviewKeyEvent` ⇒ **自举循环**：按键要先有焦点节点才进得来，老盒子冷启动没有焦点，「要有焦点环才认得方向键，要认得方向键才有焦点环」 |
+
+外加一条取证缺口：翻转过程只写 `AppLog.i`，而 release 构建 `d`/`i` **完全不产生** ⇒ 用户盒子出问题、日志里一条痕迹都没有（这正是所有者要求「日志页单独增加一个『调试』类别」的理由）。
+
+**改动**：
+
+1. **判据从四条扩到五条**，新增的第 3 条换的是**数据来源**而不是阈值：`isKeyNavigationConfiguration(touchscreen, keyboard)` 读 `Configuration`（框架按**真实输入设备**聚合出的全局配置），与 `hasSystemFeature` 相互独立。手机恒为 `TOUCHSCREEN_FINGER` + `KEYBOARD_NOKEYS`（软键盘从不进 `Configuration.keyboard`）⇒ false，不重现「点一下永久高亮」。`TOUCHSCREEN_UNDEFINED` 刻意算命中：真机取不到该值，判负等于在最需要这条判据的设备上把它关掉。⚠️ 这两个字段**未被** `@Deprecated`、常量是 `ConstantValue` 内联（API 22 不缺符号），是用 `javap -p -v` 在 android-34 stub jar 上实测核对的，不是凭印象。
+2. **窗口层兜底**：`MainActivity.onKeyDown` 的**第一件事**（在 `MediaKeyHandler` 之前）调 `DpadInputTracker.noteKeyEvent(..., source = "window")`，Compose 根 `Box` 的 `onPreviewKeyEvent` 保留 `source = "compose"`。两层覆盖面不同：`onKeyDown` 是窗口最后一级、消掉自举循环；`onPreviewKeyEvent` 覆盖被 Compose 消费而不下沉的按键。Compose `Dialog` 自带独立 Window、根节点预览拦不到它 ⇒ 窗口层不可省。⛔ 没有用 `Activity.dispatchKeyEvent`（androidx.core 的 `RestrictedApi`，CI 的 `lintDebug` 已是阻塞的）。
+3. **`AppLog.diag()` + `LogStore.LEVEL_DIAG = "X"`**：release 也落盘、logcat 仅 Debug 输出；`severityOf(X) = 0`（与 D 同档）⇒ 「全部」带上它、I/W/E 三档把它挡在门外，新增 `filterForSelection(entries, selection)` 让选中「调试」时**只看** X —— 用户不必在几百行 I/W 里找那三条读数。日志页筛选行加第 5 枚 chip（`settings_logs_level_diag`，`SettingsChipRow` 的 `tv = 5` / `phonePortrait = 3`），X 档用 `NasMusicColors.Primary` 着色（调试读数不是告警，不能看起来像报错）。
+4. **读数接入**：启动一次（`LaunchedEffect(Unit)`）+ 判据 5 翻转后一次，各写 3 条 `X`：五条判据实测值与显示结论 / 厂商·型号·SDK·版本 / input device 清单（`describeInputDevice` 打成 `#id 名称 src=0x… [DPAD][TOUCH]` —— 十六进制旁边直接标位名，因为回传要靠人读截图）。两次读数对账即可定位是哪条判据把焦点视觉打开的。方向键**到达**记录按来源各限流 5 条（`KEY_ARRIVAL_LOG_LIMIT`）：长按会连发 repeat，不设上限就把 400 行滚动窗口里的 W/E 现场挤掉了。`window` 有记录而 `compose` 没有 ⇒ 按键从没进过 Compose 焦点树 —— 两个来源分别记的全部意义就在这条差集。
+5. **缓存边界**：`InputDevice.getDeviceIds()` 是 binder 调用，而 `shouldShowFocusVisuals()` 有 135+ 个组合期调用点 ⇒ 探测结果放**进程级 `by lazy`**（`dpadProbe`，一次探测同时产出命中位与诊断清单），⛔ 不能写成 `@Composable` 里的 `remember`（那样每个调用点各查一次）。三条静态判据抽出 `probeFocusVisualInputs(context)`，`dpadProbe` / `DpadInputTracker` 两个动态源留在外面 —— 混进探测函数就会在组合期打 binder 或丢掉快照 state 的订阅。
+6. **`LEVEL_DIAG` 登记进 `LogStore.ALL_LEVELS`**：`decode()` 用 `ALL_LEVELS` 挡畸形行，**漏登记的表现是写盘成功、读取时静默丢弃** —— 看起来像「日志根本没记」，是最难查的一种失败，故单独立一条门禁并在 `ALL_LEVELS` 的 KDoc 上写明。
+
+**门禁**：`FocusIndicatorContractTest` 33 例（源码扫描 + 纯函数）—— 焦点环在 `.background(` 之后（逐条修饰符链、含 lambda 体夹在中间的正负例）；五条判据 token 齐全；判据 3 必须真的 or 进 `shouldShowFocusVisuals` 的返回；`InputDevice` 查询只存在于探测函数且必须 `by lazy { probeDpadInputDevices() }`；按键兜底必须 `source = "compose"` 与 `source = "window"` 两个来源都在、且 `onKeyDown` 函数体内确有 `noteKeyEvent(`；`object DpadInputTracker` 体内必须写 `AppLog.diag(` 且不得残留 `AppLog.i(`；`isKeyNavigationConfiguration` / `isRemoteNavigationDevice` / `nextDirectionalSeen` 的手机侧与 TV 侧正负用例；四条护栏自证（只有 compose 来源的样例、只写 `AppLog.i` 的样例、`functionBody` 三种切法）。
+`LogsTabWiringGateTest` 35 例 —— 筛选判据从硬编码的 `LogStore.filterAtLeast(` 改为 `filterForSelection` + `settings_logs_level_diag`；新增「`AppLog.diag` 必须无条件落盘」「`LEVEL_DIAG` 必须登记进 `ALL_LEVELS`」两条正向与两条对应的负向自证（负例一律咬自己的判据）。
+`LogStoreTest` 19 例 —— 非法级别样本从 `"X"` 换成 `"Z"`（X 现在是合法级别）；「所有级别都能落盘并解码」改为显式写入列表 + `asReversed()` + `ALL_LEVELS` 覆盖性断言（⚠️ 原写法遍历 `setOf(D,I,W,E,X)` 却按 `E,X,W,I,D` 断言顺序，是我这次写错的）；新增「调试档必须单列而不参与严重度阶梯」与对应负向自证。
+⚠️ `functionBody(` 取 `fun noteKeyEvent(` 会被签名里的 `device: InputDevice? = null` 误判成表达式体只取一行 ⇒ 改取 `object DpadInputTracker` 整块，负向样例也照同一形态写。
+
+**验证**：`testDebugUnitTest --tests "*LogStoreTest" --tests "*LogsTabWiringGateTest" --tests "*FocusIndicatorContractTest"` → **87 例零失败**（33 + 19 + 35，`--rerun-tasks` 与增量各跑一次）；全量 `testDebugUnitTest lintDebug --rerun-tasks` → **239 类 / 2462 例零失败**、lint **0 errors / 163 warnings**（既有告警，无新增）。版本号未提升（191 / 2.39.6）。
+⚠️ 本机踩过的两个假失败：`--tests` 与 `lintDebug` 同一条命令里会让 lint 报 `Unknown command-line option '--tests'`（16s 秒红，与代码无关，分开跑）；`FocusIndicatorContractTest` 一处 `if` 块收尾误写成 `)`，Kotlin 报的是 14 处 `Unresolved reference 'uiSourceRoot'` + `Missing '}'` 的**级联假象** —— 栈顶那条 `Syntax error` 才是真凶，别照着后面的错去补 import。
+**未做**：本机不装不启动（按分工，真机判定由所有者做）；未编 release APK，尚未推送。改善是否命中用户盒子**无法本机验证** —— 只能靠日志页「调试」档回传读数，故本轮把取证通道当成一等公民做。
+
+**回传后的读法**（下次用户反馈时按这张表定位，不要再从零推）：
+
+| 日志页「调试」档读数 | 结论 |
+|---|---|
+| `显示=true` 且用户仍看不见 | 判据没问题 ⇒ 是**绘制**侧：查 `.focusRing(` 是否被挪到 `.background(` 之前，或该组件根本没接 `activeFocus` |
+| `显示=false`、`按键到达[window]` 有、`按键到达[compose]` 没有 | 按键从没进 Compose 焦点树 ⇒ 焦点树本身空（布局 / `focusable` 缺失），窗口层兜底已把判据 5 打开却无处可画 |
+| `显示=false`、`DPAD设备=false`、`按键形态配置=false`、`无触摸屏=false` | 三道静态门全落空 ⇒ 该 ROM 连 `Configuration` 都被伪造，需要新证据（把 `输入设备[…]` 那行的 `src=0x…` 回传，按位再判） |
+| `显示=true` 只在 `已按过方向键=true` 之后出现 | 判据 3/4 在该设备上失效，只剩兜底 ⇒ 进场即见这条需求没满足，得按清单加第六道（能力探测） |

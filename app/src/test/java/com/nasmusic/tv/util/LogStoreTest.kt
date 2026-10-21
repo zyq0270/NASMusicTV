@@ -67,20 +67,27 @@ class LogStoreTest {
         assertNull("空行", LogStore.decode(""))
         assertNull("字段不足", LogStore.decode("123\tE\tTAG"))
         assertNull("时间戳非法", LogStore.decode("abc\tE\tTAG\tmsg"))
-        assertNull("级别非法", LogStore.decode("123\tX\tTAG\tmsg"))
+        assertNull("级别非法", LogStore.decode("123\tZ\tTAG\tmsg"))
     }
 
     @Test
-    fun `四个级别都必须能落盘并解码`() {
-        for (level in LogStore.ALL_LEVELS) {
-            LogStore.appendBlocking(level, "L", "msg-$level", null)
-        }
+    fun `所有级别都必须能落盘并解码（含 X 调试）`() {
+        // 写入顺序固定，才能断言倒序结果（ALL_LEVELS 是 Set，别拿它的迭代次序当写入次序）
+        val written = listOf(
+            LogStore.LEVEL_DEBUG,
+            LogStore.LEVEL_INFO,
+            LogStore.LEVEL_WARN,
+            LogStore.LEVEL_ERROR,
+            LogStore.LEVEL_DIAG,
+        )
+        written.forEach { LogStore.appendBlocking(it, "L", "msg-$it", null) }
         val levels = LogStore.snapshot().entries.map { it.level }
         assertEquals(
-            "D/I 曾是非法级别（decode 会丢），现在必须完整保留（倒序）",
-            listOf(LogStore.LEVEL_ERROR, LogStore.LEVEL_WARN, LogStore.LEVEL_INFO, LogStore.LEVEL_DEBUG),
+            "任何一级都不得被 decode 丢掉（X 一旦漏进 ALL_LEVELS，整行会被无声丢弃）",
+            written.asReversed(),
             levels,
         )
+        assertEquals("ALL_LEVELS 必须覆盖上面写入的每一级", written.toSet(), LogStore.ALL_LEVELS)
     }
 
     @Test
@@ -107,13 +114,70 @@ class LogStoreTest {
 
     @Test
     fun `未知过滤级别必须回落全部而不是滤空`() {
-        assertEquals(LogStore.LEVEL_DEBUG, LogStore.normalizeLevel("X"))
+        // ⚠️ 脏值用 "Z" 不用 "X"：X 从 v2.39.6 起是**合法**级别（调试读数），
+        // 拿它当"未知级别"会让这条用例悄悄变成空转。
+        assertEquals(LogStore.LEVEL_DEBUG, LogStore.normalizeLevel("Z"))
+        assertEquals(LogStore.LEVEL_DIAG, LogStore.normalizeLevel(LogStore.LEVEL_DIAG))
         assertEquals(LogStore.LEVEL_WARN, LogStore.normalizeLevel(LogStore.LEVEL_WARN))
         val entries = listOf("D", "W").map { LogStore.decode(LogStore.encode(it, "T", "m", null))!! }
         assertEquals(
             "持久化的脏值不能把日志页滤成空白",
             entries.size,
-            LogStore.filterAtLeast(entries, "X").size,
+            LogStore.filterAtLeast(entries, "Z").size,
+        )
+    }
+
+    /**
+     * 「调试」档（X）的过滤语义 —— 它是**另一类**而不是阶梯上的一级：
+     *  - 选「全部」(D) 含 X，X 不会凭空消失；
+     *  - 选 I/W/E **不含** X，否则用户想看告警时会被一堆设备读数挤掉现场；
+     *  - 选 X **只有** X，这是不连 adb 回传焦点/设备读数的唯一视图。
+     */
+    @Test
+    fun `调试档必须单列而不参与严重度阶梯`() {
+        val entries = listOf(
+            LogStore.LEVEL_DEBUG,
+            LogStore.LEVEL_INFO,
+            LogStore.LEVEL_WARN,
+            LogStore.LEVEL_ERROR,
+            LogStore.LEVEL_DIAG,
+        ).map { LogStore.decode(LogStore.encode(it, "T", "m-$it", null))!! }
+
+        assertEquals(
+            "「全部」必须含 X（否则用户以为设备读数没产生）",
+            listOf("D", "I", "W", "E", "X"),
+            LogStore.filterForSelection(entries, LogStore.LEVEL_DEBUG).map { it.level },
+        )
+        assertEquals(
+            "I/W/E 档必须排除 X（调试读数不得挤掉告警现场）",
+            listOf("W", "E"),
+            LogStore.filterForSelection(entries, LogStore.LEVEL_WARN).map { it.level },
+        )
+        assertEquals(
+            "选中 X 只看 X",
+            listOf("X"),
+            LogStore.filterForSelection(entries, LogStore.LEVEL_DIAG).map { it.level },
+        )
+        assertEquals(
+            "E 档不得混入 X",
+            listOf("E"),
+            LogStore.filterForSelection(entries, LogStore.LEVEL_ERROR).map { it.level },
+        )
+    }
+
+    /** 负向自证：若 X 被误当成「更高级别」塞进阶梯，上面那条会全绿而这条会红。 */
+    @Test
+    fun `负向自证 X 的严重度不得高于 W 或 E`() {
+        assertTrue(
+            "X 必须与 D 同级（0）：否则 I/W/E 档会把设备读数当成告警显示出来",
+            LogStore.severityOf(LogStore.LEVEL_DIAG) == 0,
+        )
+        assertTrue(
+            "X 与 D 同级 ⇒ filterAtLeast 的「全部」自然含 X，无需特判",
+            LogStore.filterAtLeast(
+                listOf(LogStore.decode(LogStore.encode(LogStore.LEVEL_DIAG, "T", "m", null))!!),
+                LogStore.LEVEL_DEBUG,
+            ).isNotEmpty(),
         )
     }
 

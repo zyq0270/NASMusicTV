@@ -48,6 +48,7 @@ import com.nasmusic.tv.player.PlaybackService
 import com.nasmusic.tv.ui.components.AppRoot
 import com.nasmusic.tv.ui.components.ConnectPromptDialog
 import com.nasmusic.tv.ui.components.DpadInputTracker
+import com.nasmusic.tv.ui.components.logFocusVisualDiagnostics
 import com.nasmusic.tv.ui.screens.ExitConfirmDialog
 import com.nasmusic.tv.ui.theme.NASMusicTVTheme
 import com.nasmusic.tv.ui.theme.FontSize
@@ -346,6 +347,21 @@ class MainActivity : ComponentActivity() {
                     val connectMessage by viewModel.connectMessage.collectAsState(initial = null)
                     val errorMessage by viewModel.errorMessage.collectAsState(initial = null)
 
+                    // 焦点判据的实测读数写进日志页「调试」档（release 也写）。
+                    // 出问题的往往是**用户的**盒子，那边连不上 adb，日志页截图是唯一取证通道。
+                    // ⚠️ 必须在 LaunchedEffect 里，⛔ 不许直接写在组合体中：首次调用会触发
+                    // 一次 InputDevice 的 binder 查询（进程内只付一次，但要付在组合之外）。
+                    LaunchedEffect(Unit) {
+                        logFocusVisualDiagnostics(applicationContext, "启动")
+                    }
+                    // 首次方向键后再读一次：此时判据 5 已经翻转，两次读数对账就知道
+                    // 到底是哪一条把焦点视觉打开的（启动那次若是全 false，这里必有一条 true）。
+                    LaunchedEffect(DpadInputTracker.directionalNavigationSeen) {
+                        if (DpadInputTracker.directionalNavigationSeen) {
+                            logFocusVisualDiagnostics(applicationContext, "首次方向键后")
+                        }
+                    }
+
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
@@ -355,14 +371,26 @@ class MainActivity : ComponentActivity() {
                             // `onPreviewKeyEvent` 挂在根节点上，Compose 会沿焦点目标的祖先链
                             // 从根往下派发按键 ⇒ 覆盖全部页面，且在按键被消费之前先经过。
                             //
+                            // 但它**要求按键先走进 Compose**：老盒子没有任何节点持有焦点时按键到不了这里，
+                            // 所以 `onKeyDown` 里还有一条 source="window" 的兜底（两处都要在，
+                            // 差集本身就是诊断信息）。
+                            //
                             // 覆盖不到 Compose `Dialog`（自带独立 Window / 独立 ComposeView），
                             // 但那不构成问题：用户必须先用方向键走到那个弹窗入口，
                             // 标志在打开弹窗之前就已经置上了。
                             .onPreviewKeyEvent { event ->
                                 // ⛔ 直接取 `nativeKeyEvent` 的 keyCode，而不是逐个 Compose `Key` 映射 ——
                                 // 后者要维护一张几十项的对照表，且新增遥控器键就漏一个。
+                                // source="compose"：只有当按键**进入了 Compose 焦点树**才会走到这里。
+                                // 与 `onKeyDown` 里 source="window" 的那条对照，就能从日志页
+                                // 判断「按键到底进没进 Compose」—— 老盒子上这正是分岔点。
                                 val native = event.nativeKeyEvent
-                                DpadInputTracker.noteKeyEvent(native.keyCode, native.action)
+                                DpadInputTracker.noteKeyEvent(
+                                    keyCode = native.keyCode,
+                                    action = native.action,
+                                    source = "compose",
+                                    device = native.device,
+                                )
                                 false // 只观察，不消费
                             }
                     ) {
@@ -606,6 +634,19 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
+        // 焦点判据的**窗口层兜底**（v2.39.6）：Compose 根节点的 `onPreviewKeyEvent`
+        // 只在按键**进入 Compose 焦点树**时才收到。老盒子上冷启动常常没有任何节点持有焦点，
+        // 按键走不到那里 ⇒ 判据 5 形成自举循环（「要有焦点环才认得方向键，
+        // 要认得方向键才有焦点环」）。`Activity.onKeyDown` 是窗口层的最后一级，
+        // 按键只要进了这个窗口就一定经过这里。
+        // ⛔ 仍然不用 `Activity.dispatchKeyEvent`（androidx.core 的 RestrictedApi，CI lint 阻塞）。
+        DpadInputTracker.noteKeyEvent(
+            keyCode = keyCode,
+            action = event?.action ?: KeyEvent.ACTION_DOWN,
+            source = "window",
+            device = event?.device,
+        )
+
         // G-1: HDMI-CEC / 蓝牙遥控器媒体键映射
         val handled = MediaKeyHandler.handleKeyEvent(
             keyCode = keyCode,

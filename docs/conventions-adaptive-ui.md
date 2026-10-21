@@ -481,39 +481,87 @@ val tvDevice = shouldShowFocusVisuals()   // ui/components/FocusIndicator.kt
 ```
 
 设备特征靠不住，**运行时输入能力**靠得住 —— 遥控器本身就是注册在系统里的 input device、
-声明了 `SOURCE_DPAD`，盒子再怎么隐瞒 `leanback`/`television` 也瞒不掉它。四条判据任一成立即显示：
+声明了 `SOURCE_DPAD`，盒子再怎么隐瞒 `leanback`/`television` 也瞒不掉它。五条判据任一成立即显示：
 
-| # | 判据 | 覆盖场景 |
-|---|------|----------|
-| 1 | 没有触摸屏（`!FEATURE_TOUCHSCREEN`） | 电视盒子 / 机顶盒 / 投影仪的常态 |
-| 2 | `FEATURE_LEANBACK` **或** `android.hardware.type.television` | 认证电视 |
-| 3 | **存在支持 `SOURCE_DPAD` 的输入设备** | ⭐ 非认证盒子；**进场即命中，无需按键** |
-| 4 | 进程内收到过方向/确认键（`DpadInputTracker`） | 运行中才接入的蓝牙键盘 / 手柄 |
+| # | 判据 | 数据来源 | 覆盖场景 |
+|---|------|----------|----------|
+| 1 | 没有触摸屏（`!FEATURE_TOUCHSCREEN`） | permissions.xml | 电视盒子 / 机顶盒 / 投影仪的常态 |
+| 2 | `FEATURE_LEANBACK` **或** `android.hardware.type.television` | permissions.xml | 认证电视 |
+| 3 | **`Configuration.touchscreen` 不是手指触摸**，或 `keyboard` 报出实体键盘 | 框架按真实输入设备聚合 | ⭐ 1/2 的来源被厂商谎报时 |
+| 4 | **存在支持 `SOURCE_DPAD` 的输入设备** | `InputDevice` 能力探测 | 非认证盒子；**进场即命中，无需按键** |
+| 5 | 进程内收到过方向/确认键（`DpadInputTracker`） | 按键事件 | 运行中才接入的蓝牙键盘 / 手柄 |
 
-⛔ **判据 3 是「切到页面立刻看到焦点环」这条需求的唯一保证**：
+⛔ **判据 4 是「切到页面立刻看到焦点环」这条需求的唯一保证**：
 
 > 「当我切换到某个页面时，要立刻知道焦点在哪里？而不是先按一下才看到焦点环。」
 
-判据 1、2 是**静态特征嗅探**，在刻意隐瞒特征的盒子上会双双落空；判据 4 **必须先按一次键**
-才会翻转 —— 正好是用户拒绝的那个行为。判据 3 是能力探测，开屏即成立。
+判据 1、2 是**静态特征嗅探**，在刻意隐瞒特征的盒子上会双双落空；判据 5 **必须先按一次键**
+才会翻转 —— 正好是用户拒绝的那个行为。判据 4 是能力探测，开屏即成立。
 
-#### 判据 3 的缓存策略
+#### 为什么要加判据 3：来源必须独立（v2.39.6）
+
+**同一句用户反馈「遥控器导航看不见焦点」在开发者电视上不复现、在用户盒子上复现**，
+查出来的原因：判据 1、2 读的都是 `PackageManager.hasSystemFeature(...)`，而它的唯一依据是
+**厂商手写的 `permissions.xml`** —— 大量盒子为了能装手机应用，把
+`android.hardware.touchscreen` 声明成 `required="false"`（甚至干脆不写），
+于是「没有触摸屏」这条直接落空；`InputDevice` 探测（判据 4）又可能被
+「DPAD 与 TOUCHSCREEN 报在同一个 device 上」的排除规则挡住（见下）。
+
+判据 3 换的是**数据来源**：`Configuration.touchscreen` / `.keyboard` 由框架按**真实连接的输入
+设备**聚合而成，跟厂商在 permissions.xml 里怎么写无关。两条来源独立 ⇒ 一路落空另一路还在。
+
+```kotlin
+internal fun isKeyNavigationConfiguration(touchscreen: Int, keyboard: Int): Boolean =
+    touchscreen != Configuration.TOUCHSCREEN_FINGER ||
+        (keyboard != Configuration.KEYBOARD_NOKEYS && keyboard != Configuration.KEYBOARD_UNDEFINED)
+```
+
+- 手机恒为 `TOUCHSCREEN_FINGER` + `KEYBOARD_NOKEYS`（软键盘从不进 `Configuration.keyboard`）⇒ **false**，
+  §11 的粘滞焦点态防护不受影响。
+- `TOUCHSCREEN_UNDEFINED` **也算命中**（刻意的宽松）：真机由框架聚合，恒为
+  NOTOUCH / STYLUS / FINGER 之一，`UNDEFINED` 只会来自合成 `Configuration` 或畸形 ROM ——
+  判负等于在最需要这条判据的设备上把它关掉，而手机侧永远走不到该分支。
+- ⚠️ `Configuration.touchscreen` / `.keyboard` 在 android-34 stub 里**没有** `@Deprecated`
+  （用 `javap -p -v` 核对过），常量是 `ConstantValue` 内联，API 22 上不缺符号。
+
+#### 判据 5 的接线：必须两个来源（v2.39.6）
+
+判据 5 此前只挂在 Compose 根节点的 `onPreviewKeyEvent` 上 —— 而那是「按键**已经进入**
+Compose 焦点树」之后才有机会执行的地方。老盒子冷启动时根本没有焦点节点，于是形成
+**自举循环**：要有焦点环才认得方向键，要认得方向键才有焦点环。
+
+⇒ 兜底必须**同时**挂在两层，且都调 `DpadInputTracker.noteKeyEvent(...)`：
+
+| 层 | 位置 | `source` | 作用 |
+|---|---|---|---|
+| 窗口层 | `MainActivity.onKeyDown`（**第一件事**，在 `MediaKeyHandler` 之前） | `"window"` | 消掉自举循环；按键没进 Compose 焦点树也能翻转 |
+| Compose 层 | 根 `Box` 的 `onPreviewKeyEvent` | `"compose"` | 覆盖被 Compose 消费掉、不会下沉到 `onKeyDown` 的按键 |
+
+- ⛔ **不要用 `Activity.dispatchKeyEvent`** —— 它是 `androidx.core` 的 `RestrictedApi`，
+  本仓库 CI 的 lint 是阻塞的（`lintDebug` 有 Error 就红）。
+- ⚠️ Compose `Dialog` 有**独立 Window**，根 `Box` 的预览拦键覆盖不到对话框内的按键；
+  这也是窗口层必须保留的原因之一。
+
+#### 判据 3/4 的缓存策略
 
 `InputDevice.getDeviceIds()` 是一次 **binder 调用**（`InputManager`），而
 `shouldShowFocusVisuals()` 被 **135+ 个组件在组合期调用** ⇒ 必须缓存。
 
 - ⛔ **不能**写成 `remember { … }` 放在 `@Composable` 里：每个调用点各有一份缓存，
   首屏仍是 135 次 binder 调用。
-- ✅ 放在 `object` 的 `by lazy` 上，**全进程只查一次**。
+- ✅ 放在 `object` 级私有属性的 `by lazy` 上（`dpadProbe`），**全进程只查一次**。
+- ⚠️ `PackageManager` 特征与 `Configuration` 读数可以在 `remember` 里算（本地读取，无 binder），
+  但**`InputDevice` 的探测绝不能进组合函数体** —— 门禁 `InputDevice 查询必须被缓存且只存在于探测函数里`
+  锁的就是这条边界。
 
 **「设备是运行中才接入的」怎么办 —— 有意不做过期机制。**
-蓝牙键盘后连时这个值确实已过期，但用户要用键盘导航就得先按方向键；那一刻判据 4
+蓝牙键盘后连时这个值确实已过期，但用户要用键盘导航就得先按方向键；那一刻判据 5
 （`DpadInputTracker`，快照 state，读它就订阅了）立刻生效并触发全体重组。
-于是 3 与 4 互补：**3 负责「进场就有」（遥控器），4 负责「后连的按一下就生效」**。
+于是 4 与 5 互补：**4 负责「进场就有」（遥控器），5 负责「后连的按一下就生效」**。
 加主动过期反而会引入一个更糟的风险 —— 在用户已形成肌肉记忆后把焦点环抽走，
 那正是本次要修的故障本身。
 
-#### 判据 3 的误判面（手机侧）
+#### 判据 4 的误判面（手机侧）
 
 部分 ROM / 模拟器会给内建触摸数字化器**顺带多报 source 位**，那样裸机手机会被误判成
 远控设备。处理方式（`isRemoteNavigationDevice` 纯函数）：
@@ -528,9 +576,31 @@ internal fun isRemoteNavigationDevice(hasDpad: Boolean, isTouchDigitizer: Boolea
 **不会**牺牲「电视盒子谎报 touchscreen 也要点亮焦点环」这条核心需求 ——
 那台盒子的遥控器照样命中。
 
-裸机手机三项判据全 false：有触摸屏（判据 1 false）、触摸设备不声明 `SOURCE_DPAD`
-（判据 3 false）、没按过方向键（判据 4 false）⇒ 焦点视觉保持关闭，
-§11 的粘滞焦点态防护不受影响。
+裸机手机五项判据全 false：有触摸屏（1）、非认证电视（2）、`FINGER` + 无实体键盘（3）、
+触摸设备不声明 `SOURCE_DPAD`（4）、没按过方向键（5）⇒ 焦点视觉保持关闭。
+
+#### 判据本身必须可回传：日志页的「调试」档
+
+出问题的设备**在用户那边，连不上 adb**，logcat 早没了；而翻转过程此前只写 `AppLog.i`
+—— release 构建里 `d`/`i` **完全不产生** ⇒ 「用户盒子看不见焦点环，但日志里一条痕迹都没有」。
+
+⇒ 新增 `AppLog.diag(...)`（级别 `X`）：**release 也落盘**，在设置 → 日志页里**单列一档**
+「调试」，不与 `I/W/E` 的严重度阶梯混算（`LogStore.filterForSelection`）。
+焦点侧写进去的读数：
+
+| 时机 | 内容 |
+|---|---|
+| 启动一次（`LaunchedEffect(Unit)`） | 五条判据的**实测值** + 显示结论 + 厂商/型号/SDK + 全部 input device 清单 |
+| 首次方向键后一次 | 同上（此时判据 5 已翻转，可对账是哪一条生效） |
+| 方向键到达（限流 5 条） | `source=compose` / `source=window` —— 直接证明兜底有没有接上 |
+
+⛔ 这批读数**不许**退回 `AppLog.i` / `d`（release 无痕），门禁
+`焦点判据的翻转与到达必须写进 release 可见的调试档` 锁死。
+⚠️ 新增日志级别必须同时登记进 `LogStore.ALL_LEVELS` —— 漏登记的表现是
+**写盘成功但读取时被 `decode()` 静默丢弃**（看起来像「日志根本没记」）。
+
+用户侧取证口径：设置 → 日志 → 过滤切到「调试」→ 截图回传。
+
 
 #### 判据的使用纪律
 
@@ -559,7 +629,9 @@ Compose 的绘制顺序 = 修饰符链顺序，越靠前越靠下。`FocusableSu
 被 `.clip(shape)` 裁剪后仍完整可见，也**绝不覆盖组件内的文字**。
 
 门禁：`FocusIndicatorContractTest`（扫描源码，按修饰符链切段判定顺序；含焦点环顺序、
-四条判据完整性、D-PAD 探测与缓存、以及 `isRemoteNavigationDevice` 误判面的正负用例）。
+五条判据完整性、判据 3 是否真的 or 进返回值、按键兜底的**两个来源**、翻转与到达是否走
+`AppLog.diag`、D-PAD 探测与缓存、`isKeyNavigationConfiguration` 与 `isRemoteNavigationDevice`
+误判面的正负用例，以及护栏自身的负向自证）。
 
 ### ⚠️ `onFocusChanged` 里别读外层派生的 `activeFocus`
 

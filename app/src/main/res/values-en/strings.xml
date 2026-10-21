@@ -510,17 +510,18 @@
     <string name="settings_data">Data Management</string>
     <!-- Logs section (v2.39.4): persisted runtime warnings/errors, re-viewable after restart -->
     <string name="settings_logs">Logs</string>
-    <string name="settings_logs_desc">Local record of runtime logs (includes debug info in Debug builds); survives restarts</string>
+    <string name="settings_logs_desc">Local record of runtime logs; survives restarts. Switch to "Diagnostics" and screenshot it when reporting an issue</string>
     <string name="settings_group_runtime_logs">Runtime Logs</string>
-    <string name="settings_group_runtime_logs_desc">Release records warnings and errors (including crashes); Debug also records D/I. Keeps the latest 400</string>
+    <string name="settings_group_runtime_logs_desc">Warnings and errors are always recorded (including crashes), Debug adds D/I; "Diagnostics" holds device readings. Keeps the latest 400</string>
     <string name="settings_logs_summary">Showing %1$d of %2$d · %3$s used</string>
-    <string name="settings_logs_level_title">Show level (and above)</string>
+    <string name="settings_logs_level_title">Show level (and above; diagnostics separate)</string>
     <string name="settings_logs_level_all">All</string>
     <string name="settings_logs_level_info">Info</string>
     <string name="settings_logs_level_warn">Warnings</string>
     <string name="settings_logs_level_error">Errors</string>
+    <string name="settings_logs_level_diag">Diagnostics</string>
     <string name="settings_logs_empty">No entries yet. Warnings and errors are recorded here automatically.</string>
-    <string name="settings_logs_empty_filtered">No logs at this level. Choose "All" to see lower levels.</string>
+    <string name="settings_logs_empty_filtered">No logs for this filter. Choose "All" to see every level.</string>
     <string name="settings_logs_refresh">Refresh</string>
     <string name="settings_logs_refresh_desc">Reload the local log file</string>
     <string name="settings_logs_clear">Clear Logs</string>

@@ -12,7 +12,8 @@ import java.util.concurrent.TimeUnit
  * 一条持久化的运行日志。
  *
  * @param timestamp 毫秒时间戳（`System.currentTimeMillis()`）
- * @param level [LogStore.LEVEL_DEBUG] / [LogStore.LEVEL_INFO] / [LogStore.LEVEL_WARN] / [LogStore.LEVEL_ERROR]
+ * @param level [LogStore.LEVEL_DEBUG] / [LogStore.LEVEL_INFO] / [LogStore.LEVEL_WARN] /
+ *   [LogStore.LEVEL_ERROR] / [LogStore.LEVEL_DIAG]（调试读数，release 也落盘）
  * @param tag 模块标签（与 logcat 的 tag 一致）
  * @param message 正文（已反转义，可含换行）
  * @param stackTrace 异常堆栈全文（无异常时为 null）
@@ -59,10 +60,15 @@ data class LogSnapshot(
  * 崩溃（未捕获异常）走同步写，尽量保证最后一条留得下来。
  *
  * ## 级别与 release
- * - **W / E 始终落盘**（release 日志页只应有这两级）；
+ * - **W / E 始终落盘**（release 日志页的告警与错误）；
  * - **D / I 只在 Debug 构建落盘**（由 [AppLog] 在入口处按 `BuildConfig.DEBUG` 拦截）——
  *   release 既不打 logcat 也不写盘，调试信息不会把现场挤掉；
- * - 页面按「最低级别」过滤（[filterAtLeast]），级别是字符串而非枚举，保持文格式向后兼容。
+ * - **X（调试/诊断）始终落盘**，但**不参与 I/W/E 的告警阶梯**（见 [filterForSelection]）：
+ *   它的严重度与 D 同档 ⇒ 「全部」带上它、I/W/E 三档把它挡在门外、选中「调试」时只看它。
+ *   它是「给用户回传现场」用的设备读数，不是「出了问题」的信号，所以既不能挤进 W/E 视图，
+ *   也不能像 D/I 一样在 release 消失（电视连不上 adb，这是唯一取证通道）；
+ * - 页面筛选走 [filterForSelection]（D/I/W/E 为「至少该级别」，X 为「只看它」），
+ *   级别是字符串而非枚举，保持文件格式向后兼容。
  *
  * ## 格式（单行 TSV + 转义）
  * `时间戳 \t 级别 \t tag \t 正文 [\t 堆栈]`，其中字段内的
@@ -95,18 +101,36 @@ object LogStore {
     /** 错误级（含崩溃，始终落盘） */
     const val LEVEL_ERROR = "E"
 
-    /** 全部级别（日志页「全部」筛选项的取值） */
-    val ALL_LEVELS: Set<String> = setOf(LEVEL_DEBUG, LEVEL_INFO, LEVEL_WARN, LEVEL_ERROR)
+    /**
+     * 调试/诊断级（始终落盘，但**不参与严重度阶梯**）。
+     *
+     * 用途：设备侧读数（焦点判据、输入设备能力等），出问题时由用户截图回传。
+     * 语义上它既不是警告也不是错误，所以「信息/警告/错误」三档都**不**该把它带出来 ——
+     * 过滤规则见 [filterForSelection]。
+     */
+    const val LEVEL_DIAG = "X"
+
+    /**
+     * 合法级别字母集合 —— [decode] 用它挡畸形行。
+     *
+     * ⚠️ 新增级别**必须同时登记到这里**：漏登记不会编译报错、不会让写入失败，
+     * 只会让那一行在读取时被当成畸形行**静默丢弃**（写盘成功、日志页空白）。
+     * 门禁 `LogsTabWiringGateTest` + 用例「所有级别都必须能落盘并解码」一起锁死。
+     */
+    val ALL_LEVELS: Set<String> = setOf(LEVEL_DEBUG, LEVEL_INFO, LEVEL_WARN, LEVEL_ERROR, LEVEL_DIAG)
 
     /**
      * 级别严重度：D=0 < I=1 < W=2 < E=3。未知级别按 D 处理——
      * 旧文件里若出现未识别字母，宁可显示也不要整条丢掉（decode 已挡掉，这里是兜底）。
+     *
+     * [LEVEL_DIAG]（X）与 D 同级：这样「全部」（D 档）能带上它，而 I/W/E 三档把它排除，
+     * 诊断读数不会挤掉真正的告警现场。
      */
     fun severityOf(level: String): Int = when (level) {
         LEVEL_ERROR -> 3
         LEVEL_WARN -> 2
         LEVEL_INFO -> 1
-        LEVEL_DEBUG -> 0
+        LEVEL_DEBUG, LEVEL_DIAG -> 0
         else -> 0
     }
 
@@ -116,6 +140,16 @@ object LogStore {
         if (floor <= 0) return entries
         return entries.filter { severityOf(it.level) >= floor }
     }
+
+    /**
+     * 日志页筛选项的过滤规则（[filterAtLeast] 的唯一消费方）。
+     *
+     * I/W/E 与 D 沿用「至少该级别」的下限语义；只有 [LEVEL_DIAG] 是**精确匹配**
+     * —— 它是独立的一档类别（只看调试读数），而不是「比调试更严重」。
+     */
+    fun filterForSelection(entries: List<LogEntry>, selection: String): List<LogEntry> =
+        if (selection == LEVEL_DIAG) entries.filter { it.level == LEVEL_DIAG }
+        else filterAtLeast(entries, selection)
 
     /** 校验级别取值：不认识的级别回落「全部」（D），避免持久化的脏值把日志页滤成空白。 */
     fun normalizeLevel(level: String): String =
@@ -158,7 +192,9 @@ object LogStore {
 
     /**
      * 异步追加一条日志（[LogStore.LEVEL_DEBUG] / [LogStore.LEVEL_INFO] /
-     * [LogStore.LEVEL_WARN] / [LogStore.LEVEL_ERROR]）。
+     * [LogStore.LEVEL_WARN] / [LogStore.LEVEL_ERROR] / [LogStore.LEVEL_DIAG]）。
+     *
+     * 级别过滤由调用方（[AppLog]）负责：本函数对任何合法级别都落盘。
      *
      * 未初始化时静默丢弃 —— 应用启动最早期（`LogStore.init` 之前）的日志没有落点，
      * 此时 `AppLog` 仍照常输出 logcat。

@@ -216,9 +216,13 @@ class LogsTabWiringGateTest {
     // ─────────────────── 8b. 级别过滤（v2.39.4） ───────────────────
 
     /**
-     * 四个级别芯片 + 过滤纯函数 + 切换动作缺一不可：
-     * 只画芯片不接 `filterAtLeast`（列表不变）或只过滤不落动作（点了没反应）
+     * 五枚筛选芯片 + 过滤纯函数 + 切换动作缺一不可：
+     * 只画芯片不接过滤（列表不变）或只过滤不落动作（点了没反应）
      * 都能编译通过，必须在源码层面锁住。
+     *
+     * ⚠️ 判据认 [LogStore.filterForSelection] 而不是 `filterAtLeast`：页面必须走那条
+     * 「X 单列」的入口，退回严重度阶梯的写法会让「调试」档显示不出内容（或反过来把
+     * 设备读数混进 W/E 视图挤掉报障现场）。
      */
     @Test
     fun `日志页必须提供级别过滤`() {
@@ -228,7 +232,8 @@ class LogsTabWiringGateTest {
             "settings_logs_level_info",
             "settings_logs_level_warn",
             "settings_logs_level_error",
-            "LogStore.filterAtLeast(",
+            "settings_logs_level_diag",
+            "LogStore.filterForSelection(",
             "onSelectMinLevel",
         )) {
             assertTrue("日志页缺 `$needle` —— 无法按级别筛选", section.contains(needle))
@@ -241,8 +246,93 @@ class LogsTabWiringGateTest {
         val sample = "state.entries.forEach { LogEntryRow(entry = it, onOpen = {}) }"
         assertTrue(
             "护栏空转：没有过滤的样例被误判通过",
-            !(sample.contains("LogStore.filterAtLeast(") && sample.contains("onSelectMinLevel")),
+            !(sample.contains("LogStore.filterForSelection(") && sample.contains("onSelectMinLevel")),
         )
+    }
+
+    /** 负向自证：退回严重度阶梯（`filterAtLeast`）的样例同样必须判负。 */
+    @Test
+    fun `负向自证 用严重度阶梯过滤必须判负`() {
+        val sample = "LogStore.filterAtLeast(state.entries, state.minLevel)"
+        assertTrue(
+            "护栏空转：filterAtLeast 会把 X 当成普通级别，样例被误判通过",
+            !sample.contains("LogStore.filterForSelection("),
+        )
+    }
+
+    // ─────────────────── 8c. 「调试」档必须 release 也留痕 ───────────────────
+
+    /**
+     * 用户侧电视/盒子**连不上 adb**，日志页的「调试」档是唯一的取证通道 ⇒
+     * `AppLog.diag` 的落盘**绝不能**被 `BuildConfig.DEBUG` 门控（那是 `d`/`i` 的写法）。
+     *
+     * 判据：`fun diag(` 方法体里 `LogStore.append(` 必须出现在 `BuildConfig.DEBUG` **之前**
+     * （或直接没有该门控）；写进门控内部就等于 release 一片空白。
+     */
+    @Test
+    fun `AppLog 的 diag 必须无条件落盘（release 也要留痕）`() {
+        val src = stripComments(mainSource("util/AppLog.kt"))
+        val body = bodyOf(src, "fun diag(")
+        assertTrue("AppLog 里没有 `fun diag(` —— 「调试」档没有写入方，日志页永远是空的", body != null)
+        body!!
+        val appendAt = body.indexOf("LogStore.append(")
+        assertTrue("AppLog.diag 方法体里没有 LogStore.append(", appendAt >= 0)
+        assertTrue(
+            "AppLog.diag 必须写 LEVEL_DIAG，否则不会进「调试」这一档",
+            body.contains("LogStore.LEVEL_DIAG"),
+        )
+        val debugAt = body.indexOf("BuildConfig.DEBUG")
+        assertTrue(
+            "落盘被 BuildConfig.DEBUG 门控住了（release 无痕迹）：append@$appendAt debug@$debugAt",
+            debugAt < 0 || appendAt < debugAt,
+        )
+    }
+
+    /** 负向自证：把落盘写进 DEBUG 门控里的样例必须判负。 */
+    @Test
+    fun `负向自证 diag 落盘被门控必须判负`() {
+        val sample = """
+            fun diag(tag: String, message: String) {
+                if (BuildConfig.DEBUG) {
+                    LogStore.append(LogStore.LEVEL_DIAG, tag, message)
+                }
+            }
+        """.trimIndent()
+        val body = bodyOf(sample, "fun diag(")!!
+        val appendAt = body.indexOf("LogStore.append(")
+        val debugAt = body.indexOf("BuildConfig.DEBUG")
+        assertTrue(
+            "护栏空转：门控内的落盘被误判为无条件落盘",
+            !(appendAt >= 0 && (debugAt < 0 || appendAt < debugAt)),
+        )
+    }
+
+    /**
+     * 「调试」档必须真的能被读出来：X 一旦漏出 `ALL_LEVELS`，`decode()` 会把整行
+     * 当畸形行丢掉 —— 写盘成功、日志页空白，且没有任何报错。编译与单测都发现不了，
+     * 只能靠这条源码门禁。
+     */
+    @Test
+    fun `LEVEL_DIAG 必须登记进 ALL_LEVELS`() {
+        val src = stripComments(mainSource("util/LogStore.kt"))
+        assertTrue("LogStore 缺 `LEVEL_DIAG = \"X\"` 常量", Regex("LEVEL_DIAG\\s*=\\s*\"X\"").containsMatchIn(src))
+        val allLevels = Regex("""ALL_LEVELS[^=]*=\s*setOf\(([^)]*)\)""").find(src)
+        assertTrue("取不到 ALL_LEVELS 的定义", allLevels != null)
+        assertTrue(
+            "ALL_LEVELS 里没有 LEVEL_DIAG ⇒ decode 会静默丢掉全部调试读数：${allLevels!!.groupValues[1]}",
+            allLevels.groupValues[1].contains("LEVEL_DIAG"),
+        )
+    }
+
+    /** 负向自证：X 没登记进 ALL_LEVELS 的样例必须判负。 */
+    @Test
+    fun `负向自证 ALL_LEVELS 漏登记 X 必须判负`() {
+        val sample = """
+            const val LEVEL_DIAG = "X"
+            val ALL_LEVELS: Set<String> = setOf(LEVEL_DEBUG, LEVEL_INFO, LEVEL_WARN, LEVEL_ERROR)
+        """.trimIndent()
+        val group = Regex("""ALL_LEVELS[^=]*=\s*setOf\(([^)]*)\)""").find(sample)!!.groupValues[1]
+        assertTrue("护栏空转：漏登记 X 的样例被误判通过", !group.contains("LEVEL_DIAG"))
     }
 
     // ─────────────────── 9. 详情可复制（v2.39.2 真机反馈） ───────────────────
