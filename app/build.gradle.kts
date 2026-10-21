@@ -15,6 +15,20 @@ fun readKeystoreProperty(name: String): String {
     } catch (_: Exception) { "" }
 }
 
+// Gradle 不把 local.properties 当项目属性加载（AGP 只取其中的 sdk.dir），要读必须自己解析。
+// ⚠️ 不能用 `java.util.Properties`：Kotlin DSL 里 `java` 被 `JavaPluginExtension` 访问器占用。
+fun readLocalProperty(name: String): String? {
+    val f = rootProject.file("local.properties")
+    if (!f.exists()) return null
+    return try {
+        val prefix = "$name="
+        f.readLines().firstOrNull { it.startsWith(prefix) }
+            ?.removePrefix(prefix)?.trim()?.takeIf { it.isNotEmpty() }
+    } catch (_: Exception) {
+        null
+    }
+}
+
 val keystoreStoreFile = readKeystoreProperty("storeFile")
 val keystoreStorePassword = readKeystoreProperty("storePassword")
 val keystoreKeyAlias = readKeystoreProperty("keyAlias")
@@ -36,6 +50,12 @@ val baiduAppSecret = readKeystoreProperty("baiduAppSecret")
 val cryptoPassphrase = readKeystoreProperty("cryptoPassphrase")
     .ifBlank { System.getenv("CRYPTO_PASSPHRASE").orEmpty() }
 
+// E51「像素城市」发布隔离开关（docs/e51-lofi-city-plan.md §2.5）：
+// 本机 local.properties 里写 `lofi.city=true` 即把该效果编进包；CI 与公开构建缺省 false。
+// ⚠️ 该开关只隔离 APK，不隔离源码（本仓库是公开仓库，代码文本仍随仓库发布）。
+val lofiCityEnabled: String = (readLocalProperty("lofi.city") ?: providers.gradleProperty("lofi.city").orNull)
+    .toString().toBooleanStrictOrNull()?.toString() ?: "false"
+
 android {
     namespace = "com.nasmusic.tv"
     compileSdk = 34
@@ -44,8 +64,8 @@ android {
         applicationId = "com.nasmusic.tv"
         minSdk = 22
         targetSdk = 34
-        versionCode = 191
-        versionName = "2.39.6"
+        versionCode = 192
+        versionName = "2.39.7"
 
         ndk {
             abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64")
@@ -57,6 +77,9 @@ android {
         
         // S1 修复（2026-09-13）：CryptoUtils AES-256 派生口令（运行时由 CryptoUtils 经 BuildConfig 读取）
         buildConfigField("String", "CRYPTO_PASSPHRASE", "\"$cryptoPassphrase\"")
+
+        // E51 像素城市：本机/公开双变体开关（读取处见文件顶部，口径见 docs/e51-lofi-city-plan.md §2.5）
+        buildConfigField("boolean", "LOFI_CITY_ENABLED", lofiCityEnabled)
     }
 
     // CI 的 Unit tests job 不生成 keystore.properties：无 release 签名配置时跳过创建，

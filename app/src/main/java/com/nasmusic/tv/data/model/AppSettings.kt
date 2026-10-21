@@ -1,6 +1,7 @@
 package com.nasmusic.tv.data.model
 
 import com.nasmusic.tv.backend.photo.PhotoScaleMode
+import com.nasmusic.tv.BuildConfig
 import com.nasmusic.tv.R
 import androidx.annotation.StringRes
 import com.nasmusic.tv.visualizer.photo.PhotoTransitionId
@@ -124,7 +125,11 @@ data class AppSettings(
 )
 
 /**
- * 可视化效果主题（26 套手动效果，无自动导演档）。
+ * 可视化效果主题（27 套手动效果，无自动导演档）。
+ *
+ * ⚠️ 其中 [LOFI_CITY] 受编译期开关 `BuildConfig.LOFI_CITY_ENABLED` 控制，
+ * **枚举项恒在册**（`entries.size` 与本机/CI 无关），只有 [selectable] 出的列表会过滤它。
+ * 方案见 `docs/e51-lofi-city-plan.md` §2.5。
  *
  * [tier] 决定该效果在各画质档位下的可用性，见 [VisualQuality.supports]。
  *
@@ -380,6 +385,25 @@ enum class VisualizerTheme(
      * 分帧烘焙预算 [DesertSmokeBakes.BAKE_BUDGET_MS] ms，`grade` **最后**烘（覆盖层，缺失画面仍完整）。
      */
     DESERT_SMOKE(R.string.visualizer_theme_desert_smoke, "大漠孤烟", Tier.ADV, "48", needsParticleBudget = false),
+
+    /**
+     * E51「像素城市」（方案 `docs/e51-lofi-city-plan.md`）
+     *
+     * 逐场景移植 loficities.com 的像素城市动画，跑在自建的低分辨率像素引擎上
+     * （480×270 离屏画布 → 最近邻放大满屏，⛔ 不用 WebView/WebGL —— 电视上已证实不可用）。
+     *
+     * ## 归 [Tier.ADV] + `needsParticleBudget = false`（方案 D-c）
+     * 每帧一次全屏 blit + 若干光晕贴图，工作量与 [MOONLIT] / [DESERT_SMOKE] 同构，故标 ADV；
+     * 但**一个粒子都不画**、⛔ 不读 `ctx.quality.maxParticles` ⇒ LOW 档**照常提供**本效果
+     * （场景自己按 [VisualizerTheme] 之外的 `MOTION_FPS` 降帧，⛔ 不按档位摘掉效果）。
+     *
+     * ## ⚠️ 编译期双变体：在册但可能不可选
+     * 本效果只在**本机 release**（`local.properties` 里 `lofi.city=true`）出现；
+     * GitHub Actions 的公开 release 缺省 `false`，此时 [selectable] 过滤掉它、
+     * [com.nasmusic.tv.visualizer.VisualizerRendererFactory.create] 也会回落默认效果。
+     * ⛔ 枚举项本身**必须照常声明**（`entries.size`、双语字符串门禁、预算门禁都按声明计数）。
+     */
+    LOFI_CITY(R.string.visualizer_theme_lofi_city, "像素城市", Tier.ADV, "51", needsParticleBudget = false),
     ;
 
     /** 效果分级：决定画质档位可用性 */
@@ -439,15 +463,31 @@ private val LEGACY_MAP = mapOf(
          *
          * ⛔ **刻意不给默认值** —— 三个调用点必须显式表态，避免日后漏传导致
          * 「三开关全关时左右键切到一个画不出东西的空效果上」。
+         *
+         * ⚠️ [LOFI_CITY] 另受编译期开关过滤，见 [publishable]（方案 §2.5-A）。
          */
         fun selectable(photoWallAvailable: Boolean): List<VisualizerTheme> =
             if (photoWallAvailable) ALL else WITHOUT_PHOTO_WALL
 
+        /**
+         * 双变体收口 A：公开版（`BuildConfig.LOFI_CITY_ENABLED == false`，即 CI 缺省）里
+         * [LOFI_CITY] 从**所有可选列表**中消失。
+         *
+         * 这是「没有这个效果」而不是「有但坏了」：工厂的 `availableThemes()` 完全委托本列表，
+         * 指示器、左右键、`VisualizerViewModel.step()` 共用同一份 ⇒ 公开版根本切不到它。
+         * ⚠️ 光堵这一处不够 —— 备份 JSON 里存过 `"visualizerTheme": "LOFI_CITY"` 的话
+         * [fromKey] 仍会按枚举名解析成功（开关不影响声明），所以
+         * [com.nasmusic.tv.visualizer.VisualizerRendererFactory.create] 还有第二道回落。
+         */
+        private fun publishable(list: List<VisualizerTheme>): List<VisualizerTheme> =
+            if (BuildConfig.LOFI_CITY_ENABLED) list else list.filterNot { it == LOFI_CITY }
+
         /** 全部效果（含 [PHOTO_WALL]）—— 预生成，避免每次调用重新 `filter` 分配 */
-        private val ALL: List<VisualizerTheme> = entries
+        private val ALL: List<VisualizerTheme> = publishable(entries)
 
         /** 三来源全关时的列表 —— 预生成，同上 */
-        private val WITHOUT_PHOTO_WALL: List<VisualizerTheme> = entries.filter { it != PHOTO_WALL }
+        private val WITHOUT_PHOTO_WALL: List<VisualizerTheme> =
+            publishable(entries.filter { it != PHOTO_WALL })
     }
 }
 

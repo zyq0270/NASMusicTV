@@ -113,6 +113,11 @@ __pycache__/
 app/src/main/assets/globe/node_modules/
 app/src/main/assets/globe/package.json
 app/src/main/assets/globe/package-lock.json
+# E51「像素城市」上游原件（loficities.com 的 app-*.js 按模块切分出来的 165 份原文）。
+# ⛔ 与 app/src/globe-upstream/（那是 MIT/Apache 授权的库原件、已入仓）**不同**：上游无开源授权，
+#    原文不进 git，只作本机对账基线（docs/e51-lofi-city-plan.md §2 第二条纪律、§9 P1）。
+#    在 main 源集之外 ⇒ Gradle 不打包；护栏是 `LofiUpstreamHygieneTest`（.gitignore 挡不住打包）。
+app/src/lofi-upstream/
 # box-agent 会话产物目录（`<日期>-<会话ID前8位>`，自动生成在项目根，不入仓）
 # 例：2026-09-13-384e30ce/ —— 由 agent 运行时创建，内含 output/tasks/… 截图等
 20??-??-??-????????/

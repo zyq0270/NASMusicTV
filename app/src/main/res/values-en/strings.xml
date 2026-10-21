@@ -1295,6 +1295,7 @@
     <string name="visualizer_theme_light_beams">Light beams</string>
     <string name="visualizer_theme_liquid_grid">Liquid grid</string>
     <string name="visualizer_theme_liquid_ripple">Liquid ripple</string>
+    <string name="visualizer_theme_lofi_city">Pixel City</string>
     <string name="visualizer_theme_lyrics_dot_matrix">Lyrics dot matrix</string>
     <string name="visualizer_theme_matrix_rain">Matrix rain</string>
     <string name="visualizer_theme_milkdrop_feedback">Feedback afterimage</string>
@@ -1310,6 +1311,8 @@
     <string name="visualizer_theme_tripod_fog">War in the Mist</string>
     <string name="visualizer_theme_vintage_tv">Vintage TV</string>
     <string name="visualizer_theme_world">World</string>
+    <!-- E51 pixel city: bottom-right card. City name/tagline live in the generated CityRegistry table (plan 12.6); only UI copy belongs here -->
+    <string name="visualizer_city_time_label">Local time</string>
     <!-- photo_transition -->
     <string name="photo_transition_bass_bloom">Bass bloom</string>
     <string name="photo_transition_beat_cut">Beat cut</string>

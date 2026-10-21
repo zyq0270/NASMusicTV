@@ -1,6 +1,7 @@
 package com.nasmusic.tv.visualizer
 
 import android.content.Context
+import com.nasmusic.tv.BuildConfig
 import com.nasmusic.tv.data.model.VisualQuality
 import com.nasmusic.tv.data.model.VisualizerTheme
 import com.nasmusic.tv.visualizer.renderers.BeatFireworkRenderer
@@ -10,6 +11,7 @@ import com.nasmusic.tv.visualizer.renderers.ConstellationRenderer
 import com.nasmusic.tv.visualizer.renderers.DesertSmokeRenderer
 import com.nasmusic.tv.visualizer.renderers.LiquidGridRenderer
 import com.nasmusic.tv.visualizer.renderers.LiquidRippleRenderer
+import com.nasmusic.tv.visualizer.renderers.LofiCityRenderer
 import com.nasmusic.tv.visualizer.renderers.MatrixRainRenderer
 import com.nasmusic.tv.visualizer.renderers.MilkdropRenderer
 import com.nasmusic.tv.visualizer.renderers.MoonlitRenderer
@@ -45,8 +47,22 @@ object VisualizerRendererFactory {
      * E44「明月」解码 `assets/globe/moon.jpg`。其余 Canvas 渲染器都忽略它，保持原实现。WORLD 分支已切到
      * 3D 版 [WorldGlobeRenderer]（WebView + three-globe）；旧 2D 版
      * WorldRenderer 已整文件删除归档（M11 修复，2026-10-06，原 2106 行零实例化死代码）。
+     *
+     * ⚠️ 外层那个 `if` 是 E51 双变体收口 B，**不要"顺手"合并进 when**：
+     * 公开 release（CI 缺省 `lofi.city` 未设 ⇒ `false`）里备份 JSON 的
+     * `"visualizerTheme": "LOFI_CITY"` 仍会被 [VisualizerTheme.fromKey] 按枚举名解析成功
+     * （开关只作用于运行期列表，不影响枚举声明），必须在真正 new 渲染器的这一刻回落，
+     * 否则公开版会渲染出未获上游许可的效果。`VisualizerTheme.selectable()` 是收口 A，两处都要在。
      */
-    fun create(theme: VisualizerTheme, context: Context): VisualizerRenderer = when (theme) {
+    fun create(theme: VisualizerTheme, context: Context): VisualizerRenderer =
+        if (!BuildConfig.LOFI_CITY_ENABLED && theme == VisualizerTheme.LOFI_CITY) {
+            // 回落 = 枚举声明的默认效果 [VisualizerTheme.Default] 对应的那个渲染器
+            CircularRingRenderer()
+        } else {
+            createEnabled(theme, context)
+        }
+
+    private fun createEnabled(theme: VisualizerTheme, context: Context): VisualizerRenderer = when (theme) {
         VisualizerTheme.CIRCULAR_RING -> CircularRingRenderer()
         VisualizerTheme.LIQUID_GRID -> LiquidGridRenderer()
         VisualizerTheme.BEAT_FIREWORK -> BeatFireworkRenderer()
@@ -78,6 +94,10 @@ object VisualizerRendererFactory {
         VisualizerTheme.BIRDS_FLOCK -> BirdsFlockRenderer()
         // E48「大漠孤烟」零外部资产（14 类位图全在首帧 boot 程序化烘焙）⇒ ⛔ 不收 Context。
         VisualizerTheme.DESERT_SMOKE -> DesertSmokeRenderer()
+        // E51「像素城市」零外部资产（场景位图全在 onEnter 后程序化烘焙）⇒ ⛔ 不收 Context。
+        // ⚠️ 本行的字面形态 `-> LofiCityRenderer(` 被 ParticleBudgetGateTest 的工厂映射正则消费，
+        // 双变体的开关在 create() 外层，⛔ 不要写成 `-> if (...) ... else ...`。
+        VisualizerTheme.LOFI_CITY -> LofiCityRenderer()
     }
 
     /**

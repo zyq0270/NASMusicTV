@@ -1,5 +1,6 @@
 package com.nasmusic.tv.data.model
 
+import com.nasmusic.tv.BuildConfig
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -15,6 +16,18 @@ import org.junit.Test
  * 另含**门禁 G7**（§14.4）：`PHOTO_WALL` 的可见性由三来源开关派生（§7.4）。
  */
 class VisualizerThemeTest {
+
+    /**
+     * E51 双变体对**计数**的影响（方案 §2.5）。
+     *
+     * `BuildConfig.LOFI_CITY_ENABLED` 由 `lofi.city` 决定：本机 `local.properties` 写 `true`、
+     * CI 缺省 `false` ⇒ 同一份测试文件必须在两种构建下都绿，所以凡涉及
+     * [VisualizerTheme.selectable] 的计数都写成「基线 + 本值」，⛔ 不许写死。
+     *
+     * ⚠️ [VisualizerTheme.entries] 的计数**不受本值影响** —— 开关只过滤运行期列表，
+     * 枚举项照常声明（这正是 §2.5 里「数字门不受影响」那条的依据）。
+     */
+    private val lofiInList = if (BuildConfig.LOFI_CITY_ENABLED) 1 else 0
 
     @Test
     fun `legacy enum names migrate to the new themes`() {
@@ -48,14 +61,15 @@ class VisualizerThemeTest {
 
     @Test
     fun `theme library is all concrete effects, no auto mode`() {
-        assertEquals(26, VisualizerTheme.entries.size)
+        // 27 = 26 + LOFI_CITY。⛔ 与 lofi.city 开关无关：枚举恒声明，只有 selectable() 会过滤。
+        assertEquals(27, VisualizerTheme.entries.size)
     }
 
     @Test
     fun `selectable list contains every theme when the photo wall is available`() {
         val selectable = VisualizerTheme.selectable(photoWallAvailable = true)
-        assertEquals(26, selectable.size)
-        assertEquals(26, selectable.distinct().size)
+        assertEquals(26 + lofiInList, selectable.size)
+        assertEquals(26 + lofiInList, selectable.distinct().size)
         assertTrue(selectable.contains(VisualizerTheme.PHOTO_WALL))
     }
 
@@ -86,21 +100,21 @@ class VisualizerThemeTest {
             listOf(VisualizerTheme.PHOTO_WALL),
             on.filter { it !in off.toSet() }
         )
-        assertEquals(25, off.size)
-        assertEquals(26, on.size)
+        assertEquals(25 + lofiInList, off.size)
+        assertEquals(26 + lofiInList, on.size)
     }
 
     @Test
     fun `ordinal labels are unique`() {
         val labels = VisualizerTheme.entries.map { it.ordinalLabel }
-        assertEquals(26, labels.distinct().size)
+        assertEquals(27, labels.distinct().size)
     }
 
     @Test
     fun `display names are non blank and unique`() {
         val names = VisualizerTheme.entries.map { it.displayName }
         assertTrue(names.none { it.isBlank() })
-        assertEquals(26, names.distinct().size)
+        assertEquals(27, names.distinct().size)
     }
 
     @Test
@@ -190,6 +204,22 @@ class VisualizerThemeTest {
         // 编号 `"48"` 由 E48 占用，而 E49 之后才落地 ⇒ 次序上 48 应在 47 与 49 之间
         assertEquals("48", VisualizerTheme.DESERT_SMOKE.ordinalLabel)
         assertTrue(VisualizerTheme.DESERT_SMOKE.ordinal > VisualizerTheme.BIRDS_FLOCK.ordinal)
+    }
+
+    @Test
+    fun `pixel city is offered on every tier`() {
+        // E51「像素城市」与 E46/E47/E48/E49 同款：档位标 ADV（如实承认"比 BASIC 重"：
+        // 480×270 引擎画布 + 每帧一次全屏 blit），但一个粒子都不画 ⇒ 三档全可选。
+        // ⛔ LOW 档**不**把它从列表里剔除，也⛔ 不按 Tier 砍开销 —— 它按上游 MOTION_FPS 自节流。
+        assertEquals(VisualizerTheme.Tier.ADV, VisualizerTheme.LOFI_CITY.tier)
+        assertFalse(VisualizerTheme.LOFI_CITY.needsParticleBudget)
+        assertTrue("LOW 档也应提供像素城市", VisualQuality.LOW.supports(VisualizerTheme.LOFI_CITY))
+        assertTrue(VisualQuality.MEDIUM.supports(VisualizerTheme.LOFI_CITY))
+        assertTrue(VisualQuality.HIGH.supports(VisualizerTheme.LOFI_CITY))
+        assertEquals("51", VisualizerTheme.LOFI_CITY.ordinalLabel)
+        assertTrue(VisualizerTheme.LOFI_CITY.ordinal > VisualizerTheme.DESERT_SMOKE.ordinal)
+        // fromKey 按枚举名反查 ⇒ 开关关掉也解析得回来（方案 §2.5-B 的成立前提）
+        assertEquals(VisualizerTheme.LOFI_CITY, VisualizerTheme.fromKey("LOFI_CITY"))
     }
 
     @Test
