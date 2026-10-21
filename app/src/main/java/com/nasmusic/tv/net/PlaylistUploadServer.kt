@@ -90,7 +90,7 @@ class PlaylistUploadServer(
 
         override fun serve(session: IHTTPSession): Response {
             // P1-1：一次性 token 鉴权（query t= 或 Cookie auth=），拒绝同网段未授权访问
-            if (!LocalServerAuth.isAuthorized(session, authToken)) return LocalServerAuth.forbidden()
+            if (!LocalServerAuth.isAuthorized(session, authToken)) return LocalServerAuth.forbidden(session)
             return when {
                 session.uri == "/" && session.method == Method.GET -> servePage()
                 session.uri == "/api/upload" && session.method == Method.POST -> handleUpload(session)
@@ -214,49 +214,46 @@ function showStatus(msg,type){
 
         /**
          * 上传歌单文件（raw body = 文件字节，文件名来自 query `name`）。
-         * 读取方式：按 Content-Length 精确读满即止——不能 `read 到 -1`
-         * （keep-alive 连接上读完 body 后 read 会阻塞至 SO_TIMEOUT，恒抛
-         * SocketTimeoutException，2026-09-18 实测）。不按 Content-Length
-         * 预分配数组（可谎报 → OOM），分块累积 + [MAX_UPLOAD_BYTES] 硬上限。
+         *
+         * 传输编码统一交给 [HttpRequestBody]（定长与 chunked 都支持），任何拒绝路径都断连——
+         * 把未消费的 body 留在 keep-alive 连接上会让同连接的下一跳变成 `400 Bad Request`，
+         * 浏览器端只剩一句 "Failed to fetch"。
+         * 不在此处 `read 到 -1`：keep-alive 上会阻塞至 SO_TIMEOUT（2026-09-18 实测）。
          */
         private fun handleUpload(session: IHTTPSession): Response {
             return try {
                 val fileName = session.parameters["name"]?.firstOrNull()
                     ?.takeIf { it.isNotBlank() }
                     ?: "playlist.txt"
-                val contentLength = session.headers["content-length"]?.toLongOrNull() ?: -1L
-                if (contentLength <= 0L) {
-                    // fetch(Blob) 必然带 content-length；缺失（chunked）无法安全定长读取
-                    return jsonResponse(false, context.getString(R.string.html_playlist_empty))
-                }
-                if (contentLength > MAX_UPLOAD_BYTES) {
-                    return jsonResponse(false, context.getString(R.string.html_playlist_too_large))
-                }
-                val buffer = java.io.ByteArrayOutputStream()
-                val chunk = ByteArray(16 * 1024)
-                var remaining = contentLength
-                while (remaining > 0) {
-                    val read = session.inputStream.read(chunk, 0, minOf(chunk.size.toLong(), remaining).toInt())
-                    if (read < 0) break // 对端提前关闭
-                    buffer.write(chunk, 0, read)
-                    remaining -= read
-                }
-                if (buffer.size() == 0) {
-                    return jsonResponse(false, context.getString(R.string.html_playlist_empty))
-                }
-                AppLog.i(TAG, "upload received: $fileName (${buffer.size()} bytes)")
-                val message = onFileReceived.invoke(fileName, buffer.toByteArray())
-                if (message != null) {
-                    jsonResponse(true, message)
-                } else {
-                    jsonResponse(false, context.getString(R.string.html_playlist_import_failed))
+                when (val body = session.readRequestBody(MAX_UPLOAD_BYTES)) {
+                    is HttpRequestBody.Result.OverLimit -> {
+                        AppLog.w(TAG, "上传拒绝: 超过 ${MAX_UPLOAD_BYTES / 1024 / 1024}MB 上限 ($fileName)")
+                        jsonResponse(false, context.getString(R.string.html_playlist_too_large)).noKeepAlive()
+                    }
+                    is HttpRequestBody.Result.Malformed -> {
+                        AppLog.w(TAG, "上传失败: 请求体不完整 ${body.detail} ($fileName)")
+                        jsonResponse(false, context.getString(R.string.html_playlist_import_failed) + ": " + body.detail).noKeepAlive()
+                    }
+                    is HttpRequestBody.Result.Read -> {
+                        if (body.bytes.isEmpty()) {
+                            AppLog.w(TAG, "上传失败: 请求体为空 ($fileName)")
+                            return jsonResponse(false, context.getString(R.string.html_playlist_empty))
+                        }
+                        AppLog.w(TAG, "上传到达: $fileName (${body.bytes.size} bytes)")
+                        val message = onFileReceived.invoke(fileName, body.bytes)
+                        if (message != null) {
+                            jsonResponse(true, message)
+                        } else {
+                            jsonResponse(false, context.getString(R.string.html_playlist_import_failed))
+                        }
+                    }
                 }
             } catch (e: Exception) {
                 AppLog.e(TAG, "upload failed", e)
                 jsonResponse(
                     false,
                     context.getString(R.string.html_playlist_import_failed) + ": " + (e.message ?: e.javaClass.simpleName)
-                )
+                ).noKeepAlive()
             }
         }
 

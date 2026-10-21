@@ -89,6 +89,9 @@ class AppPreferences internal constructor(private val context: Context) {
         /** 歌单导入历史最大保留条数（超出按 importedAt 淘汰最旧） */
         const val playlistImportHistoryMaxSize = 20
 
+        /** 「从本地文件导入」挑过的备份文件最大登记条数（超出淘汰最旧） */
+        const val importedBackupsMaxSize = 20
+
         /** 照片墙转场时长范围（ms，§7.3：300–2000） */
         val PHOTO_WALL_TRANSITION_MS_RANGE = 300..2000
 
@@ -295,6 +298,12 @@ class AppPreferences internal constructor(private val context: Context) {
 
     // --- 歌单导入（R：playlist-import-feature-plan）---
     private val keyPlaylistImportHistory = stringPreferencesKey("playlist_import_history")
+
+    /**
+     * 「从本地文件导入」挑过并恢复成功的备份文件登记（v2.39.4）。
+     * 只登记 SAF 授权、换设备无意义，因此**不进备份导出内容**。
+     */
+    private val keyImportedBackups = stringPreferencesKey("imported_backup_files")
     /** songId → ReachabilityEntry（Map<String, {result, checkedAt}>，仅记录非 REACHABLE 判定） */
     private val keySongReachability = stringPreferencesKey("song_reachability")
 
@@ -1469,6 +1478,65 @@ class AppPreferences internal constructor(private val context: Context) {
             val mutable = list.toMutableList()
             if (mutable.removeAll { it.playlistId == playlistId }) {
                 prefs[keyPlaylistImportHistory] = gson.toJson(mutable)
+            }
+        }
+    }
+
+    // --- 「从本地文件导入」挑过的备份文件（最近 20 条，按显示名去重）---
+
+    val importedBackups: Flow<List<com.nasmusic.tv.data.model.ImportedBackupRecord>> =
+        dataStore.data.map { prefs ->
+            val json = prefs[keyImportedBackups] ?: "[]"
+            try {
+                gson.fromJson<List<com.nasmusic.tv.data.model.ImportedBackupRecord>>(
+                    json,
+                    object : TypeToken<List<com.nasmusic.tv.data.model.ImportedBackupRecord>>() {}.type
+                ) ?: emptyList()
+            } catch (e: Exception) { emptyList() }
+        }
+
+    /** 一次性读取（备份列表刷新是同步调用链，不为它开订阅） */
+    suspend fun getImportedBackups(): List<com.nasmusic.tv.data.model.ImportedBackupRecord> =
+        importedBackups.first()
+
+    /**
+     * 登记一个「用户在选择器里挑过并恢复成功」的备份文件。
+     *
+     * 为什么必须由调用方显式登记：这类文件不归本 app 所有（`owner_package_name` 是 shell/下载器），
+     * `MediaStore.Downloads` 查询对本 app 不可见 ⇒ 不登记就永远不会出现在备份列表里。
+     */
+    suspend fun recordImportedBackup(item: com.nasmusic.tv.data.model.ImportedBackupRecord) {
+        dataStore.edit { prefs ->
+            val json = prefs[keyImportedBackups] ?: "[]"
+            val list = safeParseJson("imported_backup_files", json) {
+                gson.fromJson<MutableList<com.nasmusic.tv.data.model.ImportedBackupRecord>>(
+                    json,
+                    object : TypeToken<MutableList<com.nasmusic.tv.data.model.ImportedBackupRecord>>() {}.type
+                )
+            } ?: mutableListOf()
+            val mutable = list.toMutableList()
+            mutable.removeAll { it.displayName == item.displayName }
+            mutable.add(0, item)
+            while (mutable.size > importedBackupsMaxSize) {
+                mutable.removeAt(mutable.size - 1)
+            }
+            prefs[keyImportedBackups] = gson.toJson(mutable)
+        }
+    }
+
+    /** 删除备份文件时联动清理登记（否则列表里残留一条读不到的死行） */
+    suspend fun removeImportedBackup(uri: String) {
+        dataStore.edit { prefs ->
+            val json = prefs[keyImportedBackups] ?: "[]"
+            val list = safeParseJson("imported_backup_files", json) {
+                gson.fromJson<MutableList<com.nasmusic.tv.data.model.ImportedBackupRecord>>(
+                    json,
+                    object : TypeToken<MutableList<com.nasmusic.tv.data.model.ImportedBackupRecord>>() {}.type
+                )
+            } ?: return@edit
+            val mutable = list.toMutableList()
+            if (mutable.removeAll { it.uri == uri }) {
+                prefs[keyImportedBackups] = gson.toJson(mutable)
             }
         }
     }

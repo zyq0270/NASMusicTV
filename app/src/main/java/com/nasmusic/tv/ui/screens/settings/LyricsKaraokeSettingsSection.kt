@@ -56,6 +56,8 @@ data class LyricsKaraokeActions(
     val onDownloadModel: (() -> Unit)?,
     val onDeleteModel: (() -> Unit)?,
     val onScanTransferModel: (() -> Unit)?,
+    /** 从本地文件导入分离模型（SAF 选择器，所有设备都显示；与扫码上传走同一套 SHA-256 校验） */
+    val onImportModelFile: (() -> Unit)? = null,
     /** T10：歌词字号 / 高亮（与播放页共用同一份持久化 key） */
     val onChangeLyricsFontScale: (Float) -> Unit = {},
     val onChangeLyricsHighlightMode: (LyricsHighlightMode) -> Unit = {},
@@ -225,6 +227,14 @@ internal fun LyricsKaraokeSettingsSection(
                                     // 打开扫码传输对话框（下一级）
                                     trailing = Trail.Arrow,
                                 ),
+                                // 本机已有模型文件时不必走网络：直接挑本地 .onnx，
+                                // 落盘后按与下载/上传完全一致的 SHA-256 标准校验
+                                ModelAction(
+                                    label = stringResource(R.string.settings_import_model_file),
+                                    description = stringResource(R.string.settings_import_model_file_desc),
+                                    onClick = { actions.onImportModelFile?.invoke() },
+                                    trailing = Trail.Arrow,
+                                ),
                             ),
                             tv = 2,
                             phonePortrait = 1,
@@ -265,6 +275,14 @@ internal fun LyricsKaraokeSettingsSection(
                                     description = stringResource(R.string.settings_scan_upload_model_desc),
                                     onClick = { actions.onScanTransferModel?.invoke() },
                                     // 打开扫码传输对话框（下一级）
+                                    trailing = Trail.Arrow,
+                                ),
+                                // 本机已有模型文件时不必走网络：直接挑本地 .onnx，
+                                // 落盘后按与下载/上传完全一致的 SHA-256 标准校验
+                                ModelAction(
+                                    label = stringResource(R.string.settings_import_model_file),
+                                    description = stringResource(R.string.settings_import_model_file_desc),
+                                    onClick = { actions.onImportModelFile?.invoke() },
                                     trailing = Trail.Arrow,
                                 ),
                             ),

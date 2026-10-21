@@ -67,7 +67,7 @@ class ServerConfigTransferServer(
     }
 
     override fun serve(session: IHTTPSession): Response {
-        if (!LocalServerAuth.isAuthorized(session, authToken)) return LocalServerAuth.forbidden()
+        if (!LocalServerAuth.isAuthorized(session, authToken)) return LocalServerAuth.forbidden(session)
         return when {
             session.uri == "/" && session.method == Method.GET -> servePage()
             session.uri == "/api/config" && session.method == Method.POST -> handleConfig(session)
@@ -87,39 +87,42 @@ class ServerConfigTransferServer(
      */
     private fun handleConfig(session: IHTTPSession): Response {
         return try {
-            val contentLength = session.headers["content-length"]?.toLongOrNull() ?: -1L
-            if (contentLength <= 0L || contentLength > MAX_BODY_BYTES) {
-                return json(false, context.getString(R.string.cfg_msg_web_ui_empty_or_large))
+            // 传输编码统一交给 HttpRequestBody（chunked 与定长），拒绝路径一律断连，
+            // 否则未消费的 body 会污染 keep-alive 连接 → 浏览器只见 "Failed to fetch"
+            when (val body = session.readRequestBody(MAX_BODY_BYTES)) {
+                is HttpRequestBody.Result.OverLimit -> {
+                    AppLog.w(TAG, "配置拒绝: 请求体超过 $MAX_BODY_BYTES 字节上限")
+                    json(false, context.getString(R.string.cfg_msg_web_ui_empty_or_large)).noKeepAlive()
+                }
+                is HttpRequestBody.Result.Malformed -> {
+                    AppLog.w(TAG, "配置失败: 请求体不完整 ${body.detail}")
+                    json(false, context.getString(R.string.cfg_msg_web_ui_failed, body.detail)).noKeepAlive()
+                }
+                is HttpRequestBody.Result.Read -> {
+                    val text = String(body.bytes, Charsets.UTF_8)
+                    if (text.isBlank()) {
+                        AppLog.w(TAG, "配置失败: 请求体为空")
+                        return json(false, context.getString(R.string.cfg_msg_web_ui_empty))
+                    }
+                    val obj = Gson().fromJson(text, JsonObject::class.java)
+                        ?: return json(false, context.getString(R.string.cfg_msg_web_ui_format))
+                    val backendType = obj.get("backendType")?.asString?.trim() ?: ""
+                    val baseUrl = obj.get("baseUrl")?.asString?.trim() ?: ""
+                    val username = obj.get("username")?.asString?.trim() ?: ""
+                    val password = obj.get("password")?.asString ?: ""
+                    val displayName = obj.get("displayName")?.asString?.trim() ?: ""
+                    if (backendType !in ALLOWED_TYPES) return json(false, context.getString(R.string.cfg_msg_web_ui_unsupported, backendType))
+                    if (!baseUrl.startsWith("http://") && !baseUrl.startsWith("https://")) {
+                        return json(false, context.getString(R.string.cfg_msg_web_ui_url_scheme))
+                    }
+                    AppLog.i(TAG, "config received: type=$backendType url=${UrlSanitizer.sanitize(baseUrl)}")
+                    onConfigReceived.invoke(backendType, baseUrl, username, password, displayName)
+                    json(true, context.getString(R.string.cfg_msg_web_ui_sent))
+                }
             }
-            // 定长分块读取（keep-alive 上不能 read 到 -1；不按 Content-Length 预分配）
-            val buffer = java.io.ByteArrayOutputStream()
-            val chunk = ByteArray(8 * 1024)
-            var remaining = contentLength
-            while (remaining > 0) {
-                val read = session.inputStream.read(chunk, 0, minOf(chunk.size.toLong(), remaining).toInt())
-                if (read < 0) break
-                buffer.write(chunk, 0, read)
-                remaining -= read
-            }
-            val body = String(buffer.toByteArray(), Charsets.UTF_8)
-            if (body.isBlank()) return json(false, context.getString(R.string.cfg_msg_web_ui_empty))
-            val obj = Gson().fromJson(body, JsonObject::class.java)
-                ?: return json(false, context.getString(R.string.cfg_msg_web_ui_format))
-            val backendType = obj.get("backendType")?.asString?.trim() ?: ""
-            val baseUrl = obj.get("baseUrl")?.asString?.trim() ?: ""
-            val username = obj.get("username")?.asString?.trim() ?: ""
-            val password = obj.get("password")?.asString ?: ""
-            val displayName = obj.get("displayName")?.asString?.trim() ?: ""
-            if (backendType !in ALLOWED_TYPES) return json(false, context.getString(R.string.cfg_msg_web_ui_unsupported, backendType))
-            if (!baseUrl.startsWith("http://") && !baseUrl.startsWith("https://")) {
-                return json(false, context.getString(R.string.cfg_msg_web_ui_url_scheme))
-            }
-            AppLog.i(TAG, "config received: type=$backendType url=${UrlSanitizer.sanitize(baseUrl)}")
-            onConfigReceived.invoke(backendType, baseUrl, username, password, displayName)
-            json(true, context.getString(R.string.cfg_msg_web_ui_sent))
         } catch (e: Exception) {
             AppLog.e(TAG, "handleConfig failed", e)
-            json(false, context.getString(R.string.cfg_msg_web_ui_failed, e.message ?: e.javaClass.simpleName))
+            json(false, context.getString(R.string.cfg_msg_web_ui_failed, e.message ?: e.javaClass.simpleName)).noKeepAlive()
         }
     }
 

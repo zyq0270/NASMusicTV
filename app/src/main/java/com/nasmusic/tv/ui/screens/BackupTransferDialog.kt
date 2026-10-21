@@ -81,18 +81,18 @@ fun BackupTransferDialog(
             val url = server.buildUrl(ip)
             serverUrl = url
             qrBitmap = QrCodeGenerator.generateQrBitmap(url, 360)
-            AppLog.i("BackupTransferDialog", "DisposableEffect: starting server at $url")
             val started = server.start()
-            AppLog.i("BackupTransferDialog", "DisposableEffect: server.start() returned $started")
+            // 落盘日志（AppLog.w）：release 下手机报 "Failed to fetch" 时，
+            // 靠这行判断当时服务到底在不在听（日志不记 token，只记地址）
+            AppLog.w("BackupTransferDialog", "扫码传输服务 ${if (started) "已启动" else "启动失败"}: ${url.substringBefore("?")}")
             status = if (started) context.getString(R.string.backup_transfer_waiting) else context.getString(R.string.backup_transfer_start_failed)
         } else {
             AppLog.w("BackupTransferDialog", "DisposableEffect: no IP address")
             status = context.getString(R.string.backup_transfer_no_ip)
         }
         onDispose {
-            AppLog.i("BackupTransferDialog", "onDispose: stopping server")
+            AppLog.w("BackupTransferDialog", "扫码传输服务已停止（弹窗关闭，端口不再监听）")
             server.stop()
-            AppLog.i("BackupTransferDialog", "onDispose: server stopped")
         }
     }
 

@@ -30,10 +30,14 @@ data class DataSettingsActions(
     val onExportBackup: (() -> Unit)?,
     val onImportBackup: ((android.net.Uri) -> Unit)?,
     val onScanTransferBackup: (() -> Unit)?,
+    /** 本地文件导入备份（SAF 选择器，所有设备都显示 —— 见 `LocalFilePicker` 的「不做能力探测」说明） */
+    val onImportBackupFile: (() -> Unit)? = null,
     /** F2-1：打开播放统计面板 */
     val onOpenPlayStats: (() -> Unit)? = null,
-    /** 歌单导入入口（SAF OpenDocument，launcher 由 MainActivity 持有） */
+    /** 歌单导入入口（扫码上传，launcher 由宿主持有；Android TV 无 DocumentsUI 时这是唯一入口） */
     val onImportPlaylistFile: (() -> Unit)? = null,
+    /** 从本地文件导入歌单（SAF 选择器，与备份同一条「不做能力探测、一律显示」口径） */
+    val onImportPlaylistLocalFile: (() -> Unit)? = null,
     /** 打开最近导入的歌单（跳「我的」页） */
     val onOpenImportedPlaylist: ((String) -> Unit)? = null,
     /** 消费导入结果消息（4s 自动） */
@@ -97,6 +101,17 @@ internal fun DataSettingsSection(
                     trailing = Trail.Arrow,
                 )
             }
+            // 从本地文件导入：备份 json 已经在这台设备上（导出后拷回 / 别的设备传的）时，
+            // 不必绕一圈扫码 —— 扫码页要求服务端进程一直活着，手机上一开浏览器 app 就进后台，
+            // 会被系统冻结导致上传必然失败（v2.39.3 真机定位）。所有设备一律显示。
+            if (actions.onImportBackupFile != null) {
+                SettingActionButton(
+                    label = stringResource(R.string.settings_import_backup_file),
+                    description = stringResource(R.string.settings_import_backup_file_desc),
+                    onClick = { actions.onImportBackupFile?.invoke() },
+                    trailing = Trail.Arrow,
+                )
+            }
             // 备份文件列表
             Text(
                 text = stringResource(R.string.settings_backup_list),
@@ -130,6 +145,15 @@ internal fun DataSettingsSection(
                     label = stringResource(R.string.settings_import_playlist),
                     description = stringResource(R.string.settings_import_playlist_desc),
                     onClick = { actions.onImportPlaylistFile?.invoke() },
+                    trailing = Trail.Arrow,
+                )
+            }
+            // 从本地文件导入歌单：与备份同理，扫码上传在本机上会被系统冻结进程而必然失败
+            if (actions.onImportPlaylistLocalFile != null) {
+                SettingActionButton(
+                    label = stringResource(R.string.settings_import_playlist_local),
+                    description = stringResource(R.string.settings_import_playlist_local_desc),
+                    onClick = { actions.onImportPlaylistLocalFile?.invoke() },
                     trailing = Trail.Arrow,
                 )
             }

@@ -87,7 +87,7 @@ class ModelTransferServer(
 
     override fun serve(session: IHTTPSession): Response {
         // P1-1：一次性 token 鉴权（query t= 或 Cookie auth=），拒绝同网段未授权访问
-        if (!LocalServerAuth.isAuthorized(session, authToken)) return LocalServerAuth.forbidden()
+        if (!LocalServerAuth.isAuthorized(session, authToken)) return LocalServerAuth.forbidden(session)
         val uri = session.uri
         val method = session.method
 

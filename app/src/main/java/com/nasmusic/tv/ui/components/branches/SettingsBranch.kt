@@ -4,12 +4,21 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.ui.res.stringResource
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.tv.material3.ExperimentalTvMaterial3Api
+import android.app.Activity
+import android.content.ActivityNotFoundException
+import android.content.Intent
+import androidx.activity.compose.ManagedActivityResultLauncher
+import androidx.activity.result.ActivityResult
 import com.nasmusic.tv.backend.photo.PhotoSourceKind
+import com.nasmusic.tv.util.LocalFilePicker
+import com.nasmusic.tv.util.AppLog
 import com.nasmusic.tv.data.model.Screen
 import com.nasmusic.tv.data.model.Song
 import com.nasmusic.tv.data.model.ServerConfig
@@ -63,6 +72,34 @@ internal fun SettingsBranch(
                     var showBackupTransferDialog by remember { mutableStateOf(false) }
                     var showModelTransferDialog by remember { mutableStateOf(false) }
                     var showPlaylistImportDialog by remember { mutableStateOf(false) }
+                    val branchContext = androidx.compose.ui.platform.LocalContext.current
+                    // 「从本地文件导入」三枚入口（备份 json / 歌单 / 分离模型）：文件已在这台设备上时
+                    // 不必绕扫码 —— 扫码要求本 app 活着当服务端，手机一开浏览器就进后台被冻结。
+                    // ⛔ 一律显示，不做「本机有没有选择器」的能力探测（v2.39.3 就是这样误判把行藏掉的）；
+                    // 起不来由 launchDocumentPicker 把原因显示到对应区块顶部。
+                    val backupFileLauncher = rememberLauncherForActivityResult(
+                        ActivityResultContracts.StartActivityForResult()
+                    ) { result ->
+                        val picked = if (result.resultCode == Activity.RESULT_OK) result.data?.data else null
+                        if (picked != null) {
+                            // 必须**在结果回调里同步**转持久授权（协程里补做会被系统当成授权已过期），
+                            // 有了它这份文件才能在重启后继续留在备份列表里 —— 见 ImportedBackupRecord。
+                            LocalFilePicker.persistRead(branchContext, picked)
+                            viewModel.backupVM.importBackup(picked, fromLocalFile = true)
+                        }
+                    }
+                    val playlistFileLauncher = rememberLauncherForActivityResult(
+                        ActivityResultContracts.StartActivityForResult()
+                    ) { result ->
+                        val picked = if (result.resultCode == Activity.RESULT_OK) result.data?.data else null
+                        if (picked != null) viewModel.playlistImportVM.importPlaylist(picked)
+                    }
+                    val modelFileLauncher = rememberLauncherForActivityResult(
+                        ActivityResultContracts.StartActivityForResult()
+                    ) { result ->
+                        val picked = if (result.resultCode == Activity.RESULT_OK) result.data?.data else null
+                        if (picked != null) viewModel.downloadVM.importModelFromUri(picked)
+                    }
                     // 修复（H-3）：组合内 runBlocking 同步读改为 Flow 订阅
                     val baiduConfig by viewModel.prefs.baidu.baiduConfigFlow.collectAsState(
                         initial = com.nasmusic.tv.data.model.CloudDriveConfig(com.nasmusic.tv.data.model.CloudDriveType.BAIDU)
@@ -211,10 +248,20 @@ internal fun SettingsBranch(
                         onDeleteBackup = { uri -> viewModel.backupVM.deleteBackup(uri) },
                         onConsumeBackupMessage = { viewModel.backupVM.consumeBackupMessage() },
                         onScanTransferBackup = { showBackupTransferDialog = true },
+                        onImportBackupFile = {
+                            launchDocumentPicker(backupFileLauncher, LocalFilePicker.BACKUP_MIME_TYPES) {
+                                viewModel.backupVM.reportBackupFailure(it)
+                            }
+                        },
                         // 歌单导入（阶段5）
                         playlistImportHistory = playlistImportHistory,
                         playlistImportMessage = playlistImportMessage,
                         onImportPlaylistFile = { showPlaylistImportDialog = true },
+                        onImportPlaylistLocalFile = {
+                            launchDocumentPicker(playlistFileLauncher, LocalFilePicker.PLAYLIST_MIME_TYPES) {
+                                viewModel.playlistImportVM.reportImportFailure(it)
+                            }
+                        },
                         onOpenImportedPlaylist = { _ -> viewModel.navVM.navigateTo(Screen.Mine) },
                         onConsumePlaylistImportMessage = { viewModel.playlistImportVM.consumeImportMessage() },
                         // 百度网盘设置
@@ -275,6 +322,11 @@ internal fun SettingsBranch(
                     onDeleteModel = { viewModel.deleteModel() },
                     onRefreshModelStatus = { viewModel.downloadVM.refreshModelStatus() },
                     onScanTransferModel = { showModelTransferDialog = true },
+                    onImportModelFile = {
+                        launchDocumentPicker(modelFileLauncher, LocalFilePicker.ANY_MIME_TYPES) {
+                            viewModel.downloadVM.reportModelImportFailure(it)
+                        }
+                    },
                     // T10：歌词显示（与播放页弹窗读同一条 Flow，改完立刻对播放页生效）
                     lyricsFontScale = lyricsFontScale,
                     lyricsHighlightMode = lyricsHighlightMode,
@@ -408,7 +460,8 @@ internal fun SettingsBranch(
                             onDismiss = { showModelTransferDialog = false }
                         )
                     }
-                    // 歌单扫码上传导入弹窗（阶段5.5，替代 SAF 文件选择器——Android TV 无 DocumentsUI）
+                    // 歌单扫码上传导入弹窗（阶段5.5：TV 无 DocumentsUI，扫码是电视上的唯一入口；
+                    // 本机有文件选择器的设备另走「从本地文件导入」，见 playlistFileLauncher）
                     if (showPlaylistImportDialog) {
                         PlaylistImportUploadDialog(
                             onFileReceived = { name, bytes ->
@@ -417,4 +470,25 @@ internal fun SettingsBranch(
                             onDismiss = { showPlaylistImportDialog = false }
                         )
                     }
+}
+
+/**
+ * 打开系统文件选择器（三枚「从本地文件导入」入口共用）。
+ *
+ * ⛔ 起不来时必须把原因经 [onUnavailable] 显示到对应区块顶部：入口一律渲染、不做能力探测，
+ * 静默失败在用户眼里就等于「没有这个功能」—— v2.39.3 用 `resolveActivity()` 探测，
+ * 因 `<queries>` 没镜像目标 filter 的 mimeType 而在 MIUI 上误判成「本机没有选择器」，
+ * 整行直接消失了。
+ */
+private fun launchDocumentPicker(
+    launcher: ManagedActivityResultLauncher<Intent, ActivityResult>,
+    mimeTypes: List<String>,
+    onUnavailable: (String) -> Unit
+) {
+    try {
+        launcher.launch(LocalFilePicker.openIntent(mimeTypes))
+    } catch (e: ActivityNotFoundException) {
+        AppLog.e("SettingsBranch", "系统文件选择器不可用", e)
+        onUnavailable(e.message ?: "ActivityNotFoundException")
+    }
 }

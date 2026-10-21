@@ -91,7 +91,7 @@ class LocalInputServer(
 
         override fun serve(session: IHTTPSession): Response {
             // P1-1：一次性 token 鉴权（query t= 或 Cookie auth=），拒绝同网段未授权的文本注入
-            if (!LocalServerAuth.isAuthorized(session, authToken)) return LocalServerAuth.forbidden()
+            if (!LocalServerAuth.isAuthorized(session, authToken)) return LocalServerAuth.forbidden(session)
             return when {
                 session.uri == "/" && session.method == Method.GET -> serveInputPage()
                 session.uri == "/submit" && session.method == Method.POST -> handleSubmit(session)
@@ -115,11 +115,12 @@ class LocalInputServer(
                 // 同网段超大 POST 可耗尽内存（对齐 Backup/Playlist 上传的硬上限口径）。
                 val contentLength = session.headers["content-length"]?.toLongOrNull() ?: -1L
                 if (contentLength > 1L * 1024 * 1024) {
+                    // 拒绝即断连：body 还没读，留在这条 keep-alive 连接上会污染下一请求
                     return newFixedLengthResponse(
                         Response.Status.BAD_REQUEST,
                         "application/json; charset=UTF-8",
                         """{"ok":false}"""
-                    )
+                    ).noKeepAlive()
                 }
                 val files = HashMap<String, String>()
                 session.parseBody(files)

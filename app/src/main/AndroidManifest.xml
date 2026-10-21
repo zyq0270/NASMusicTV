@@ -37,6 +37,29 @@
       设置页；加白名单由用户自行去系统设置。
     -->
 
+    <!--
+      包可见性声明（API 30+）。两处消费方：
+      - 设置 → 数据 的「从本地文件导入」（备份 / 歌单 / 分离模型）用 ACTION_OPEN_DOCUMENT
+      - 导出与网盘目录选择用 ACTION_OPEN_DOCUMENT_TREE（`ExportPermissionHelper.isTreePickAvailable`
+        的 resolveActivity 探测，未声明时在本机同样查不到）
+      ⚠️ `<intent>` 的匹配是**逐字段比对**的：目标 filter 声明了 `<data mimeType>` 时，
+      查询侧不写 `<data>` 就数不相等 ⇒ 查不到（v2.39.3 在小米 MIUI 上就是这样把
+      「从本地文件导入」整行误判成不可用而藏掉的）。categories 同理，必须把
+      DocumentsUI 真正声明的 DEFAULT / OPENABLE 一起镜像过来。
+    -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.OPEN_DOCUMENT" />
+            <category android:name="android.intent.category.DEFAULT" />
+            <category android:name="android.intent.category.OPENABLE" />
+            <data android:mimeType="*/*" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.OPEN_DOCUMENT_TREE" />
+            <category android:name="android.intent.category.DEFAULT" />
+        </intent>
+    </queries>
+
     <!-- Device features: both TV and phone supported -->
     <uses-feature
         android:name="android.hardware.touchscreen"

@@ -16944,3 +16944,85 @@ debug 包无 R8 合并故不复现（与「只在 release 崩」吻合）。
 BUILD SUCCESSFUL、全量 **2358 例 0 失败**。真机复跑前**先清空设置页日志**再操作
 （日志持久化）：新包启动不再崩溃、日志无告警刷屏（用户确认）。若想进一步证 R8
 因素：同步骤跑 debug 包应不崩。
+
+### 10.261 v2.39.4 — 扫码上传「Failed to fetch」定案 + 三枚「从本地文件导入」+ 导入结果可见性（2026-10-21）
+
+**上报**：手机「设置 → 数据 → 上传导出的数据」扫码页报 `上传失败：Failed to fetch`；
+改走本地导入后又有两条真机反馈：**成功后屏幕上没有任何提示**、**导入用的文件不在下方备份列表里**。
+
+**根因三条（互相独立，前两条解释「扫码上传为什么失败」，第三条解释「本地导入为什么看不见」）**
+
+1. **手机端结构性不可行**：app 一切到后台即被 Android 12+ 的 cgroup freezer 冻住 ——
+   设备侧实测 `cpuset:/background`、`oom_score_adj=701`、`/sys/fs/cgroup/uid_<app>/pid_<pid>/cgroup.freeze=1`；
+   内嵌 `BackupTransferServer` 的 socket **仍在 `[::]:18081` LISTEN**，但不再 accept，
+   客户端停在 `SYN_SENT`、服务端零日志；手机**自己** `curl 127.0.0.1:18081` 也 5s 超时，
+   可排除路由/防火墙/浏览器。而打开浏览器必然让 app 进后台 ⇒ 手机端的扫码上传不是 bug，是结构性不可行。
+   电视端则是浏览器复用了**旧链接**（`dumpsys activity recents` 里是 `http://192.168.0.100:…`，
+   当日电视是 `.114`，令牌还是一次性的）。所有者裁决：**不做前台服务、不追电视端**，改做原生
+   「从本地文件导入」入口。
+2. **传输层真 bug（本轮修）**：NanoHTTPD 2.3.1 的 `HTTPSession.execute()` 只解析请求头、
+   **从不消费 body**（已用 `javap` 反汇编核实）。旧上传路径只按 `Content-Length` 定长读，
+   于是另外两类合法请求 **一个字节都不读** 就返回响应：
+   `Transfer-Encoding: chunked`（Chromium 系 `fetch` + 无名 Blob 常走这条，JS 侧拿不到精确字节数
+   就不发 `Content-Length`）与超限请求体。而响应头仍是 `Connection: keep-alive` ⇒ 残留 body
+   被解析成**下一个请求** → 下一跳直接 `400 Bad Request`，`fetch` 以 `Failed to fetch` 拒绝，
+   真实原因被彻底吞掉。鉴权拒绝（403）同理，也会把 body 留在连接上。
+3. **备份列表看不见（MediaProvider 所有权可见性）**：设备侧
+   `content query --uri content://media/external/downloads` 显示，app 自己导出的 4 份备份
+   `owner_package_name=NULL`（`_uid`=app，自己可见），而经 adb / 小米互传拷进去的
+   `NASMusic_backup_20260920_221903.json` 是 `com.android.shell`。MediaStore 对**非本 app 拥有的行
+   不返回**，SAF 选择器却是用户逐次授权 ⇒ **读得到、列不出**。凡「用户自己在选择器里挑的文件」
+   都必须另外登记，否则这条入口在用户眼里就是「导入成功了但文件凭空消失」。
+
+**修复**
+
+- `net/HttpRequestBody.kt`（新，三个 server 共用）：统一消费请求体 ——
+  `Transfer-Encoding` 优先于 `Content-Length`（RFC 7230 §3.3.3，也是防请求走私的顺序）；
+  定长按块扣减读取、**绝不按声明的长度预分配**；chunked 逐块解码并严格校验块后 CRLF 与 trailer；
+  返回 `Read` / `OverLimit` / `Malformed` 三态，**除 `Read` 外调用方一律 `noKeepAlive()`**，
+  让 socket 始终处于干净的请求边界。`BackupTransferServer`、`PlaylistUploadServer`、
+  `ServerConfigTransferServer`、`LocalInputServer` 全部接入；`LocalServerAuth.forbidden(session)`
+  附带 `W` 级日志（release 侧唯一可观测通道）并断连。
+- **三枚「从本地文件导入」**（备份 json / 歌单 / 分离模型）在设置 → 数据、歌词与 K 歌分区
+  **一律常显**：所有者裁决「不用隐藏，全部版本都展现」，且能力探测在 MIUI 上会假阴性
+  （`resolveActivity` + `<queries>` 逐字段比对，漏 `<data mimeType>`/`CATEGORY_OPENABLE` 就查不到）。
+  `util/LocalFilePicker.kt` 统一入口：`ACTION_OPEN_DOCUMENT` + `CATEGORY_OPENABLE` +
+  `EXTRA_MIME_TYPES` + `EXTRA_INITIAL_URI`（初始目录 `Download/NASMusic`，文档 id 手拼
+  `primary:Download/NASMusic`，`buildDocumentUri` 对该目录不适用）。
+- **结果可见性**：备份/歌单的结果消息除分区顶部文本外，**再弹一次 Toast**（成功 4s 后自动消费）；
+  本地导入成功文案带文件名（`backup_restored_from_file`）。分离模型的错误是长期驻留态，
+  **故意不加 Toast**（每次进分区都会重放噪音，与 10.260 删除那条同因）。
+- **备份列表登记**：`ImportedBackupRecord` + `AppPreferences.importedBackups`（上限 20、按显示名去重）
+  + `mergeImportedEntries`（同名时导出项胜出、合并后按 mtime 倒序）+ 每次列表现读
+  `contentResolver.persistedUriPermissions`，**授权失效的登记项直接剪掉**（不留点了必炸的死行）
+  + 文档型 uri 的删除走 `DocumentsContract.deleteDocument`。选择器意图必须带
+  `FLAG_GRANT_PERSISTABLE_URI_PERMISSION`，`takePersistableUriPermission` 必须在 Activity
+  结果回调里**同步**调用（协程里补做可能被系统视为授权已过期）。
+
+**门禁（每条谓词都带负向自证）**
+
+| 测试类 | 例 | 锁什么 |
+|---|---|---|
+| `HttpRequestBodyTest` | 10 | 定长/chunked/trailer/大小写与扩展/优先级/无体/超限不读入内存/畸形 |
+| `BackupUploadFramingTest` | 3 | 读干净后同连接下一请求不被污染 / 超限拒绝必须断连 / 未授权带体 POST 必须断连 |
+| `LocalFilePickerTest` | 3 | 初始目录=导出目录 / 每个入口都是可打开的文档选择 / **全仓不得出现能力探测** |
+| `BackupLocalImportRecordTest` | 6 | 同名去重且导出项胜出 / 掉授权即剔 / 时间倒序 / `localImported` 标记 / 意图可持久化 / 文案带文件名 |
+| `BackupResultVisibilityGateTest` | 4 | 备份与歌单的 Toast 落点 + 「无 Toast 的源必须判 false」 |
+
+⚠️ 本模块**没开** `testOptions.unitTests.isIncludeAndroidResources`（`app/build.gradle.kts` 只有
+`isReturnDefaultValues`），单测里 `getString(R.string.x)` 抛 `Resources$NotFoundException`；
+为一条文案去翻这个全局配置会影响 2000+ 例。文案类判据一律**读 `values*/strings.xml` 原文 +
+`String.format`**。另一个坑：K2 里 `"""…"""` 的 `\$` 不是转义，`$s` 会被当模板插值
+（`Unresolved reference 's'`），要字面美元符必须用普通串 `"…\$s…"`。
+
+**验证**：`testDebugUnitTest --rerun-tasks` + `lintDebug` 同轮跑完，**230 个测试类 / 2384 例 /
+0 失败 0 错误 0 跳过**（统计自 `app/build/test-results/testDebugUnitTest/TEST-*.xml`，不看退出码），
+lint **0 error**（163 warning 存量）；release `NASMusicTV-release-v2-39-4.apk` 25,835,620 字节、
+md5 `3f1a1c77dfd67cd21442a17271bc5642`，`install -r` 到手机（Redmi，`91846823`）后设备侧
+`base.apk` md5 逐字节一致，`versionCode=189 / versionName=2.39.4`。
+**用户真机验收通过（2026-10-21）**：成功提示带文件名、导入的文件出现在下方列表、重启后仍在、删除可用。
+电视侧未复测（所有者裁决「电视上上次就成功了，不用管了」）。
+
+**取证手法（同类问题直接照用）**：`/proc/net/tcp` 看 `SYN_SENT`、`/sys/fs/cgroup/.../cgroup.freeze`
+判冻结、`dumpsys activity recents` 读浏览器真实 URL、`content query --uri content://media/external/downloads`
+看 `owner_package_name`；release 包没有 `run-as`，现场可观测通道只有落盘日志。

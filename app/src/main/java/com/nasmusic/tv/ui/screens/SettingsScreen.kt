@@ -1,6 +1,7 @@
 package com.nasmusic.tv.ui.screens
 
 import android.net.Uri
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusGroup
@@ -37,6 +38,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
@@ -222,6 +224,8 @@ fun SettingsScreen(
     onDeleteModel: (() -> Unit)? = null,
     onRefreshModelStatus: (() -> Unit)? = null,
     onScanTransferModel: (() -> Unit)? = null,
+    /** 从本地文件导入分离模型（SAF 选择器，所有设备都显示） */
+    onImportModelFile: (() -> Unit)? = null,
     // ── T10：歌词显示（与播放页弹窗共用同一份持久化 key）──
     lyricsFontScale: Float = 1f,
     lyricsHighlightMode: com.nasmusic.tv.data.model.LyricsHighlightMode =
@@ -246,10 +250,14 @@ fun SettingsScreen(
     onDeleteBackup: ((Uri) -> Unit)? = null,
     onConsumeBackupMessage: (() -> Unit)? = null,
     onScanTransferBackup: (() -> Unit)? = null,
+    /** 本地文件导入备份（SAF，launcher 由 SettingsBranch 持有） */
+    onImportBackupFile: (() -> Unit)? = null,
     // 歌单导入（2026-09-18：§4.4.2 导入入口 + 最近导入记录 + 消息）
     playlistImportHistory: List<com.nasmusic.tv.data.model.PlaylistImportHistoryItem> = emptyList(),
     playlistImportMessage: com.nasmusic.tv.data.model.BackupMessage? = null,
     onImportPlaylistFile: (() -> Unit)? = null,
+    /** 从本地文件导入歌单（SAF 选择器） */
+    onImportPlaylistLocalFile: (() -> Unit)? = null,
     onOpenImportedPlaylist: ((String) -> Unit)? = null,
     onConsumePlaylistImportMessage: (() -> Unit)? = null,
     // 服务器连接设置
@@ -329,6 +337,9 @@ fun SettingsScreen(
     modifier: Modifier = Modifier
 ) {
 var activeSection by remember { mutableStateOf(SettingsSection.GENERAL) }
+    // 结果消息的屏幕级落点：分区内那一行会被列表滚动甩出视野（真机上「导入成功却毫无提示」
+    // 就是这么来的），同一条消息还必须进 Toast —— 见 BackupResultVisibilityGateTest
+    val toastContext = LocalContext.current.applicationContext
     // 竖屏只认 PhonePortrait；TV 与手机横屏走现状两栏（B1 硬规则）
     val isPortraitPhone = LocalUiMode.current == UiMode.PhonePortrait
     // 分区路由主体：竖屏用 navVM 的 selectedSection（非空时才会渲染内容），否则用两栏的 activeSection
@@ -424,9 +435,14 @@ var activeSection by remember { mutableStateOf(SettingsSection.GENERAL) }
     // 配合下方「有新消息就滚到分区顶部」保证一定看得见。成功提示仍 4s 自动消失。
     LaunchedEffect(backupMessage) {
         val msg = backupMessage
-        if (msg != null && !msg.isError) {
-            kotlinx.coroutines.delay(4000)
-            onConsumeBackupMessage?.invoke()
+        if (msg != null) {
+            // 屏幕级落点：分区内那一行在列表顶部，SAF 返回时列表还在惯性滚动、
+            // `animateScrollToItem` 会被取消并被 runCatching 吞掉 ⇒ 只靠那一行等于没提示。
+            Toast.makeText(toastContext, msg.text, Toast.LENGTH_LONG).show()
+            if (!msg.isError) {
+                kotlinx.coroutines.delay(4000)
+                onConsumeBackupMessage?.invoke()
+            }
         }
     }
 
@@ -441,7 +457,10 @@ var activeSection by remember { mutableStateOf(SettingsSection.GENERAL) }
 
     // 歌单导入结果消息显示后自动消费（镜像 backupMessage 4s 消费）
     LaunchedEffect(playlistImportMessage) {
-        if (playlistImportMessage != null) {
+        val msg = playlistImportMessage
+        if (msg != null) {
+            // 同 backupMessage：结果必须有一处不随列表滚动的落点
+            Toast.makeText(toastContext, msg.text, Toast.LENGTH_LONG).show()
             kotlinx.coroutines.delay(4000)
             onConsumePlaylistImportMessage?.invoke()
         }
@@ -630,6 +649,7 @@ var activeSection by remember { mutableStateOf(SettingsSection.GENERAL) }
                             onDownloadModel = onDownloadModel,
                             onDeleteModel = onDeleteModel,
                             onScanTransferModel = onScanTransferModel,
+                            onImportModelFile = onImportModelFile,
                             onChangeLyricsFontScale = onChangeLyricsFontScale,
                             onChangeLyricsHighlightMode = onChangeLyricsHighlightMode,
                             // T16：自定义源编辑并入通用宿主（原 showCustomModelUrlDialog）
@@ -936,8 +956,10 @@ var activeSection by remember { mutableStateOf(SettingsSection.GENERAL) }
                             onExportBackup = onExportBackup,
                             onImportBackup = onImportBackup,
                             onScanTransferBackup = onScanTransferBackup,
+                            onImportBackupFile = onImportBackupFile,
                             onOpenPlayStats = onOpenPlayStats,
                             onImportPlaylistFile = onImportPlaylistFile,
+                            onImportPlaylistLocalFile = onImportPlaylistLocalFile,
                             onOpenImportedPlaylist = onOpenImportedPlaylist,
                             onConsumePlaylistImportMessage = onConsumePlaylistImportMessage,
                         ),

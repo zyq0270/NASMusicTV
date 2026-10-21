@@ -143,6 +143,8 @@
     <string name="settings_delete_model_desc">Delete model needed for separation mode</string>
     <string name="settings_scan_upload_model">Scan &amp; Upload Model</string>
     <string name="settings_scan_upload_model_desc">Use phone to scan and upload model file to TV</string>
+    <string name="settings_import_model_file">Import model from file</string>
+    <string name="settings_import_model_file_desc">Pick an .onnx already on this device</string>
     <string name="settings_network_model_not_downloaded">Network separation model not downloaded (HT-Demucs FT, ~166MB)</string>
     <string name="settings_storage_path">Storage path: %s</string>
     <string name="settings_download_separation_model">Download Separation Model</string>
@@ -185,6 +187,9 @@
     <string name="settings_network_test_error">Network error: %s</string>
     <string name="settings_scan_transfer">Scan &amp; Transfer</string>
     <string name="settings_scan_transfer_desc">Scan with phone to transfer data / upload to server / remote restore</string>
+    <!-- Local backup file import (phone): the row hides itself when no system picker exists -->
+    <string name="settings_import_backup_file">Import from local file</string>
+    <string name="settings_import_backup_file_desc">Pick a backup file from Download/NASMusic to restore</string>
     <!-- Switch state semantics (see plan §5.2): short label inside the thumb, full word for TalkBack. -->
     <string name="settings_on">ON</string>
     <string name="settings_off">OFF</string>
@@ -1010,6 +1015,7 @@
     <string name="backup_exported">Backup exported: %s</string>
     <string name="backup_export_failed">Backup failed: %s</string>
     <string name="backup_restored">Restore complete, please reconnect to server</string>
+    <string name="backup_restored_from_file">Restored %1$s (settings updated; reconnect to the server)</string>
     <string name="backup_restore_failed">Restore failed: %s</string>
     <string name="backup_deleted">Backup deleted</string>
     <string name="backup_delete_failed">Delete failed: %s</string>
@@ -1040,6 +1046,10 @@
     <string name="html_backup_status_restoring">Restoring...</string>
     <string name="html_backup_status_restore_failed">Restore failed</string>
     <string name="html_backup_status_upload_failed">Upload failed</string>
+    <string name="html_backup_status_offline">Cannot reach the TV: keep this page open, make sure the TV is awake, and turn off any browser proxy/boost, then retry</string>
+    <string name="html_backup_status_diag_reachable">Self-check: the TV IS online (%s). The upload request itself is what failed — turn off browser boost/data-saver/ad-blocker and retry, or use another browser</string>
+    <string name="html_backup_status_diag_unreachable">Self-check: the TV is unreachable (%s). Its transfer service stopped (it stops as soon as this page closes or the TV sleeps) — reopen the QR code on the TV</string>
+    <string name="html_backup_status_diag_empty">Upload failed: the browser read 0 bytes (%s). Save the file from cloud storage to local phone storage first, then pick it again</string>
     <string name="html_backup_confirm_restore">Restore backup %s?\nCurrent data will be overwritten (server needs reconnection).</string>
 
     <!-- ModelTransferServer HTML Page -->
@@ -1185,6 +1195,8 @@
     <!-- Playlist import -->
     <string name="settings_import_playlist">Import Playlist</string>
     <string name="settings_import_playlist_desc">Import from m3u / txt / json / NetEase Cloud playlist file (URL direct links supported)</string>
+    <string name="settings_import_playlist_local">Import playlist from file</string>
+    <string name="settings_import_playlist_local_desc">Pick a playlist file from Download/NASMusic</string>
     <string name="settings_playlist_import_history">Recent Imports</string>
     <string name="playlist_importing">Importing playlist…</string>
     <string name="playlist_import_progress">Importing playlist… %d%%</string>
@@ -1460,6 +1472,7 @@
     <string name="model_msg_boundary_missing">Missing multipart boundary. Content-Type: %1$s</string>
     <string name="model_msg_file_too_small">File too small (%1$dMB; ~166MB expected). Make sure you upload htdemucs_ft_vocals_fp16weights.onnx</string>
     <string name="model_msg_sha_mismatch">SHA-256 mismatch: expected %1$s…, got %2$s…. Make sure you upload the official htdemucs_ft_vocals_fp16weights.onnx (~158MB)</string>
+    <string name="model_msg_import_failed">Model import failed: %1$s</string>
     <string name="model_msg_upload_success">Model uploaded! Saved (%1$dMB)</string>
     <string name="model_msg_upload_failed">Upload failed: %1$s: %2$s</string>
     <string name="model_msg_unknown_error">Unknown error</string>
@@ -1469,6 +1482,7 @@
     <string name="backup_msg_download_failed">Download failed: %1$s</string>
     <string name="backup_msg_upload_empty">Upload content is empty</string>
     <string name="backup_msg_upload_too_large">Upload too large (limit %1$dMB)</string>
+    <string name="backup_msg_upload_malformed">Upload interrupted: %1$s</string>
     <string name="backup_msg_saved">Saved: %1$s</string>
     <string name="backup_msg_save_failed">Save failed: %1$s</string>
     <string name="backup_msg_upload_failed">Upload failed: %1$s</string>
@@ -1554,6 +1568,7 @@
     <string name="backup_util_write_failed">Failed to write backup file</string>
     <string name="backup_util_mkdir_failed">Failed to create backup directory</string>
     <string name="backup_util_read_failed">Failed to read backup file</string>
+    <string name="backup_util_too_large">File too large (%1$d MB): this is not a backup file</string>
     <string name="backup_util_invalid_path">Invalid file path</string>
     <string name="backup_util_delete_failed">Deletion failed, file missing or already deleted</string>
     <!-- Feiniu (fnOS) connection diagnostics -->

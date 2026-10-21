@@ -243,6 +243,18 @@ class PlaylistImportViewModel(
         return successMessage
     }
 
+    /**
+     * 把「导入没能开始」的原因直接显示出来（v2.39.4：本机没有可用系统文件选择器时，
+     * SAF 意图 `startActivity` 会抛 ActivityNotFoundException —— 入口一律显示，
+     * 失败必须让用户看见，不能静默返回）。
+     */
+    fun reportImportFailure(reason: String) {
+        _importMessage.value = BackupMessage(
+            getApplication<Application>().getString(R.string.playlist_import_failed, reason.take(60)),
+            isError = true
+        )
+    }
+
     /** 消费导入结果消息（SettingsScreen 4s 后调用，镜像 backupMessage） */
     fun consumeImportMessage() {
         _importMessage.value = null

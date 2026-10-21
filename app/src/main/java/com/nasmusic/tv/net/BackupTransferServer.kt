@@ -102,8 +102,17 @@ class BackupTransferServer(
         override fun serve(session: IHTTPSession): Response {
             // P1-1：一次性 token 鉴权（query t= 或 Cookie auth=），拒绝同网段未授权访问。
             // 该 server 的 /api/restore 可整体覆盖用户数据，是鉴权收益最大的一处。
-            if (!LocalServerAuth.isAuthorized(session, authToken)) return LocalServerAuth.forbidden()
-            AppLog.i(TAG, "serve: ${session.method} ${session.uri}")
+            if (!LocalServerAuth.isAuthorized(session, authToken)) return LocalServerAuth.forbidden(session)
+            // 落盘日志：手机报 "Failed to fetch" 时，这一行的有无直接区分两种病因
+            // ——「请求根本没到电视」（待机 / 弹窗已关 / 浏览器走了云端代理）
+            //   与「到了但传输层被拒」。AppLog.d/i 在 release 会被 R8 折掉，必须用 w。
+            AppLog.w(
+                TAG,
+                "请求: ${session.method} ${session.uri} " +
+                    "cl=${session.headers["content-length"] ?: "-"} " +
+                    "te=${session.headers["transfer-encoding"] ?: "-"} " +
+                    "ua=${session.headers["user-agent"]?.take(24) ?: "-"}"
+            )
             return when {
                 session.uri == "/" && session.method == Method.GET -> servePage()
                 session.uri == "/api/list" && session.method == Method.GET -> handleList()
@@ -140,6 +149,10 @@ class BackupTransferServer(
                 "restoreFailed" to context.getString(R.string.html_backup_status_restore_failed),
                 "uploading" to context.getString(R.string.html_backup_uploading),
                 "uploadFailed" to context.getString(R.string.html_backup_status_upload_failed),
+                "offline" to context.getString(R.string.html_backup_status_offline),
+                "diagReachable" to context.getString(R.string.html_backup_status_diag_reachable),
+                "diagUnreachable" to context.getString(R.string.html_backup_status_diag_unreachable),
+                "diagEmpty" to context.getString(R.string.html_backup_status_diag_empty),
                 "uploadBtn" to context.getString(R.string.html_backup_upload_btn)
             )
             val strJson = gson.toJson(strMap)
@@ -199,13 +212,20 @@ input[type=file]{width:100%;padding:10px;font-size:14px;background:#0a0a23;borde
 
 <script>
 var STR = $strJson;
+// 部分手机浏览器（含小米自带）不给「IP 站点」存 Cookie，Cookie 鉴权会全线 403。
+// 二维码 URL 里本来就带一次性 token，页面把它显式带回每个接口，不依赖 Cookie。
+function apiUrl(p){
+  var m=location.search.match(/[?&]t=([^&]+)/);
+  if(!m)return p;
+  return p+(p.indexOf('?')>=0?'&':'?')+'t='+encodeURIComponent(m[1]);
+}
 // 修复（2026-09-22 审查）：备份文件名可能含 HTML/属性敏感字符（RemoteControlHtml 的
 // esc/escAttr 教训）——展示名走 escHtml，onclick 里的文件名走 JSON.stringify+escAttr
 //（结构引号与数据引号统一过实体层，浏览器解码后仍是合法 JS 字符串字面量）。
 function escHtml(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
 function escAttr(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/'/g,'&#39;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 function loadBackups(){
-  fetch('/api/list')
+  fetch(apiUrl('/api/list'))
     .then(function(r){return r.json()})
     .then(function(d){
       var list=document.getElementById('backupList');
@@ -232,20 +252,36 @@ function loadBackups(){
 
 function downloadBackup(name){
   showStatus(STR.downloading,'');
-  window.location='/api/download?name='+encodeURIComponent(name);
+  window.location=apiUrl('/api/download?name='+encodeURIComponent(name));
   setTimeout(function(){showStatus(STR.downloadStarted,'ok');},1000);
 }
 
 function restoreBackup(name){
   if(!confirm(STR.confirmRestore.replace('%s',name)))return;
   showStatus(STR.restoring,'');
-  fetch('/api/restore?name='+encodeURIComponent(name),{method:'POST'})
+  fetch(apiUrl('/api/restore?name='+encodeURIComponent(name)),{method:'POST'})
     .then(function(r){return r.json()})
     .then(function(d){
       showStatus(d.message, d.ok?'ok':'err');
       if(d.ok) setTimeout(loadBackups,2000);
     })
     .catch(function(e){showStatus(STR.restoreFailed,'err');});
+}
+
+// 上传失败时的自检：用同一个接口前缀发一个 GET 探测。
+// 收到任何 HTTP 响应（含 403）= 电视在线，问题出在这个 POST 本身（浏览器拦截/改写）；
+// 探测也无响应 = 电视端服务已停或端口不通。电视侧此时没有任何请求日志，只能由客户端给出判别。
+function probe(base){
+  var done=false;
+  function finish(reachable,detail){
+    if(done)return;
+    done=true;
+    showStatus(base+' | '+(reachable?STR.diagReachable:STR.diagUnreachable).replace('%s',detail),'err');
+  }
+  setTimeout(function(){finish(false,'timeout 4s')},4000);
+  fetch(apiUrl('/api/list'),{method:'GET',cache:'no-store'})
+    .then(function(r){finish(true,'HTTP '+r.status)})
+    .catch(function(e){finish(false,(e&&e.message)?String(e.message):'error')});
 }
 
 function uploadBackup(){
@@ -262,8 +298,20 @@ function uploadBackup(){
   var reader=new FileReader();
   reader.onload=function(){
     var blob=new Blob([reader.result],{type:'application/json'});
-    fetch('/api/upload',{method:'POST',body:blob})
-      .then(function(r){return r.json()})
+    // 部分国产浏览器从云端/内容提供器取文件时读出 0 字节——必须在发请求前就告知，
+    // 否则服务端只会记录「请求体为空」，用户端看到的却是含义不明的「上传失败」
+    if(blob.size===0){
+      showStatus(STR.diagEmpty.replace('%s',file.name+' ('+file.size+' B)'),'err');
+      btn.disabled=false;
+      btn.textContent=STR.uploadBtn;
+      return;
+    }
+    var tag=' ['+blob.size+'/'+file.size+' B]';
+    fetch(apiUrl('/api/upload'),{method:'POST',body:blob})
+      .then(function(r){
+        if(!r.ok)throw new Error('HTTP '+r.status);
+        return r.json();
+      })
       .then(function(d){
         showStatus(d.message, d.ok?'ok':'err');
         if(d.ok){
@@ -272,7 +320,14 @@ function uploadBackup(){
         }
       })
       .catch(function(e){
-        showStatus(STR.uploadFailed+': '+e.message,'err');
+        var m=(e&&e.message)?String(e.message):'';
+        // fetch 自身被拒时浏览器只给 "Failed to fetch"，属传输层失败（连不上电视），
+        // 与服务端返回的业务错误不同——必须分开报，否则用户看不到该做什么
+        if(/failed to fetch|network|load failed|aborted|connection|err_/i.test(m)||m===''){
+          probe(STR.offline+tag);
+        }else{
+          showStatus(STR.uploadFailed+': '+m+tag,'err');
+        }
       })
       .finally(function(){
         btn.disabled=false;
@@ -359,58 +414,49 @@ loadBackups();
 
         /** 上传备份文件（raw body = JSON 内容） */
         private fun handleUpload(session: IHTTPSession): Response {
-            AppLog.i(TAG, "handleUpload: called, method=${session.method}, uri=${session.uri}")
+            // 直接从 inputStream 读取原始字节，用 UTF-8 解码
+            // 不用 parseBody()：某些 ROM 上 Charset.defaultCharset() 非 UTF-8，导致中文乱码
+            //
+            // 不在此处判 Content-Length：交给 HttpRequestBody 统一处理定长与 chunked，
+            // 并保证「任何拒绝路径都不把未消费的 body 留在 keep-alive 连接上」。
+            val contentLength = session.headers["content-length"] ?: "-"
+            val transferEncoding = session.headers["transfer-encoding"] ?: "-"
             return try {
-                // 直接从 inputStream 读取原始字节，用 UTF-8 解码
-                // 不用 parseBody()：某些 ROM 上 Charset.defaultCharset() 非 UTF-8，导致中文乱码
-                val contentLength = session.headers["content-length"]?.toLongOrNull() ?: -1L
-                AppLog.i(TAG, "handleUpload: contentLength=$contentLength")
-                if (contentLength <= 0L) {
-                    return jsonResponse(false, context.getString(R.string.backup_msg_upload_empty))
-                }
-                if (contentLength > MAX_UPLOAD_BYTES) {
-                    AppLog.w(TAG, "handleUpload: rejected, contentLength=$contentLength > $MAX_UPLOAD_BYTES")
-                    return jsonResponse(false, context.getString(R.string.backup_msg_upload_too_large, MAX_UPLOAD_BYTES / 1024 / 1024))
-                }
-                // 安全：不按 Content-Length 预分配数组（客户端可谎报 → 巨型 ByteArray 直接 OOM），
-                // 改为按 Content-Length 定长分块读取（keep-alive 连接上不能 `read 到 -1`，
-                // 否则读完 body 后 read 阻塞至 SO_TIMEOUT 抛 SocketTimeoutException，2026-09-18 实测），
-                // 超上限立即中止
-                val buffer = java.io.ByteArrayOutputStream()
-                val chunk = ByteArray(16 * 1024)
-                var totalRead = 0
-                var remaining = contentLength
-                while (remaining > 0 && totalRead <= MAX_UPLOAD_BYTES) {
-                    val read = session.inputStream.read(chunk, 0, minOf(chunk.size.toLong(), remaining).toInt())
-                    if (read < 0) break // 对端提前关闭
-                    totalRead += read
-                    remaining -= read
-                    buffer.write(chunk, 0, read)
-                }
-                if (totalRead == 0) {
-                    return jsonResponse(false, context.getString(R.string.backup_msg_upload_empty))
-                }
-                var json = String(buffer.toByteArray(), Charsets.UTF_8)
-                // 去掉 UTF-8 BOM（如果有）
-                if (json.startsWith("\uFEFF")) {
-                    json = json.substring(1)
-                }
-                AppLog.i(TAG, "handleUpload: body length=${json.length}")
-                if (json.isEmpty()) {
-                    return jsonResponse(false, context.getString(R.string.backup_msg_upload_empty))
-                }
-                val result = BackupFileUtils.export(context, json)
-                if (result.isSuccess) {
-                    val savedName = result.getOrThrow()
-                    AppLog.i(TAG, "Upload saved: $savedName (${json.length} chars)")
-                    onBackupChanged.invoke()
-                    jsonResponse(true, context.getString(R.string.backup_msg_saved, savedName))
-                } else {
-                    jsonResponse(false, context.getString(R.string.backup_msg_save_failed, result.exceptionOrNull()?.message))
+                when (val body = session.readRequestBody(MAX_UPLOAD_BYTES)) {
+                    is HttpRequestBody.Result.OverLimit -> {
+                        AppLog.w(TAG, "上传拒绝: 体量超上限 ${MAX_UPLOAD_BYTES / 1024 / 1024}MB (content-length=$contentLength transfer-encoding=$transferEncoding)")
+                        jsonResponse(false, context.getString(R.string.backup_msg_upload_too_large, MAX_UPLOAD_BYTES / 1024 / 1024)).noKeepAlive()
+                    }
+                    is HttpRequestBody.Result.Malformed -> {
+                        AppLog.w(TAG, "上传失败: 请求体不完整 ${body.detail} (content-length=$contentLength transfer-encoding=$transferEncoding)")
+                        jsonResponse(false, context.getString(R.string.backup_msg_upload_malformed, body.detail)).noKeepAlive()
+                    }
+                    is HttpRequestBody.Result.Read -> {
+                        AppLog.w(TAG, "上传到达: ${body.bytes.size} 字节 (content-length=$contentLength transfer-encoding=$transferEncoding)")
+                        var json = String(body.bytes, Charsets.UTF_8)
+                        // 去掉 UTF-8 BOM（如果有）
+                        if (json.startsWith("\uFEFF")) {
+                            json = json.substring(1)
+                        }
+                        if (json.isBlank()) {
+                            AppLog.w(TAG, "上传失败: 请求体解码后为空")
+                            return jsonResponse(false, context.getString(R.string.backup_msg_upload_empty))
+                        }
+                        val result = BackupFileUtils.export(context, json)
+                        if (result.isSuccess) {
+                            val savedName = result.getOrThrow()
+                            AppLog.w(TAG, "上传已保存: $savedName (${json.length} 字符)")
+                            onBackupChanged.invoke()
+                            jsonResponse(true, context.getString(R.string.backup_msg_saved, savedName))
+                        } else {
+                            AppLog.w(TAG, "上传落盘失败: ${result.exceptionOrNull()?.message}")
+                            jsonResponse(false, context.getString(R.string.backup_msg_save_failed, result.exceptionOrNull()?.message))
+                        }
+                    }
                 }
             } catch (e: Exception) {
                 AppLog.e(TAG, "handleUpload failed", e)
-                jsonResponse(false, context.getString(R.string.backup_msg_upload_failed, e.message))
+                jsonResponse(false, context.getString(R.string.backup_msg_upload_failed, e.message)).noKeepAlive()
             }
         }
 

@@ -1,5 +1,6 @@
 package com.nasmusic.tv.net
 
+import com.nasmusic.tv.util.AppLog
 import fi.iki.elonen.NanoHTTPD
 import java.util.UUID
 
@@ -22,6 +23,8 @@ import java.util.UUID
  */
 object LocalServerAuth {
 
+    private const val TAG = "LocalServerAuth"
+
     /** 生成 16 位十六进制 token（UUID 去连字符截断；单次启动内唯一即可） */
     fun newToken(): String = UUID.randomUUID().toString().replace("-", "").take(16)
 
@@ -43,10 +46,23 @@ object LocalServerAuth {
     /** 页面响应附带的 Cookie 头（手机浏览器存 24h，后续 /api 接口同源请求自动携带） */
     fun cookieHeader(token: String): String = "auth=$token; Path=/; Max-Age=86400; SameSite=Lax"
 
-    /** 统一的 403 响应（不回显任何内部信息） */
-    fun forbidden(): NanoHTTPD.Response = NanoHTTPD.newFixedLengthResponse(
-        NanoHTTPD.Response.Status.FORBIDDEN,
-        "text/plain; charset=UTF-8",
-        "Forbidden"
-    )
+    /**
+     * 统一的 403 响应（不回显任何内部信息）。
+     *
+     * 必须断连：带请求体的请求（如上传）走到这里时 body 还挂在 socket 上，
+     * 若继续 keep-alive，残留字节会被解析成下一个请求 → 浏览器报 `Failed to fetch`
+     * 而非"未授权"。见 [HttpRequestBody] 头注。
+     *
+     * [session] 仅用于日志（[AppLog.w] 落盘，release 现场唯一可观测通道）。
+     */
+    fun forbidden(session: NanoHTTPD.IHTTPSession? = null): NanoHTTPD.Response {
+        if (session != null) {
+            AppLog.w(TAG, "403 拒绝: ${session.method} ${session.uri} from ${session.remoteIpAddress}")
+        }
+        return NanoHTTPD.newFixedLengthResponse(
+            NanoHTTPD.Response.Status.FORBIDDEN,
+            "text/plain; charset=UTF-8",
+            "Forbidden"
+        ).noKeepAlive()
+    }
 }

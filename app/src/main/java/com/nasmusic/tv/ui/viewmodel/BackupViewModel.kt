@@ -8,10 +8,12 @@ import com.nasmusic.tv.NasMusicApp
 import com.nasmusic.tv.R
 import com.nasmusic.tv.backend.network.mv.MvSearchManager
 import com.nasmusic.tv.data.model.BackupMessage
+import com.nasmusic.tv.data.model.ImportedBackupRecord
 import com.nasmusic.tv.data.prefs.AppPreferences
 import com.nasmusic.tv.data.prefs.backupGson
 import com.nasmusic.tv.util.AppLog
 import com.nasmusic.tv.util.BackupFileUtils
+import com.nasmusic.tv.util.LocalFilePicker
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -40,9 +42,19 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
     /** 刷新备份文件列表（进入设置页时调用） */
     fun refreshBackupFiles() {
         viewModelScope.launch {
-            _backupFiles.value = BackupFileUtils.listBackups(getApplication())
+            _backupFiles.value = currentBackupFiles()
         }
     }
+
+    /**
+     * 列表 = 本 app 导出的 + 「从本地文件导入」登记过的。
+     *
+     * ⚠️ 第二类不可省：从电脑/互传/浏览器下载拷进 `Download/NASMusic/` 的备份 json 不归本 app
+     * 所有，MediaStore 查询对它返回空（真机取证见 `ImportedBackupRecord`），只查 MediaStore 会让
+     * 用户觉得「导入成功了但文件凭空消失」。
+     */
+    private suspend fun currentBackupFiles(): List<BackupFileUtils.BackupFile> =
+        BackupFileUtils.listBackups(getApplication(), prefs.getImportedBackups())
 
     /** 导出完整备份到 Downloads/NASMusic/（含服务器地址，不含密码/Token） */
     fun exportBackup() {
@@ -54,7 +66,7 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
                 val json = backupGson.toJson(data)
                 val result = BackupFileUtils.export(getApplication(), json)
                 result.onSuccess { fileName ->
-                    _backupFiles.value = BackupFileUtils.listBackups(getApplication())
+                    _backupFiles.value = currentBackupFiles()
                     _backupMessage.value = BackupMessage(getApplication<Application>().getString(R.string.backup_exported, fileName))
                 }.onFailure { e ->
                     AppLog.e("BackupViewModel", "exportBackup failed", e)
@@ -70,8 +82,11 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
     /**
      * 从指定备份文件恢复数据
      * 恢复后服务器未连接（密码不备份），需重新连接
+     *
+     * @param fromLocalFile true = 来自「从本地文件导入」的选择器。除了提示要带上文件名，
+     *   还必须把这份文件**登记**进列表（见 [currentBackupFiles]），否则用户导入完在列表里找不到它。
      */
-    fun importBackup(uri: Uri) {
+    fun importBackup(uri: Uri, fromLocalFile: Boolean = false) {
         viewModelScope.launch {
             try {
                 val json = BackupFileUtils.read(getApplication(), uri).getOrThrow()
@@ -82,13 +97,40 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
                 prefs.backup.importBackupData(data)
                 mvSearchManager.importMvCache(data.mvCacheEntries)
                 // 刷新受备份影响的 UI 状态
+                val ctx = getApplication<Application>()
+                val fileName = if (fromLocalFile) recordLocalImport(uri) else null
                 refreshAfterImport()
-                _backupMessage.value = BackupMessage(getApplication<Application>().getString(R.string.backup_restored))
+                _backupMessage.value = BackupMessage(
+                    if (fileName != null) {
+                        ctx.getString(R.string.backup_restored_from_file, fileName)
+                    } else {
+                        ctx.getString(R.string.backup_restored)
+                    }
+                )
             } catch (e: Exception) {
                 AppLog.e("BackupViewModel", "importBackup failed", e)
                 _backupMessage.value = BackupMessage(getApplication<Application>().getString(R.string.backup_restore_failed, e.message?.take(60) ?: ""), isError = true)
             }
         }
+    }
+
+    /**
+     * 把本地导入的文件登记进备份列表，返回其显示名（供提示文案用）。
+     *
+     * ⚠️ 持久化授权**不在这里申请** —— `takePersistableUriPermission` 必须在 Activity 结果回调
+     * 里同步调用（协程里补做可能被系统视为授权已过期），见 SettingsBranch 的 backupFileLauncher。
+     */
+    private suspend fun recordLocalImport(uri: Uri): String {
+        val ctx = getApplication<Application>()
+        val name = LocalFilePicker.displayName(ctx, uri)
+        prefs.recordImportedBackup(
+            ImportedBackupRecord(
+                uri = uri.toString(),
+                displayName = name,
+                lastModified = LocalFilePicker.lastModified(ctx, uri)
+            )
+        )
+        return name
     }
 
     /**
@@ -120,9 +162,9 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
         kotlinx.coroutines.runBlocking { restoreBackupFromJson(json) }
 
     /** 导入备份后刷新相关 StateFlow（收藏、歌单、队列、统计等由 prefs Flow 自动更新） */
-    private fun refreshAfterImport() {
+    private suspend fun refreshAfterImport() {
         // 服务器连接状态保持断开（密码不备份），其余由 collect 自动同步
-        _backupFiles.value = BackupFileUtils.listBackups(getApplication())
+        _backupFiles.value = currentBackupFiles()
     }
 
     /** 删除指定备份文件 */
@@ -130,7 +172,8 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             try {
                 val result = BackupFileUtils.delete(getApplication(), uri)
-                _backupFiles.value = BackupFileUtils.listBackups(getApplication())
+                if (result.isSuccess) prefs.removeImportedBackup(uri.toString())
+                _backupFiles.value = currentBackupFiles()
                 result.onSuccess {
                     _backupMessage.value = BackupMessage(getApplication<Application>().getString(R.string.backup_deleted))
                 }.onFailure { e ->
@@ -142,6 +185,17 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
                 _backupMessage.value = BackupMessage(getApplication<Application>().getString(R.string.backup_delete_failed, e.message?.take(60) ?: ""), isError = true)
             }
         }
+    }
+
+    /**
+     * 外部报告一次备份操作失败（例如系统文件选择器被 ROM 停用，启动即抛）。
+     * 错误必须落在界面上，不能只进日志 —— 分区顶部的 backupMessage 就是它的显示位。
+     */
+    fun reportBackupFailure(reason: String) {
+        _backupMessage.value = BackupMessage(
+            getApplication<Application>().getString(R.string.backup_restore_failed, reason.take(60)),
+            isError = true
+        )
     }
 
     /** 消费备份结果消息（UI 显示后调用） */

@@ -21,12 +21,15 @@ import com.nasmusic.tv.data.model.StorageType
 import com.nasmusic.tv.player.ModelDownloadManager
 import com.nasmusic.tv.player.PlayerManager
 import com.nasmusic.tv.util.AppLog
+import com.nasmusic.tv.util.LocalFilePicker
 import com.nasmusic.tv.util.StorageUtils
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import java.io.File
 
 /**
  * 下载域 ViewModel（R-1 拆分自 MainViewModel）：
@@ -48,6 +51,8 @@ class DownloadViewModel(
     private companion object {
         /** Meting 源标识：唯一支持多码率的网络源（方案 §2.5）；权威值见 NetworkSongId.METING_SOURCE（F5） */
         const val METING_SOURCE = NetworkSongId.METING_SOURCE
+        /** 导入模型的最小字节数：低于此值直接判「挑错了文件」，不必再去算 166MB 的 SHA-256 */
+        private const val MIN_MODEL_IMPORT_BYTES = 1L * 1024 * 1024
     }
 
     /** 直链解析器（复用 NasMusicApp 中已注入 detailed lambda 的实例） */
@@ -372,6 +377,71 @@ class DownloadViewModel(
                 _modelDownloaded.value = false
             }
         }
+    }
+
+    /**
+     * 从本地文件导入分离模型（SAF 选到的 `.onnx`，v2.39.4）。
+     *
+     * 与「在线下载」「扫码上传」共用同一条完整性标准：先复制进 `.importing` 临时文件，
+     * SHA-256 与 [ModelDownloadManager.EXPECTED_SHA256] 一致才替换正式文件 ——
+     * 挑错文件/截断文件都会留下明确报错，不会装成「已安装模型」再在推理时炸。
+     * 进度复用下载那组 StateFlow，所以设置页上显示的是同一个进度条。
+     */
+    fun importModelFromUri(uri: android.net.Uri) {
+        if (_modelDownloading.value) return
+        val appCtx = getApplication<Application>()
+        val mgr = modelDownloadManager
+        _modelDownloading.value = true
+        _modelDownloadError.value = null
+        _modelDownloadProgress.value = 0f
+        viewModelScope.launch(Dispatchers.IO) {
+            val target = mgr.getModelFile()
+            val tmp = File(target.parentFile, target.name + ".importing")
+            try {
+                val bytes = LocalFilePicker.copyToFile(appCtx, uri, tmp)
+                _modelDownloadedMB.value = bytes / (1024 * 1024)
+                _modelTotalMB.value = mgr.getExpectedSizeMB().toLong()
+                if (bytes < MIN_MODEL_IMPORT_BYTES) {
+                    _modelDownloadError.value = appCtx.getString(
+                        R.string.model_msg_file_too_small, bytes / (1024 * 1024)
+                    )
+                    return@launch
+                }
+                val actualSha = ModelDownloadManager.sha256Of(tmp)
+                if (!actualSha.equals(ModelDownloadManager.EXPECTED_SHA256, ignoreCase = true)) {
+                    AppLog.e(
+                        "DownloadViewModel",
+                        "importModelFromUri: SHA-256 mismatch, size=$bytes, actual=$actualSha"
+                    )
+                    _modelDownloadError.value = appCtx.getString(
+                        R.string.model_msg_sha_mismatch,
+                        ModelDownloadManager.EXPECTED_SHA256.take(16), actualSha.take(16)
+                    )
+                    return@launch
+                }
+                target.delete()
+                if (!tmp.renameTo(target)) throw java.io.IOException("renameTo failed")
+                _modelDownloaded.value = true
+                _modelSizeMB.value = mgr.getModelSizeMB()
+                _modelPath.value = target.absolutePath
+                _modelDownloadProgress.value = 1f
+            } catch (e: Exception) {
+                AppLog.e("DownloadViewModel", "importModelFromUri failed", e)
+                _modelDownloadError.value = appCtx.getString(
+                    R.string.model_msg_import_failed, e.message ?: e.javaClass.simpleName
+                )
+            } finally {
+                if (tmp.exists()) tmp.delete()
+                _modelDownloading.value = false
+            }
+        }
+    }
+
+    /** 把「导入没能开始」的原因显示出来（本机没有可用系统文件选择器时的可见报错） */
+    fun reportModelImportFailure(reason: String) {
+        _modelDownloadError.value = getApplication<Application>().getString(
+            R.string.model_msg_import_failed, reason.take(60)
+        )
     }
 
     /** 删除已下载的模型文件 */
