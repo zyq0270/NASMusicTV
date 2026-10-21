@@ -203,9 +203,11 @@ fun AppRoot(
     // v2.36.0 D10：**不加任何过渡**（裸 Column，硬切）—— 引入 AnimatedContent/Crossfade
     // 会在过渡期同时组合新旧子树，带回 B3 的三个副作用（handler 置空 / 重复拉数据 / 滚动位丢失）。
     Column(modifier = Modifier.fillMaxSize()) {
-        // 顶部导航栏（沉浸模式 / MTV 全屏页时隐藏）
+        // 顶部导航栏（沉浸模式 / MTV、K 歌、可视化全屏页时隐藏）
         // ⚠️ v1.4 B1 硬规则：只有 PhonePortrait 用新栏；TV 与手机横屏都走现状（TvTopNavBar）
-        if (!isImmersiveMode.value && !showMv && !showVisualizer) {
+        // ⚠️ K 歌页虽不是 AppRoot 覆盖层（是 NowPlayingScreen 内部分支），但它是强制横屏的
+        //    全屏页 —— 条件里必须含 showKaraoke，否则 TV / 手机横屏都会在歌词上方留一条导航栏。
+        if (!isImmersiveMode.value && !showMv && !showKaraoke && !showVisualizer) {
             if (isPhonePortrait) {
                 // D9：竖屏显示系统栏 → statusBarsPadding()/displayCutoutPadding() 生效
                 PhoneTopBar(

@@ -17312,3 +17312,27 @@ hex 冻结）、`ThemeModeTest`（迁移与解析全矩阵，含 TV SYSTEM → �
 235 类 / 2423 例，本修复 +1 类 +5 例；统计自 `app/build/test-results/testDebugUnitTest/TEST-*.xml`）；
 **版本号未提升**（`versionCode=191 / versionName=2.39.6`，按所有者要求沿用当前版本）。
 已覆盖安装到手机（Redmi `91846823`，`lastUpdateTime=2026-10-21 21:07:24`）。未提交、未推送。
+
+### 10.267 v2.39.6 补丁 — K 歌页全屏显示：顶部导航栏纳入全屏条件（2026-10-21）
+
+**触发**：所有者要求「K 歌页面，要做成全屏模式；TV 端和手机端都要修改」。
+
+**根因**：K 歌页自身一直是 `fillMaxSize`，且手机系统栏（`MainActivity` 的 `showBars`）与手机竖屏底部栏
+（MiniPlayer + PhoneNavBar）的条件里早已含 `showKaraoke`；**唯一漏掉的是 AppRoot 顶部导航栏**——
+其条件只排除了沉浸模式、MTV 与可视化，因此 TV 与手机横屏进入 K 歌页后，歌词上方始终压着一条
+`TvTopNavBar`。K 歌页不是 AppRoot 覆盖层（是 `NowPlayingScreen` 内部分支），所以这条条件不会随页面
+自动生效。
+
+**改动**：`AppRoot` 顶部栏条件补 `!showKaraoke`（`!isImmersiveMode && !showMv && !showKaraoke &&
+!showVisualizer`），与底部栏 / 系统栏同口径。K 歌页内部布局、焦点与退出路径均未改：BACK 仍先退出
+K 歌并恢复导航栏。
+
+**门禁**：新增 `KaraokeFullscreenGateTest`（源码扫描，3 例）：顶部栏、手机竖屏底部栏、手机系统栏
+三处条件必须都含 `showKaraoke`；任一处退回即红（Robolectric 不验证 Compose 布局结果，按
+`KaraokePickerTvFocusScanTest` 同路径锁源码结构）。
+
+**验证**：`testDebugUnitTest --tests "*KaraokeFullscreenGateTest"` → **3 例零失败**（统计自
+`app/build/test-results/testDebugUnitTest/TEST-com.nasmusic.tv.ui.components.KaraokeFullscreenGateTest.xml`）；
+`assembleRelease` → `BUILD SUCCESSFUL`（4m 49s），产物 `NASMusicTV-release-v2-39-6.apk`
+**25,857,111 字节**、md5 `3dd21aea17fd57a6b20022bf137e8091`；**版本号未提升**
+（`versionCode=191 / versionName=2.39.6`，按所有者要求沿用当前版本）。已覆盖安装到手机（Redmi `91846823`，`lastUpdateTime=2026-10-21 21:30:21`），待真机验收；本地提交，未推送、未 tag。
