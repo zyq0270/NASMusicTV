@@ -17305,7 +17305,7 @@ hex 冻结）、`ThemeModeTest`（迁移与解析全矩阵，含 TV SYSTEM → �
   `BUILD SUCCESSFUL`）；`lintDebug` **0 errors / 163 warnings**（与基线一致）；`assembleRelease` → `BUILD SUCCESSFUL`（7m 3s），
   产物 **25,857,884 字节**、md5 `f6e332da60ab49d429c8a5f00d776dd7`、`versionCode=191 / versionName=2.39.6`
   （按所有者口径**版本号不升**）；已覆盖安装手机（`lastUpdateTime=2026-10-21 22:30:06`）。
-  **所有者已于同日手机上验证通过**（浅色/深色两套状态栏与导航栏底色均跟随主题）。改动仍未提交、未推送、未打 tag。
+  **所有者已于同日手机上验证通过**（浅色/深色两套状态栏与导航栏底色均跟随主题）。改动已本地提交，未推送、未打 tag。
 
 ### 10.266 v2.39.6 补丁 — 曲库「歌曲」Tab 接入百度网盘索引（2026-10-21）
 
