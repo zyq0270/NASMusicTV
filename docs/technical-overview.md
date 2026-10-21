@@ -17377,7 +17377,7 @@ K 歌并恢复导航栏。
 }
 ` 定位函数体，否则顶格右括号永不命中。
 
-**验证**：`compileDebugKotlin lintDebug` → `BUILD SUCCESSFUL`（6m 10s，lint 无 error）；`testDebugUnitTest --tests "*LibraryBrowseCardStyleGateTest"` → **13 例零失败**；`--tests "com.nasmusic.tv.ui.*"` → 31 类 **283 例零失败**；`assembleRelease` → `BUILD SUCCESSFUL`（4m 29s），产物 `NASMusicTV-release-v2-39-6.apk` **25,857,676 字节**、md5 `a01a05678dd6a43de276bea05fcc71f7`；版本号未提升（191 / 2.39.6）。已覆盖安装到手机（Redmi `91846823`，`lastUpdateTime=2026-10-21 21:58:36`）与创维 TV（`192.168.0.114:5555`，`21:59:12`），待真机验收。
+**验证**：`compileDebugKotlin lintDebug` → `BUILD SUCCESSFUL`（6m 10s，lint 无 error）；`testDebugUnitTest --tests "*LibraryBrowseCardStyleGateTest"` → **13 例零失败**；`--tests "com.nasmusic.tv.ui.*"` → 31 类 **283 例零失败**；`assembleRelease` → `BUILD SUCCESSFUL`（4m 29s），产物 `NASMusicTV-release-v2-39-6.apk` **25,857,676 字节**、md5 `a01a05678dd6a43de276bea05fcc71f7`；版本号未提升（191 / 2.39.6）。已覆盖安装到手机（Redmi `91846823`，`lastUpdateTime=2026-10-21 21:58:36`）与创维 TV（`192.168.0.114:5555`，`21:59:12`），待真机验收。**真机验收通过**（所有者 2026-10-21 确认艺术家块与专辑块已同形、数量在右上角）。
 
 **留档未做（供后续批次裁决）**：
 - 专辑 / 艺术家两个 Tab 的网格脚手架（Level 1.5 返回、A-Z 分组、右边缘焦点、索引条接线约 120 行）仍是两份逐行重复 —— 抽成一个 `LetterGroupedGrid` 才是「永不分家」的根因修法，但触及焦点与返回行为，需要单独一轮真机回归。
