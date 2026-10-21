@@ -519,6 +519,19 @@
 >
 > ⚠️ 未进 `CHANGELOG.md`：纯文档移动 + 清理，按本仓规矩不登记。
 
+## 第十四轮（2026-10-18，1 个）—— 所有者裁决：放弃夸克网盘接入路线
+
+| 文档 | 判定依据 | 被谁引用（已改写） | 挂起决策 |
+|---|---|---|---|
+| `quark-drive-integration-plan.md` | ❌ **所有者明确结论、主动放弃**（2026-10-18 原话"接入夸克网盘路线冻结"）。硬阻塞由官方原文坐实：`open.quark.cn` 是**夸克小程序开发者平台**而非网盘开放平台 —— ① `app_id` 需**公司主体审批**、`client_id` 需小程序审批，个人/GPL 项目申请不到；② 交付形态是**小程序**不是独立 APK；③ 侧栏「文件／媒体／分享」全部标注**（建设中）**，今天没有网盘文件接口。⇒ 路线表 T1/T2 判死、T3 冻结；与 `aliyundrive-support-plan.md`（官方关闭第三方访问）**同类先例** | **无**（全仓 grep `quark-drive-integration-plan` 零命中；本篇是当日新建、当日归档，未及被任何源码 KDoc / `AGENTS.md` / `technical-overview.md` 引用）⇒ 无需改写引用 | ⏳ **Q4 未裁决**：是否投入 **WebDAV / Alist 通用后端**。⚠️ **放弃夸克 ≠ 采纳 WebDAV**，两个独立决策；§10 已留 WebDAV 落地要点（PROPFIND 仅 Depth 0/1 ⇒ BFS N+1、Basic 走请求头复用 `BackendAuthHeaders`、XML 必须禁 DTD 防 XXE、复用 `BaiduPanApi.AUDIO_EXTENSIONS`、创维 API 22 不信任 Let's Encrypt 的真机门槛，估算 6–8 人日）。<br>⏳ **M0 第 1 项未做**：`CloudDriveConfig.tokens` 泛型化 + `baiduConfigFlow` → `cloudDriveConfigFlow(type)`（`data/model/CloudDriveConfig.kt:13-14` 自带的债务注释）—— 不受夸克阻塞，且是 T5 的前置。<br>✅ **长期有效的否决**：绝不把 README §1.4 泄露的 `third_party_agent` + `cf134812e2de4032bd1cb7c3727e84b3` 内置进开源 APK（与路线是否放弃无关，勿"复用"）。 |
+
+> ⚠️ **归档 ≠ 调研作废。** 本篇的三点保留价值：① §2.2 两条平台线对照（小程序 MD5 签名 / `api-mini-program.quark.cn` vs 网盘 SHA256 签名 / `open-api-drive.quark.cn`）**是官方正文证据**，下次有人提"接夸克/接阿里/接 115"可直接引，不必重走调研；② §3.2 的能力缺口 **G1–G8 是独立于凭据问题的技术事实**（无列目录接口、搜索死顶 100 条、返回体无时长/比特率/ID3、下载须带 Cookie、Range 未验证）—— 它们解释"当初为什么不建议做夸克专属后端"，凭据事实解释"现在为什么做不了"，⛔ 两件事别混；③ §10 的 WebDAV 要点是唯一仍可执行的产出。
+>
+> ⛔ **源码侧一行未改**：`CloudDriveType.QUARK` 仍是 `PLACEHOLDER`（灰显），`IMPLEMENTED` 仍只有 `BAIDU`。归档是纯文档动作，不产生任何代码变更，因此**不进 `CHANGELOG.md`**（按本仓规矩，文档改动不登记）。
+>
+> ⚠️ **移动方式 = 普通 `mv`，不是 `git mv`**：本篇创建于 2026-10-18 当日、**从未提交入库**（`git log` 对它零记录，`git status` 归档前后均为 `??`），无历史可保留。⇒ `docs/` 根**入库 Markdown 篇数不变，仍为 5 篇**（`git ls-tree --name-only HEAD docs/ | grep -c '\.md$'` 实测；第十一轮末那句口径继续有效）。唯一例外是顶部加了**归档状态头**、§8 标题与 Q1/Q2/Q4 三行按裁决结果回填，正文其余一字未删。
+
+
 ## 第十五轮（2026-10-19，1 个）—— 设置区整理方案落地完毕，✅ 归档
 
 | 文档 | 判定依据 | 被谁引用（已改写） | 挂起决策 |
