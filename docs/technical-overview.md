@@ -17199,7 +17199,7 @@ ORT 的权重分配走 native malloc，`separate()` 里那道 `Runtime.maxMemory
 
 **触发**：所有者要求「增加浅色主题配色」，并拍板：除频谱效果页外全部支持浅色；
 开关改为三态；配色由品牌青绿派生并用脚本核算对比度；默认跟随系统、TV 的 SYSTEM 回退深色；
-照片墙随频谱页保持深色。开发计划见 `docs/light-theme-plan.md`（实施偏差见其 §12）。
+照片墙随频谱页保持深色。开发计划见 `docs/archive/light-theme-plan.md`（实施偏差见其 §12）。
 
 **机制**（`Theme.kt`）：新增 `NasPalette`（19 个颜色 token + `isLight`）与
 `NasPalettes.Dark/Light`；`NasMusicColors` 全部属性改为 **@Composable getter**，
@@ -17579,4 +17579,60 @@ Added 一行「设置 → 通用 新增「焦点高亮」开关（默认开）�
 **未做 / 未验**：① 焦点视觉在真机上的观感本轮**未测**（改动只经编译 + 门禁），
 电视与手机的粘滞焦点都还得回炉；② 用户回传的「调试」读数仍未收到，
 所以「那台盒子究竟是哪一路落空」至今没有实测答案；③ 未推送、未 tag、未编 release APK。
+
+### 10.272 v2.39.7 — E51 斯德哥尔摩：72 个上游函数全部直译落地（2026-10-23）
+
+**结果**：`LofiCityStockholm.kt` 从 97 行骨架补到 **4255 行 / 286 个成员**，上游
+`js/scenes/stockholm.js` 的 **72 个函数全部移植**（逐名比对，只剩两处有意跳过：
+`pix24` ⇒ 共享 `PixelBuffer`、`renderAd23` ⇒ 本项目无广告）。`compileDebugKotlin`
+对该文件 **0 错误**。
+
+**分批（本地 `main`，⛔ 均未推送）**：`ef67456` 骨架（元数据 + 嵌套类型 + 144 条常量 +
+`initConstants()`）→ `90c2a47`/`e80de8e`/`30a8f95` 批次 1–3（工具 + 精灵烘焙）→
+`19c6497`/`5e9b8c9`/`5510b15`/`9248852`/`f5946fb` 批次 4a–4e（`renderXxx`）→
+`09dc9f1`/`027ebb2` 批次 5a–5b → `5c644f9`/`9032e3a` 批次 6a–6b →
+`e6c7fb3`/`c81c3a8`/`d4b46ab` 批次 7a–7c（场景绘制，含 `drawTerrace4` 的 `DL7` 排序队列）→
+`30cf60b` 共享天气引擎 → `cf30395` `renderFrame43`（三层天气合成 + `VIG_C43`）→
+`dc8e4e8` 编译修正 → `e5de57e` 接线。
+
+**受控差异（均为本项目既有决定的直接后果，不是漏移植）**：
+① `WEATHER43` 把 `snow` 归为本城自有 motif ⇒ `wx.shared` 恒 null，引擎的 `snow` 分支
+**不可达**，下雪走自有的 `drawSnow5`；② 引擎 `dry`/`shelter` 恒 null ⇒ `shown(...)` 剔除
+整段不移植；③ `ADS5`/`PITCH36` 不移植，`drawBoard4` 只留霓虹光晕 + 骨架；
+④ `crowd` 无对应 `SceneOpts` 字段 ⇒ 取本城默认 `CROWD19`。
+
+**天气引擎按城复制**（与布达佩斯同口径）：`RainDef`/`RainDrop`/`FlashDef`、
+`RAIN_DEFS`/`DRIZZLE_DEFS`/`STORM_RAIN_DEFS`、`particlesFor`、`DROPS`/`MIST_DROPS`/`STORM_DROPS`、
+`STORM_FLASHES`、`stormLight`/`drawStormLight`、`landY`/`upTo`/`landFade`/`litAt10`、
+`drawRain`、`grade` + `softChannel` + `softLight`、`LeafPal`/`LeafF`/`LEAF_*`/`LEAVES`/
+`makeLeaf`/`drawLeaves`、`drawWeather`。
+⚠️ 本城 `WX43.leaves.wind = [0, 30, W, 196]` ⇒ **有风落叶支路可达**，`drawLeaves` 的 wind
+分支必须存在（与布达佩斯不同，那边不可达）。
+⚠️ `grade` 走 canvas `soft-light`，而 `Comp` 只有 `SOURCE_OVER/LIGHTER/COPY` ⇒ 按 W3C 公式
+逐像素等价实现（`softChannel` 两支：`Cs <= 0.5` 与 `D(Cb)`），不是近似。
+⚠️ `Light19.col` 是 `Int` ⇒ `litAt10` 直接返回 `l.col`，不再 `hex()`。
+
+**编译修正（12 处系统性问题，`dc8e4e8`）**：缺 `step`/`makeHalo`/`SceneOpts` 三个 import
+（前两者本就在 `pixel` 包里，纯属漏引，曾连带把 `and`/`<` 解析成 `BigInteger` 与
+`Comparable.compareTo` 连锁报错 40+ 条）；`look15` 首参是 `Int`（10 处传了 `24.0`）；
+`Puff13.base` 应为 `Double`（上游与 `ry * 0.3` 相加）；`min(255, Double)` ⇒ `minOf`；
+`if (f and 1 != 0)` 缺括号；`ctx.drawImage(src, dx, dy, dw, dh)` 的 **5 参形态本仓库没有**
+⇒ 改写成 9 参全源矩形形态（`drawStormLight`）。
+⚠️ `x < (if (y > 12) 1 else 0)` 在 K2 下会把 `<` 当类型实参解析并连锁报 9 条语法错，
+改为先取 `val inset` 再比较。
+
+**接线**：`LofiScenes.build` 增加 `"stockholm" -> LofiCityStockholm()`（`e5de57e`）。
+`tagline` 按上游改为 `"Advent snow over Stadshuset"`（此前手抄成 `Adventure`，R6 会咬）。
+
+**遗留（不属于本城 lane，未代为修复）**：
+① `CityRegistry` 里 `stockholm.focusX` 仍是脚本占位值 `0.0`，上游是 `T.cx` = 322 ⇒
+门禁 R6 会报这一条，需注册表那条 lane 重跑 `scripts/lofi_city_registry_sync.py`；
+② `budapest` 已在 `SCENES_BUILT` 却无 `LofiScenes` 分支（R4/R6 同样会报）；
+③ `lintDebug` 与单测本轮**未跑通**——工作区同时存在其它 lane 的未完成文件
+（`LofiCityKyoto.kt` 1304 条、`LofiCityBudapest.kt` 119 条、`LofiCityChicago.kt` 19 条等，
+合计 1455 条编译错误），全项目编译未过 ⇒ 只能做**单文件 0 错误**这一级验证。
+
+**未做 / 未验**：未推送、未 tag、未编 release APK（E51 移植件 ⛔ 不外发，见
+`docs/e51-lofi-city-plan.md` §2.6）；斯德哥尔摩真机观感未测。
+
 
