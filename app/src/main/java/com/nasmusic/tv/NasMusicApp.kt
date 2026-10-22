@@ -39,6 +39,7 @@ import com.nasmusic.tv.data.model.CloudDriveType
 import com.nasmusic.tv.data.prefs.AppPreferences
 import com.nasmusic.tv.player.ModelDownloadManager
 import com.nasmusic.tv.player.PlayerManager
+import com.nasmusic.tv.ui.components.FocusVisualPreference
 import com.nasmusic.tv.util.AppLog
 import com.nasmusic.tv.util.LogStore
 import kotlinx.coroutines.CoroutineExceptionHandler
@@ -338,6 +339,12 @@ val baiduOAuthClient: BaiduOAuthClient by lazy { BaiduOAuthClient(this, baiduOkH
         qualityOverrides = com.nasmusic.tv.data.prefs.QualityOverrides(this)
         // R-7（第三类）：启动 provider 键内存镜像收集（DataStore Flow → @Volatile）
         appPreferences.startProviderMirrors(applicationScope)
+        // 焦点高亮开关：DataStore Flow → 进程级 Compose 快照（唯一写入方）。
+        // ⚠️ 组合期**只读快照** —— `shouldShowFocusVisuals()` 被 135+ 个组件调用，
+        // 在那里读 Flow 等于每次重组都打 DataStore（`docs/conventions-adaptive-ui.md` §11）。
+        applicationScope.launch {
+            appPreferences.display.focusHighlightEnabled.collect { FocusVisualPreference.update(it) }
+        }
         // R-7（第一类）：语言镜像一次性迁移（老版本 DataStore 已有语言值，镜像为空时补写）
         appPreferences.migrateLanguageMirrorIfNeeded()
         // 启动时应用语言设置（读 SharedPreferences 镜像，零 IO）

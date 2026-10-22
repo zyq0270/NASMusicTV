@@ -3142,6 +3142,16 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
         prefs.player.setAnimationsEnabled(enabled)
     }
 
+    /**
+     * v2.39.7：「焦点高亮」开关（设备本地偏好，默认开）。
+     *
+     * 这里只写盘 —— 组合期读的进程级快照由 `NasMusicApp.onCreate` 起的常驻收集刷新，
+     * 所以拨完这一格焦点环/缩放立刻重算，不需要重启。
+     */
+    fun updateFocusHighlightEnabled(enabled: Boolean) = viewModelScope.launch {
+        prefs.display.setFocusHighlightEnabled(enabled)
+    }
+
     fun updateAutoPlayNext(enabled: Boolean) = viewModelScope.launch {
         prefs.player.setAutoPlayNext(enabled)
     }

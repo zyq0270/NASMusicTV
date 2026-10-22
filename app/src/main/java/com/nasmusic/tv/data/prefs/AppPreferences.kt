@@ -419,6 +419,7 @@ class AppPreferences internal constructor(private val context: Context) {
     // =====================================================================
 
     private val keyScreenOrientation = stringPreferencesKey("display_screen_orientation")
+    private val keyFocusHighlightEnabled = booleanPreferencesKey("display_focus_highlight")
 
     /** 屏幕方向："auto"（跟随传感器 + 尊重系统旋转锁）/ "portrait" / "landscape" */
     val screenOrientation: Flow<String> = dataStore.data.map { it[keyScreenOrientation] ?: "auto" }
@@ -426,6 +427,25 @@ class AppPreferences internal constructor(private val context: Context) {
     suspend fun setScreenOrientation(value: String) {
         dataStore.edit { it[keyScreenOrientation] = value }
         displayMirrorPrefs.edit().putString(KEY_ORIENTATION_MIRROR, value).apply()
+    }
+
+    /**
+     * 「遥控器焦点高亮」开关，**默认开**（所有者 2026-10-22 裁决：让用户先能看见焦点，
+     * 才谈得上把「调试」读数回传给我们）。
+     *
+     * 为什么要有这个开关：焦点视觉原先**完全靠设备识别**决定画不画
+     * （`hasSystemFeature` / `Configuration` / `InputDevice` 三路），而非认证电视盒子会把这三处
+     * 全谎报 —— 猜错的结果是用户整台设备都用不了，而设备特征本身不可信。
+     * 改成「默认显示 + 用户可关」后，猜错最坏也只是「多画了一圈」，
+     * 手机侧的粘滞焦点则由**触摸抑制**负责（见 `FocusInputTracker`），不再依赖猜设备。
+     *
+     * 与屏幕方向同为**设备本地偏好**：从手机备份恢复到电视不该改电视的可见性策略。
+     */
+    val focusHighlightEnabled: Flow<Boolean> =
+        dataStore.data.map { it[keyFocusHighlightEnabled] ?: true }
+
+    suspend fun setFocusHighlightEnabled(enabled: Boolean) {
+        dataStore.edit { it[keyFocusHighlightEnabled] = enabled }
     }
 
     /**

@@ -17,4 +17,14 @@ class DisplayPrefs internal constructor(private val prefs: AppPreferences) {
 
     /** 冷启动同步读（@Volatile 镜像，零 IO）；仅供 `MainActivity.onCreate` 使用 */
     fun getScreenOrientationSync(): String = prefs.getScreenOrientationSync()
+
+    /**
+     * 「遥控器焦点高亮」开关（**默认开**）。
+     *
+     * 组合期不读 DataStore —— 由 `NasMusicApp.onCreate` 起一个常驻收集，把值刷进
+     * `FocusVisualPreference` 的快照 state，`shouldShowFocusVisuals()` 只读那个快照。
+     */
+    val focusHighlightEnabled = prefs.focusHighlightEnabled
+
+    suspend fun setFocusHighlightEnabled(enabled: Boolean) = prefs.setFocusHighlightEnabled(enabled)
 }

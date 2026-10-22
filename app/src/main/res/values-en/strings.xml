@@ -412,6 +412,8 @@
     <string name="settings_theme_light">Light</string>
     <string name="settings_animations">Animations</string>
     <string name="settings_animations_desc">Page transitions and focus animations</string>
+    <string name="settings_focus_highlight">Focus highlight</string>
+    <string name="settings_focus_highlight_desc">Outline the item chosen with the remote</string>
     <string name="settings_font_size">Font Size</string>
     <string name="settings_auto_play">Auto Play Next</string>
     <string name="settings_auto_play_desc">Automatically play next song in queue when current ends</string>

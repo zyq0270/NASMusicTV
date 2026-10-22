@@ -137,6 +137,8 @@ internal fun SettingsBranch(
                     val settingsSection by viewModel.navVM.settingsSection.collectAsState(initial = null)
                     // v2.36.0 屏幕方向（L1 全局策略）
                     val screenOrientation by viewModel.prefs.display.screenOrientation.collectAsState(initial = "auto")
+                    // v2.39.7 焦点高亮开关（初值必须与偏好默认值一致：true，否则进页瞬间会闪一下）
+                    val focusHighlightEnabled by viewModel.prefs.display.focusHighlightEnabled.collectAsState(initial = true)
                     // 阶段 9（§9）：照片墙的运行时状态 —— 权限三态 + 目录拒绝原因。
                     // ⚠️ 都来自 visualizerVM 的 StateFlow，**不从 AppSettings 读**：
                     //    权限状态官方禁止落盘（§9.4），目录拒绝是瞬时事实。
@@ -170,6 +172,8 @@ internal fun SettingsBranch(
                         onChangeScreenOrientation = { value ->
                             coroutineScope.launch { viewModel.prefs.display.setScreenOrientation(value) }
                         },
+                        focusHighlightEnabled = focusHighlightEnabled,
+                        onChangeFocusHighlight = { viewModel.updateFocusHighlightEnabled(it) },
                         settings = settings,
                         onChangeThemeMode = { viewModel.updateThemeMode(it) },
                         onToggleAnimations = { viewModel.updateAnimationsEnabled(it) },

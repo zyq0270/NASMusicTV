@@ -416,6 +416,8 @@
     <string name="settings_theme_light">浅色</string>
     <string name="settings_animations">界面动画</string>
     <string name="settings_animations_desc">页面切换和焦点动画</string>
+    <string name="settings_focus_highlight">焦点高亮</string>
+    <string name="settings_focus_highlight_desc">遥控器选到哪一项就框出哪一项</string>
     <string name="settings_font_size">字体字号</string>
     <string name="settings_auto_play">自动播放下一首</string>
     <string name="settings_auto_play_desc">歌曲结束后自动播放队列中的下一首</string>

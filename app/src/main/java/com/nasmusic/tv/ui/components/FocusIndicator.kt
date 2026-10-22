@@ -6,6 +6,7 @@ import android.content.res.Configuration
 import android.os.Build
 import android.view.InputDevice
 import android.view.KeyEvent
+import android.view.MotionEvent
 import androidx.compose.foundation.border
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -36,44 +37,42 @@ import com.nasmusic.tv.util.AppLog
  *
  * 本修饰符把焦点环追加到链尾，**画在最上层**。
  *
- * ## ② 判据：看「输入能力」，不看「设备特征」
+ * ## ② 决策：用户说了算 + 看当下用什么输入，不猜设备
  *
- * `PackageManager.hasSystemFeature(leanback / type.television)` 在非 Google 认证的
- * 电视盒子上经常双双返回 false（这个判据在本项目历史上已被迫补过两次：
- * 先从 leanback 扩到 `type.television`，v2.20.0 又修了「单查 leanback」）。
- * 而它一旦为 false，[FocusableSurface] 的 `activeFocus` 恒为 false ⇒ 缩放、焦点环、
- * 容器色、内容色**全部**关闭，用户只能靠按确认键反推焦点位置。
+ * v2.39.7 起（所有者裁决）显示焦点视觉只有两个条件：
+ * 1. **设置页「焦点高亮」开关为开**（[FocusVisualPreference]，默认**开**）
+ * 2. **此刻不是触摸导航**（[FocusInputTracker]：手指点一次屏收起，按一次方向键回来）
  *
- * 设备特征靠不住，**运行时输入能力**靠得住 —— 遥控器本身就是注册在系统里的
- * input device、声明了 `SOURCE_DPAD`，盒子再怎么隐瞒 leanback/television 也瞒不掉它。
- * 五条判据任一成立即显示焦点视觉：
+ * ## 为什么把判断从设备交给用户
+ * 原本靠五条自动判据猜「这台设备是不是电视」，但非认证电视盒子会把三路特征
+ * **同时谎报**：`hasSystemFeature` 读的是厂商手写的 permissions.xml，
+ * 猜错的代价是**整台设备看不见焦点**——这正是用户报的故障，而我们远程改不动。
+ * 改成默认显示 + 可手动关后，猜错最坏只是多画一圈。
+ *
+ * 手机侧的粘滞焦点（`clickable` 点一下获得焦点且焦点不消失）也不再靠设备嗅探，
+ * 改用**触摸事件**：触摸与按键在系统里分开上报，比任何设备特征都可靠。
+ * ⚠️ 这里有个容易踩空的推演：若手机抑制仍用 `Configuration` 嗅探，
+ * 「默认开」就等价于今天的自动判据 3，开关等于什么都没加。
+ *
+ * ## 五条自动判据去哪了：降级为诊断证据
+ * 它们**不再参与决策**，仍由 [probeFocusVisualInputs] 实测并写进日志页「调试」档
+ * （[logFocusVisualDiagnostics]）。留着是因为回传读数需要一条对照：
+ * 「判据会显示=false 而实际显示=true」就直接证明那台盒子在谎报特征、开关救了它。
+ * 原五条（任一成立即视为电视形态，仅供取证）：
  * 1. 没有触摸屏（`FEATURE_TOUCHSCREEN` 为 false；电视盒子 / 机顶盒 / 投影仪的常态）
  * 2. `FEATURE_LEANBACK` 或 `android.hardware.type.television`
  * 3. **`Configuration.touchscreen` 不是手指触摸**，或 `Configuration.keyboard` 报出了实体键盘
- *    （v2.39.6 新增，见 [isKeyNavigationConfiguration]）
+ *    （v2.39.6 新增，见 [isKeyNavigationConfiguration]；它读的是框架按**真实输入设备**
+ *    聚合出的全局配置，与判据 1 的 permissions.xml **来源独立**，
+ *    所以能补上「盒子声明 `touchscreen required=false` 但实际无触摸数字化器」这一类落空）
  * 4. **存在支持 `SOURCE_DPAD` 的输入设备**（能力探测，遥控器/外接键盘/手柄）
- * 5. 进程内收到过任一方向/确认键（[DpadInputTracker] 兜底，覆盖运行中才接入的设备）
- * ## 为什么要加第 3 条（用户盒子看不见焦点环、我们的电视正常）
- * 判据 1 读的是 `<uses-feature>`（**厂商手写的 permissions.xml**），判据 3 读的是
- * `Configuration.touchscreen`（**框架按真实输入设备聚合出来的全局配置**）——
- * 两者是**互相独立**的来源。大量电视盒子会把 `android.hardware.touchscreen` 声明成
- * `required="false"` 以便装手机应用，于是判据 1 直接落空；但那台盒子并没有触摸数字化器，
- * 框架给出的 `configuration.touchscreen` 是 `TOUCHSCREEN_NOTOUCH` ⇒ 判据 3 命中。
- * 手机侧两个来源**一致**（FINGER + NOKEYS），不会被带进来看似 TV 的焦点环。
+ * 5. 进程内收到过任一方向/确认键（[DpadInputTracker]）
  *
- * 第 4 条是「切页面后焦点环立刻可见」这条需求的**唯一保证** ——
- * 前三条是静态嗅探，在刻意隐瞒特征的盒子上可能全部落空，而第 5 条必须先按一次键
- * 才会翻转，那正是用户拒绝的行为（「而不是先按一下才看到焦点环」）。
- *
- * ## 判据本身必须可回传（[logFocusVisualDiagnostics]）
+ * ## 读数必须可回传（[logFocusVisualDiagnostics]）
  * 出问题的是**用户的**电视/盒子，不是开发机 —— 那边连不上 adb，`AppLog.d/i` 在 release
- * 又完全不产生。所以五条判据的实测值 + 全部输入设备清单会写进日志页的「调试」档
- * （[com.nasmusic.tv.util.LogStore.LEVEL_DIAG]），由用户截图/复制回传。
- * ⛔ 这条通道不能被 `BuildConfig.DEBUG` 门控，否则等于没有。
- *
- * 手机上 `clickable` 节点点一下会获得焦点且焦点粘住，因此在**只靠触摸**时仍需
- * 关闭焦点视觉（`docs/conventions-adaptive-ui.md` §11）。裸机手机五项判据全为 false：
- * 有触摸屏、正在触摸的那个 input device 不声明 `SOURCE_DPAD`、且没按过方向键。
+ * 又完全不产生。所以开关状态、触摸抑制、实际显示 + 五条判据实测值 + 全部输入设备清单
+ * 会写进日志页的「调试」档（[com.nasmusic.tv.util.LogStore.LEVEL_DIAG]），
+ * 由用户截图/复制回传。⛔ 这条通道不能被 `BuildConfig.DEBUG` 门控，否则等于没有。
  */
 
 /** 焦点环实心描边的默认宽度。TV 远距离观看，2dp 太弱（且见上方 ① 的盖住问题）。 */
@@ -102,6 +101,77 @@ fun isDirectionalNavigationKey(keyCode: Int): Boolean = when (keyCode) {
 }
 
 /**
+ * 用户侧「焦点高亮」开关 —— 进程级快照，**默认开**（所有者 2026-10-22 裁决）。
+ *
+ * ## 为什么由用户说了算，而不是继续加判据
+ * 焦点视觉原先**完全靠猜设备**（`hasSystemFeature` / `Configuration` / `InputDevice` 三路）。
+ * 非认证电视盒子会把这三处**同时谎报**，猜错的代价是「整台设备看不见焦点」——
+ * 而这正是用户报的故障，且我们远程改不动。改成**默认显示 + 可手动关**之后，
+ * 猜错最坏只是「多画一圈」，手机侧的粘滞焦点交给 [FocusInputTracker] 的触摸抑制，
+ * 不再依赖猜设备。
+ *
+ * ⛔ 默认值必须是 `true`：出问题的用户装上新包就得先能看见焦点，
+ * 否则他连「焦点在哪」都说不清，「调试」档的读数也无从对照（门禁
+ * `焦点高亮开关必须默认开` 锁死这一点）。
+ *
+ * ⚠️ 组合期**只读这个快照**，不在这里读 DataStore —— 本函数被 135+ 个组件调用。
+ */
+object FocusVisualPreference {
+    var highlightEnabled by mutableStateOf(true)
+        private set
+
+    /** 由 `NasMusicApp.onCreate` 起的常驻收集写入（DataStore → 快照，唯一写入方）。 */
+    fun update(enabled: Boolean) {
+        if (enabled == highlightEnabled) return
+        highlightEnabled = enabled
+        AppLog.diag("Focus", "焦点高亮开关=$enabled（设置页改动或启动读偏好）")
+    }
+}
+
+/**
+ * 触摸抑制 —— 手指一操作就收起焦点视觉，直到再次出现方向键。
+ *
+ * ## 它替掉的是什么
+ * 「这是不是电视」的设备嗅探。触摸与按键在系统里是**分开上报**的事件，
+ * 比任何设备特征都可靠：真机手机报得出 `FINGER` 也可能报得出 DPAD 设备（外接键盘），
+ * 但它**第一次点屏**就说明此刻是触摸导航 ⇒ 该收起焦点环。
+ *
+ * ## 为什么初始值是不抑制
+ * 电视/盒子用户从头到尾不会发出触摸事件，于是进场第一帧起焦点就可见
+ * （这正是「切到页面立刻知道焦点在哪」那条需求）。手机侧的粘滞焦点在第一次点屏
+ * 之后即被抑制，与改动前的实际观感一致。
+ *
+ * ⛔ 置位/清除都必须只记「此刻的输入方式」，不做计时回收 —— 超时收起会让
+ * 「混合输入」设备（触屏电视）反复闪框，比常亮更难读。
+ */
+object FocusInputTracker {
+    /** 组合可读 —— 被 [shouldShowFocusVisuals] 在组合期读取，变化即触发重组。 */
+    var touchNavigating by mutableStateOf(false)
+        private set
+
+    private var touchLogged = false
+
+    /** 由 `MainActivity.dispatchTouchEvent` 接线（窗口层，触摸事件一定经过这里）。 */
+    fun noteTouchEvent(action: Int) {
+        if (action != MotionEvent.ACTION_DOWN) return
+        // 已经处于触摸导航时不再写 state：滚动时每帧都有 down，白触发 135+ 重组
+        if (touchNavigating) return
+        touchNavigating = true
+        if (!touchLogged) {
+            touchLogged = true
+            AppLog.diag("Focus", "检测到触摸导航 → 焦点视觉抑制（按方向键可恢复）")
+        }
+    }
+
+    /** 方向键把输入方式交还给按键导航（[DpadInputTracker.noteKeyEvent] 内部调用）。 */
+    internal fun noteDirectionalKey() {
+        if (!touchNavigating) return
+        touchNavigating = false
+        AppLog.diag("Focus", "方向键接管输入 → 焦点视觉恢复显示")
+    }
+}
+
+/**
  * 方向键使用痕迹（进程级，粘住）。
  *
  * ⛔ 只记「有没有用过方向键」，**不记时间也不回收** —— 焦点视觉本身是无害的
@@ -109,7 +179,10 @@ fun isDirectionalNavigationKey(keyCode: Int): Boolean = when (keyCode) {
  * 把指示器抽走，那正是本次要修的故障本身。
  */
 object DpadInputTracker {
-    /** 组合可读 —— 被 [shouldShowFocusVisuals] 在组合期读取，变化即触发重组。 */
+    /**
+     * 组合可读 —— v2.39.7 起**不参与决策**，由 `MainActivity` 的 `LaunchedEffect` 键控，
+     * 收到第一个方向键后再打一次诊断读数（进场时那台盒子还没被证实是按键导航）。
+     */
     var directionalNavigationSeen by mutableStateOf(false)
         private set
 
@@ -136,6 +209,8 @@ object DpadInputTracker {
      */
     fun noteKeyEvent(keyCode: Int, action: Int, source: String, device: InputDevice? = null) {
         if (action == KeyEvent.ACTION_DOWN && isDirectionalNavigationKey(keyCode)) {
+            // 方向键 ⇒ 输入方式交还给按键，解除触摸抑制（焦点视觉恢复显示）
+            FocusInputTracker.noteDirectionalKey()
             val logged = arrivalLogged[source] ?: 0
             if (logged < KEY_ARRIVAL_LOG_LIMIT) {
                 arrivalLogged[source] = logged + 1
@@ -151,7 +226,7 @@ object DpadInputTracker {
         directionalNavigationSeen = next
         // 必须走 diag 而不是 i：release 下 `AppLog.i` **完全不产生**，
         // 「判据 5 到底有没有翻转」在用户设备上就再也查不到了（v2.39.6 的取证缺口）。
-        AppLog.diag("Focus", "按键导航已确认[$source] code=$keyCode → 焦点视觉常开")
+        AppLog.diag("Focus", "按键导航已确认[$source] code=$keyCode → 自动判据 5 命中")
     }
 }
 
@@ -174,9 +249,8 @@ internal fun nextDirectionalSeen(current: Boolean, keyCode: Int, action: Int): B
  * ⛔ **排除「既声明 DPAD 又声明 TOUCHSCREEN」的设备**：
  * 那几乎必然是内建触摸数字化器顺带多报了 source 位（部分 ROM / 模拟器如此），
  * 而不是外接遥控器。真正的遥控器 / 键盘 / 手柄是**独立**的 input device，
- * 不会同时声明 `SOURCE_TOUCHSCREEN`。这条排除把手机侧的误判面压到最低，
- * 且**不牺牲**「电视盒子谎报 touchscreen 也要点亮焦点环」这条核心需求 ——
- * 那台盒子的遥控器同样是一个独立 device，照样命中。
+ * 不会同时声明 `SOURCE_TOUCHSCREEN`。这条排除让「触摸抑制」（[FocusInputTracker]）之外的
+ * 判据 4 读数保持干净 —— 手机外接键盘时它不会误报成遥控器。
  *
  * @param hasDpad 该设备是否支持 `InputDevice.SOURCE_DPAD`
  * @param isTouchDigitizer 该设备是否同时是触摸数字化器（`InputDevice.SOURCE_TOUCHSCREEN`）
@@ -244,48 +318,46 @@ private fun probeDpadInputDevices(): DpadProbe {
 private data class DpadProbe(val present: Boolean, val devices: String)
 
 /**
- * D-PAD 输入设备探测结果 —— **进程内只查一次**，顺带产出设备清单。
+ * D-PAD 输入设备探测结果 —— **进程内只查一次**，顺带产出设备清单（诊断用）。
  *
- * ## 为什么 `by lazy` 而不是 `remember`
+ * ## 为什么 `by lazy` 而不是每次实测
  *
- * `shouldShowFocusVisuals()` 被 135+ 个组件在组合期调用。若缓存写在该 `@Composable` 里
- * （`remember(packageManager) { … }`），每个调用点各有一份 ⇒ 首屏 135 次
- * `InputDevice.getDeviceIds()`，而它是一次 **binder 调用**（`InputManager`），
- * 会把首屏组合期拖出可见卡顿。放到 `object` 上则整个进程只付一次。
+ * `InputDevice.getDeviceIds()` 是一次 **binder 调用**（`InputManager`）。[logFocusVisualDiagnostics]
+ * 会在启动、首次方向键、以及用户进日志页时被反复调用，每次都真打 binder 既没必要也可能卡顿；
+ * 放到 `object` 上则整个进程只付一次。
+ * ⛔ 更重要的边界：`shouldShowFocusVisuals()` 被 135+ 个组件在组合期调用，
+ * 它**绝不**能碰到这份缓存 —— 门禁 `FocusIndicatorContractTest` 锁的就是这条线。
  *
  * ## 「设备是运行中才接入的」怎么办
  *
  * 蓝牙键盘 / 外接手柄后连时，这个值确实已经过期。**但不需要失效机制** ——
- * 用户要用外接键盘导航，就得先按方向键；那一刻 [DpadInputTracker] 会立刻把
- * `directionalNavigationSeen` 置 true 并触发重组（它是快照 state，读它就订阅了）。
- * 于是两条判据形成互补：**探测负责「进场就有」（遥控器）**，按键负责
- * **「后连的设备按一下就生效」**。加主动失效反而会引入一个风险 ——
- * 在用户已形成肌肉记忆后把焦点环抽走，那正是本次要修的故障本身。
+ * v2.39.7 起它只是诊断读数，焦点视觉本身由 [FocusVisualPreference]（用户开关）与
+ * [FocusInputTracker]（触摸抑制）决定，不依赖这份缓存。读数会滞后，但显示不会出错。
  */
 private val dpadProbe: DpadProbe by lazy { probeDpadInputDevices() }
-
-/** 判据 4（存在 D-PAD 输入设备）—— 取自 [dpadProbe] 的进程级缓存。 */
-private val dpadInputDevicePresent: Boolean
-    get() = dpadProbe.present
 
 /**
  * 是否应当显示焦点视觉 —— **全应用唯一判据**（焦点环 / 缩放 / 容器色 / 内容色都走它）。
  *
- * 五条判据任一成立即为真（详见文件头 ②）：
- * 1. 没有触摸屏 2. 电视 feature 任一 3. 按键导航形态的 `Configuration`
- * 4. **存在支持 `SOURCE_DPAD` 的输入设备** 5. 进程内收到过方向/确认键（快照 state 读，参与重组）
+ * ## 规则（v2.39.7 起，所有者裁决）
+ * 显示 = **用户开关开着** 且 **此刻不是触摸导航**
  *
- * 判据 1–3 缓存于 [remember]（PackageManager 在 API 22 上可能是 binder 调用），
- * 判据 4 缓存于 [dpadProbe]（全进程一次，见其 KDoc —— 组合期**绝不**直接查 InputDevice），
- * 判据 5 是快照 state 读 —— 它一变，所有读它的组件自动重组。
+ * - 开关（[FocusVisualPreference]，默认**开**）：把「这台设备是不是电视」的判断交还给用户，
+ *   因为盒子可以谎报任何设备特征，而猜错的代价是整台设备看不见焦点。
+ * - 触摸抑制（[FocusInputTracker]）：手机侧的粘滞焦点不再依赖设备嗅探 ——
+ *   手指点一次屏就收起，按一次方向键又回来。
+ *
+ * ⛔ 这里**不再**读 `hasSystemFeature` / `Configuration` / `InputDevice`：那五条自动判据
+ * 降级为 [probeFocusVisualInputs] 的**诊断读数**，仍写进日志页「调试」档 ——
+ * 它们现在是证据，不再是决策，这正好避免了「判据落空 ⇒ 用户什么都看不见 ⇒ 也没法回传」。
+ *
+ * ⚠️ 两个值都是快照 state 读：读即订阅，所以切换开关、第一次点屏、第一次按方向键
+ * 都会让全部 135+ 个调用点重组，不需要额外的刷新机制。
  */
 @Composable
 fun shouldShowFocusVisuals(): Boolean {
-    val context = LocalContext.current
-    val packageManager = remember(context) { context.packageManager }
-    val probed = remember(packageManager, context.resources) { probeFocusVisualInputs(context) }
-    return probed.noTouchScreen || probed.tvFeature || probed.keyNavigationConfig ||
-        dpadInputDevicePresent || DpadInputTracker.directionalNavigationSeen
+    if (!FocusVisualPreference.highlightEnabled) return false
+    return !FocusInputTracker.touchNavigating
 }
 
 /**
@@ -347,11 +419,18 @@ internal fun describeInputDevice(device: InputDevice?): String {
  */
 fun logFocusVisualDiagnostics(context: Context, reason: String) {
     val inputs = probeFocusVisualInputs(context)
+    val switch = FocusVisualPreference.highlightEnabled
+    val touch = FocusInputTracker.touchNavigating
     AppLog.diag(
         "Focus",
-        "焦点判据[$reason] 显示=${inputs.show} 无触摸屏=${inputs.noTouchScreen} " +
-            "TV特征=${inputs.tvFeature} 按键形态配置=${inputs.keyNavigationConfig} " +
-            "DPAD设备=${inputs.dpadInputDevicePresent} 已按过方向键=${inputs.directionalNavigationSeen}",
+        "焦点[$reason] 显示=${switch && !touch} 高亮开关=$switch 触摸抑制=$touch",
+    )
+    AppLog.diag(
+        "Focus",
+        "自动判据[$reason]（仅作证据，不参与决策） 判据会显示=${inputs.show} " +
+            "无触摸屏=${inputs.noTouchScreen} TV特征=${inputs.tvFeature} " +
+            "按键形态配置=${inputs.keyNavigationConfig} DPAD设备=${inputs.dpadInputDevicePresent} " +
+            "已按过方向键=${inputs.directionalNavigationSeen}",
     )
     AppLog.diag(
         "Focus",

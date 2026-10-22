@@ -17484,5 +17484,93 @@ K 歌并恢复导航栏。
 
 **验证**：`testDebugUnitTest --tests "*Lofi*"` → **11 类 87 例零失败**（2 例 skip = 未开 `LOFI_SNAPSHOT` 的 PNG 导出）；全量 `testDebugUnitTest` → **251 类 / 2557 例零失败**；`lintDebug` → **0 errors / 164 warnings**（既有告警，无新增）。版本号 192 / 2.39.7。
 
+**真机缺陷：整幅频闪（同日修复）**：手机装上 v2.39.7 后报「整体画面在闪烁，包括灯光」。根因不在灯光：`drawContent` 把 `MOTION_FPS` 的**重算**节流门也罩住了落屏那一次 `drawImage`，而 `VisualizerStage` 每帧重录 display list（`tick` 驱动）⇒ 没被重算的 UI 帧交出一张空画布，只剩舞台背景层；节流时钟 `fx.nowMs` 又是 `AudioFrame.timeMs`（`PcmSpectrumTap` 的 25Hz FFT 时间戳，`INTERVAL_MS = 40L`），与 UI 帧不锁相。真机证据（Redmi、120Hz、code 192）：6 秒 `screenrecord` 702 帧里 **516 帧（73.5%）整帧无内容**，`o####` 五帧周期 ⇒ **≈21.6Hz**；空白帧亮度均值 15.4、有画面帧 33.3。修法：节流只包 `repaint`（重算 480×270 像素），新增 `present`（落屏）**每帧必做**，判定抽成纯函数 `shouldRepaint(lastPaintMs, nowMs, intervalMs)`；同一台手机复测 **0/596 空白帧、0 次明暗翻转**。门禁 `LofiCityFlickerGateTest`（7 例：顶层 `present` + `repaint` 必须受门控 + 纯函数语义 + 4 条负向自证）**7 例零失败**。⚠️ 副作用是有意保留的：动效推进节拍回到频谱 25Hz（MEDIUM 实际 12.5fps、LOW 1fps），暂停即冻结——这正是「画面跟音乐」的语义；LOW 档也从"每秒闪一下"变成稳定静帧。
+
 **未做**：① **P0 真机探针仍未跑**——`Filter.Nearest` 放大在创维 5.1.1 上是否硬边、`PixelBuffer`→`ImageBitmap`→`drawImage` 的每帧成本，这两项只能上电视量（低于 15 fps 按 §5 内节流处置）；② 四城的地标相似度人工评分（≥4 才收）按分工归所有者；③ 未推送、未 tag。
+
+### 10.271 v2.39.7 — 焦点高亮改为**用户开关 + 触摸抑制**：不再猜设备（2026-10-22）
+
+**背景**：§10.269 把判据从 2 条补到 5 条 + 窗口层兜底 + 「调试」取证档之后，所有者给出的下一步是
+「按你分析先调整代码看能否改善，再加关键日志由用户回传」。本轮是**第二击**，来自同一个故障的
+升级预案讨论：如果用户回传后仍定位不到，怎么办？所有者裁决两件事 ——
+① **设置里加一个「焦点高亮」手动开关，默认开**，让用户先能看见焦点、才谈得上把读数回传；
+② 其他办法（自动放大、焦点播报等）暂不做，仍以回传调试信息为准。作用域经确认选
+**「只对按键导航生效」**：开关=开时强制显示焦点视觉，手机用手指点按仍保持抑制。
+
+**为什么这次改的是"谁来决策"而不是"判据再加一条"**：§10.269 已列出四路独立落空路径
+（permissions.xml 谎报 / 无 leanback+television / DPAD 与 TOUCHSCREEN 同设备被排除 / 按键自举循环），
+它们的共同点是**三路来源全部由厂商说了算**，而猜错的代价是整台设备看不见焦点 ——
+这个代价我们远程承担不了（设备在用户家客厅，我们的电视一切正常）。
+改成「默认显示 + 用户可关」后，猜错最坏只是多画一圈，且用户看得见、能自己调。
+
+**决策函数只剩两个输入**（`ui/components/FocusIndicator.kt`）：
+
+```kotlin
+if (!FocusVisualPreference.highlightEnabled) return false   // 设置页开关，默认 true
+return !FocusInputTracker.touchNavigating                   // 第一次 ACTION_DOWN 触摸置位
+```
+
+五条自动判据**不删**，降级为 `probeFocusVisualInputs()` 的诊断读数。这不是妥协：
+读数留着才有对照能力 —— 「`判据会显示=false` 而实际 `显示=true`」直接证明那台盒子在谎报特征、
+开关把它救了；反过来若开关开着、判据全 false，问题就不在识别层而在绘制层。
+
+**本轮最重要的一条推演（差点把开关做成空操作）**：手机侧的抑制如果仍用 `Configuration` 嗅探
+（旧判据 3），那「默认开」就**等价于今天的判据 3**，这个开关等于什么都没加。
+所以抑制必须来自**真实触摸事件**：`MainActivity.dispatchTouchEvent` →
+`FocusInputTracker.noteTouchEvent(ACTION_DOWN)` 置位，方向键 → `noteDirectionalKey()` 解除。
+触摸与按键在系统里分开上报，比任何设备特征可靠。
+⚠️ `Activity.dispatchTouchEvent` 是 `Activity` 自身的公开 API，与被 §10.269 禁用的
+`androidx.core` `RestrictedApi` 的 `dispatchKeyEvent` **不是一回事**，可以用。
+⛔ 抑制只记「此刻的输入方式」，**不做计时回收** —— 超时收起会让触屏电视反复闪框，比常亮更难读。
+
+**链路三段，缺一段就表现为「拨了没反应」或「重启又变回去」**：
+设置页 `SettingSwitch`（卡②「外观与动效」，与「界面动画」同卡）→
+`MainViewModel.updateFocusHighlightEnabled` → `prefs.display.setFocusHighlightEnabled`（写盘）→
+`NasMusicApp.onCreate` 起的常驻收集（`applicationScope`）→ `FocusVisualPreference.update`（刷快照）→
+组合期只读快照。⚠️ 常驻收集放 Application 而非 Activity：快照是**进程级**的，Activity 重建
+不该让它回到默认值。⚠️ 这是本仓库**第一次**由 `NasMusicApp` 引用 `ui.*`（此前 app→ui 零import，
+但没有门禁禁止该方向；`data→player/visualizer` 早已存在）。
+开关是**设备本地偏好**（与屏幕方向同类），⛔ 不进 `AppSettings` 备份 json ——
+否则手机备份恢复到电视会把可见性策略一起带走。
+
+**默认值四处必须一致**（快照 `mutableStateOf(true)` / DataStore `?: true` /
+`SettingsBranch.collectAsState(initial = true)` / `GeneralSettingsState` 默认参数）：
+出问题的用户装上新包就得先能看见焦点。设置页初值若写 `false`，进页瞬间会闪一下再点亮。
+
+**日志读数扩了一条**：`logFocusVisualDiagnostics` 原来只打五条判据，现在第一行是
+`焦点[reason] 显示=… 高亮开关=… 触摸抑制=…`，第二行是
+`自动判据[reason]（仅作证据，不参与决策） 判据会显示=… …`。
+只有判据值的话，回传的截图无法区分「盒子谎报」与「用户自己把开关关了」两种情况。
+
+**门禁**：`FocusIndicatorContractTest` **39 例**（原 33 例里三条已被本轮改动推翻，见下）。
+新增/重写：`决策必须由开关与触摸抑制驱动，不得再猜设备`（含嗅探标记黑名单 + 3 条负向自证）、
+`开关默认值必须四处一致且为 true`、`触摸抑制必须由窗口层置位并由方向键解除`、
+`开关必须走设置页写偏好并由常驻收集刷进快照`（含「不得进 AppSettings」的反向断言）、
+`五条自动判据必须全部进入诊断读数`、`按键痕迹必须仍进诊断读数并在首次方向键后再打一次`、
+`焦点高亮文案必须中英齐备`。⚠️ 被推翻的三条旧门禁是
+`D-PAD 探测结果必须真的参与 shouldShowFocusVisuals 的返回`、
+`Configuration 判据必须 or 进 shouldShowFocusVisuals 的返回`、
+`缓存失效的替代方案必须在按键路径上有兜底` —— 它们的意图（别把判据写成死代码）仍然成立，
+但**主谓宾已经变了**（判据的消费者从决策函数换成诊断函数），所以断言改成扫
+`probeFocusVisualInputs` / `logFocusVisualDiagnostics` 的函数体。
+
+**踩到的两个新坑（本机）**：① `functionBody(text, "fun updateFocusHighlightEnabled(")` 取不到函数体 ——
+该函数是 `= viewModelScope.launch { … }` 表达式体，而签名里带 `=` 会被判成「表达式体只取一行」，
+正好取到不含断言目标的那一行 ⇒ 断言改成扫全文 + 扫 `AppSettings.kt` 反向断言；
+② 「默认值四处一致」用例必须先断言**四个文件都读得到**，否则路径挪动后 `readText()` 抛异常
+会被误读成"判据命中"，护栏静默空转。
+
+**验证**：`testDebugUnitTest --tests "*FocusIndicatorContractTest" --tests "*SettingsGroupCoverageTest"
+--tests "*LogsTabWiringGateTest" --tests "*LogStoreTest"` → **4 类 110 例零失败**；
+按包再扩一轮 `--tests "com.nasmusic.tv.ui.*" --tests "com.nasmusic.tv.data.prefs.*"
+--tests "com.nasmusic.tv.util.*"` → **63 类 549 例，2 例失败**，两条都在
+`LofiCityCardWiringGateTest`（W4「渲染器没调用 publishCursor」），属**并发会话当时未完成的像素城市改动**
+（工作区同时有 `LofiCityRenderer.kt` 与 `docs/e51-lofi-city-plan.md` 的他人改动），与本轮焦点改动无关，
+本轮未代为修复；本轮涉及的 `FocusIndicatorContractTest` / `SettingsGroupCoverageTest` /
+`LogsTabWiringGateTest` / `LogStoreTest` / `ProviderMirrorWiringGateTest` 全绿。
+`lintDebug` → **0 errors / 164 warnings**（与 §10.270 同数，无新增）。**版本号保持 192 / 2.39.7**（未发新版）。
+
+**未做 / 未验**：① 焦点视觉在真机上的观感本轮**未测**（改动只经编译 + 门禁），
+电视与手机的粘滞焦点都还得回炉；② 用户回传的「调试」读数仍未收到，
+所以「那台盒子究竟是哪一路落空」至今没有实测答案；③ 未推送、未 tag、未编 release APK。
 

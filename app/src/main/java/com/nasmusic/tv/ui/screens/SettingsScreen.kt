@@ -303,6 +303,9 @@ fun SettingsScreen(
     // v2.36.0 屏幕方向（L1 全局策略；L2 顶部栏按钮只是快捷改它）
     screenOrientation: String = "auto",
     onChangeScreenOrientation: ((String) -> Unit)? = null,
+    // v2.39.7 焦点高亮（遥控器导航时画不画焦点环/缩放）；默认值必须与偏好默认值 true 一致
+    focusHighlightEnabled: Boolean = true,
+    onChangeFocusHighlight: ((Boolean) -> Unit)? = null,
     /**
      * 照片墙分区的动作（§7.2）。
      *
@@ -581,6 +584,7 @@ var activeSection by remember { mutableStateOf(SettingsSection.GENERAL) }
                             language = language,
                             fontAdjustment = fontAdjustment,
                             screenOrientation = screenOrientation,
+                            focusHighlightEnabled = focusHighlightEnabled,
                         ),
                         actions = GeneralSettingsActions(
                             onChangeLanguage = onChangeLanguage,
@@ -588,6 +592,7 @@ var activeSection by remember { mutableStateOf(SettingsSection.GENERAL) }
                             onToggleAnimations = onToggleAnimations,
                             onChangeFontAdjustment = onChangeFontAdjustment,
                             onChangeScreenOrientation = onChangeScreenOrientation,
+                            onChangeFocusHighlight = onChangeFocusHighlight,
                         )
                     )
                 }

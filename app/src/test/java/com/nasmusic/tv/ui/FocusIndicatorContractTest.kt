@@ -41,17 +41,34 @@ import java.io.File
  *    「要有焦点环才认得方向键，要认得方向键才有焦点环」。⇒ 必须同时存在**窗口层**兜底
  *    （`MainActivity.onKeyDown`，source="window"）。
  *
+ * ⑤ **只要还在猜设备，就总有一台设备猜错**（v2.39.7，所有者裁决）：上面 ②③④ 把判据从 2 条
+ *    加到 5 条，用户的盒子**仍然**看不见焦点 —— 因为三路来源（permissions.xml /
+ *    `Configuration` / `InputDevice`）都可被厂商改写，而猜错的代价是整台设备看不见焦点，
+ *    这个代价我们远程承担不了。⇒ 决策权交给**用户开关**（默认开）+ **触摸抑制**
+ *    （手指点屏收起、方向键恢复），五条判据降级为日志页「调试」档的**取证读数**。
+ *    ⚠️ 手机侧的抑制同样⛔不许回到设备嗅探：若抑制仍读 `Configuration`，「默认开」就等价于
+ *    旧判据 3，这个开关等于什么都没加 —— 所以必须有 `dispatchTouchEvent` 这条真实触摸来源。
+ *
  * ## 判定规则
  *
  * 1. `FocusableSurface.kt` / `UnifiedSongRow.kt` 内，`.focusRing(` 必须出现在 `.background(` **之后**
  *    —— 否则会被容器色盖住。
  * 2. 焦点视觉的判据必须是 `shouldShowFocusVisuals()`，不得再直接用 `isTVDevice()`。
- * 3. 五条核心判据（无触摸屏 / TV feature / **按键形态的 Configuration** /
- *    **D-PAD 输入设备** / 按键兜底）一条都不能被删，
- *    且 D-PAD 探测必须真的 or 进 `shouldShowFocusVisuals()` 的返回值、且必须被缓存。
- * 4. 按键兜底必须**两个来源都在**（compose + window），少一个就退回上面 ④ 的自举循环。
- * 5. 判据翻转与按键到达记录必须走 `AppLog.diag`（release 也落盘），⛔ 不许退回 `AppLog.i` ——
+ * 3. **决策只有两个输入**：`shouldShowFocusVisuals()` 的函数体必须读
+ *    `FocusVisualPreference.highlightEnabled`（开关）与 `FocusInputTracker.touchNavigating`（触摸抑制），
+ *    且**不得**出现任何设备嗅探标记（`hasSystemFeature` / `dpadProbe` / `directionalNavigationSeen` …）。
+ * 4. **开关默认值必须是 `true`**，且四处默认值（快照 / DataStore / 设置页初值 / 分区 state）
+ *    必须一致 —— 出问题的用户装上新包就得先能看见焦点。
+ * 5. 触摸抑制必须①由**窗口层** `dispatchTouchEvent` 置位，②由**方向键**解除，
+ *    且初始值必须是「不抑制」（电视进场第一帧就可见）。
+ * 6. 五条自动判据必须**仍在**（作为诊断读数），且必须被 `logFocusVisualDiagnostics` 打进
+ *    `AppLog.diag`；开关状态与触摸抑制也必须在同一条读数里 —— 否则回传的日志无法判断
+ *    「判据落空」还是「用户自己关了」。
+ * 7. 按键兜底必须**两个来源都在**（compose + window），少一个就退回上面 ④ 的自举循环。
+ * 8. 判据翻转与按键到达记录必须走 `AppLog.diag`（release 也落盘），⛔ 不许退回 `AppLog.i` ——
  *    出问题的设备在用户那边，连不上 adb，日志页「调试」档是唯一取证通道。
+ * 9. 开关必须是**设备本地偏好**：走 `prefs.display`，⛔ 不得进 `AppSettings`（备份 json
+ *    会把电视的可见性策略恢复到手机上，反之亦然 —— 与屏幕方向同类）。
  *
  * ⚠️ 与 [FocusableSurfaceColorContractTest] 同款：这是**启发式**护栏（只看出现次序），
  * 目的是「别删 / 别挪」。护栏本身的有效性由末尾的负向用例守住。
@@ -119,56 +136,39 @@ class FocusIndicatorContractTest {
         }
     }
 
-    // ─────────────────── D-PAD 输入设备探测（核心需求：切页面即见） ───────────────────
+    // ─────────────── 自动判据：已从决策降级为诊断读数（必须仍在） ───────────────
 
     @Test
     fun `判据源码必须包含 SOURCE_DPAD 输入设备探测`() {
-        // 这条是「切到页面立刻看到焦点环」的唯一保证：前两条静态特征嗅探在刻意隐瞒
-        // leanback/television 的盒子上会双双落空，而按键兜底必须先按一次 —— 正是被拒绝的行为。
+        // 删掉它虽然不再影响显示（决策已交给开关），但回传的日志就再也看不出那台盒子
+        // 到底有没有注册遥控器 —— 而这正是下一轮修复的唯一线索。
         val text = uiSourceRoot().resolve("components/FocusIndicator.kt").readText()
         for (required in listOf("InputDevice.SOURCE_DPAD", "InputDevice.getDeviceIds()", "supportsSource")) {
-            assertTrue(
-                "FocusIndicator.kt 缺少 D-PAD 能力探测的 $required" +
-                    "（删掉它焦点环就会退回「先按一下才显示」）",
-                text.contains(required),
-            )
+            assertTrue("FocusIndicator.kt 缺少 D-PAD 能力探测的 $required", text.contains(required))
         }
     }
 
     @Test
-    fun `D-PAD 探测结果必须真的参与 shouldShowFocusVisuals 的返回`() {
-        // 光有探测函数不够：必须真的 or 进返回值，否则探测是死代码
+    fun `五条自动判据必须全部进入诊断读数`() {
         val text = uiSourceRoot().resolve("components/FocusIndicator.kt").readText()
-        assertTrue(
-            "dpadInputDevicePresent 未参与 shouldShowFocusVisuals 的判定",
-            text.contains("dpadInputDevicePresent ||"),
-        )
-    }
-
-    @Test
-    fun `五条核心判据一条都不能被删`() {
-        val text = uiSourceRoot().resolve("components/FocusIndicator.kt").readText()
+        val body = functionBody(text, "internal fun probeFocusVisualInputs(")
         val required = mapOf(
             "无触摸屏（FEATURE_TOUCHSCREEN）" to "FEATURE_TOUCHSCREEN",
             "电视特征 FEATURE_LEANBACK" to "FEATURE_LEANBACK",
             "电视特征 type.television" to "android.hardware.type.television",
             "按键形态的 Configuration" to "isKeyNavigationConfiguration",
-            "D-PAD 输入设备能力" to "dpadInputDevicePresent",
-            "按键兜底 directionalNavigationSeen" to "DpadInputTracker.directionalNavigationSeen",
+            "D-PAD 输入设备能力" to "dpadProbe.present",
+            "按键痕迹 directionalNavigationSeen" to "DpadInputTracker.directionalNavigationSeen",
         )
-        val missing = required.filterValues { !text.contains(it) }.keys
+        val missing = required.filterValues { !body.contains(it) }.keys
         if (missing.isNotEmpty()) {
             fail(
                 buildString {
-                    appendLine("焦点视觉判据被删减：$missing")
+                    appendLine("焦点自动判据的实测读数被删减：$missing")
                     appendLine()
-                    appendLine("五条判据任一成立即显示焦点环，删掉任何一条都会让某类设备退回")
-                    appendLine("「看不见焦点」。尤其：")
-                    appendLine("· D-PAD 探测是「切页面立刻可见」的保证；")
-                    appendLine("· Configuration 那条与 hasSystemFeature **来源独立**，")
-                    appendLine("  是「盒子把 touchscreen 声明成 required=false」时唯一的出路；")
-                    appendLine("· 按键兜底必须先按一次键才会翻转 —— 那是用户明确拒绝的行为，")
-                    appendLine("  所以它只能当兜底，不能当唯一判据。")
+                    appendLine("v2.39.7 起这五条不再决定显示，但它们是日志页「调试」档的证据：")
+                    appendLine("用户回传的截图里若没有这些读数，我们无法区分")
+                    appendLine("「盒子谎报特征」/「用户自己关了开关」/「触摸抑制没解除」三种故障。")
                     appendLine()
                     appendLine("详见 docs/conventions-adaptive-ui.md §11。")
                 }
@@ -177,15 +177,147 @@ class FocusIndicatorContractTest {
     }
 
     @Test
-    fun `Configuration 判据必须 or 进 shouldShowFocusVisuals 的返回`() {
-        // 只写一个 isKeyNavigationConfiguration 函数不够：它没进返回值就是死代码，
-        // 「谎报 touchscreen feature」的盒子照样看不见焦点环。
+    fun `决策必须由开关与触摸抑制驱动，不得再猜设备`() {
         val text = uiSourceRoot().resolve("components/FocusIndicator.kt").readText()
         val body = functionBody(text, "fun shouldShowFocusVisuals()")
-        assertTrue(
-            "keyNavigationConfig 未参与 shouldShowFocusVisuals 的判定",
-            body.contains("keyNavigationConfig"),
+        val missing = DECISION_MARKERS.filter { !body.contains(it) }
+        val sniffing = deviceSniffHits(body)
+        if (missing.isNotEmpty() || sniffing.isNotEmpty()) {
+            fail(
+                buildString {
+                    if (missing.isNotEmpty()) appendLine("shouldShowFocusVisuals 缺少的决策输入：$missing")
+                    if (sniffing.isNotEmpty()) appendLine("shouldShowFocusVisuals 又回到了设备嗅探：$sniffing")
+                    appendLine()
+                    appendLine("显示 = 用户开关开着 且 此刻不是触摸导航。猜设备的代价是整台设备看不见")
+                    appendLine("焦点（用户的盒子正是这么坏的），而开关猜错最坏只是多画一圈。")
+                }
+            )
+        }
+    }
+
+    @Test
+    fun `开关默认值必须四处一致且为 true`() {
+        // 出问题的用户装上新包就得先能看见焦点，否则他连「焦点在哪」都说不清，
+        // 「调试」档的读数也无从对照。任意一处默认成 false 都会在第一帧把焦点藏起来。
+        val checks = listOf(
+            "进程级快照" to Pair("ui/components/FocusIndicator.kt", "var highlightEnabled by mutableStateOf(true)"),
+            "DataStore 默认" to Pair("data/prefs/AppPreferences.kt", "it[keyFocusHighlightEnabled] ?: true"),
+            "设置页初值" to Pair("ui/components/branches/SettingsBranch.kt", "focusHighlightEnabled.collectAsState(initial = true)"),
+            "分区 state 默认" to Pair("ui/screens/settings/GeneralSettingsSection.kt", "val focusHighlightEnabled: Boolean = true"),
         )
+        val unreadable = checks.filter { projectSource(it.second.first).isFile.not() }.map { it.first }
+        assertTrue("默认值用例读不到源文件（路径被挪动，护栏会空转）：$unreadable", unreadable.isEmpty())
+        val missing = checks.filter { !projectSource(it.second.first).readText().contains(it.second.second) }.map { it.first }
+        assertTrue("焦点高亮开关的默认值不是 true（或写法被改）：$missing", missing.isEmpty())
+    }
+
+    @Test
+    fun `触摸抑制必须由窗口层置位并由方向键解除`() {
+        val indicator = uiSourceRoot().resolve("components/FocusIndicator.kt").readText()
+        val tracker = functionBody(indicator, "object FocusInputTracker")
+        assertTrue("触摸事件没置位 touchNavigating（手机粘滞焦点会重现）", tracker.contains("touchNavigating = true"))
+        assertTrue("抑制态只应由方向键解除", tracker.contains("touchNavigating = false"))
+        assertTrue(
+            "初始值必须是「不抑制」：电视/盒子从头到尾不发触摸事件，进场第一帧就要看到焦点",
+            tracker.contains("var touchNavigating by mutableStateOf(false)"),
+        )
+
+        // 置位来源必须是**窗口层触摸事件**，不是设备特征 —— 见类头 ⑤ 的推演
+        val activity = uiSourceRoot().resolve("MainActivity.kt").readText()
+        val dispatchBody = functionBody(activity, "override fun dispatchTouchEvent(ev: MotionEvent)")
+        assertTrue("MainActivity 没覆写 dispatchTouchEvent ⇒ 触摸抑制没有数据来源", dispatchBody.contains("noteTouchEvent("))
+
+        // 方向键必须把输入方式交还给按键导航（触屏电视 / 手机外接遥控器的混合输入形态）
+        val keyBody = functionBody(indicator, "object DpadInputTracker")
+        assertTrue("方向键未解除触摸抑制", keyBody.contains("FocusInputTracker.noteDirectionalKey()"))
+    }
+
+    @Test
+    fun `开关必须走设置页写偏好并由常驻收集刷进快照`() {
+        // 三段链路缺一段就表现为「拨了没反应」或「重启又变回去」
+        val section = uiSourceRoot().resolve("screens/settings/GeneralSettingsSection.kt").readText()
+        assertTrue("设置页没有焦点高亮开关", section.contains("R.string.settings_focus_highlight"))
+        assertTrue(
+            "开关没接 onChangeFocusHighlight（SettingSwitch 的 onClick 必须回调到 VM）",
+            section.contains("actions.onChangeFocusHighlight"),
+        )
+        val viewModel = projectSource("ui/viewmodel/MainViewModel.kt").readText()
+        assertTrue(
+            "MainViewModel 缺 updateFocusHighlightEnabled",
+            viewModel.contains("fun updateFocusHighlightEnabled("),
+        )
+        // ⛔ 不得进 AppSettings（备份 json 会把电视的可见性策略带到手机上，反之亦然）
+        assertTrue(
+            "焦点高亮必须走 prefs.display（设备本地偏好），不得写进 AppSettings 备份",
+            viewModel.contains("prefs.display.setFocusHighlightEnabled"),
+        )
+        val appSettings = projectSource("data/model/AppSettings.kt").readText()
+        assertTrue(
+            "焦点高亮被放进了 AppSettings —— 它会随备份跨设备恢复，把电视的策略带到手机",
+            !appSettings.contains("focusHighlight"),
+        )
+        val app = projectSource("NasMusicApp.kt").readText()
+        assertTrue(
+            "NasMusicApp 没起常驻收集 ⇒ 开关只在重启后生效（组合期读的是进程级快照）",
+            app.contains("FocusVisualPreference.update"),
+        )
+    }
+
+    @Test
+    fun `焦点高亮文案必须中英齐备`() {
+        for (locale in listOf("values", "values-en")) {
+            val text = resFile(locale).readText()
+            for (key in listOf("settings_focus_highlight", "settings_focus_highlight_desc")) {
+                assertTrue(
+                    "$locale/strings.xml 缺 $key —— 缺一侧是运行期 getString 抛异常，不是编译错误",
+                    text.contains("name=\"$key\""),
+                )
+            }
+        }
+    }
+
+    /** 负向自证：把决策改回「猜设备」的写法必须被上一条咬住。 */
+    @Test
+    fun `负向自证 决策回到设备嗅探必须判负`() {
+        val sample = """
+            @Composable
+            fun shouldShowFocusVisuals(): Boolean {
+                val inputs = LocalContext.current.let { probeFocusVisualInputs(it ) }
+                return inputs.dpadInputDevicePresent || inputs.tvFeature
+            }
+        """.trimIndent()
+        val body = functionBody(sample, "fun shouldShowFocusVisuals()")
+        assertTrue("护栏空转：嗅探写法没被检出", deviceSniffHits(body).isNotEmpty())
+        assertTrue("护栏空转：嗅探写法没被判为缺决策输入", DECISION_MARKERS.any { !body.contains(it) })
+        // 反向：正确写法不得误伤
+        val good = """
+            @Composable
+            fun shouldShowFocusVisuals(): Boolean {
+                if (!FocusVisualPreference.highlightEnabled) return false
+                return !FocusInputTracker.touchNavigating
+            }
+        """.trimIndent()
+        val goodBody = functionBody(good, "fun shouldShowFocusVisuals()")
+        assertTrue("护栏误伤：正确的开关+抑制写法被判负", deviceSniffHits(goodBody).isEmpty() && DECISION_MARKERS.all { goodBody.contains(it) })
+    }
+
+    /** 负向自证：默认关的开关必须被「默认值」用例的谓词咬住。 */
+    @Test
+    fun `负向自证 开关默认关必须判负`() {
+        val sample = "object FocusVisualPreference { var highlightEnabled by mutableStateOf(false) }"
+        assertTrue("护栏空转：mutableStateOf(false) 没被检出", !sample.contains("var highlightEnabled by mutableStateOf(true)"))
+    }
+
+    /** 负向自证：没有触摸来源（只有设备嗅探）的抑制写法必须判负。 */
+    @Test
+    fun `负向自证 缺窗口层触摸来源必须判负`() {
+        val sample = """
+            override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
+                return super.onKeyDown(keyCode, event)
+            }
+        """.trimIndent()
+        val body = functionBody(sample, "override fun onKeyDown(keyCode: Int, event: KeyEvent?)")
+        assertTrue("护栏空转：样例里没有 dispatchTouchEvent/noteTouchEvent 却被当成已接线", !body.contains("noteTouchEvent("))
     }
 
     // ─────────────── 兜底通道：窗口层 + 可回传的调试日志 ───────────────
@@ -220,6 +352,13 @@ class FocusIndicatorContractTest {
         // 启动时的一次快照读数：不按键也能看到五条判据的实测值
         val activity = uiSourceRoot().resolve("MainActivity.kt").readText()
         assertTrue("MainActivity 没调用 logFocusVisualDiagnostics —— 焦点判据没有可回传的读数", activity.contains("logFocusVisualDiagnostics("))
+
+        // 读数必须**同时**含开关与触摸抑制：只有判据值的话，回传的截图无法区分
+        // 「盒子谎报特征 ⇒ 开关救了它」和「用户自己把开关关了 ⇒ 该提醒他打开」。
+        val diagBody = functionBody(text, "fun logFocusVisualDiagnostics(")
+        assertTrue("诊断读数缺开关值", diagBody.contains("FocusVisualPreference.highlightEnabled"))
+        assertTrue("诊断读数缺触摸抑制值", diagBody.contains("FocusInputTracker.touchNavigating"))
+        assertTrue("诊断读数缺自动判据的对照值", diagBody.contains("inputs.show"))
     }
 
     /** 负向自证：只挂 Compose 层的写法必须判负。 */
@@ -342,15 +481,24 @@ class FocusIndicatorContractTest {
     }
 
     @Test
-    fun `缓存失效的替代方案必须在按键路径上有兜底`() {
-        // 判据 3 缓存后对「运行中才接入」的设备会过期，这是接受的取舍 ——
-        // 但必须确认兜底（判据 4 的按键跟踪）确实还在，否则动态接入就彻底没救。
+    fun `按键痕迹必须仍进诊断读数并在首次方向键后再打一次`() {
+        // dpadProbe 是进程级缓存，对「运行中才接入」的键盘/手柄会过期。
+        // v2.39.7 起显示不再依赖它（所以不需要失效机制），但读数必须还能反映按键痕迹，
+        // 并且要在第一次按键后**再打一次** —— 否则回传的截图只有进场那一刻的过期值。
         val text = uiSourceRoot().resolve("components/FocusIndicator.kt").readText()
-        val composableBody = functionBody(text, "fun shouldShowFocusVisuals()")
+        val probeBody = functionBody(text, "internal fun probeFocusVisualInputs(")
         assertTrue(
-            "shouldShowFocusVisuals 必须读 directionalNavigationSeen（覆盖运行中接入的键盘/手柄）",
-            composableBody.contains("DpadInputTracker.directionalNavigationSeen"),
+            "probeFocusVisualInputs 不再读 directionalNavigationSeen（按键痕迹从读数里消失了）",
+            probeBody.contains("DpadInputTracker.directionalNavigationSeen"),
         )
+        val activity = uiSourceRoot().resolve("MainActivity.kt").readText()
+        assertTrue(
+            "MainActivity 没有以 directionalNavigationSeen 为键的 LaunchedEffect（首按后不会再打读数）",
+            activity.contains("LaunchedEffect(DpadInputTracker.directionalNavigationSeen)"),
+        )
+        // 决策函数绝不许读 InputDevice（binder 不得进组合期）
+        val composableBody = functionBody(text, "fun shouldShowFocusVisuals()")
+        assertTrue("组合期决策打 binder", !composableBody.contains("InputDevice.getDeviceIds()"))
     }
 
     // ─────────────────────────── D-PAD 探测的纯逻辑（误判面） ───────────────────────────
@@ -602,6 +750,24 @@ class FocusIndicatorContractTest {
         )
         return found!!
     }
+
+    /** 相对 `com/nasmusic/tv/` 的源文件 —— 开关链路跨了 ui / data / Application 三层。 */
+    private fun projectSource(relative: String): File {
+        val root = uiSourceRoot().parentFile
+        assertTrue("UI 源码目录的父目录不是 com/nasmusic/tv：${root?.absolutePath}", root?.name == "tv")
+        val file = root!!.resolve(relative)
+        assertTrue("找不到源文件 ${file.absolutePath}（链路被挪动，护栏会空转）", file.isFile)
+        return file
+    }
+
+    private fun resFile(locale: String): File {
+        val candidates = listOf(File("src/main/res"), File("app/src/main/res"), File("../app/src/main/res"))
+        val res = candidates.firstOrNull { it.isDirectory }
+        assertTrue("找不到 res 目录（user.dir=${File("").absolutePath}）", res != null)
+        val file = File(res!!, "$locale/strings.xml")
+        assertTrue("${file.absolutePath} 不存在", file.isFile)
+        return file
+    }
 }
 
 /** 画焦点环的源码文件（相对 `ui/` 源目录） */
@@ -612,6 +778,33 @@ private val FOCUS_RING_SITES = listOf(
 
 /** 焦点环的两种写法（都要查，否则换个写法就能绕过门禁） */
 private val FOCUS_RING_MARKERS = listOf(".focusRing(", ".border(")
+
+/**
+ * 决策函数**必须**读的两个输入（v2.39.7：用户开关 + 触摸抑制）。
+ * 少任何一个都会重现对应故障：少开关 ⇒ 我们又回到猜设备；少抑制 ⇒ 手机粘滞焦点。
+ */
+private val DECISION_MARKERS = listOf(
+    "FocusVisualPreference.highlightEnabled",
+    "FocusInputTracker.touchNavigating",
+)
+
+/**
+ * 决策函数**绝不许**出现的设备嗅探标记。
+ *
+ * 每一条都曾是「焦点看不看得见」的判据，也都在用户的盒子上落空过 ——
+ * 它们现在只该出现在 [probeFocusVisualInputs] / 诊断日志里。
+ */
+private val DEVICE_SNIFF_MARKERS = listOf(
+    "hasSystemFeature",
+    "isKeyNavigationConfiguration(",
+    "probeFocusVisualInputs",
+    "dpadProbe",
+    "SOURCE_DPAD",
+    "directionalNavigationSeen",
+)
+
+/** 决策体里命中的嗅探标记（真实用例与负向自证**共用同一个谓词**，否则自证只证明了自己）。 */
+private fun deviceSniffHits(body: String): List<String> = DEVICE_SNIFF_MARKERS.filter { body.contains(it) }
 
 /** 该文件里是否存在「焦点环排在不透明背景之前」的写法。逐条修饰符链判定。 */
 private fun focusRingBeforeBackground(text: String): Boolean =

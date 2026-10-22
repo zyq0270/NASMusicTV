@@ -8,6 +8,7 @@ import android.graphics.drawable.ColorDrawable
 import android.net.Uri
 import android.os.Bundle
 import android.view.KeyEvent
+import android.view.MotionEvent
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -48,6 +49,7 @@ import com.nasmusic.tv.player.PlaybackService
 import com.nasmusic.tv.ui.components.AppRoot
 import com.nasmusic.tv.ui.components.ConnectPromptDialog
 import com.nasmusic.tv.ui.components.DpadInputTracker
+import com.nasmusic.tv.ui.components.FocusInputTracker
 import com.nasmusic.tv.ui.components.logFocusVisualDiagnostics
 import com.nasmusic.tv.ui.screens.ExitConfirmDialog
 import com.nasmusic.tv.ui.theme.NASMusicTVTheme
@@ -631,6 +633,17 @@ class MainActivity : ComponentActivity() {
         } catch (e: Exception) {
             AppLog.w("MainActivity", "refreshLocalMusicAccess failed", e)
         }
+    }
+
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        // 焦点视觉的**触摸抑制**接线（v2.39.7，所有者裁决「只对按键导航生效」）：
+        // 手指点一次屏就收起焦点框，避免手机上「点过的节点粘住一个永久高亮、又选不回来」。
+        // ⚠️ 必须在窗口层（Activity）做，⛔ 不能靠设备特征嗅探 ——「默认开」的开关若仍用
+        // `Configuration` 判据来抑制手机，它等价于旧判据 3，等于什么都没加。
+        // `Activity.dispatchTouchEvent` 是 Activity 自身的公开 API（非 RestrictedApi），
+        // 触摸事件一定经过这里。
+        FocusInputTracker.noteTouchEvent(ev.action)
+        return super.dispatchTouchEvent(ev)
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
