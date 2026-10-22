@@ -17570,6 +17570,12 @@ return !FocusInputTracker.touchNavigating                   // 第一次 ACTION_
 `LogsTabWiringGateTest` / `LogStoreTest` / `ProviderMirrorWiringGateTest` 全绿。
 `lintDebug` → **0 errors / 164 warnings**（与 §10.270 同数，无新增）。**版本号保持 192 / 2.39.7**（未发新版）。
 
+**`CHANGELOG.md` 的处置**（所有者 2026-10-22 裁决「直接在现有版本上增改即可」）：v2.39.7 段补
+Added 一行「设置 → 通用 新增「焦点高亮」开关（默认开）」+ Changed 一行「焦点高亮不再依赖设备型号识别」，
+随 `d02ffcb` 入库。该文件在工作区里被外部 markdown 格式化整体改写过（`[` → `\[`、`~` → `\~`、
+表格补齐列宽），裁决是不还原、直接在其上增改 ⇒ 那次提交含格式化差异与并发会话的像素城市 changelog 行
+（同一文件无法按行拆分）。
+
 **未做 / 未验**：① 焦点视觉在真机上的观感本轮**未测**（改动只经编译 + 门禁），
 电视与手机的粘滞焦点都还得回炉；② 用户回传的「调试」读数仍未收到，
 所以「那台盒子究竟是哪一路落空」至今没有实测答案；③ 未推送、未 tag、未编 release APK。
