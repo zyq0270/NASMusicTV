@@ -7,15 +7,24 @@
 >
 > 类型：`Added`（新增） | `Changed`（变更） | `Fixed`（修复） | `Removed`（移除）
 
-## [v2.39.7] - 2026-10-22
+## \[v2.39.7] - 2026-10-22
 
 ### Added
 
-- 新增频谱效果「像素城市」：像素风城市夜景，含开普敦、重庆、台北、大阪四座城（GitHub 自动构建的公开版默认不含，需本机开启 `lofi.city` 后编译）
+- 新增频谱效果「像素城市」：像素风城市夜景，含开普敦、重庆、台北、大阪四座城（GitHub 自动构建的公开版默认不含）
 - 像素城市按设定时长自动切换城市，切换时播放全屏地球过场
 - 像素城市播放时在右下角显示当前城市名、标语与该城当地时间
+- 设置 → 通用 新增「焦点高亮」开关（默认开），可自行决定是否高亮遥控器当前选中项
 
-## [v2.39.6] - 2026-10-21
+### Changed
+
+- 遥控器焦点高亮不再依赖设备型号识别：默认开启，手指点按时自动收起、按方向键恢复
+
+### Fixed
+
+- 修复「像素城市」开启后整幅画面（含灯光）闪烁的问题
+
+## \[v2.39.6] - 2026-10-21
 
 ### Added
 
@@ -35,13 +44,13 @@
 - 曲库「歌曲」Tab 在无搜索时同时列出 NAS、本地与百度网盘索引歌曲
 - 修复部分用户的电视/盒子上用遥控器导航时看不出焦点在哪一项的问题：焦点判据补充设备输入配置来源，并在窗口层增加方向键兜底
 
-## [v2.39.5] - 2026-10-21
+## \[v2.39.5] - 2026-10-21
 
 ### Fixed
 
 - 高质量人声分离在系统可用内存不足时立即提示原因并切回快速模式，不再等待十几秒后失败
 
-## [v2.39.4] - 2026-10-21
+## \[v2.39.4] - 2026-10-21
 
 ### Added
 
@@ -62,7 +71,7 @@
 - 选择器入口在所有设备上恒定显示，不再因机型差异被隐藏
 - 修复网络音乐 / MV 端点被清空或备份中为空时未回落默认值，导致 MV 搜索无结果、端点请求报错
 
-## [v2.39.3] - 2026-10-20
+## \[v2.39.3] - 2026-10-20
 
 ### Fixed
 
@@ -79,7 +88,7 @@
 
 - 感谢用户 **[@Chengxi-x](https://github.com/Chengxi-x)** 提供详细的故障信息与修改方案（`fetchAllPages` 逐条容错、`parseTrack` 安全访问器），本版本的修复直接采用了该思路
 
-## [v2.39.2] - 2026-10-19
+## \[v2.39.2] - 2026-10-19
 
 ### Fixed
 
@@ -91,13 +100,13 @@
 - **清空日志的确认框改为真正的弹窗**：此前它会作为一块遮罩显示在日志列表下方；删除歌单的确认框有同样问题，一并修正
 - **网络搜索对异常的接口响应更宽容**：接口返回对象（错误提示或包了一层的列表）时不再整次搜索失败，并会在日志里记下接口实际返回的内容摘要
 
-## [v2.39.1] - 2026-10-19
+## \[v2.39.1] - 2026-10-19
 
 ### Added
 
 - **设置页新增「日志」分区**：运行期的警告与错误（含闪退）自动记在本地，重启后仍可回看；支持刷新与一键清空（清空前二次确认），最多保留最近 400 条
 
-## [v2.39.0] - 2026-10-19
+## \[v2.39.0] - 2026-10-19
 
 ### Added
 
@@ -124,7 +133,7 @@
 
 - **删除无消费方的隐藏配置**：频谱显示开关、歌词偏移、天气城市三项（`weather_enabled` / `weather_manual_city` / `weather_auto_refresh`）及占位网盘入口行；K 歌变调 / 倍速保留在播放页即时控制，不进设置页
 
-## [v2.38.15] - 2026-10-17
+## \[v2.38.15] - 2026-10-17
 
 ### Added
 
@@ -134,13 +143,13 @@
 
 - **高质量分离失败提示不再截断，并直接附设备诊断信息**：K 歌页的失败横幅给出错误原文全量内容，随后附上机型、系统版本、指令集与运行位宽、整机总内存与剩余内存、本进程内存、ONNX Runtime 版本、模型文件大小与路径、耗时
 
-## [v2.38.14] - 2026-10-17
+## \[v2.38.14] - 2026-10-17
 
 ### Changed
 
 - **播放统计「最爱歌手」拆分合唱曲目**：「林忆莲/李宗盛」这类合作曲不再合并成一个条目，改为两位歌手分列、各记一次播放；同一位歌手的独唱与合唱归并到人，总播放次数与播放歌曲数口径不变
 
-## [v2.38.13] - 2026-10-15
+## \[v2.38.13] - 2026-10-15
 
 ### Added
 
@@ -152,7 +161,7 @@
 - **修复进入「大漠孤烟」时黑屏一下（真凶是下标越界）**：浮沙带与暗角两张位图的逐行烘焙函数里多了一次自增 ⇒ 像素下标以 2 倍速增长、撞穿行缓冲并抛异常 ⇒ 烘焙期间**整帧被丢弃**、露出黑底。修后两者能正常烘完
 - **「大漠孤烟」首帧不再空白**：进入效果（含切换画质 / 转屏重建）时先画一条与烘焙**同源**的天幕渐变顶着，下一帧再分配 14 类位图并开烘
 
-## [v2.38.12] - 2026-10-15
+## \[v2.38.12] - 2026-10-15
 
 ### Added
 
@@ -162,16 +171,16 @@
 
 - **「鸟群」三条视差带整条画错**：带子只挪了 `drawRect` 的 `topLeft`，而 Compose 的 `drawRect(brush, …)` 不会把着色器一起挪（着色器锚在画布原点）⇒ 采样落到位图之外被 `TileMode.Clamp` 折成"最后一行铺满整条带"，表现为**远树排是一排等高竖棍、近景枯树与近景草丛整条消失、栖鸟悬空**。改为平移画布定位带子（画完立刻还原），横向视差同时恢复生效
 - **「鸟群」树带顶端预留不足**：`treePad` 由 `160s` 提到 `250s`（按枝尖几何上界推导），原值会把最高那棵树的上段主干与枝杈整段裁掉
-- **「鸟群」三条带的横向视差速度补齐设计高度缩放**：`vTree/vTuft` 是 1600×900 的设计 px 系数，调用点补乘 `h/900`，否则在 1080p / 1220p 上慢 20~36%
+- **「鸟群」三条带的横向视差速度补齐设计高度缩放**：`vTree/vTuft` 是 1600×900 的设计 px 系数，调用点补乘 `h/900`，否则在 1080p / 1220p 上慢 20\~36%
 - **「雪松」三条平铺带同款缺陷**：阴云层、远景雾带、贴地吹雪带同样只挪了 `topLeft` ⇒ 云层与雾带退化成一条平的横带、横向也从不滚动；一并改为平移画布（v2.38.11 段已冻结，故记在本版）
 
-## [v2.38.11] - 2026-10-14
+## \[v2.38.11] - 2026-10-14
 
 ### Added
 
 - **新增可视化效果「雪松」（第 24 套）**：漫天大雪的冷调雪原，右侧一棵积雪阔叶大树，树下站着一个拄杖的静止剪影，肩上积雪随风力时积时落
 
-## [v2.38.10] - 2026-10-14
+## \[v2.38.10] - 2026-10-14
 
 ### Changed
 
@@ -181,7 +190,7 @@
 
 - **修复 K 歌页调完升降调 / 变速后遥控器选不中按钮**：关闭选择框后焦点回到原来的按钮上，可立即再次进入
 
-## [v2.38.9] - 2026-10-13
+## \[v2.38.9] - 2026-10-13
 
 ### Fixed
 
@@ -189,7 +198,7 @@
 - **修复「迷雾之战」在三脚巨影身上只画轮廓、内部不上色**：腿、机身与光柱在部分老电视上恢复完整填色
 - **修复进入「迷雾之战」时黑屏或长时间停在上一个画面**：进入后立刻出画面，浓雾、建筑、人群与暗角在随后几帧逐层补齐
 
-## [v2.38.8] - 2026-10-12
+## \[v2.38.8] - 2026-10-12
 
 ### Added
 
@@ -201,14 +210,14 @@
 - **搜索结果的歌曲计数标明来源与艺人**：命中艺人的全量列表不再与结果总数混读，加载完毕后不再显示「421/421」这类分数
 - **标注「版权存疑」的歌曲恢复显示来源标签**：该角标改为追加显示，不再顶替原有的「网络」来源标签；角标本身也从一行灰字改成一个划斜杠的版权符号，给歌名让出横向空间
 
-## [v2.38.7] - 2026-10-11
+## \[v2.38.7] - 2026-10-11
 
 ### Added
 
 - **网络搜索命中艺人时返回该艺人的全部作品**：结果可上下翻页续取，可播项排在前面
 - **疑似无版权的歌曲不再隐藏**，行尾标注「可能无版权」，点播失败后会自动换用同名的可播版本继续播放
 
-## [v2.38.6] - 2026-10-10
+## \[v2.38.6] - 2026-10-10
 
 ### Added
 
@@ -218,7 +227,7 @@
 - **明月效果·随音乐律动**：月晕、海面亮度、粼光与云速跟随音乐强弱轻微变化，鼓点落时水面泛起涟漪
 - **明月效果按画质档分三档细节**，电视与手机均可用
 
-## [v2.38.5] - 2026-10-08
+## \[v2.38.5] - 2026-10-08
 
 ### Added
 
@@ -229,7 +238,7 @@
 
 - **电视上用遥控器导航时看不到焦点在哪**：现在遥控器移动焦点时所有界面都会亮起焦点指示环，且切换页面后立即可见，无需先按一次键
 
-## [v2.38.4] - 2026-10-07
+## \[v2.38.4] - 2026-10-07
 
 ### Added
 
@@ -242,10 +251,10 @@
 
 - **效果「世界」改为仅在最高画质档提供**：中/低画质档下不再出现在可选列表里
 - **效果「世界」资源瘦身**：5 个运行时用不到的文件移出打包目录（进版本库、不进 APK），该目录在安装包内减小 2.02 MB
-- **切换视觉效果时的卡顿明显缩短**：各效果的等待时间从 2~5 秒降到约 1 秒以内
+- **切换视觉效果时的卡顿明显缩短**：各效果的等待时间从 2\~5 秒降到约 1 秒以内
 - **彗星尾巴改为柔和的双尾**：离子尾（蓝白、笔直）+ 尘埃尾（淡黄、略弯），尾缘由硬边改为渐隐，彗核周围增加弥散的彗发
 
-## [v2.38.3] - 2026-10-05
+## \[v2.38.3] - 2026-10-05
 
 > **全量代码审查报告（docs/archive）全部 29 个问题项修复：3 高危 + 12 中危 + 15 低危 + 文档同步**
 > **权限与签名统一：本地音乐总开关（按需申请权限）、Manifest 权限瘦身、CI 发布签名 fail-fast**
@@ -283,7 +292,7 @@
 - **修复 MainViewModel 构造期接线解引用后声明字段**：ServerViewModel 等三个子 VM 的接线区后移到全部字段声明之后，消除启动 NPE 风险（同类问题曾在 v2.37.0 引发启动崩溃）
 - **修复 Navidrome 取消收藏失效**：star/unstar 方向改为以调用方传入状态为准（对齐 Subsonic 修复版），服务器全量收藏拉取失败时不再全部误判为未收藏
 - **修复高对比度模式整条从未生效**：原掩码 0x20000 非任何 Android 标志位、恒为 false；改读系统 `high_text_contrast_enabled` 并监听变化实时重组
-- **修复天气电台播放记录与收藏按合成 id 记账**：时间线与心形判定剥离 nas_/nasf_ 前缀，同一首歌不再重复计数、心形不再恒空
+- **修复天气电台播放记录与收藏按合成 id 记账**：时间线与心形判定剥离 nas\_/nasf\_ 前缀，同一首歌不再重复计数、心形不再恒空
 - **修复取消全部下载被静默吞掉**：下载完成段（封面/歌词/重命名/内嵌）补取消检查点，取消后不再被 COMPLETED 状态覆盖、不再弹「已下载」通知
 - **修复天气 API（OWM/Open-Meteo/IP 定位）四处不检查 HTTP 状态**：key 失效时日志记录 HTTP 码而非静默降级
 - **修复通知封面切歌竞态**：封面加载完成后校验当前播放项仍是发起时的歌曲才写入，通知不再残留上一首封面
@@ -311,8 +320,7 @@
 
 - 全量代码审查报告（2026-10-05）归档于 docs/archive/，含两轮核验与勘误记录（29 项问题、修复路线与影响面修正）
 
-
-## [v2.38.2] - 2026-10-04
+## \[v2.38.2] - 2026-10-04
 
 > **新增可视化效果「海边」（俯拍岸线频谱），并移除 9 个效果；效果库由 30 套调整为 21 套**
 
@@ -338,7 +346,7 @@
 - **海边帧率偏低，已完成真机成本归因并确认瓶颈在电视硬件**
 - **修复可视化测试工具的一处越界缺陷**
 
-## [v2.38.1] - 2026-10-02
+## \[v2.38.1] - 2026-10-02
 
 > **应用内音量：独立于系统音量，设置页与播放页均可调节**
 
@@ -346,7 +354,7 @@
 
 - **应用内音量**：应用级增益（0–100%），独立于系统音量；设置页滑条与播放页音量条双入口，跨曲交叉淡入淡出自动适配
 
-## [v2.38.0] - 2026-10-01
+## \[v2.38.0] - 2026-10-01
 
 > **可视化质感升级：21 套效果重做，新增可视化画质档位**
 
@@ -380,7 +388,7 @@
 - **数字雨**：低画质档位下进入即闪退
 - **单测门禁**：测试源码树编译失败
 
-## [v2.37.6] - 2026-09-29
+## \[v2.37.6] - 2026-09-29
 
 > **精简可视化效果库**
 
@@ -391,7 +399,7 @@
 
 ### Changed
 
-- **齿轮（CONCENTRIC_GEARS）**：质感重做——随机布局 13 齿轮三级啮合传动（每次进入全新布局；参数化真实齿形 + 轮毂/辐条/轮缘，速比与转向按齿数锁定）+ 外围独立卫星齿轮组（各组异速持续旋转），暗调金系双层描边发光 + 径向渐变/暗角/颗粒/星野背景 + 轮间啮合连线，音乐缓慢驱动（脉冲棘轮推进、能量呼吸缩放 0.98~1.05）
+- **齿轮（CONCENTRIC_GEARS）**：质感重做——随机布局 13 齿轮三级啮合传动（每次进入全新布局；参数化真实齿形 + 轮毂/辐条/轮缘，速比与转向按齿数锁定）+ 外围独立卫星齿轮组（各组异速持续旋转），暗调金系双层描边发光 + 径向渐变/暗角/颗粒/星野背景 + 轮间啮合连线，音乐缓慢驱动（脉冲棘轮推进、能量呼吸缩放 0.98\~1.05）
 - **怀旧（VINTAGE_TV）**：两侧黑边改为胶片边缘（方孔居中），胶片持续向上滚动
 - **轨道（ORBITAL_RINGS）**：效果重做为完整太阳系（八大行星/卫星系统/土星环/星空，倾斜俯视椭圆轨道 + 全屏自适应），太阳随音乐律动
 
@@ -400,7 +408,7 @@
 - **移除 11 个可视化效果**：沉浸辉光、径向星芒、粒子风暴、万花筒、粒子银河、棱镜彩虹、极光、声弦、几何环、构成、螺旋
 - **移除 RECORD_AUDIO 权限**：启动不再请求麦克风权限（频谱可视化改为 PCM 采样通道）
 
-## [v2.37.5] - 2026-09-27
+## \[v2.37.5] - 2026-09-27
 
 > **修复 MTV 页遥控器焦点无法移到右侧控制按钮**
 
@@ -408,7 +416,7 @@
 
 - **MTV 页遥控器焦点卡在返回按钮**：PlayerView 视频层禁用 Android 视图焦点（不可聚焦/子树全禁/不可点击）+ 进入页焦点落播放/暂停按钮
 
-## [v2.37.4] - 2026-09-27
+## \[v2.37.4] - 2026-09-27
 
 > **修复照片墙 Jellyfin 照片源获取 0 张**
 
@@ -416,7 +424,7 @@
 
 - **照片墙 Jellyfin 照片源全 0**：扩展名判定改从 Jellyfin `Path` 字段（实际文件路径）取，不再用不带扩展名的 `Name` 字段过滤
 
-## [v2.37.3] - 2026-09-27
+## \[v2.37.3] - 2026-09-27
 
 > **新增怀旧老电视频谱效果**
 
@@ -441,20 +449,20 @@
 - 怀旧效果歌词居中定位，并修复长行文字左侧被截断
 - 怀旧效果抖动相位改 dt 累加，修复大时间基数下正弦抖动冻结/跳变
 
-## [v2.37.2] - 2026-09-26
+## \[v2.37.2] - 2026-09-26
 
 > **齿轮可视化重做：同心嵌套环 → 啮合行星轮系**
 
 ### Changed
 
-- **齿轮效果重做**：E33 由同心嵌套环改为行星轮系，太阳轮驱动 2~4 只行星轮，各齿轮绕自身轴心旋转并齿对齿啮合
+- **齿轮效果重做**：E33 由同心嵌套环改为行星轮系，太阳轮驱动 2\~4 只行星轮，各齿轮绕自身轴心旋转并齿对齿啮合
 
 ### Fixed
 
 - **齿轮绕自身轴心自转**：此前所有齿轮整体绕画布中心公转（"齿轮乱跑"），现各齿轮钉在各自轴心上自转
 - **齿轮旋转稳定**：转速改为匀速基线 + 节拍推进，移除高频抖动调速，啮合观感不抖
 
-## [v2.37.1] - 2026-09-25
+## \[v2.37.1] - 2026-09-25
 
 > **全量代码审查修复：17 条 High + 8 条快修（审查报告 docs/NASMusicTV-代码审查报告-2026-09-25.html）**
 
@@ -516,7 +524,7 @@
   纳入 saveLock；WaterfallRenderer 退出 recycle 双缓冲；缓存设置页清理后即时刷新尺寸；
   删死串 mine_remove_song
 
-## [v2.37.0] - 2026-09-23
+## \[v2.37.0] - 2026-09-23
 
 > **照片墙：三来源照片全屏轮播可视化（43 种转场 + 端上人脸检测）**
 
@@ -561,7 +569,7 @@
 - **外接存储挂载事件 API 22 短路**：`StorageMonitor` 在老系统上挂载 / 拔盘回调中断的问题
   （同时修复电视上 USB 音乐扫不到的既有缺陷）
 
-## [v2.36.7] - 2026-09-23
+## \[v2.36.7] - 2026-09-23
 
 > **手机竖屏全屏沉浸式播放页 + 逐字歌词折行推进修复**
 
@@ -576,12 +584,12 @@
 
 - **设置「关于」页长值把标签挤没**：标签与值改为 1 : 1.5 分配宽度，长值在右栏内换行且
   恒右对齐，标签在任何字号 / 屏幕形态下都保持可见（`AboutRow`）
-- **逐字歌词折行时高亮「倒带」**：一句歌词被排成 2~3 个可视行时，高亮边界不再从第一折行
+- **逐字歌词折行时高亮「倒带」**：一句歌词被排成 2\~3 个可视行时，高亮边界不再从第一折行
   末端向左回退 —— 行尾字符改用本行右缘作插值终点，并保证边界像素单调不回退，
   实现「完整走完第一折行再走第二折行」。手机竖屏 / 横屏 / TV / K 歌页共用同一渲染组件，
   一并修复
 
-## [v2.36.6] - 2026-09-22
+## \[v2.36.6] - 2026-09-22
 
 > **手机竖屏歌词跳转改长按激活（手势冲突修复）**
 
@@ -599,7 +607,8 @@
 - 服务器配置扫码填入：二维码改为常驻显示在标题右侧（TV 无触摸无法点击展开）、
   HTTP 服务随页面开关
 - ProviderMirrorTest 在 CI 慢机偶发超时：镜像更新等待窗口 1s→3s（断言不变）
-## [v2.36.5] - 2026-09-22
+
+## \[v2.36.5] - 2026-09-22
 
 > **全量代码审查修复：安全鉴权 · 协议修正 · 一致性收敛 · 性能**
 
@@ -613,6 +622,7 @@
   选择后端类型并填写服务器地址 / 用户名 / 密码 / 显示名，提交后自动填充到
   电视端表单（后端类型同步切换），由用户遥控器确认后连接；含一次性 token
   鉴权、后端类型白名单、地址 scheme 校验
+
 - **手机端歌词拖拽跳转播放位置（横竖屏）**：拖动浏览歌词时顶部出现虚线指示条，
   滑到虚线处的歌词行高亮为目标，松手即跳到该行起始时间播放；拖拽期间自动
   跟行暂停，跳转后自动恢复（TV 端无触摸，行为不变）
@@ -659,7 +669,8 @@
   均衡器 / 我的 / 播放队列 / 设置七个页面（顶层 padding 三态化：
   TV 32/20 不变，手机横屏水平 16dp / 垂直 0dp，竖屏 16/12 不变）
 - AGENTS.md Kotlin 版本对齐实际 build 配置（2.2.10 → 2.3.10）
-## [v2.36.4] - 2026-09-21
+
+## \[v2.36.4] - 2026-09-21
 
 > **E37「分子」：去掉刻画抖动 · 分子式改专用排版 · 修好分子轮换**
 
@@ -687,7 +698,7 @@
 - `ChemicalFormulaTest`（化学式排版，含 run 左缘连续性 / 下标下沉量 的负向自证）
 - `MoleculeMotionTest`（运动相位：DRAW 恒速、单帧增量有界、dt 钳制）
 
-## [v2.36.3] - 2026-09-21
+## \[v2.36.3] - 2026-09-21
 
 > **手机端手势跟手化 · 横屏图标修正 · 新增 E37「分子」频谱效果**
 >
@@ -731,7 +742,7 @@
 - **曲库 pager 平移方向反了**（v2.36.3 开发中真机反馈）：`translationX` 公式
   `(fraction − 页索引)` → `(页索引 − fraction)`，手指左划现在正确滑向右侧 TAB
 
-## [v2.36.2] - 2026-09-20
+## \[v2.36.2] - 2026-09-20
 
 > **手机端 4 个真机问题修复 · 老备份导入容错**
 >
@@ -794,7 +805,7 @@
 - 门禁结果：`testDebugUnitTest` **874 例 / 0 失败**、`lintDebug` **0 Error / 272 Warning**、
   `assembleRelease` BUILD SUCCESSFUL → `NASMusicTV-release-v2-36-2.apk`
 
-## [v2.36.1] - 2026-09-20
+## \[v2.36.1] - 2026-09-20
 
 > **车机蓝牙媒体按键修复 · 手机横竖屏布局修复**
 >
@@ -845,7 +856,7 @@
 
 - 新增门禁 `MediaSessionAccessPolicyTest`（8 例，含源码扫描「不得出现 reject」+ 三层自证）
 
-## [v2.36.0] - 2026-09-19
+## \[v2.36.0] - 2026-09-19
 
 > **手机竖屏 UI 适配与横竖屏切换 · Release 独立签名**
 >
@@ -927,7 +938,7 @@
 - CI `build` job 签名步骤改双模式：配置 Secrets 时用正式 keystore 签名，未配置时回退
   throwaway `ci-keystore.jks`
 
-## [v2.35.0] - 2026-09-18
+## \[v2.35.0] - 2026-09-18
 
 > **网络音乐多码率：补齐 192 档，播放与下载支持按档位静默降级；同曲多档可共存**
 >
@@ -1059,7 +1070,7 @@
 - `DownloadDatabase` 的 `exportSchema` 由 `false` 改为 `true`，导出
   `app/schemas/.../DownloadDatabase/{1,2}.json` 作为迁移测试的权威基线（勿手改 JSON）
 
-## [v2.34.4] - 2026-09-18
+## \[v2.34.4] - 2026-09-18
 
 > **修复：导入歌单 stub 不再误标「NAS」来源，播放时同步/异步补全后标签即时刷新**
 
@@ -1089,7 +1100,7 @@
 - `PlaylistEnricher.enrichAndPersistEverywhere()` 返回类型从 `Boolean` 改为 `Song?`
   （返回补全后的 Song，未命中返回 null），避免调用方需二次调用 `enrichSong()`
 
-## [v2.34.3] - 2026-09-18
+## \[v2.34.3] - 2026-09-18
 
 > **歌单导入：m3u / txt / json / 网易云歌单一键入库，URL 直链直接使用并校验可达性**
 >
@@ -1142,7 +1153,7 @@
 - `backend.playlist.*` 测试包 **73 例全绿**（Parser 27 + Importer 15 + UrlReachabilityChecker 15 + Enricher 16）
 - 「URL 可达性判断后直接使用」的用户决策（2026-09-18）已落实到导入编排与 UI
 
-## [v2.34.2] - 2026-09-17
+## \[v2.34.2] - 2026-09-17
 
 > **网络音乐播放失败多级降级：链接失效不再连锁跳歌**
 >
@@ -1151,6 +1162,7 @@
 > 替换两级降级，大幅降低连续跳歌概率。
 >
 > **降级链路（从轻到重）**：
+>
 > - 层级 0：`resolvePlayUrl(forceRefresh=true)` — 强制绕过缓存重新解析 + 失败清缓存
 > - 层级 1：同源重搜 — `title+artist` 关键词重搜，逐条可播校验取替代曲
 > - 层级 2：跨源替换 — 遍历其他已注册源搜索 + 可播校验，替代曲替换队列中对应位置
@@ -1176,9 +1188,10 @@
 - 新增 `NetworkMusicManagerTest`（**11 例 / 0 失败**）：forceRefresh 跳过缓存、失败清缓存、跨源降级顺序、候选可播校验、同源排除、防死循环
 
 ### Test
+
 - 全量 `testDebugUnitTest` 通过（11 例新增 NetworkMusicManagerTest）
 
-## [v2.34.1] - 2026-09-17
+## \[v2.34.1] - 2026-09-17
 
 > **沉浸播放页：封面右侧竖排显示歌曲名 / 艺术家**
 >
@@ -1210,11 +1223,12 @@
   **已经是 false**，默认行高足够紧凑
 
 ### Test
+
 - 新增 `ImmersiveVerticalTextTest`（**9 例 / 0 失败**）：竖排拆字按码点（emoji / 生僻字的
   **代理对不被拆开**）、超长截断补「…」且总长不超上限、长度正好等于上限时不补、上限 1、空串
 - 全量 `testDebugUnitTest` **556 例 / 0 失败**
 
-## [v2.34.0] - 2026-09-17
+## \[v2.34.0] - 2026-09-17
 
 > **播放统计新增「听歌热力图」——按日期看播放**
 >
@@ -1229,6 +1243,7 @@
 ### Added
 
 **数据层：按天播放统计（`play_stats_daily`）**
+
 - 新增 DataStore 键 `play_stats_daily`，格式 `{ "yyyy-MM-dd": count }`；保留最近 **400 天**
   （> 53 周窗口的 371 天），超出滚动清理
 - ⚠️ 写入点**只挂 `recordPlayWithSong`**（与月度统计同一次 DataStore edit，原子写），
@@ -1238,6 +1253,7 @@
   增量计数早已生效，回填会重复计数）。上限受 `play_records` 500 条约束，属"尽力而为"
 
 **聚合层：`data/stats/PlayHeatmap.kt`（新增，纯函数可单测）**
+
 - 窗口 = 最近 53 周；**列 = 周、行 = 星期（行 0 = 周日）**；未来日期为 `null`（留空不绘制）
 - 颜色分级取**非零播放量的四分位**而非"相对峰值" —— 峰值远高于日常时，相对峰值会把绝大多数
   格子压成同一档，热力图失去信息量
@@ -1246,6 +1262,7 @@
 - 月份标签对齐到"该月第一列"；与上一个标签不足 3 列时**顺延而非丢弃**（窗口开头常出现只剩几天的残月）
 
 **UI：`ui/screens/stats/PlayHeatmapChart.kt`（新增）**
+
 - 格子边长按可用宽度自适应，夹在 3…16dp：电视大格、手机小格，**都不需要横向滚动**
 - 网格用**单个 Canvas 一次性绘制**（371 格），低端 TV 上比 371 个 Compose Box 更稳
 - **纯展示、不入 D-Pad 焦点链**，不打乱 返回 → Tab 的焦点顺序
@@ -1258,13 +1275,14 @@
 `pstats_entry_desc` 补上"听歌热力图"
 
 ### Test
+
 - 新增 `PlayHeatmapBuilderTest`（**18 例 / 0 失败**）：网格 53×7 与星期对齐、未来日期留空、
   窗口边界、窗口外数据剔除、单日定位、跨月跨年、最长连续、峰值日（并列取最早）、四分位分级、
   月份标签（13 个且列间距 ≥ 3）
 - ⚠️ 其中「**写入端 `PlayStatsRepository.currentDay` 与读取端 dateKey 同口径**」这条最关键：
   口径不一致会导致"统计写得进去、热力图读不出来、整张图全空"，而症状与"没有数据"一模一样
 
-## [v2.33.0] - 2026-09-17
+## \[v2.33.0] - 2026-09-17
 
 > **Android Auto 车机支持（阶段 1：可发现 + 可浏览 + 可播放）**
 >
@@ -1285,23 +1303,27 @@
 ### Added
 
 **Android Auto 可发现性（缺任一项车机完全看不到本应用）**
+
 - 新增 `app/src/main/res/xml/automotive_app_desc.xml`，内容为 `<automotiveApp><uses name="media"/></automotiveApp>`
 - `AndroidManifest.xml` 的 `<application>` 新增 `com.google.android.gms.car.application` meta-data 指向该文件
 - `PlaybackService` 的 `intent-filter` 补注册 `android.media.browse.MediaBrowserService`（原先只有 `androidx.media3.session.MediaLibraryService`）。两个 action **必须同时存在**：缺前者 Media3 客户端找不到，缺后者平台 `MediaBrowser` / Android Auto 找不到
 
 **媒体浏览树（`player/MediaLibraryTree.kt` 重写）**
+
 - 根菜单固定 **4 项可浏览节点**：当前播放 / 离线下载 / 收藏 / 歌单，**按 root hints 动态裁剪**
 - 前 3 项**不依赖家庭内网** —— 开车时手机在移动数据上、NAS 内网地址不可达，必须保证车机端始终有内容可播
 - 歌单下钻：`pl` → `pl/{id}` → 歌曲
 - 叶子节点只带 `mediaId`、**不设 URI**（网络歌曲 `streamUrl` 按设计不持久化；NAS 流地址带 token 会过期），URI 由播放入口统一解析
 
 **根菜单 tab 图标（阶段 2.5）**
+
 - 新增 4 个**单色白矢量图标**（`res/drawable/`，24dp）：`ic_auto_queue`（播放三角）/ `ic_auto_download`（下箭头）/ `ic_auto_favorite`（五角星）/ `ic_auto_playlist`（三横线）
 - 官方规范原文要求：*"Monochrome (preferably white) icons for each tab item"*，此前 4 项根菜单**完全没有图标**，车机上是占位样式
 - **⚠️ 只设 `artworkUri` 指向矢量 XML 是不可靠的**：`BitmapFactory` **无法解码 VectorDrawable**，而 Media3 到 Android Auto 的 `iconUri` 通路要求消费方能解码该 URI。故采用**「矢量图源 + 运行时光栅化」**：`MediaLibraryTree.rasterizeIcon()` 把矢量渲染成 256×256 PNG，经 `setArtworkData()` 走**确定性最高的 `iconBitmap` 通路**（`LegacyConversions.java:329`）；同时仍设 `artworkUri`（`android.resource://`）作次选（`LegacyConversions.java:357`）
 - 结果按 resId 缓存（4 个图标只渲染一次）；渲染失败降级为「无图标」，**不影响内容树加载**
 
 **提供方图标 attribution icon（阶段 4.1）**
+
 - 新增 `res/drawable/ic_car_attribution.xml`（24dp 单色纯白），并在 `<application>` 下声明 `androidx.car.app.TintableAttributionIcon` meta-data
 - 官方原文（`training/cars/media/configure-manifest`「定义提供方图标」）：用于媒体卡片等「媒体内容优先」的位置，**必须是单色**、推荐矢量
 - 图形**复用品牌标记**（与 `mipmap-*/ic_launcher` 的 adaptive icon foreground 同源：播放三角 + 左右两道声波），但**没有重画路径** —— 用 `<group>` 等比放大（`scale 1.75` / `translate(-40.5, -40.5)`，推导见 `docs/archive/android-auto-plan.md` §七 4.1），避免手写坐标偏差。放大是必需的：adaptive icon 前景只占 44% 宽度是**为了启动器安全区裁剪**，本图标是独立图标、不经裁剪，直接沿用会明显偏小
@@ -1309,6 +1331,7 @@
 - **⚠️ 两个易误判点**：① meta-data 名带 `androidx.car.app` 前缀，但**不需要引入 Car App Library 依赖**（它只是平台读取的字符串键；那个库是给导航/POI 类 AAOS 模板应用用的，与 Media3 媒体应用是两条路）——「不新增依赖」的路线前提依然成立；② 名字里的 `Tintable` 表示**平台会着色**，故填纯白而非品牌青绿 `#2DD4BF`
 
 **搜索与语音（阶段 3）**
+
 - `MediaLibraryTree` 新增 `suspend fun search(query)` —— **双源合并**：网络音乐（Meting，公网，始终尝试）+ NAS 后端（内网，`searchSongs`，尽力而为）。按 `song.id` 去重（`LinkedHashMap` 保序，网络结果排前面），上限 `MAX_SEARCH_RESULTS = 50`；复用既有的 `songToItem()`，故结果天然满足 `LibraryResult.ofItemList` 对 item 的三项硬要求（`mediaId` 非空 + `isBrowsable` / `isPlayable` 显式设置）
 - `PlaybackService` 新增 `onSearch` —— 按 Media3 的**两步流程**，本方法只回**结果码**，并通过 `notifySearchResultChanged(browser, query, itemCount, params)` 通知**结果数量**。⚠️ 只回结果码而不通知数量，车机端**不会**来取结果（表现为「搜了但列表空」）
 - `PlaybackService` 新增 `onGetSearchResult` —— 返回真正的结果列表。⚠️ **不假设 `onSearch` 已先被调用**：javadoc 明确 query「may not」先经 `onSearch`（走 `MediaBrowserCompat#search` 时不会），故本方法**能独立搜索**，60s TTL 的 `searchCache` 只是省一次重复搜索的优化、不是正确性依赖
@@ -1317,6 +1340,7 @@
 - 新增 `SEARCH_TIMEOUT_MS = 10_000L`（比浏览的 `BROWSE_TIMEOUT_MS` 宽 —— 要跨公网 + 内网两源）；NAS 侧失败用 `AppLog.d` **静默跳过**（内网不可达在车机场景下是**常态**，不是异常）
 
 **播放入口（`PlaybackService`）**
+
 - 新增 `onAddMediaItems` 覆写（默认实现在 item 缺 `LocalConfiguration` 时会抛 `UnsupportedOperationException`）
 - 新增 `onSetMediaItems` 覆写 —— 覆写后它成为**所有点歌路径的统一入口**（legacy 的 `playFromMediaId` / `playFromUri` 等都会汇聚过来）
 - URI 三级解析：已有 URI → `Song.streamUrl` → `NetworkMusicManager.resolvePlayUrl()`（走公网，车机场景可用）
@@ -1324,6 +1348,7 @@
 - 新增 `onConnect` **包验证**：放行系统进程 / AAOS 控制器 / Android Auto 控制器 / 本应用 / Google 助理（手机 `com.google.android.googlequicksearchbox` 与 AAOS `com.google.android.carassistant` 包名不同，分别放行）；DEBUG 构建全放行以免调试期"莫名连不上"
 
 **`PlayerManager` 新增 API**
+
 - `syncQueueFromExternal(songs, startIndex)` —— **只同步 T3 状态镜像、不触碰 player**。因为 Media3 会用 `onSetMediaItems` 的返回值自行调 `player.setMediaItems()`，此处再调 `playQueue()` 会重复设置
 - `updateStreamUrl(index, url)` —— 回写队列中某条的 `streamUrl`，不动 `currentIndex` / `currentSong`
 - `replayAt(index)` —— URL 异步解析完成后原地续播
@@ -1355,11 +1380,11 @@
 - `testDebugUnitTest` **529 例 / 0 失败 / 0 错误**（57 个结果 XML；基线 518/56，**净增 11 例 = `SearchMergeTest`**）
 - `lintDebug` **0 Error / 254 Warning**（基线 0/257；**净减 3 条**，来源见下）。**阶段 3 新增代码与阶段 4.1 的 1 个 drawable + 1 个 meta-data 均未带来新告警**；且 lint 在阶段 3 实施期**抓出 2 条真实 error**（`putIfAbsent` 的 API 24+ 问题，见 `Fixed`），修完后归零
 - ⚠️ **构建环境提示（重要）**：`拒绝访问` / `AccessDeniedException` 类报错有**两种成因**，靠 stderr 区分 ——
-  | 现象 | 判定依据 | 处置 |
-  |---|---|---|
-  | **沙箱拦截** Gradle 删除/写入自身产物 | stderr 有 `[sandbox] 命令被沙箱拦截` | 关闭沙箱（提权）重跑 |
-  | **真·文件锁** | stderr **无**任何 sandbox 字样 | `./gradlew.bat --stop` → 删掉出问题的中间产物目录 → 重跑 |
-  本轮两种都实际遇到（一次有 sandbox 字样；另一次提权后 `sandbox` 命中数为 0，却仍在 `project_dex_archive\...\*.dex` 上报 `AccessDeniedException`，实测该目录可写、文件非只读 → 属构建期瞬时锁）。详见 `docs/technical-overview.md` §10.157
+  | 现象                                                                                                                                                                               | 判定依据                         | 处置                                         |
+  | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------- | ------------------------------------------ |
+  | **沙箱拦截** Gradle 删除/写入自身产物                                                                                                                                                        | stderr 有 `[sandbox] 命令被沙箱拦截` | 关闭沙箱（提权）重跑                                 |
+  | **真·文件锁**                                                                                                                                                                        | stderr **无**任何 sandbox 字样    | `./gradlew.bat --stop` → 删掉出问题的中间产物目录 → 重跑 |
+  | 本轮两种都实际遇到（一次有 sandbox 字样；另一次提权后 `sandbox` 命中数为 0，却仍在 `project_dex_archive\...\*.dex` 上报 `AccessDeniedException`，实测该目录可写、文件非只读 → 属构建期瞬时锁）。详见 `docs/technical-overview.md` §10.157 |                              |                                            |
 - 改动文件在 lint 报告中的命中：`PlaybackService` / `BrowseCache` / **`MediaLibraryTree` 均 0 命中**；`PlayerManager` 2 条 `UseKtx`（`PlayerManager.kt:520` / `:532`），**为存量、本次未触碰**
 - **警告 257 → 254 是净减少，不是新增**：`MediaLibraryTree` 的 `Uri.parse` 从基线 3 处降到 **0 处**（全部改为 `String.toUri()`），`UseKtx` 告警相应净减 3 条（全项目 `UseKtx` 22 → 19）
 - 4 个新图标**未被 `UnusedResources` 误报**（152 条 `UnusedResources` 里 `ic_auto_*` / `banner` **0 命中**）—— 说明 Kotlin 侧 `R.drawable.*` 引用被 lint 正确识别为「已使用」
@@ -1373,11 +1398,12 @@
 - **未做真机/车机验收**：DHU 需 `adb forward tcp:5277 tcp:5277` + `desktop-head-unit.exe`；真车默认只显示 Play 商店应用、侧载需在 Android Auto 开发者模式打开 "Unknown sources"。按项目约定，上机验证由用户执行
 - **版本**：v2.32.7 → **v2.33.0**（versionCode 146 → 147）
 
-## [v2.32.7] - 2026-09-16
+## \[v2.32.7] - 2026-09-16
 
 ### Changed
 
 **沉浸播放页重做：左半封面（右缘虚化渐黑）+ 右半黑底歌词**
+
 - 改前沉浸模式是「全屏模糊封面背景 + 歌词全宽」，左侧封面列被整列隐藏——封面看不到，歌词压在模糊封面上
 - 改后：**左半屏 = 封面大图**（`ContentScale.Crop` 铺满，右缘渐进虚化并渐变到纯黑），**右半屏 = 纯黑背景 + 歌词**，两侧各占一半
 - 沉浸模式整屏底色改纯黑；歌词上下渐隐遮罩同色（新增 `LyricsView.fadeMaskColor`），避免黑底上出现深蓝渐变带
@@ -1396,7 +1422,7 @@
 - **真机验收**：用户在电视（`9R54_G8S` / SDK 22 / Android 5.1.1）上实测沉浸播放页**通过**（2026-09-16）。这也顺带证实 `CompositingStrategy.Offscreen` + `BlendMode.DstIn` 渐变遮罩在 API 22 上确实生效（曾担心无离屏层会误裁已绘制内容，实测不成立）
 - **版本**：v2.32.6 → **v2.32.7**（versionCode 145 → 146）
 
-## [v2.32.6] - 2026-09-16
+## \[v2.32.6] - 2026-09-16
 
 > 2026-09-16 审查报告（`docs/archive/code-review-2026-09-16.md`）修复落地：共 **25 项**（P0×2 / P1×7 / P2×11 / P3×5）。
 > **P1-3** 经产品裁定为有意设计、不修；**P1-9** 经核验为误报、撤回——两条保留编号留档，防止后续轮次重复上报。
@@ -1407,6 +1433,7 @@
 ### Fixed
 
 **跨链路一致性**
+
 - **P0-1（阻断）下载链路未注入认证头**：`SongDownloadManager` 的下载 client 未走 `BackendAuthHeaders`，静默重登后下载持续 401。修复：补 `forHost(host)` 拦截器，host **精确匹配**使令牌不随 302 泄漏到第三方域
 - **P0-2 孤儿恢复分支永不命中**：下载中断后 `entity.audioPath` 为 null 时无法定位已落盘文件。修复：新增 `recoverFinalPathOrNull()`，按 artist/album/title 反推最终路径（含 ` (2..10)` 去重序号）
 - **P1-2 下载完成/失败通知不可见**：`DownloadViewModel.message` 存在但**全仓库无 UI 消费方**（唯一被消费的是 `MainActivity` 的 `viewModel.errorMessage`）。修复：改走 `NasMusicApp.downloadNotifyMessage` → `MainViewModel.showError`
@@ -1415,6 +1442,7 @@
 - **P2-4 USB 广播被 scheme 过滤**：单个 `IntentFilter` 的 `file` scheme 约束误伤了 `MEDIA_*` 之外的广播。修复：拆成 media/usb 两个 filter
 
 **并发与队列正确性**
+
 - **P1-5 `cancelAll` 重启 loop 致新旧 loop 并存**：`cancelAll` 末尾 `startLoop()` 在旧 loop 仍阻塞于 OkHttp socket 读时立即重启，**两个 loop 并存破坏串行队列保证**。修复：`call.cancel() + cancelRequested 标志 + drain 队列`，loop 常驻不重启
 - **P1-7 T3 三元组不同帧发布**：`queue` / `currentIndex` / `currentSong` 未在同一次 `_playerState.update` 写入。修复：REPEAT_ONE 回卷/末首与 `onPlaybackEnded` 的 REPEAT_ALL 均同帧发布
 - **P2-6 SmartRadio 陈旧任务回写**：上一轮生成任务未取消时会覆盖新结果。修复：以 `currentCoroutineContext()[Job].isActive` 为唯一准入判据（锁内二次确认）
@@ -1422,11 +1450,13 @@
 - **P2-9 `/api/search` 阻塞 worker**：NanoHTTPD 每请求一线程，慢搜索会占满 worker。修复：`Semaphore(2)` + `tryAcquire` 失败直接 **503 快速失败不排队** + 慢查询耗时日志
 
 **静默截断与数据完整性**
+
 - **P2-7（数据丢失）飞牛分页静默截断**：末页判据为 `items.size() < size`，服务端某页因限流/过滤少发几条即被误判为末页，**后续页静默丢失且无任何日志**（收藏/全量搜索少歌）。修复：优先按 `data.total` 判定（`pagesFetched * size >= total`），`total` 缺失才回退旧判据；新增 `fetchPageEnvelope()` 取整个 `data` 信封
 - **P2-11 模型上传缺完整性校验**：`ModelTransferServer.handleUpload` 落盘后不校验。修复：补 SHA-256 比对 `EXPECTED_SHA256`（private → internal）；multipart header 解析加 **8KB 总量 + 2KB 单行**上限防内存放大
 - **P3-4 Room schema 未留档**：`exportSchema = true` 但**从未配 `room.schemaLocation`**——Room 只打警告且**一个 schema 都不导出**。修复：补 `ksp { arg("room.schemaLocation", …) }`，落盘 `app/schemas/…LocalMusicDatabase/3.json`（version 3 / 17 字段 + 1 索引），**需随代码入库**
 
 **边界与语义修正**
+
 - **P2-10 移除队列末尾正在播放项会跳歌**：移除末尾项使 ExoPlayer 进 `STATE_ENDED`，被 `onPlaybackEnded` 的 REPEAT_ALL 误判成「到队尾」而 `seekTo(0)`，**跳到不相干的歌**。修复：抽纯函数 `computeQueueRemoval()` + 显式 `seekTo` 对齐
 - **P3-5 天气电台 OWM→WMO 映射错乱**：`mapOpenWeatherMapCode` 返回的 20/50/60/70 **落不进任何 `WeatherMood` 区间**，导致 OpenWeatherMap 路径的天气电台**一律回退 CLOUDY**。修复：改回真 WMO 码 45/51/61/71；`describeWeatherCode` 对照 WMO 表重写
 - **P3-2 Demucs 逐帧边界检查恒不命中**：三个循环上界已保证（约 4200 万次/4min 死分支）。修复：删除，注释写明调用方须自行保证 `gi < totalSamples`
@@ -1435,28 +1465,32 @@
 - **P2-1** 进度回调按 `PROGRESS_STEP` 节流；**P2-5** `_downloadStates` 统一 `.update{}`；**P1-1** `fullScan` 空扫描保留旧索引并 `loadFromCache()`；**P1-4** 空间预估 `* 1024L`（`SongDownloadManager` / `AutoDownloadController` 两处）；**P1-8** `/api/queue/add` 加 try/catch + title 非空 + URI scheme 白名单
 
 ### Added
+
 - `app/schemas/com.nasmusic.tv.backend.local.db.LocalMusicDatabase/3.json` — Room schema 留档产物（P3-4 的副产物），**需随代码入库**
 - `QueueRemovalTest`（6 例）— 覆盖 `computeQueueRemoval` 全部边界，含「移除末尾当前项」这一原缺陷场景
 
 ### Docs
+
 - `AGENTS.md`：更正「单测在本机跑不起来」的过时结论（实测 `testDebugUnitTest` 可正常运行）；补充「`assembleDebug` 不编译 test 源码」
 - `docs/technical-overview.md` §10.155 新增本节记录；§10.146 / §10.147 内三处「本机无法跑单测」加日期化更正标注（保留历史原貌，不改写）
 - `review-report-audit` 技能同步更正同一处过时结论
 
 ### 说明
+
 - **过程中发现**：第一批修复（P0/P1/P2-1..6）里藏着一处**编译错误**——`SongDownloadManager.kt:530` 把缺 `else` 的 `if` 当表达式用。这说明该批修复当时**未经任何编译验证**。教训：**`file:line` 存在 ≠ 代码能编译**，「已修」的充分性必须由编译兜底。
 - **环境结论勘误**：开工时依据的「本机单测不可用（worker JVM 一启动即死）」**已过时并被实测推翻**——全量 518 例 0 失败。根因推断为**卡死的 Gradle 守护进程持锁**；再遇 worker 秒死应先 `./gradlew.bat --stop` 释放锁。
 - **验证**：`assembleDebug` / `assembleRelease` 均 BUILD SUCCESSFUL（5m31s / 9m30s，后者含 R8 + `lintVitalRelease`）；`lintDebug` 0 Error / 257 Warning（基线 256，差值为依赖版本类网络告警波动）；`testDebugUnitTest` **518 例 / 0 失败 / 0 错误**（512 基线 + 新增 6 例）。产物 `NASMusicTV-release-v2-32-6.apk`（22.9MB），`output-metadata.json` 核对 versionCode 145 / versionName 2.32.6。
   - 注：本地 `keystore.properties` 的 `storeFile` 刻意指向 `debug.keystore`（`androiddebugkey`），使**本地 release 与 debug 同签名**、`install -r` 可覆盖已装 debug 版；根目录 `release-key.jks` 未被本地构建使用。此为**有意设计**，非缺陷。
 - **版本**：v2.32.5 → **v2.32.6**（versionCode 144 → 145）
 
-## [v2.32.5] - 2026-09-15
+## \[v2.32.5] - 2026-09-15
 
 > 飞牛批次（v2.32.4）**审查后修复**：1 项阻断（播放解析链） + 1 项一致性（令牌刷新） + 2 项健壮性；测试总量 25 → 41 例（`FeiniuUrlTest` +4，新增 `BackendAuthHeadersTest` 6 例、`BackendHostOfUrlTest` 6 例）。
 >
 > 修复清单详见 `docs/archive/feiniu-backend-improvement-plan.md` §14；独立复核记录（harness 复跑 / 编译 / 边界实测）见对应提交说明。
 
 ### Fixed
+
 - **F-1（阻断）飞牛歌曲播放解析失败**：适配器全链路未填充 `Song.streamUrl`，而全 app 的 NAS 播放解析唯一出口是 `PlayerViewModel.resolveStreamUrl` → `adapter.getSongsByIds(...).streamUrl`（对照：Jellyfin / Navidrome / Subsonic 均在解析期填充）。修复：`parseTrack` 按 `FeiniuUrl.streamUrl(apiBase, guid)` 填充。此前点播 / 自动切歌 / 恢复队列全部在解析环节失败（A5 无法通过）
 - **F-2 静默重登后播放 / 封面持续 401**：`BackendAuthHeaders` 由快照改 **provider**（每次请求实时读取 `adapter.streamHeaders`），重登换新令牌即时生效；`FeiniuAdapter.userToken` 加 `@Volatile`
 - **F-3 IPv6 地址 host 匹配错位**：`BackendRegistry.hostOf` 提取为顶层 `hostOfUrl` 并对 IPv6 字面量**剥离方括号**（`java.net.URI.getHost()` 返回 `[2001:db8::1]`、OkHttp `url.host` 为 `2001:db8::1`，不剥离则认证头永不注入）
@@ -1465,17 +1499,19 @@
 - **CI 首跑暴露的 L3 遗留语义 bug（通知栏「切换播放模式」从未生效）**：`MutableSharedFlow(replay=0, extraBufferCapacity=0)` 在**有订阅者**时 `tryEmit` 必失败（投递需挂起）、无订阅者时反而返回 true——`requestPlayModeToggle` 用它判断「有无 UI 订阅」完全颠倒。修复：加 `extraBufferCapacity = 1`（replay 仍 0，不滞留）+ `subscriptionCount` 门控恢复返回值语义；`PlayModeToggleEventTest` 改用真实调度器重写（原 `runTest` 虚拟调度器下该语义不可测）
 
 ### Tests
+
 - `FeiniuUrlTest` 25 → **29 例**（补：无 scheme 带端口、大写 scheme、重复斜杠、`hostOf` IPv6 剥括号）
 - 新增 `BackendAuthHeadersTest`（provider 实时性 / 大小写匹配 / 空 host / 清空 / 异常降级，6 例）
 - 新增 `BackendHostOfUrlTest`（含 IPv6 剥括号，6 例）
 
 ### 验证
+
 - 独立 JVM harness 复跑：`FeiniuUrlTest` **OK (29 tests)**、`BackendAuthHeadersTest` **OK (6 tests)**（新增 `docs/archive/verification/verify_auth_headers/` harness，与 verify_feiniu_url 同构）
 - `assembleDebug` / `assembleRelease`（含 R8）/ `compileDebugUnitTestKotlin` BUILD SUCCESSFUL；`lintDebug` **0 Error**（257 Warning）；release dex 冒烟确认三个类与新方法（`hostOfUrl` / `fetchLyricsRaw` / `doToggleFavorite` 等）均未被 R8 收缩
 - `BackendHostOfUrlTest`（6 例，含 IPv6 剥括号）随 CI 的 `testDebugUnitTest` 执行（源码位于 BackendRegistry.kt，无法独立抽取运行；本机已通过编译验证）
 - 真机动态项（A5 / A6 / A14）仍需飞牛真机验收
 
-## [v2.32.4] - 2026-09-14
+## \[v2.32.4] - 2026-09-14
 
 > 飞牛音乐（fnOS）后端对接**重写**。以可运行的飞牛 TV 客户端 `fn-music-tv`（github.com/QiaoKes/fn-music-tv）为权威依据，替换原先基于第三方逆向文章猜测的实现。开发计划与评审记录见 `docs/archive/feiniu-backend-improvement-plan.md`（含 §3 缺陷对照表 D1–D22、§10 评审记录）。
 >
@@ -1488,6 +1524,7 @@
 > 动态行为仍需飞牛真机按文档 §5.2 的 A1–A14 验收。
 
 ### Fixed
+
 - **D1 认证头（阻断）**: 旧实现发 `Cookie: music-token=$token`，真实协议是 **`Authorization: <userToken>`（原始值，无 `Bearer` 前缀）**。旧写法导致所有已认证请求 401
 - **D2 登录令牌字段（阻断）**: 登录响应取 `token`，真实字段是 **`data.userToken`**，旧写法永远取不到令牌
 - **D9 播放流地址（阻断）**: `track/{id}/stream` → **`track/stream?guid=<guid>`**（guid 是查询参数，不是路径段）
@@ -1508,6 +1545,7 @@
 - **D20 默认端口**: 连接页飞牛默认端口 **80 → 5666**（fnOS 音乐服务端口），同步更新 `strings.xml` 提示文案
 
 ### Added
+
 - `FeiniuUrl`：地址归一化（补 scheme / 默认端口 5666·5667 / 推导 `/music/api/v1/`）+ 端点拼装。**有意偏离**参考项目的「显式 http 无端口补 80」规则，统一补 5666/5667——本适配器是飞牛专用，填 `http://192.168.1.100` 指的一定是音乐服务
 - `BackendAuthHeaders`：跨进程单例的后端认证头，供播放与封面链路消费。**只在 host 精确匹配时注入**，令牌不会随 302 泄漏到 CDN / 第三方域名；`BackendRegistry` 在连接成功/断开时同步更新与清空
 - 版本信息 `sys/config` → `VersionInfo.Runtime`（关于页显示飞牛真实版本号与 mediasrv 版本）
@@ -1517,16 +1555,18 @@
 - `FeiniuUrlTest.kt`（纯 JVM，25 用例）：地址归一化 / 端点拼装的回归网，覆盖默认端口 5666·5667、显式端口保留、路径幂等（不拼出 `/music/api/v1/music/api/v1/`）、凭据与非 http 协议拒绝、IPv6、`guid` 查询参数形态等。覆盖旧实现真实踩过的坑：默认端口 80、流地址用路径段而非查询参数、封面按曲目 ID 而非 `coverId`
 
 ### Changed
+
 - 封面主路径明确为 `Song.coverUrl` + `getCoverUrlCandidates`（经核查 `getCoverUrl(songId)` 在 UI 层**零调用**，其实现降级为只查内存缓存、不发起网络请求，避免非 suspend 方法在未知线程上做 IO）
 - `BackendRegistry` 构造新增可选 `appContext`（Application 级，不泄漏），由 `NasMusicApp` 传入
 - 飞牛适配器**不再调用** `EncodingUtils.fixEncoding()`：该函数会无条件剥掉结尾的 `?`（"Why?" → "Why"），而 fnOS 返回正常 UTF-8、参考项目 `fn-music-tv` 不做这层处理，用在飞牛上是纯损失。已移除原先的 7 处调用并改为直接 `str(...)`（见文档 §12 Q4）
 
 ### 遗留 / 未做（有意）
+
 - FNID 远程连接与中继模式（relay）：依赖 Release 构建期注入的签名密钥与外网 FNID 解析，本仓库无此配置，风险面过大
 - 安全码（access code）：`x-access-code` / `x-access-source` 为可选能力，飞牛未开启时无影响，已预留协议位置但未做 UI
 - 漫游（`track/roam-*`）：需维护漫游会话状态，`getRandomSongs` 改为按总数随机取页实现
 
-## [v2.32.3] - 2026-09-14
+## \[v2.32.3] - 2026-09-14
 
 > 代码质量修复批次（基于 code-review-full-report-2026-09-13.md 审阅落地，实施记录综合评分 74 → 78 → 81）。本版本不引入新功能，仅修复 7 项 P0 线程安全问题 + 1 项 P0 安全问题 + 2 项 P1 状态一致性问题 + 1 项 P2 文档补充。落地后经编译验证补丁修复 3 处编译错误（T7 变量作用域 + P1#12/L7 缺失导入），`:app:assembleDebug` 与 `:app:assembleRelease` 均构建通过，详见 §10.136。
 > 另含 T2（分批 Flow 化）：百度配置读取路径全部由 `runBlocking(IO)` 迁移到 `baiduConfigFlow.first()`（suspend），分两批落地（第一批外部 UI/App 调用点；第二批 AppPreferences 15 个便捷方法 + BaiduPrefs 透传 + BaiduOAuthClient/Netdisk/MvFileService/ViewModel 调用方），详见 §10.137。
@@ -1538,6 +1578,7 @@
 > 另含 P1 性能清单落地 4 项（P1#3 Crossfade 等功率曲线 / P1#4 SleepTimer 协程化 / P1#6 `hueOf` 零分配 / P1#7 Milkdrop 预分配 Canvas）；P1 清单另 4 项经复核判定不宜按报告原建议直接实施（P1#11 设计取舍 / P1#9 非等价优化 / P1#8 需算法改写 / P1#5 需改 30+ 渲染器），逐条理由详见 §10.148。⚠️ 本机测试 worker 无法启动，新增的虚拟时间用例与 S4 的 5 条 MockWebServer 用例**均未经运行**，须由 CI 验证。
 
 ### Fixed
+
 - **K 歌 / ONNX 专项修复（player）**: 落地 `docs/archive/code-review-karaoke-onnx-2026-09-14.md` 的 2 项 P0 + 3 项 P1 + 5 项 P2（P2-d / P2-e 为 2026-09-14 二次审计后追加），详见 §10.146。**本机 `./gradlew testDebugUnitTest` 始终无法运行（测试 worker 启动即死，exit 268435466）**，故另用 `kotlin-compiler-embeddable` 绕过 Gradle 做独立 JVM 数值验证：39 条断言全部通过，且对已提交的 `LinearResamplerTest.kt` 本体跑出 `OK (10 tests)`。**真机听感仍未验证**：
   - **P0-1 采样率归一化（`DemucsSeparator.kt`）**: MediaCodec 不重采样、`codec.configure` 也改不了 `KEY_SAMPLE_RATE`，48kHz 源此前原样进入按 44100Hz 设计的模型，而 WAV 头硬编码 44100 → 伴奏时长缩短 8.8%、音高升高约 1.5 个半音。新增流式线性插值重采样器 `LinearResampler`（`inRate == outRate` 时整体旁路），解码阶段统一归一化到 44100Hz，下游分段/overlap-add/WAV 头/时长计算只有一处真相
   - **P0-2 单声道源错乱（`DemucsSeparator.kt`）**: `channelCount` 此前读出但从未使用，无条件按 L/R 成对读 → 单声道源被当成「两倍帧数的立体声」，输出时长减半、播放翻倍速且升八度。改为按真实声道数拆帧（单声道复制为 L/R；>2 声道取前两路并跳过其余），并新增 `INFO_OUTPUT_FORMAT_CHANGED` 处理以 `codec.outputFormat` 为准
@@ -1582,6 +1623,7 @@
   - **经复核不予实施（4 项）**: P1#11（Milkdrop 硬编码 1280×720 → 判定为**设计取舍非缺陷**）、P1#9（PlasmaFlow 逐粒子 `drawCircle` → Path 批量，**非等价优化**：需按色相/透明度分桶量化，会引入可见色带，须真机对比后再定）、P1#8（Constellation O(n²) → 需**算法改写**为空间网格，非机械改动）、P1#5（VisualizerMath 种子隔离 → 需改 30+ 渲染器且感知收益未验证）。逐条理由见 §10.148 与 §10.147
 
 ### Docs
+
 - **L4 补充（db）**: `LocalMusicDatabase.kt` 注释强化：`fallbackToDestructiveMigration` 仅适用可由其他数据源重建的本地索引，**未来承载用户数据（下载/收藏/播放列表）的数据库绝不可启用**，必须维护 Migration 类
 - **审阅文档**: `docs/archive/code-review-full-report-2026-09-13.md` 追加"实施记录"段并随 T2/T6/T3 落地持续同步，标注 13 项已修复 + 3 项暂缓（理由）+ 综合评分 74 → 78 → 81
 - **全量报告遗留项持久化（docs）**: 独立审计发现——该报告当时位于 gitignored 的 `logs_temp/`（2026-09-20 已迁入 `docs/archive/` 并入库），其未完成项的唯一记录不进版本控制，一旦目录被清理，后人只会看到 CHANGELOG 的"13 项已修复"而**误判为已全修完**。新增 `docs/technical-overview.md` §10.147，把报告 36 项条目拆解为「已修 13 · 未完成 16 · 判定无需修复 5 · 已 review 关闭 1 · 剔除 1」，并逐条列出未完成的 16 项（含 L1/L2 架构债、L6 待触发、T5 死代码、P1#3/#4/#6/#7/#8/#9/#11 性能项、S4 安全项、P1#5/L3 暂缓、P1#1 决定不做、customAppKey 未做）及其实测证据。此前 L1/L2/L6/T5 与 P1 性能项在 `CHANGELOG.md`/`technical-overview.md` 中均为 0 命中，仅存在于该 gitignored 文件
@@ -1595,16 +1637,19 @@
   - **结论落点**: 已写入 `docs/technical-overview.md` §10.146 新增的「§七-4 专项调研」小节（含完整矩阵与决策记录）、`app/build.gradle.kts` 依赖声明处的警告注释、`AGENTS.md` 的 Non-obvious constraints 条目，以免后人误以为「改个版本号就能解决」。另在 §10.147 新增「其他报告的未完成项（跨报告汇总）」小节——该节原先只覆盖全量报告的 36 项，现把本报告未完成的 4 条（§七-4 / §七-5 / §七-3 / §四-3）一并纳入，便于「一处看全」全部遗留项，并明确标注 **§七-4 是其中唯一有硬期限的项**
 
 ### CI
+
 - **CI 修复（workflow）**: `.github/workflows/build.yml` 的 `build` job 生成 `keystore.properties` 时补 `cryptoPassphrase`（优先取仓库 secret `CRYPTO_PASSPHRASE`，未配置时回退占位值），修复 S1 阶段 A+ 的 release guard 会导致 CI `assembleRelease` 失败的问题
 - **CI 新增 lint（workflow）**: 新增 `lint` job 跑 `lintDebug` 并上传 HTML 报告。项目此前从未跑过 lint；首跑结果为 **133 errors / 255 warnings**，故该 job 以非阻塞（`continue-on-error`）方式引入，待清理后转阻塞。主要类别：`UnusedResources` 152、`TypographyEllipsis` 26、`UseKtx` 21、`RestrictedApi` 20（集中在 `CoilBitmapLoader.kt` 使用 androidx 内部 API）、`NewApi` 9（minSdk 22 下未做版本守卫，潜在崩溃：`BatteryOptimizationHelper.kt:27`、`ExportCoordinator.kt:62`、`MainViewModel.kt:566/2493`）
 - **CI lint 转阻塞（workflow）**: lint 错误清零后（105 → 0），移除 `lint` job 的 `continue-on-error: true`，job 更名 `Lint`，转为真正的阻塞门禁——今后任何新引入的 lint **error** 都会让 CI 失败；256 条 warning 不影响结果。若因新增 error 失败，应修复而非退回非阻塞
 - **文档修正（AGENTS.md）**: 原述"CI 只跑 `assembleDebug`、不跑测试/lint"已过时——实际为 `assembleRelease` + `testDebugUnitTest`，本次再补 `lintDebug`
 
 ### Changed
+
 - **T3 改造（player）**: `PlayerManager.kt` 的 queue/currentIndex/currentSong 三个独立 `MutableStateFlow` 合并为单一 `PlayerState`（新文件 `player/PlayerState.kt`）原子流，全部状态更新点改 `_playerState.update { it.copy(...) }` 同帧发布；`PlayerViewModel` 移除原 3 个转发流改透传 `playerState`；订阅点适配（AppRoot/QueueBranch 收集 `playerState` 派生、MainViewModel 5 处流派生 + 8 处取值、DownloadViewModel 删除下载暂停判定、PlaybackService 通知"下一首"标题），详见 §10.139
 - 版本 v2.32.2 → **v2.32.3**（versionCode 141 → 142）
 
 ### 暂缓（3 项，需独立 PR）
+
 - S4 Jellyfin 会话内 401 重认证（需真实环境测试重试逻辑）
 - P1#5 VisualizerMath seed 隔离（30+ Renderer 全部修改）
 - L3 playModeToggleHandler 改 Flow（跨文件改造）
@@ -1612,98 +1657,114 @@
 > P1#1 OkHttp 连接池统一：已决定**不做**（见审阅报告实施记录 F 决策记录）
 
 ### P2 顺手项（未做）
+
 - `customAppKey/secretKey` 加密（原计划与 T2 一起做，T2 已完成但此项未动）
 
-## [v2.32.2] - 2026-09-13
+## \[v2.32.2] - 2026-09-13
 
 > 全局统一播放控制按钮（返回/上一曲/下一曲/播放顺序/播放暂停）的图标色与聚焦反馈规范：**未聚焦时图标恒为亮白（TextPrimary）不依赖主题默认色兜底；聚焦时整体按钮背景变化、图标色保持不变**。此前各页 Icon 均不传 `tint`，实际取 tv-material3 主题 `LocalContentColor`（恰好为亮白但未显式保证），且 `FocusableSurface` 下发的自定义 `LocalFocusableContentColor` 并非 Icon 消费的通道——聚焦色参数形同虚设。另有两处不一致：QueueScreen 播放/暂停按钮聚焦反而**变暗**（Primary 70%），NowPlaying/K 歌主按钮聚焦背景完全**不变**（与"聚焦有整体变化"的交互预期不符）。
 
 ### Changed
+
 - **播放控制按钮图标显式亮白**：`PlayerControls`（NowPlaying/MTV 控制行的上一曲/播放暂停/下一曲/播放顺序）、K 歌/MTV/队列页 `MiniIconButton` 内 Icon 全部显式 `tint = TextPrimary`，不再依赖主题 `LocalContentColor` 兜底
 - **主按钮（播放/暂停）聚焦变亮**：NowPlaying/K 歌聚焦背景由不变（Primary→Primary）改为 `NasMusicColors.PrimaryBright`（新增强调色 #5EEAD4）；队列页由变暗（Primary 70%）统一改为变亮
 - 非主按钮（返回/上一曲/下一曲/播放顺序）聚焦背景维持 Surface → Primary 30% 变化；图标色任何状态均不变
 - `Theme.kt` 新增 `NasMusicColors.PrimaryBright`（#5EEAD4），`HighContrastColors.PrimaryBright` 改为引用同一值
 - 版本 v2.32.1 → **v2.32.2**（versionCode 140 → 141）
 
-## [v2.32.1] - 2026-09-13
+## \[v2.32.1] - 2026-09-13
 
 > 修复 TV 端 K 歌与 MTV 全屏页面手机遥控二维码不显示/无法通过遥控器按键重新唤醒的问题。**根因一（主因）**：AppRoot 的 `isTV` 仅检查 `android.software.leanback` 特性，而实测电视（`pm list features`）只上报 `android.hardware.type.television` 无 leanback——TV 被误判为手机，`remoteControlUrl` 被 `if (isTV)` 守卫强制置 null，二维码完全无法生成（v2.20.0 手机端支持引入的回归，当时 MainActivity/NasMusicApp/TextInputDialog 均用双特性判断、唯 AppRoot 漏检）。**根因二**：页面级按键预览未建立稳定焦点域，内部 TV 按钮或 MTV 的 AndroidView 视频层获得焦点后，按键不保证经过外层监听。现 isTV 对齐全库统一的双特性判断，并为两页建立可聚焦的页面焦点域主动请求焦点、仅在 KeyDown 刷新显隐计时；二维码在进入页面及任意遥控器按键后立即显示，约 5 秒无操作后完全隐藏，同时保留原有 D-Pad、播放控制、焦点导航和 BACK 行为。
 
 ### Fixed
+
 - **K 歌/MTV 手机遥控二维码不显示（根因修复）**：`AppRoot` 的 `isTV` 补上 `android.hardware.type.television` 检测（与 MainActivity setContent 内、NasMusicApp、TextInputDialog 的既有判断对齐），TV 不再被误判为手机；`MainActivity.onCreate` 的系统栏隐藏判断同步对齐
 - **K 歌/MTV 手机遥控二维码按键后不显示**：两页外层增加 `FocusRequester + focusable()` 页面焦点域，页面进入时主动请求焦点，确保内部按钮与 MTV 视频层场景下仍能收到按键预览
 - **二维码显隐计时重复刷新**：仅在 `KeyEventType.KeyDown` 时刷新 5 秒计时，避免同一次按键的 KeyUp 再次延长显示时间
 
 ### Changed
+
 - **K 歌页控制按钮对齐 MTV 定时隐藏**：底部栏（返回/上一首/播放暂停/下一首/升降调/变速/原唱伴唱/质量切换）5 秒无操作虚化至 0.15 透明度，任意遥控器按键或焦点变化恢复；歌词与歌曲信息保持常显
 - 版本 v2.32.0 → **v2.32.1**（versionCode 139 → 140）
 
-## [v2.32.0] - 2026-09-13
+## \[v2.32.0] - 2026-09-13
 
 > 可视化效果库一次补齐 11 套极简几何风格效果（E26–E36）：E26「声弦」线性声波（平行细线阵随波形起伏，高频叠加细密锯齿）、E27「几何环」动态几何环（pulse 心跳缩放 + treble 积分旋转 + 顶点频谱断点闪烁）、E28「构成」包豪斯拼贴（莫兰迪色系扁平几何体，低音放大/高频翻面/中频漂移）、E29「轨道」环绕轨道（倾斜椭圆轨道 + 光球拖尾环形缓冲，倾角低通晃动防筛子）、E30「雷达」极坐标（雷达绿单色，低音向心收缩 + 扫掠角余弦亮起 + 频谱余辉弧）、E31「折纸」低多边形（三角形 cos 投影翻折，过零交换明暗面；treble 驱动冷暖色相插值）、E32「阶梯」方波（刻意不做缓动的量化方块立面，高频 2×2 碎裂）、E33「齿轮」同心齿轮（齿轮 Path 预生成，beat 棘轮一个齿距 120ms 缓动，小齿轮 treble 疯转）、E34「分形」分形树（拓扑 onEnter 拍平存数组不递归，bass 驱动展开深度，末梢确定性电弧）、E35「光轴」旋转光轴（宽淡辉光+细亮芯线双层，高频手动分段虚线避开 dashPathEffect 每帧分配）、E36「螺旋」费马螺旋（黄金角预计算点位，内圈组整体旋转规避逐点变换）。全部 Tier.BASIC（三档画质全开，内部按画质分档细节量），draw 内零分配（E30 SweepGradient 预分配、E26 单 Path 双描边、E29 环形历史缓冲零 arraycopy）。音频分析层零改动，舞台/指示器/切换零改动（自动遍历 selectable）；均衡器页小预览按 ordinal%3 归类样式天然兼容。
 
 ### Added
+
 - **11 套极简几何可视化效果（E26–E36）**：`VectorWavesRenderer` / `PulsingPolygonsRenderer` / `BauhausShapesRenderer` / `OrbitalRingsRenderer` / `RadarGridRenderer` / `OrigamiPolyRenderer` / `StaircaseWaveRenderer` / `ConcentricGearsRenderer` / `FractalTreeRenderer` / `LightBeamsRenderer` / `FermatSpiralRenderer`（4 个新文件），枚举 `VisualizerTheme` 编号 26–36 全 Tier.BASIC；`VisualizerRendererFactory` 注册 11 分支
 - **画质内部分档**：全部效果按 LOW/MEDIUM/HIGH 缩放元素量（线数/形状数/轨道数/网格密度/分形深度/光束数/点数），LOW 档亦可流畅
 
 ### Changed
+
 - `VisualizerThemeTest` 数量断言 23 → 34；版本 v2.31.4 → **v2.32.0**（versionCode 138 → 139）
 
-## [v2.31.4] - 2026-09-13
+## \[v2.31.4] - 2026-09-13
 
 > 修复设置页内容区无法用遥控器**左键**把焦点移回左侧导航栏的问题（用户报告：仅播放设置分区复现，其他分区偶发/正常）。根因：设置页为「左栏分区导航（verticalScroll Column）+ 右栏内容（LazyColumn）」双滚动容器布局，焦点跨容器移动依赖系统几何查找；播放设置内容最长（整段为单个 LazyColumn item，含多组横排按钮/开关/路径文本），焦点在内容区内部左右移动时几何查找无法"走出"到左栏，表现为按左键焦点卡住。修复采用 Compose TV 标准的焦点越界重定向：右栏声明 `focusGroup` 并挂 `focusProperties { exit }`，向左越界（`FocusDirection.Left`）时强制聚焦左栏**当前分区项**（每个分区项持有独立 `FocusRequester`，`activeSection` 驱动）。对全部分区生效，且不影响内容区内部（横排按钮组之间）的正常左右移动；其他方向（上/下/右）越界维持系统默认行为。用户确认的交互预期：导航栏选中分区 → 右键进入内容修改查看 → 左键逐步移回导航栏 → 继续选其他分区。
 
 ### Fixed
+
 - **设置页内容区按左键无法移回导航栏**：`SettingsScreen` 右栏 LazyColumn 增加 `focusGroup` + 左向 `exit` 重定向到左栏当前分区项；分区导航项挂 `FocusRequester`
 
 ### Changed
+
 - 版本 v2.31.3 → **v2.31.4**（versionCode 137 → 138）
 
-## [v2.31.3] - 2026-09-13
+## \[v2.31.3] - 2026-09-13
 
 > 修复设置域子页面遥控器返回键无法回到设置主菜单的问题。BACK 键 Level 2 导航分发表（`AppRoot`）为「白名单 + `else -> navigateHome` 兜底」模式：从设置进入的均衡器（`Screen.Equalizer`）与播放统计（`Screen.PlayStats`）没有专门分支，静默落入兜底直接回首页——页面左上角返回按钮点击可回设置，但遥控器返回键行为与之不一致，用户只能移动焦点"点"按钮返回。现按入口来源补齐分发：均衡器/播放统计/服务器连接 → 回设置，网盘（入口唯一在"我的"）→ 回我的页；天气电台入口在首页，由兜底回首页保持正确。设置页内部弹窗（备份/模型传输/文本输入/目录选择/导出设备）的返回键关闭均正常，无需改动。
 
 ### Fixed
+
 - **均衡器/播放统计按返回键回不到设置**：Level 2 分发表补 `Screen.Equalizer` / `Screen.PlayStats` → `navSettings` 分支，与页面返回按钮行为一致
 - **网盘页按返回键回不到"我的"**：补 `Screen.Netdisk` → `navigateMine` 分支（入口唯一：MineBranch）
 
 ### Changed
+
 - 版本 v2.31.2 → **v2.31.3**（versionCode 136 → 137）
 
-## [v2.31.2] - 2026-09-13
+## \[v2.31.2] - 2026-09-13
 
 > 统一歌曲/歌词来源标签体系。修复播放页来源标识硬编码 `"NET"`：无论百度网盘、Meting 网络曲、Jamendo 还是电台，只要 `isNetworkSong=true` 一律显示写死的 "NET"（`NowPlayingScreen` 从未接入 `MusicSourceType` 体系）。现改用统一 `SourceBadge`（百度→"百度"☁ 橙 / Meting→"网络"🌐 绿 / Jamendo→"Jamendo"♪ 粉 / 电台→"电台"📻 紫，NAS→"NAS"🎵 蓝也补齐显示）。歌曲信息面板「网络来源」行原显示原始标识大写（BAIDU/METING），改为统一 `sourceType.displayName` 且全来源显示；`LyricsSource`（歌词来源）补齐 `icon`/`color` 字段与歌曲来源定义结构对齐，播放页歌词来源切换标签文案由 strings.xml 独立维护改为统一取枚举 `displayName`（内嵌/本地/在线/缓存），两套文案不再漂移；发现页专辑角标沿用 `MusicSourceType` 文案与颜色（样式为封面角标紧凑版，维持现状）。
 
 ### Fixed
+
 - **播放页来源标签硬编码 "NET"**：`NowPlayingScreen` 来源标识改用统一 `SourceBadge(song)`，按 `MusicSourceType` 正确显示「百度 / 网络 / Jamendo / 电台 / 天气电台 / NAS / 本地 / 已下载」及对应主题色
 - **歌曲信息面板来源文案不统一**：`SongInfoPanel` 「网络来源」行由 `networkSource?.uppercase()`（BAIDU/METING 原始标识）改为 `sourceType.displayName`，行名改「歌曲来源」，全部来源均显示
 - **歌词来源两套文案漂移**：删除 strings.xml 的 `player_highlight_backend/local/network/cached`（中英双语），播放页歌词来源切换标签统一取 `LyricsSource.displayName`
 
 ### Changed
+
 - **`LyricsSource` 与 `MusicSourceType` 结构对齐**：新增 `icon` / `color` 字段（颜色语义对齐：内嵌→蓝 / 本地→橙 / 在线→绿 / 缓存→青），`displayName` 统一为短版文案
 - 清理无引用资源 `song_info_unknown_source`（中英）；版本 v2.31.1 → **v2.31.2**（versionCode 135 → 136）
 
-## [v2.31.1] - 2026-09-13
+## \[v2.31.1] - 2026-09-13
 
 > 修复「下载到本地的歌曲无法播放」。本地/已下载歌曲的 `file://` URI 永久有效，但持久化层（上次队列/最近播放/本地歌单/备份恢复）此前对所有歌曲统一置空 `streamUrl`，恢复后播放地址丢失；而播放解析链（`resolveStreamUrl` / `resolveAndPlayCurrentSong`）只认「网络歌曲 / NAS 歌曲」两种来源，本地歌曲（id 为 `local_*`）被误当 NAS 歌曲去后端查询必然失败，部分入口还会因空 URI 被 `onPlayerError` 静默吞掉——表现为点播无反应或自动跳歌。现改为仅网络歌曲置空 `streamUrl`（本地歌曲保留）、解析链补全本地分支（`streamUrl` 缺失时回退 `path`），并新增「已下载优先」：网络歌曲播放/切歌/批量播放前先查下载记录，已下载且文件存在直接播本地文件（支持离线播放）。
 
 ### Fixed
+
 - **恢复队列/最近播放/本地歌单中的本地歌曲无法播放**：`AppPreferences` 6 处持久化（`saveLastQueue` / `recordRecentSongObject` / `recordPlay` / `addSongToPlaylist` / 备份恢复×2）改为经 `stripVolatileStreamUrl()` 仅对 `isNetworkSong` 置空 `streamUrl`，本地歌曲保留 `file://` URI
 - **播放解析链误把本地歌曲当 NAS 歌曲解析**：`PlayerViewModel.resolveStreamUrl` / `resolveAndPlayCurrentSong` 由二分支（网络 / NAS）扩为三分支，`isLocalSong` 直接用本地 URI（`streamUrl` 缺失回退 `path`），不再拿 `local_*` id 去 `adapter.getSongsByIds()` 查询失败
 - **`updateRestoredQueueStreamUrls` 排除本地歌曲**：`nasSongIds` 筛选与合并条件增加 `!it.isLocalSong`，不再向 NAS 后端发起无意义的 `local_*` 查询
 - **`playQueue` 空 URL 静默失败**：`needsResolve` 与首曲回填覆盖 `isLocalSong`（历史持久化数据 `streamUrl` 已被置空，用 `path` 回填），避免空 URI 触发 `onPlayerError` 被静默吞掉
 
 ### Added
+
 - **已下载优先（离线播放）**：`DownloadRepository.playableLocalUri(song)`（仅 COMPLETED 且本地文件存在非空才返回 `file://` URI）；`NetworkMusicViewModel.playNetworkSong` / `PlayerViewModel.resolveStreamUrl`（网络分支）/ `MainViewModel.playNetworkBatch`（首曲）在解析直链前先查下载记录，已下载直接播本地文件——断网也能播已下载歌曲
 
 ### Changed
+
 - 版本：v2.31.0 → **v2.31.1**（versionCode 134 → 135）
 
-## [v2.31.0] - 2026-09-13
+## \[v2.31.0] - 2026-09-13
 
 > 新增「催眠」（E25）可视化效果：数学函数图像动画。缓慢描线（8s）画出带坐标轴/刻度/标签的数学函数图像，静止凝视 3s 后图像溃散蒸发（2.4s）、空场 0.5s 再随机换下一张——53 条函数（笛卡尔 27 + 参数曲线 8 + 极坐标 8 + 彩蛋 10）一次性全部实现，Fisher-Yates + soft 加权洗牌保证单周期不重复、柔和曲线偏早出现、跨周期交界不重图。屏幕右侧独立"公式带"（18% 屏宽、垂直居中）经自研 `FormulaLayout` 渲染**真数学样式**（嵌套上标 `e^{-x^2}`、真分式、根号横线；上标转普通字形绘制，完全绕开 U+2070 区字体覆盖问题），并随曲线共用同一溃散时间轴按 run 碎散——上标飞离宿主、分式线跟着分子断开。**与歌曲完全解耦**：渲染器结构上不读 `songId`，切歌/暂停/静音/后台返回均不打断当前图像的"描线→静止→溃散"（超时保护推进 DRAW 前先补满描线进度，杜绝后台返回后"只画 1% 就静止"）。溃散双档：LOW/MED 逐点抖动蒸发（点数按画质减半），HIGH 粒子化坍缩（切线初速 + 重力 + 节拍脉冲 ×1.35）。音频联动克制（描线变速 ≤1.15×、辉光/线宽微调），静音时效果完整可看。`FormulaLayout` / `FunctionLibrary` 纯 JVM 可单测，6 个新测试文件 34 个用例；`app/build.gradle.kts` 新增 `testOptions.unitTests.isReturnDefaultValues` 支持渲染器构造的纯 JVM 测试。
 
 ### Added
+
 - **「催眠」（E25）数学函数图像动画**：`HypnoticFunctionRenderer`（四态状态机 `8000/3000/2400/500`ms）+ 枚举 `VisualizerTheme.HYPNOTIC_FUNCTION`（"催眠"，Tier.BASIC，编号 25，三档画质全开）；`VisualizerRendererFactory` 注册分支
 - **`FormulaLayout`**：数学公式源标记 → 排版 run 的自绘排版引擎（纯 JVM）。支持嵌套上标 `^{}`、下标预留、真分式 `frac{}{}`、根号 `√{}` + 横线、`^2`/`²` 等价归一；花括号不配对降级为字面绘制；3 行断行 + 缩字号兜底（下限 26f）；词/运算符边界断行，`+`/`-` 粘后块保持负数项完整
 - **`FunctionLibrary`**：53 条函数定义（`FunctionDef` 支持 `uGap` 断点双段域）+ 三类采样器（归一化输出、自动 y 范围、NaN/Inf/跳变断笔、渐近线大值尾巴剔除）+ 三步加权洗牌（Fisher-Yates → 全局 soft 加权降序 → 跨周期防重交换）
@@ -1711,30 +1772,36 @@
 - **测试**：`FunctionLibraryTest` / `FormulaLayoutTest` / `HypnoticPhaseTest` / `HypnoticScheduleTest` / `HypnoticLayoutTest` / `HypnoticDissolveTest`（34 用例：53 条采样有限性、间断分段、闭合曲线、洗牌覆盖/防重/确定性/songId 无关、排版几何、状态机时长、溃散阈值带）
 
 ### Fixed
+
 - **只有第一张图有描线过程，后续函数直接出全图**：`GAP → DRAW` 迁移时未清零 `drawAccumulator`——首图靠 `onEnter` 归零，之后每个周期累加器残留 `8000ms`，新图第一帧即满足"描线完成"直接进 HOLD。现迁移时归零
 
 ### Changed
+
 - **`app/build.gradle.kts`**：新增 `testOptions { unitTests.isReturnDefaultValues = true }`（渲染器构造含 `Paint`，纯 JVM 单测需要）
 - `VisualizerThemeTest`：枚举总数断言 21 → 23（该文件此前已滞后于源码：E23/E24 加入后实际为 22，未同步），并补 `HYPNOTIC_FUNCTION` 三档支持断言；头部注释同步
 
-## [v2.30.5] - 2026-09-13
+## \[v2.30.5] - 2026-09-13
 
 > 新增「心跳」可视化效果（E24）：心电图式滚动频谱。一条连续折线从屏幕最右侧生成扫描点，已绘制的波形冻结并整体向左匀速平移，最左端超出屏幕被裁掉。**只取鼓点**——不由宽频时域波形驱动，仅在鼓点命中时注入一个完整的 **P-QRS-T 心搏复合波**，人声/中高频背景不参与；相邻鼓点之间贴中心基线走平。基线固定在屏幕垂直中线，心搏波相对基线上下都有振幅（P/R 波向上，Q/S 波下探）。鼓点判定走**双通道**：`frame.beat` 官方标志 **或** `frame.pulse` 上升沿——后者用于补回「节拍检测跑 50Hz／渲染数据仅 30fps（`EMIT_INTERVAL_MS=33`）」采样下被跳过的单帧标志，解决"有鼓点却不出波形"。幅度取新增的 `AudioFrame.bassRaw`（**未**峰值归一化的低频原始能量）除以自身慢速均值——不能用 `bass`，它经 `boost()` 峰值跟随后在鼓点瞬间恒为 1.0，会让每次鼓点长得一模一样；映射到 0.45–1 保留强弱差异。心搏波拉长到约 0.50s，并设 800ms 最短渲染间隔（≈75 BPM 上限）**丢掉过密的连续鼓点**，保证每个心搏完整、彼此不粘连；主峰高度由 0.40 半屏压到 0.26。复古 CRT 绿线风格，峰顶无任何圆点。环形历史缓冲零分配、零 arraycopy，滚动按列虚拟时间匀速；三档画质全可用。舞台/交互/入口零改动（自动遍历 selectable）。
 
 ### Added
+
 - **「心跳」（E24）心电图式滚动频谱**：新增 `EcgWaveRenderer` 与枚举 `VisualizerTheme.ECG_WAVE`（Tier.BASIC，三档全开）；`VisualizerRendererFactory` 注册分支
 
 ### Fixed
+
 - **只有第一张图有描线过程，后续函数直接出全图**：`GAP → DRAW` 迁移时未清零 `drawAccumulator`——首图靠 `onEnter` 归零，之后每个周期累加器残留 `8000ms`，新图第一帧即满足"描线完成"直接进 HOLD。现迁移时归零
 
 ### Changed
+
 - **`AudioFrame` 新增 `bassRaw`**（20–250Hz 未归一化原始线性能量）：`bass` 走 `boost()` 峰值跟随归一化，鼓点瞬间恒为 1.0，无法表达鼓点强弱；需要绝对强弱对比的效果改用本字段
 
-## [v2.30.4] - 2026-09-12
+## \[v2.30.4] - 2026-09-12
 
 > 针对最近三次提交（737ae0c / 1cda585 / ddaef2d）的代码审查结果集中修复：万花筒几何错误、歌词点阵切歌不更新、可视化封面取色 403、Path 批处理丢失的逐元素 alpha、控制行按钮高度不齐、歌词信息每帧重复计算。
 
 ### Fixed
+
 - **万花筒（E10）8 扇区塌陷**：把 `withTransform` 手写成显式旋转时，线段**内端点**误用只含 `rotation` 的角（`rotCos/rotSin`），外端点用 `k*45°+rotation`（`baseCos/baseSin`），两端角度不一致 → 8 个扇区的内端全塌到同一方向，只剩 k=0 一瓣正确，画面呈“章鱼”状。现内外端统一用扇区角
 - **歌词点阵（E23）切歌后永远停在上一首**：`swapper = remember { RendererSwapper() }` 无 key，切歌不会重建渲染器、不走 `onEnter`；`displayedLineIndex` 仅在 `< 0` 时初始化，且行切换只认 `diff >= 1`，新歌 idx 从 0 开始使 `diff` 为负 → 永不触发。现 `RenderContext` 新增 `songId`，渲染器比对到歌曲变化即回到初始态（顺带解决 seek 回退时 `diff < 0` 无分支的问题）
 - **可视化封面取色在百度网盘源失败（403）**：`coil.ImageLoader(app)` 新建的是**无配置**实例，绕过 `NasMusicApp.newImageLoader()` 注入的百度 dlink UA 拦截器 → 封面加载失败、配色长期停在 `CoverPalette.Fallback`；且该实例从不 `shutdown()`，泄漏线程池与缓存。改用 `coil.Coil.imageLoader(app)` 全局单例（与 `MainViewModel` 已修过的同一处教训一致）
@@ -1747,9 +1814,11 @@
 - **播放控制行按钮高度不齐**：v2.30.3 把 `IconButton` 紧凑尺寸 48→40dp 时未同步 `VocalToggleButton`（仍 48dp），同一行图标按钮 40dp、文字按钮 48dp。现统一为 40dp
 
 ### Fixed
+
 - **只有第一张图有描线过程，后续函数直接出全图**：`GAP → DRAW` 迁移时未清零 `drawAccumulator`——首图靠 `onEnter` 归零，之后每个周期累加器残留 `8000ms`，新图第一帧即满足"描线完成"直接进 HOLD。现迁移时归零
 
 ### Changed
+
 - **歌词信息每帧计算量减半以上**：`computeLyricInfo` 原先在两个 Canvas 内各调一次（新层 + 交叉淡出的旧层），且内含 O(N) 全量扫描求最长行。现提到外层每帧只算一次，并新增 `LyricMetrics` / `computeLyricMetrics`，由 `remember(lyrics)` 缓存歌曲级常量
 - `LyricTopBar` 去掉 `remember(lyrics, progressMs) { derivedStateOf { ... } }`：key 含 `progressMs` 会导致每帧重建 State 对象，等于没缓存；二分查找本身 O(log n)，直接调用即可
 - **恢复可视化入口按钮的 i18n**：v2.30.3 为解决截断临时硬编码中文「幻」，使 `values-en` 失效。新增 `player_visualizer_short`（中「频谱」/ 英「Viz」），宽度与「K歌」同为 52dp
@@ -1759,34 +1828,42 @@
 - 删除 `LyricsDotMatrixRenderer` 采样函数中遗留的诊断 `println`（在每帧热路径上）
 
 ### Fixed（二次审阅补充）
+
 - **数字雨字形缓存仅在 `onExit` 释放**：画质变化触发 `onEnter` 重建缓存时会丢弃旧 Bitmap 而不回收。统一收敛到 `releaseGlyphs()`，`onEnter` / `onExit` 走同一释放路径
 - **歌词点阵切歌判定在无 id 歌曲上失效**：`songId` 为 null 时（本地扫描歌曲可能没有 id）两首歌 id 都是 null，不会触发重置。现 `songId` 与歌曲标题任一变化即重置
 
 ### Fixed
+
 - **只有第一张图有描线过程，后续函数直接出全图**：`GAP → DRAW` 迁移时未清零 `drawAccumulator`——首图靠 `onEnter` 归零，之后每个周期累加器残留 `8000ms`，新图第一帧即满足"描线完成"直接进 HOLD。现迁移时归零
 
 ### Changed（二次审阅补充）
+
 - `VisualizerStage` 删除随 `crossfade` 参数一起失效的 KDoc；数字雨的释放注释合并进 `releaseGlyphs()`
 - **歌词点阵（E23）字号逐帧重算**：`LyricsDotMatrixRenderer.computeFontSize` 每帧 `new Paint` + `measureText` 推导字号，但结果只依赖最长行（整曲常量）与画布尺寸，整首歌恒定。现加 `cachedFontW`/`cachedFontH`/`cachedLongest` 变化检测，仅尺寸或歌词变化时算一次，消除每帧对象分配（最长行本身已由 `remember(lyrics)` 缓存，每首歌只扫描一次）
 
 ### Tests
+
 - `SpectrumAnalyzerTest`：把 v2.30.2 放宽的 `actual in 0.2f..0.31f` 收窄为 `0.235f..0.275f`（±0.02），恢复对“bass 落在线性分支而非 gamma 分支”的回归探测力
 
-## [v2.30.3] - 2026-09-12
+## \[v2.30.3] - 2026-09-12
 
 > 播放页 MTV 按钮文字不再被裁切；数字雨改为字形预渲染 Bitmap 大幅降低每帧开销；移除「自动导演」随机选特效功能（遥控器选哪个就恒定显示哪个）；批量将高频小图元（频谱环峰值、万花筒线段、径向星芒、隧道环点、烟花频谱、Bloom 光斑）合并为 Path 单次绘制以提升弱 GPU 流畅度。
 
 ### Removed
+
 - **移除「自动导演」随机选特效功能（`AUTO_DIRECTOR`）**：删除 `AutoDirector.kt` 及枚举 `Tier.MODE` / `isAutoDirector` / `selectable` 中的自动档；全屏舞台去掉 500ms 低频重估与 600ms 交叉淡入分支，`VisualizerViewModel` 移除 `director` / `resolveTheme`。现遥控器选中哪个效果就恒定显示哪个（21 套手动效果）。老数据若存过 `AUTO_DIRECTOR` 会自动回落到默认「频谱环」
 
 ### Fixed
+
 - **播放页 MTV 按钮文字显示不全（只看到 "MT"）**：根因是紧凑控制行总宽（约 438dp）超出固定 380dp 左栏，单独加宽 MTV 只会把它进一步推出屏外被歌词栏盖住。改为整体收紧整行——图标按钮 40/52dp、文字按钮「幻」40dp「K歌」52dp「MTV」64dp、间距 8→6dp，合计约 364dp，MTV 完整落进左栏单行显示
 - **「数字雨」（E16）TV 上卡顿**：逐字符 `drawText` 的文本排布度量开销大。改为进入时一次性预渲染 2 数字 × 4 档绿共 8 张字形 Bitmap，每帧用 `nativeCanvas.drawBitmap` 快速 blit；每列高度 20→14、列数随画质档位收窄，观感一致但每帧开销显著下降
 
 ### Fixed
+
 - **只有第一张图有描线过程，后续函数直接出全图**：`GAP → DRAW` 迁移时未清零 `drawAccumulator`——首图靠 `onEnter` 归零，之后每个周期累加器残留 `8000ms`，新图第一帧即满足"描线完成"直接进 HOLD。现迁移时归零
 
 ### Changed
+
 - **高频小图元合并为 Path 批处理（降 draw 次数）**（此前逐 draw 逼近 Android 5.1 单帧 ≈200 次独立指令预算，弱 GPU 上易掉帧）：
   - 「频谱环」（E05）：约 64 次峰值帽 `drawCircle` → 按 hue 分 4 桶的 4 条 Path
   - 「万花筒」（E10）：160 条线段 + 160 个端点光点 → 2 条 Path（长度/端点半径仍随频谱变化）
@@ -1796,62 +1873,73 @@
   - 「Bloom」（E01）：约 768 次 `drawRoundRect` → 6 条 Path
 - `VisualizerThemeTest` 同步更新：21 套效果、无自动档、`Tier` 门控断言去掉 `MODE`
 
-## [v2.30.2] - 2026-09-12
+## \[v2.30.2] - 2026-09-12
 
 > 可视化效果库补全：新增「棱镜彩虹」效果并纳入效果库；「极光」重构为写实自然星空版（墨绿→午夜蓝→近黑渐变 + 漫天星尘 + 十字星芒 + 右侧蜿蜒青绿丝带）；「歌词点阵」新增按歌曲最长行自适应字号、粒子按节奏/鼓点浮动、两行滚动凝聚放缓。
 
 ### Added
+
 - **新增效果「棱镜彩虹」（E21 `PRISM_HOLO`）**：返回效果库可选列表。全息虹彩流体风格——莫兰迪低饱和打底（灰褐→米色→浅棕灰）+ 三主带（粉紫/淡蓝/鹅黄）与两条反射残影次带（紫/青）的流体色带，内部色相随高度流动构成全息渐变，三维隧道式卷曲营造纵深；底部一段棱镜色散彩虹光晕 + 随时间滑动的柔光；四边莫兰迪暗角聚焦中央
-- **「歌词点阵」自适应字号（E23）**：`RenderContext` 新增 `lyricMaxLineChars`（全曲最长句字符数），渲染器据此换算让最长行宽度恰好约占屏宽 80% 的字号，并以「行高不超过屏高 40%（两行预留）」约束，最终夹在屏高 5%~16% 区间——长句歌字号随行缩短而放大、且不再因字号过大导致粒子稀疏空洞
+- **「歌词点阵」自适应字号（E23）**：`RenderContext` 新增 `lyricMaxLineChars`（全曲最长句字符数），渲染器据此换算让最长行宽度恰好约占屏宽 80% 的字号，并以「行高不超过屏高 40%（两行预留）」约束，最终夹在屏高 5%\~16% 区间——长句歌字号随行缩短而放大、且不再因字号过大导致粒子稀疏空洞
 - **「歌词点阵」粒子律动（E23）**：粒子浮动由随机改为节奏驱动——所有粒子按低音（bass）同步上下起伏，叠加依粒子横向位置的固定波相位形成整行规整波浪，鼓点（低音峰值）时幅度增大，节奏感强且不发散
 - **「歌词点阵」两行滚动凝聚放缓（E23）**：初始两行凝聚 700ms→1200ms、单字凝聚到达 700ms→1200ms、每字凝聚延迟 110ms→160ms、行上移 600ms→700ms，使新一行歌词凝聚过程清晰可见
 
 ### Fixed
+
 - **只有第一张图有描线过程，后续函数直接出全图**：`GAP → DRAW` 迁移时未清零 `drawAccumulator`——首图靠 `onEnter` 归零，之后每个周期累加器残留 `8000ms`，新图第一帧即满足"描线完成"直接进 HOLD。现迁移时归零
 
 ### Changed
+
 - **「极光」（E22）重构为写实自然星空版**：背景由三段平滑渐变（底部深海墨绿→中部午夜蓝→顶部近黑）；新增漫天星尘（HIGH 150 颗，明暗交错、随高频闪烁）与少量带十字星芒高亮星（随低频旋转缩放）；极光由中部等距竖光幕改为集中在画面右半侧——5 条丝带从右下蜿蜒向中央、顶部向右上卷曲，底部贴近地平线；新增底部地平线柔和青绿光晕（与极光根部交融）。动态联动：低频→光带变浓变亮变厚 + 整体呼吸胀缩；高频→光带边缘轻纱流动波纹 + 星尘/星芒加速闪烁；情绪爆发（高频+能量高）→ 极光短暂从荧光绿幻化紫红/冰蓝
 
 ### Fixed
-- 「歌词点阵」上一版字号刻度漏乘屏高导致粒子文字整段消失（字号被钳在 0.05~0.16 像素）——改为 `coerceIn(h*min, h*max)` 换算真实像素
 
-## [v2.30.1] - 2026-09-12
+- 「歌词点阵」上一版字号刻度漏乘屏高导致粒子文字整段消失（字号被钳在 0.05\~0.16 像素）——改为 `coerceIn(h*min, h*max)` 换算真实像素
+
+## \[v2.30.1] - 2026-09-12
 
 > 可视化 P6 收尾：自动导演的场景切换由硬切改为 600ms 交叉淡入；新增 PCM 降级通道，解决部分国产 TV `Visualizer` 绑定成功却恒返回全 0 导致频谱全平的问题。
 
 ### Added
+
 - **PCM 降级通道（P6）**：新增 `player/` 下 `PcmFallbackChannel` / `PcmTapProcessor` / `PcmRingBuffer` / `Radix2Fft` / `PcmSpectrumTap`。系统 `Visualizer` 连续静音 ≥2s 且正在播放时自动切到 AudioSink 的 PCM 自算频谱：`PcmTapProcessor` 挂在处理器链**最前**（取人声消除之前的原始信号），`queueInput()` 只做降混 + memcpy（< 20µs，**严禁在此 FFT**）；FFT 由专用 `HandlerThread`（`THREAD_PRIORITY_BACKGROUND`）每 40ms 执行，自实现 radix-2（N=1024，**不引入 JTransforms**）
 - **降级仲裁**：`SpectrumAnalyzer` 三态仲裁（Visualizer → PCM 探测 → 回滚）；两条通道**共用同一条分析链** `analyze()`，AGC / 感知加权柱映射 / 双通道输出只有一份实现，保证观感一致；PCM 激活后 3s 内无有效信号则回滚并抑制 5 分钟
 - 测试：`Radix2FftTest`(7) / `PcmRingBufferTest`(7) / `SpectrumAnalyzerPcmTest`(5) / `RendererSwapperTest`(7)
 
 ### Fixed
+
 - **只有第一张图有描线过程，后续函数直接出全图**：`GAP → DRAW` 迁移时未清零 `drawAccumulator`——首图靠 `onEnter` 归零，之后每个周期累加器残留 `8000ms`，新图第一帧即满足"描线完成"直接进 HOLD。现迁移时归零
 
 ### Changed
+
 - **`AUTO_DIRECTOR` 场景切换改为 600ms 交叉淡入**（开发方案 §4.21 的"禁止硬切"红线）：新增 `visualizer/RendererSwapper.kt` —— 切换时同时持有新旧两个渲染器，分别以 `t` / `1-t` 透明度叠绘两层 Canvas，600ms 后释放旧层。**手动切换（`←/→`、设置页选效果、切画质档）仍是硬切**，用户按键后需要即时反馈
 - `VisualizerStage` 渲染器生命周期改由 `RendererSwapper` 驱动：透明度经 `graphicsLayer { alpha = ... }` 延迟读取 → 淡入过程**只重绘不重组**；旧层存在性用 State，每次过渡最多重组两次
 - 画质档位变化改为**对现有渲染器重新 `onEnter`**（`Terrain` / `LiquidGrid` / `MatrixRain` / 粒子类均在 `onEnter` 里按 `VisualQuality` 预分配缓冲），不再重建实例
 
 ### Fixed
+
 - 降级切换瞬间两条通道可能并发写入共享缓冲 → `SpectrumAnalyzer.analyze()` 加 `@Synchronized`，并在 `usingPcm` 时丢弃 Visualizer 通道的残留帧（`enabled = false` 可能失败或回调在途），避免全 0 帧覆盖 PCM 结果造成画面闪烁
 
-## [v2.30.0] - 2026-09-12
+## \[v2.30.0] - 2026-09-12
 
 > 音乐可视化升级：修复「频谱不好看、画面不呼吸」的数据层根因，新增独立全屏可视化舞台（20 套效果 + 自动导演模式），并把频谱数据链路收敛为单一 `AudioFrame` 契约。
 
 ### Added
+
 - **全屏可视化舞台**（`ui/components/VisualizerStage.kt` + `ui/viewmodel/VisualizerViewModel.kt`）：三层结构（封面背景 / 效果 Canvas / 歌词 + 指示器 + 控制栏），复用 K 歌页 `showKaraoke` 覆盖层模式，**不新增 Screen 枚举**。TV `←/→`、手机左右滑动（阈值 80dp）切换效果；顶部歌词行（二分查找 + `derivedStateOf` 隔离）；效果名 2.5s 淡出 Toast；底部 21 档指示器（不支持档位置灰）；控制栏 3s 自动隐藏（隐藏态才拦截方向键，避免与焦点导航冲突）；手机左上返回按钮；BACK 走 AppRoot 仲裁（优先级仅次于沉浸模式）
 - **入口按钮**：`PlayerControls` 新增「频谱」，位于播放模式与 K 歌之间（`player_visualizer`，非电台且有当前歌曲时显示）
 - **20 套效果 + 自动导演模式**：`visualizer/renderers/` 下 `BasicRenderers`(E01–E07) / `AdvancedRenderers`(E08–E17) / `ParticleRenderers` / `UltraRenderers`(E18–E20)；`AutoDirector` 按能量调度场景（8s 最小驻留 + 升档 0.80 / 降档 0.65 回差 + 500ms 评估周期）
 - **`AudioFrame` 统一契约**（`visualizer/AudioFrame.kt`）：单例复用、渲染层只读、**渲染侧不再自行指定柱数**（结构上根治 96 vs 32 错位复发）；`SpectrumRepository` 为唯一写入方，只发布 `frameSeq` 帧序号
-- **`BeatDetector`**：43 帧低频历史 + 方差自适应阈值（系数 c ∈ [1.15, 1.9]）+ 240ms 冷却（上限 250 BPM）+ 快起慢落 `pulse`（decay 0.90）；`SectionEnergyTracker`（8s 滑动均值）、`PeakHoldTracker`、`ParticlePool`
+- **`BeatDetector`**：43 帧低频历史 + 方差自适应阈值（系数 c ∈ \[1.15, 1.9]）+ 240ms 冷却（上限 250 BPM）+ 快起慢落 `pulse`（decay 0.90）；`SectionEnergyTracker`（8s 滑动均值）、`PeakHoldTracker`、`ParticlePool`
 - 新增依赖 `androidx.palette:palette-ktx:1.0.0`（封面取色 T5）
 - ProGuard：`-keep class com.nasmusic.tv.visualizer.**` + `VisualizerTheme` / `VisualQuality` / `VisualizerTheme$Tier` 枚举 keep（枚举名持久化到 DataStore，R8 重命名会导致主题解析失败）
 
 ### Fixed
+
 - **只有第一张图有描线过程，后续函数直接出全图**：`GAP → DRAW` 迁移时未清零 `drawAccumulator`——首图靠 `onEnter` 归零，之后每个周期累加器残留 `8000ms`，新图第一帧即满足"描线完成"直接进 HOLD。现迁移时归零
 
 ### Changed
+
 - **`VisualizerTheme` 重写为 21 值**（20 效果 + `AUTO_DIRECTOR`，带 `Tier` 分级 BASIC/ADV/ULTRA/MODE）；新增 `VisualQuality` 画质档位（HIGH 64 柱/3 层辉光/200 粒子/32×18 网格/允许帧缓冲、MEDIUM 默认、LOW 32 柱禁用粒子）与 `supports(theme)` 门控
 - **`SpectrumAnalyzer` 数据层重构**：
   - 归一化分母由「当前帧低频峰值」改为「低频区运行峰值」`lowRunningPeak`（每帧 ×0.995 ≈ 3s 时间常数）——原实现分子分母同步缩放使低频柱**恒为 1.0**，轻/重鼓点长得一样，画面永不呼吸（BUG ⑨）
@@ -1866,60 +1954,71 @@
 - `AudioFrame.reset()` 明确契约：归零全部分析字段，但 `timeMs` / `seq` 刻意保留（`AutoDirector` 的最小驻留依赖 `timeMs` 单调性，归零会让切歌后调度器冻结约 8s）；换歌时的干净起点由 `SpectrumRepository.reset()` 显式清零
 
 ### Fixed
+
 - **⑬ 每帧强制重组**：删除 `SpectrumAnalyzer` 的 `StateFlow<FloatArray>` 兼容通道——它在 33ms 节流点 `emit(displayBuf.copyOf())`，`FloatArray` 按引用比较，订阅方每 33ms 必然重组一次。该数据的唯一潜在消费方（NowPlaying 48dp 小条）已随舞台上线移除，均衡器页从未传入 `spectrumData`，故整条链路（`SpectrumAnalyzer` → `PlayerEqualizer` → `PlayerManager` → `PlayerViewModel` → `NowPlayingBranch` → `NowPlayingScreen`）连同死参数一并删除
-- **⑭ 静音时频谱整体消失**：静音不再返回 `FloatArray(0)`（会让渲染层柱数归零），改为写入**长度正确的全 0 数组**；波形一并归零（避免静音期波形类效果显示上一帧残影）；不再把 `runningPeak` 压到 1f，恢复播放后前 1~2s 不再被压制
+- **⑭ 静音时频谱整体消失**：静音不再返回 `FloatArray(0)`（会让渲染层柱数归零），改为写入**长度正确的全 0 数组**；波形一并归零（避免静音期波形类效果显示上一帧残影）；不再把 `runningPeak` 压到 1f，恢复播放后前 1\~2s 不再被压制
 - **⑮ 老用户主题失效**：`VisualizerTheme.fromKey` 增加 `LEGACY_MAP`（`COLOR_FLOW`→`CIRCULAR_RING`、`NEON_PULSE`→`IMMERSIVE_BLOOM`、`CLASSICAL_WAVE`→`SONIC_TERRAIN`）+ 大小写容错 + 默认兜底，DataStore 旧值平滑迁移（无需显式 migration）
 - `SpectrumAnalyzer.processFft` 增加 FFT bins 越界防御（回调携带的 bins 多于 `attach` 预分配时补分配，不再 ArrayIndexOutOfBounds）
 - **单元测试**：新增 6 个测试类共 47 例——`BeatDetectorTest`(7) / `AudioFrameTest`(5) / `SpectrumRepositoryTest`(6) / `SpectrumAnalyzerTest`(10，覆盖 ⑨ ⑨-b ⑭ 与柱数契约) / `VisualizerThemeTest`(11，覆盖 ⑮) / `FindCurrentLyricLineTest`(8)；全量 38 类 357 例通过
 - **构建验证**：`assembleRelease`（R8 + `shrinkResources` + 签名）通过，新增 visualizer keep 规则无回归；APK 42.4MB → **21.8MB**（`NASMusicTV-release-v2-30-0.apk`）
 
-## [v2.29.3] - 2026-09-11
+## \[v2.29.3] - 2026-09-11
 
 > 依据《NASMusicTV 代码审查报告（2026-09-11）》（110 项发现，覆盖全部 275 个 Kotlin 源文件）分阶段实施的全量修复，P0/P1/P2/P3 四阶段全部落地。
 
 ### Fixed
+
 - **P0 阻断性（13 项 High）**：`CryptoUtils.encrypt` 加密失败不再静默返回明文（改为抛异常，消除凭据明文落盘）；Daoliyu/Feiniu 适配器全部 OkHttp 调用（含 `testConnection`）补 `use{}` 关闭 Response；`MusicScanner` 改 `getColumnIndex` + SDK 版本守卫（消除列序假设崩溃）；下载增加 `Content-Length` 完整性校验（截断文件不再被当作成品）；`EmbeddedCoverExtractor` 对 `content://` 改 `MediaMetadataRetriever.setDataSource(Context, Uri)`；播放引擎 H1–H5（overlap-add 段缓冲清零、crossfade `release()`、人声分离单飞锁、不再关闭进程级 `OrtEnvironment`）；`AppRoot` 补 `showKaraoke` BACK 分支 + `KaraokeStepPickerDialog` BackHandler（K 歌页 BACK 不再误触退出确认）；`LyricsManager` 在线歌词变体轮询补边界守卫；Bilibili MV 实现 WBI 签名
 - **P1 用户可见正确性**：歌词系统四修——网络歌词编码统一走 `EncodingUtils`（GBK 兜底）、网络候选加相关性校验（标题互含 + 歌手加分，杜绝搜到同名异曲）、后端歌词优先于持久化缓存（尊重用户显式选择，`userNetworkLyricsOverride` 记录手动切换）、候选拉取主线程 I/O 移入 IO 作用域并加 `Mutex` 防惊群；`LyricsPersistentCache` 补真 LRU（命中刷新 `lastPlayedAt` + 节流落盘）；导出修复目标设备错配（`onTreeGranted` 回到发起授权的设备）并加并发锁（`exportMutex.tryLock`）；百度网盘 token 日志脱敏（去掉前 10 字符）、服务端令牌失效（errno -6/31045）统一强制刷新重试一次、内嵌封面按 ID3 标签总长两阶段读取；Subsonic 用户名 URL 编码 + 歌曲总数修复；`BackupTransferServer` 上传改分块累积 + 32MB 上限（防 Content-Length 预分配 OOM DoS）；`RemoteControlHtml` 补 `esc`/`escAttr` 转义（修反射型 XSS）
 - **P2 健壮性与可观测性**：下载失败清理孤儿文件（成品 + `.lrc`/`.jpg` 旁路）并在 `cancelAll()` 真正取消 OkHttp `Call`；本地库跨通道去重改按**真实文件路径**（原 contentUri 去重漏掉同文件多通道收录）+ `LIKE ... ESCAPE '\'` 转义；`MediaTagWriter.compressCover` 补 `Bitmap.recycle()`（native 内存泄漏）；`CoilBitmapLoader` future 写入 + 取消转发守卫；`WeatherApi` 四处 Response 补 `use{}`、WMO 码表修正（85/86 阵雪）、forecast `cnt` 5→40；`BaiduFileIndexCache.setCoverUrl` 整体加锁（消除读-改-写丢失更新）
 - **P3 清理与一致性**：统一 Dialog BACK 注册入口 `RegisterDialogBackHandler`（`rememberUpdatedState` + `DisposableEffect(Unit)`，消除父重组瞬间注销导致的 BACK 穿透到退出确认的竞态），5 处弹窗改造；QR 位图移出组合期改后台线程生成；退出流程 `runBlocking` 改 IO 协程（原主线程最长冻结 1.5s）；`ModelTransferServer` 日志端口修正（18082→18083，硬编码改常量）+ `/api/status` 不再返回内部绝对路径；`RemoteControlServer` 队列索引补 `0 ≤ idx < size` 校验；手写 multipart 边界匹配重写为 KMP（`MultipartBoundaryStreamer`，修自重叠 boundary 漏判 + 8 项单元测试）；`NasMusicApp` 下载设置 lambda 合并为单次快照（原 4 次 `appSettings.first()` 可能不一致）；`NasMusicApp:139` 百度 OkHttpClient 误导性注释修正（描述"信任所有证书"与实现不符）
 
 ### Fixed
+
 - **只有第一张图有描线过程，后续函数直接出全图**：`GAP → DRAW` 迁移时未清零 `drawAccumulator`——首图靠 `onEnter` 归零，之后每个周期累加器残留 `8000ms`，新图第一帧即满足"描线完成"直接进 HOLD。现迁移时归零
 
 ### Changed
+
 - `modelDownloadUrl` 死字段补齐：新增 DataStore key `settings_model_download_url` + `appSettings` Flow 映射 + `@Volatile` 内存镜像 + `setModelDownloadUrl`/`getModelDownloadUrlSync` + 备份导入回填；`ModelDownloadManager` 支持自定义 URL 优先于内置候选列表（可用于自建镜像/NAS 绕过 CDN 限制）
 - `AppSettings` 补充 **Gson 前向兼容约束**文档（新增字段必须带默认值，否则新旧版本互反序列化会失败）
 
 ### Removed
+
 - 死代码清理：`lyrics/Mp3MetadataExtractor.kt`、`player/VocalSeparationController.kt`（均零调用点，功能已由 `HqSeparationOrchestrator` 承接）、`AccompanimentCache` 的 `startPreSeparation`/`cancelPreSeparation`/`PreSeparationState` 整条未接线通路（含构造参数 `externalScope`）；相关文档注释中的失效类引用同步修正
 
-## [v2.29.2] - 2026-09-11
+## \[v2.29.2] - 2026-09-11
 
 ### Fixed
+
 - **只有第一张图有描线过程，后续函数直接出全图**：`GAP → DRAW` 迁移时未清零 `drawAccumulator`——首图靠 `onEnter` 归零，之后每个周期累加器残留 `8000ms`，新图第一帧即满足"描线完成"直接进 HOLD。现迁移时归零
 
 ### Changed
+
 - 智能电台多源化（F2-3 演进）：推荐池从 NAS 单源扩展为 NAS + 本地（含下载）+ Meting 网络歌单采样（随机抽 3 个歌单、每单 30 首，tagged isNetworkSong），distinctBy 去重后统一打分——网络歌曲无 genre/albumId 时相应加分项自然失效，仍可入池推荐；SmartRadioManager 新增 startFromScratch 无种子启动（以 play_counts 最高歌曲为偏好种子，纯加权随机）
 - 智能电台入口迁移（F2-3 演进）：NowPlaying 控制按钮行入口移除，改为首页独立区块（天气电台卡片上方，随心听下方）；与当前播放歌曲解耦，不依赖 NAS 连接（多源池至少有本地+网络兜底）
 - 智能电台交互列表化（F2-3 手测反馈）：首页区块从"点卡片直接播放"（天气电台式）改为随心听式浏览列表——进入首页自动生成 20 首推荐批次（SmartRadioManager 新增 generateOnly：只生成不播放），区块展示 SectionHeader + 歌曲卡片横滑行，点任意卡片整批入队从该首播起，header 右侧"换一批"重新生成（保留电台种子，排除已推荐歌曲）；移除 SmartRadioCard 与 startSmartRadio/startSmartRadioFromCurrent 死代码
 
-## [v2.29.1] - 2026-09-11
+## \[v2.29.1] - 2026-09-11
 
 ### Fixed
+
 - 播放统计"本月"Tab 恒为空（F2-1 缺陷，release 专属）：ProGuard/R8 缺少 `data.stats` 包 keep 规则——`PlayStatsRepository` 的 Gson `TypeToken` 匿名类泛型签名被擦除后，`fromJson` 返回原始 `LinkedTreeMap`，`+1` 触发 `ClassCastException` 被 catch 静默吞掉，月度键（play_stats_monthly）从未写入；读取端同理解析失败降级空表。单测全绿是因为 Robolectric 不跑 R8。修复：proguard-rules.pro 补 `-keep class com.nasmusic.tv.data.stats.** { *; }`（与 v2.5.1 Gson 类型擦除崩溃同类坑，AGENTS.md 已有警示"新增序列化模型时勿删 keep 规则"）。mapping.txt 验证：data.stats 类恢复 identity 映射
-- 睡眠定时弹窗布局优化（F2-2b 手测反馈）：定时按钮从 NowPlaying 顶栏独占行移至歌词来源标签行（A+ 字号按钮右侧）；弹窗改紧凑布局——标题"定时关闭"、中间 -/[N 分钟]/+ 步进（5 分钟步长，5-300）、下方两行（15/30 快捷档 + OK/取消定时），去掉按钮内重复的"定时"字样（新增 np_sleep_timer_min 短格式字符串）
+- 睡眠定时弹窗布局优化（F2-2b 手测反馈）：定时按钮从 NowPlaying 顶栏独占行移至歌词来源标签行（A+ 字号按钮右侧）；弹窗改紧凑布局——标题"定时关闭"、中间 -/\[N 分钟]/+ 步进（5 分钟步长，5-300）、下方两行（15/30 快捷档 + OK/取消定时），去掉按钮内重复的"定时"字样（新增 np_sleep_timer_min 短格式字符串）
 - 通知栏按钮不刷新/锁屏无自定义按钮（F2-2 遗留缺陷）：media3 `MediaLibraryService` 自带默认通知 Provider，与自建多按钮通知共用 ID=1 互相覆盖，导致下拉通知栏样式漂移、状态不同步。改为 `setMediaNotificationProvider` 接管，通知统一由本服务 `buildNotification` 渲染 5 按钮；Android 13+ 锁屏/超级岛系统媒体卡片不读通知 action、由 MediaSession custom layout 渲染，新增 `setCustomLayout` + `SessionCommand`（onConnect/onCustomCommand）注入播放模式/睡眠定时两个自定义键；compact view 索引修复为 (0,1,2)（原 (1,2,3) 实际显示 播放/暂停、下一首、播放模式，漏掉上一首）
 - 睡眠定时器入口隐蔽（F2-2b）：NowPlaying 顶栏右侧新增常驻小按钮（未启动显示"定时 -"、运行中橙色显示"定时 N 分钟"），点击弹出档位选择窗（15/30/60/90 分钟 + 运行中可取消），手机触摸/TV D-Pad 通用；原"仅运行中显示"状态条移除
 
 ### Fixed
+
 - **只有第一张图有描线过程，后续函数直接出全图**：`GAP → DRAW` 迁移时未清零 `drawAccumulator`——首图靠 `onEnter` 归零，之后每个周期累加器残留 `8000ms`，新图第一帧即满足"描线完成"直接进 HOLD。现迁移时归零
 
 ### Changed
+
 - 重构：AppRoot（1155 行）`when(currentScreen)` 14 个 Screen 分支全部提取至 `ui/components/branches/` 包（Home/NowPlaying/Library/Mine/Queue/Settings/ServerConnect/AlbumDetail/ArtistDetail/Equalizer/PlaylistManagement/Netdisk/WeatherRadio/PlayStats Branch），AppRoot 精简为路由壳（391 行），外层共享状态参数化注入、`pickerSong` 弹窗状态保留在宿主经回调上抛。根除 JVM 单方法 64KB 上限（MethodTooLargeException）——此前 F2-2b 仅新增 3 个参数即触顶；实测 AppRoot 方法字节码 8303 条指令、最大分支 SettingsBranch 10437 条（上限 65535）。后续新增屏幕必须新建独立 Branch 文件
 
-## [v2.29.0] - 2026-09-10
+## \[v2.29.0] - 2026-09-10
 
 ### Added
+
 - 播放统计面板（F2-1）：新增月度播放统计（play_stats_monthly 键，recordPlayWithSong 同次 DataStore edit 原子写入，滚动保留 12 个月）+ 统计页（本月/累计 Tab、播放次数/歌曲数 KPI、最爱歌手 Top10、流派分布原生 Canvas 条形图）；入口在设置 → 数据管理 → 播放统计；聚合器纯函数可单测（PlayStatsAggregatorTest 8 用例）
 - 睡眠定时器（F2-2）：SleepTimerController（不持久化，档位 15/30/60/90 分钟，时间源可注入）+ 到期自动暂停；通知栏按钮显示剩余分钟（每分钟刷新）+ NowPlaying 顶栏状态条（点击快速设置 30 分钟）
 - 通知栏增强（F2-2）：按钮 3→5（新增播放模式循环切换、定时关闭，自定义 action 广播经 RECEIVER_NOT_EXPORTED 注册，API 22/33+ 双兼容）；下一首 subText（队尾不显示）；compact view 仍为核心 3 键
@@ -1928,28 +2027,33 @@
 - 跨曲交叉淡入淡出（F2-5）：CrossfadeController 双实例方案——切歌窗口主 player 旧歌淡出、crossfadePlayer 新歌淡入（50ms 步进线性斜坡），窗口结束 transitionToIndex 完成切歌；设置开关+时长档位（2/4/6/8/12s，默认关闭）；K歌/MTV 模式（suppressPlayback）、单曲循环、队列仅 1 首、下一首 streamUrl 为空均不触发；手动切歌立即中断；crossfadePlayer 不持音频焦点
 - 音质分级（F2-6）：Meting 源 br 参数 + 降级链（无损999→320→128，AUTO 不传 br）；BandwidthEstimator 滑动窗口带宽估计（30s/32样本，>10Mbps→999 / 2-10Mbps→320 / <2Mbps→128）；设置页 4 档选择（自动/无损/320k/128k）；NAS 原品质直传不受影响
 
-## [v2.28.1] - 2026-09-10
+## \[v2.28.1] - 2026-09-10
 
 ### Fixed
+
 - **只有第一张图有描线过程，后续函数直接出全图**：`GAP → DRAW` 迁移时未清零 `drawAccumulator`——首图靠 `onEnter` 归零，之后每个周期累加器残留 `8000ms`，新图第一帧即满足"描线完成"直接进 HOLD。现迁移时归零
 
 ### Changed
+
 - 重构（N 系列，2026-09-10，经所有者确认实施）：MainViewModel 兼容转发层消除——12 个子 VM 公开为只读属性（手动 DI，不引入 Hilt），删除 121 个纯透传转发、保留 12 个胶水转发，AppRoot/NetdiskScreen/MainActivity/MediaKeyHandler 改经子 VM 直调，MainViewModel 3186→3055 行（N-1）
 - 重构：DomainPrefs.kt（179 行 10 类）拆为 10 个独立子 Prefs 文件，data/prefs/ 达 14 文件单类单文件（N-2）
 - 重构：AppRoot 17 个单分支独占 collectAsState 订阅下沉至 when 分支内，顶层订阅 35→18 处（≤20 达标），未组合的 Screen 不再收集不重组（N-3）
 - 重构：PlayerManager（64.1KB）拆分——HQ 人声分离编排提取 HqSeparationOrchestrator（PlayerHost 窄接口，延续 R-5 模式）、均衡器/频谱提取 PlayerEqualizer，PlayerManager 精简为播放核心+队列状态机（41.5KB），外部调用面零改动（N-4；MediaSession/音频焦点实为 PlaybackService 职责，不涉及）
 
 ### Fixed
+
 - 封面缓存清除不生效：`clearCoverCache()` 用 `coil.ImageLoader(context)` 工厂函数创建全新无配置实例，其 `memoryCache`/`diskCache` 与 UI 实际使用的全局 ImageLoader（`NasMusicApp.newImageLoader()`，已注入百度 dlink UA 拦截器）不是同一个，清除操作打在了无人使用的实例上、磁盘 100MB 缓存目录也未被清理。改为 `Coil.imageLoader(context)` 取全局单例，与 `PlaybackService`/`CoilBitmapLoader` 同一实例。顺带消除该处 `ExperimentalCoilApi` 未 opt-in 告警
 - CI：`keystore.properties` 缺失时不再阻塞单测任务——`signingConfigs` 仅在配置存在时创建 release 签名，`signingConfig` 改用 `findByName`（返回 null）替代 `getByName`（配置期抛 `NoSuchElementException`）；此前 `file("")` 在配置期抛 `IllegalArgumentException`，导致 CI 的 `testDebugUnitTest` 整体失败。test job 同步补显式 Android SDK 安装步骤，不再依赖 runner 预装的隐含状态。
 - 网络歌曲队列播放中断：某首歌链接过期失败跳过后，下一首不自动播放（需手动点播放恢复）。根因：出错后 ExoPlayer 处于 IDLE 状态，`next()` 的 `seekToNextMediaItem()` 既不触发 `onMediaItemTransition`（索引不同步、空 URL 懒解析检测失效）也不重新 `prepare`，播放器静默停住。修复：新增 `transitionToIndex()` 手动恢复路径（同步索引 + 空 streamUrl 触发 `onNeedResolveStreamUrl` 解析 + seekTo/prepare/play），`next()`/`previous()` 检测到 IDLE 时统一走该路径（随机模式同策略排除已播历史）；`onMediaItemTransition` 空 URL 检测从仅 AUTO 放宽到 AUTO|SEEK；`onIsPlayingChanged(true)` 时重置 `lastErrorRetryIndex`，同一首歌成功起播后若链接再次过期仍可自动重解析一次（原仅切歌时重置）
 
-## [v2.28.0] - 2026-09-10
+## \[v2.28.0] - 2026-09-10
 
 ### Fixed
+
 - **只有第一张图有描线过程，后续函数直接出全图**：`GAP → DRAW` 迁移时未清零 `drawAccumulator`——首图靠 `onEnter` 归零，之后每个周期累加器残留 `8000ms`，新图第一帧即满足"描线完成"直接进 HOLD。现迁移时归零
 
 ### Changed
+
 - 重构：MainViewModel（5451 行）按 W0 冻结清单拆分为 13 个领域子 ViewModel（WeatherRadio/Backup/Playlist/Download/MvSearch/VocalSeparation/Server/Search/NetworkMusic/Player/Navigation/PlayHistory + 事件契约 ViewModelEvents），MainViewModel 精简为协调者 + 兼容转发层（3186 行），AppRoot 引用保持不变；详见 docs/archive/codebase-refactoring-plan-2026-09.md R-1
 - 重构：BaiduConnectionState 归属从 MainViewModel 迁移至 NetworkMusicViewModel
 - 重构：SettingsScreen 拆分为 9 个 Section（ui/screens/settings/，State/Actions 分组签名），主文件 2529→924 行（R-2）
@@ -1961,16 +2065,19 @@
 - 重构：ExportCoordinator/AccompanimentCache 统一注入 applicationScope；歌词持久缓存写互斥（F-4/F-5）
 
 ### Fixed
+
 - 安全：五个后端适配器（Jellyfin/Navidrome/Subsonic/道理鱼/飞牛）的 w/e 级错误日志统一经 UrlSanitizer 脱敏，release 包 logcat 不再泄露 api_key / Subsonic 密码令牌 / 登录 token（重构方案 F-1）；新增 UrlSanitizerTest 单测 8 项
 - 安全：天气 OpenWeatherMap API Key 改 AES-GCM 加密存储，旧明文值一次性迁移清除（F-7）
 - ANR：消除主线程 runBlocking——语言设置改 SharedPreferences 双写镜像，8 个 provider 键改 @Volatile 内存镜像（设置改动 ≤1s 生效，R-7 + F-3）；新增 ProviderMirrorTest 6 项
 - 性能：AppRoot 顶层 progress/duration 收集下沉至播放页分支，播放期间不再每秒驱动全树重组（F-2）
 - 修复：TV 双网卡（有线+无线）场景扫码 IP 可能取错网段——NetworkUtils 改接口优先级排序，有线/在用接口优先（F-6）
+
 > 说明：本轮按 docs/archive/codebase-refactoring-plan-2026-09.md v1.4 实施 R-1~R-7、R-9、R-10（Subsonic 公共层）与 F-1~F-7；R-8（Hilt 迁移）与 R-10 的 Jellyfin 域拆分经所有者确认定案不实施（兼容性风险 / 实例状态耦合深）。
 
-## [v2.27.0] - 2026-09-09
+## \[v2.27.0] - 2026-09-09
 
 ### Fixed
+
 - 安全：移除全部 6 处 trust-all TLS 配置，恢复系统默认证书校验（主播放器数据源 / Coil 图片 / 百度 OAuth / Meting / 道理鱼 / 飞牛 / B 站 MV）
 - 安全：清除连接页硬编码的开发者 NAS 账号密码（该凭据已随历史提交公开，需轮换）
 - 修复：高质量人声分离临时目录改用应用私有 cacheDir，原 /data/local/tmp 不可写导致 HQ 分离下载必败
@@ -1987,7 +2094,7 @@
 - 性能：频谱 20fps 状态流下沉至播放页收集；设置页组合内同步读改 Flow 订阅
 - 杂项：CI 增加单元测试步骤；EncodingUtils 空 catch 补日志；AGENTS.md 同步最新架构事实
 
-## [v2.26.41] - 2026-09-09
+## \[v2.26.41] - 2026-09-09
 
 多源融合大改版，终于告一段落了！
 
@@ -1995,13 +2102,13 @@
 
 - **播放页点击艺术家/歌名未跳转到搜索页**：`AppRoot.kt` 的 NowPlaying `onSearchArtist`/`onSearchSong` 接线错误地调用 `viewModel.searchNetworkSongs(keyword)`，该方法只更新独立的网络音乐搜索数据流 `_networkSearchResults`，既不导航也不设置曲库搜索关键词，导致点击后界面停留播放页、无任何跳转。修复：改为沿用已有的 `onNavigateToSearch` 模式（`selectLibraryTab(LibraryTab.SEARCH)` + `setLibrarySearchKeyword(keyword)` + `navigateTo(Screen.Library)`），跳转到曲库 SEARCH Tab 并触发跨源融合搜索（NAS + 网络 + 百度 + Jamendo + 本地）。
 
-## [v2.26.40] - 2026-09-09
+## \[v2.26.40] - 2026-09-09
 
 ### Fixed
 
 - **曲库搜索/发现/歌曲页面的加入歌单（`+`）无反应**：`AppRoot.kt` 的 `pickerSong` 状态被声明了两次——L128 顶层（供加入歌单弹窗 `PlaylistPickerDialog` 读取）与 L454 的 `Screen.Library` 分支内（遮蔽了顶层）。曲库页 `onAddToPlaylist = { song -> pickerSong = song }` 设置的是 L454 的遮蔽变量，而弹窗渲染读取的是 L128 的顶层变量，两者不是同一个 → 设置后弹窗读不到 → 永不弹出。修复：删除 L454 的冗余遮蔽变量，让曲库页的 `pickerSong` 引用顶层变量，与专辑/艺术家详情页、我的页、网盘页的加入歌单逻辑一致。
 
-## [v2.26.39] - 2026-09-09
+## \[v2.26.39] - 2026-09-09
 
 ### Fixed
 
@@ -2009,13 +2116,14 @@
 - **专辑/艺术家详情页的本地歌曲收藏后爱心不亮**：`AppRoot.kt` 的 AlbumDetail / ArtistDetail 传入 `viewModel.favoriteIds`（NAS-only），未与 `networkFavoriteIds` 合并；而 `toggleNetworkFavorite` 已将本地收藏保存到 DataStore `networkFavoriteIds`。结果收藏实际已持久化，但 `favoriteIds` 集合不含该 ID，`isFavorited = song.id in favoriteIds` 恒为 false，爱心永不亮。修复：`MainViewModel.favoriteIds` 改为 `combine(_favoriteIds, networkFavoriteIds)` 的统一合并集合，AppRoot 各屏幕统一读取（LibraryScreen 移除 `+ networkFavoriteIds` 散点拼接），NowPlaying 的 `isFavorite` 显示同步修正。
 
 ### Fixed
+
 - **只有第一张图有描线过程，后续函数直接出全图**：`GAP → DRAW` 迁移时未清零 `drawAccumulator`——首图靠 `onEnter` 归零，之后每个周期累加器残留 `8000ms`，新图第一帧即满足"描线完成"直接进 HOLD。现迁移时归零
 
 ### Changed
 
 - **收藏架构收敛为单一路径**：NAS 歌曲走服务端 adapter，网络/本地/下载歌曲走本机 DataStore `NetworkFavoriteItem`；UI 侧统一订阅合并后的 `favoriteIds`，不再在各屏幕自行按歌曲类型分流判断。
 
-## [v2.26.38] - 2026-09-08
+## \[v2.26.38] - 2026-09-08
 
 ### Fixed
 
@@ -2027,13 +2135,14 @@
 - **已下载歌曲以 LOCAL 源出现时封面不显示、歌词走网络**：下载完成后歌曲经 MediaStore 扫描以 LOCAL 源重新出现在搜索结果中，其 `downloadKey`（`local_local_xxx`）与下载记录 key（`ntwk_meting_xxx`）不匹配，`downloadStates` 查询返回 null，本地封面/歌词分支全被跳过。同时 LOCAL 源歌曲的 `song.path` 是 URL 编码的（如 `%E8%B5%B5%E4%BC%A0`），而 `EmbeddedCoverExtractor` 和 `LocalLyricsProvider` 只做 `removePrefix("file://")` 未做 URL 解码，`File(encodedPath).exists()` 返回 false。修复：`UnifiedSongRow`、`loadLyricsForCurrentSong`、`getCoverCandidates` 增加 `song.isLocalSong` 兜底，`downloadStates` 匹配不到时直接从 `song.path` 提取内嵌封面/歌词；三处路径解析均加 `android.net.Uri.decode()` 解码 percent-encoding。
 
 ### Fixed
+
 - **只有第一张图有描线过程，后续函数直接出全图**：`GAP → DRAW` 迁移时未清零 `drawAccumulator`——首图靠 `onEnter` 归零，之后每个周期累加器残留 `8000ms`，新图第一帧即满足"描线完成"直接进 HOLD。现迁移时归零
 
 ### Changed
 
 - **统一所有扫码页面 STR 序列化方式**：`RemoteControlHtml.kt`（遥控页）和 `ModelTransferServer.kt`（模型上传页）的 STR 对象从手工 `replace("'", "\\'")` / `esc()` 拼接改为 `gson.toJson()` 序列化，与备份页保持一致。防御性修复：未来在 `strings.xml` 中添加 `\n` 等特殊字符时不再导致 JS 语法错误使整个页面脚本失效。`LocalInputServer.kt`（文字输入页）纯硬编码 HTML，无需修改。
 
-## [v2.26.37] - 2026-09-08
+## \[v2.26.37] - 2026-09-08
 
 ### Fixed
 
@@ -2042,13 +2151,14 @@
 - **在线源耗尽后无法补充封面**：`artistCoverMaxAttempts = 2` 耗尽后不再解析，但 NAS 全量歌曲需 12-13 分钟才加载完，P4 歌曲封面兜底在歌曲未加载完时无效。新增 `resolveSongCoversOnly()` 方法，在线源尝试次数耗尽后，每次歌曲库更新仍重新用 P4 匹配新加载的歌曲封面，不消耗在线源尝试次数。
 
 ### Fixed
+
 - **只有第一张图有描线过程，后续函数直接出全图**：`GAP → DRAW` 迁移时未清零 `drawAccumulator`——首图靠 `onEnter` 归零，之后每个周期累加器残留 `8000ms`，新图第一帧即满足"描线完成"直接进 HOLD。现迁移时归零
 
 ### Changed
 
 - **封面多级回退链完善**：完整链路为 Jellyfin Primary tag → Jellyfin Backdrop → 网易云 → 酜狗 → iTunes → 歌曲封面(P4) → P4-only 补充通道（歌曲库更新后持续重试） → 首字母占位(UI)。
 
-## [v2.26.36] - 2026-09-08
+## \[v2.26.36] - 2026-09-08
 
 ### Fixed
 
@@ -2058,22 +2168,24 @@
 - **搜索 NAS 结果被超时截断**：`SearchAggregator` 的 `NAS_TIMEOUT` 从 5s 增至 15s，防止大曲库搜索被过早截断返回空结果。
 
 ### Fixed
+
 - **只有第一张图有描线过程，后续函数直接出全图**：`GAP → DRAW` 迁移时未清零 `drawAccumulator`——首图靠 `onEnter` 归零，之后每个周期累加器残留 `8000ms`，新图第一帧即满足"描线完成"直接进 HOLD。现迁移时归零
 
 ### Changed
 
 - **全量歌曲分页大小**：`pageSize` 从 200 增至 500，3 万首歌的 HTTP 请求次数从约 150 次降至约 60 次，减少网络开销。
 
-## [v2.26.35] - 2026-09-08
+## \[v2.26.35] - 2026-09-08
 
 ### Fixed
+
 - **只有第一张图有描线过程，后续函数直接出全图**：`GAP → DRAW` 迁移时未清零 `drawAccumulator`——首图靠 `onEnter` 归零，之后每个周期累加器残留 `8000ms`，新图第一帧即满足"描线完成"直接进 HOLD。现迁移时归零
 
 ### Changed
 
 - **百度索引全量加载瓶颈消除**：排查所有调用 `baiduIndexCache.allSongs()`（38000+ Song 对象全量创建后再客户端过滤）的热路径，替换为 entry 级预过滤方法：
   - 新增 `BaiduFileIndexCache.songsByAlbumName()` / `searchSongs()`：在 raw entry 级别过滤，只对匹配项创建 Song 对象。
-  - `loadAlbumSongs` / `playAlbumMultiSource`：`filterSongsByAlbumName(allSongs())` → `songsByAlbumName()`，38000→~20。
+  - `loadAlbumSongs` / `playAlbumMultiSource`：`filterSongsByAlbumName(allSongs())` → `songsByAlbumName()`，38000→\~20。
   - `searchSongsOnServer` 拼音搜索：`allSongs()` → `searchSongs(query, pinyinMatch=true)`。
   - `updateMergedData`：`allSongs()` 从 5 次重复调用收敛为 1 次加载 + 参数传递。
 
@@ -2083,7 +2195,7 @@
 - **百度搜索本地索引+API 串行**：`BaiduNetdiskService.searchInternal` 中本地索引和 API 从串行改为 `async` 并行，总耗时从 `本地索引 + API` 降为 `max(本地索引, API)`。
 - **歌曲列表两列布局歌名被压缩**：歌曲条目信息多（标题+艺术家+专辑+时长+操作按钮），TV 两列布局下歌名被压缩不可读。`songGridColumns()` 从 TV=2列/手机=1列 改为始终 1 列，影响曲库/发现/搜索/网盘页面。"我的"页面不受影响（其 TV/手机版式差异保持不变）。
 
-## [v2.26.34] - 2026-09-08
+## \[v2.26.34] - 2026-09-08
 
 ### Fixed
 
@@ -2097,19 +2209,20 @@
 - **无封面时自动搜索网络封面**：所有源歌曲（NAS/本地/百度网盘/网络音乐）在无封面时自动调用 `networkMusicManager.searchCoverUrl` 搜索网络封面。切歌时重置 `_networkCoverUrl` 避免残留。
 
 ### Fixed
+
 - **只有第一张图有描线过程，后续函数直接出全图**：`GAP → DRAW` 迁移时未清零 `drawAccumulator`——首图靠 `onEnter` 归零，之后每个周期累加器残留 `8000ms`，新图第一帧即满足"描线完成"直接进 HOLD。现迁移时归零
 
 ### Changed
 
 - **艺术家详情页加载性能优化**：`loadArtistSongs` 五个音乐源从串行改为真正并行（`coroutineScope` + `async`），慢源（NAS API、Meting 搜索）不再互相阻塞。
-- **百度索引过滤优化**：新增 `BaiduFileIndexCache.songsByArtist()`，在 raw entry 上直接按艺术家过滤，只对匹配项创建 Song 对象（从 38837 个降至 ~12 个），避免全量 `allSongs()` + 客户端 filter 的开销。
+- **百度索引过滤优化**：新增 `BaiduFileIndexCache.songsByArtist()`，在 raw entry 上直接按艺术家过滤，只对匹配项创建 Song 对象（从 38837 个降至 \~12 个），避免全量 `allSongs()` + 客户端 filter 的开销。
 - **ArtistSplitter 新增 `containsArtistWithKey`**：接受预计算的归一化 key，避免在循环内对同一艺术家名重复执行 NFKC 归一化 + 正则拆分。
 - `getCoverCandidates` 网络歌曲也纳入 `_networkCoverUrl` 候选（原先只对 NAS 歌曲）。
-- 实测赵传详情页加载从 ~53s 降至 ~9s。
+- 实测赵传详情页加载从 \~53s 降至 \~9s。
 
 ---
 
-## [v2.26.33] - 2026-09-08
+## \[v2.26.33] - 2026-09-08
 
 ### Fixed
 
@@ -2124,6 +2237,7 @@
 - **BaiduAuthDialog 错误文案区分**：Failed 状态根据实际失败原因动态显示（授权范围不足/用户拒绝/超时/授权失败）
 
 ### Fixed
+
 - **只有第一张图有描线过程，后续函数直接出全图**：`GAP → DRAW` 迁移时未清零 `drawAccumulator`——首图靠 `onEnter` 归零，之后每个周期累加器残留 `8000ms`，新图第一帧即满足"描线完成"直接进 HOLD。现迁移时归零
 
 ### Changed
@@ -2134,7 +2248,7 @@
 
 ---
 
-## [v2.26.32] - 2026-09-06
+## \[v2.26.32] - 2026-09-06
 
 ### Added
 
@@ -2167,6 +2281,7 @@
   - `ExportStateTest`（13 个）：覆盖状态创建、属性、错误枚举
 
 ### Fixed
+
 - **只有第一张图有描线过程，后续函数直接出全图**：`GAP → DRAW` 迁移时未清零 `drawAccumulator`——首图靠 `onEnter` 归零，之后每个周期累加器残留 `8000ms`，新图第一帧即满足"描线完成"直接进 HOLD。现迁移时归零
 
 ### Changed
@@ -2179,7 +2294,7 @@
 - **SAF TV 兼容性**：探测 TV 桩实现（`com.google.android.tv.frameworkpackagestubs`），无 SAF 时自动降级到应用专属目录
 - **导出空间检测**：每 50MB 复检目标设备空间，跌破 100MB 预留自动中止
 
-## [v2.26.31] - 2026-09-05
+## \[v2.26.31] - 2026-09-05
 
 ### Added
 
@@ -2197,7 +2312,7 @@
 - **通知栏截断文字**：`contentText` 从"已暂停/正在播放"改为显示歌手名，播放状态由 MediaStyle 图标隐含表示。
 - **PlaybackService.onTaskRemoved 切后台停歌**：原实现直接 `stopSelf()` 导致服务销毁，改为播放中保留服务。
 
-## [v2.26.30] - 2026-09-05
+## \[v2.26.30] - 2026-09-05
 
 ### Added
 
@@ -2210,9 +2325,10 @@
 
 - **艺术家详情页左侧封面不显示**：`AppRoot` 查 `selectedArtist` 用的是原始 `_artists`（NAS 未合并列表），其 coverUrl 未应用 `resolvedArtistCovers` 解析缓存，且百度/本地艺术家不在其中。改用 `viewModel.mergedArtists`（已应用封面缓存）查找，详情页左侧封面正常显示。
 
-## [v2.26.29] - 2026-09-05
+## \[v2.26.29] - 2026-09-05
 
 ### Fixed
+
 - **只有第一张图有描线过程，后续函数直接出全图**：`GAP → DRAW` 迁移时未清零 `drawAccumulator`——首图靠 `onEnter` 归零，之后每个周期累加器残留 `8000ms`，新图第一帧即满足"描线完成"直接进 HOLD。现迁移时归零
 
 ### Changed
@@ -2224,7 +2340,7 @@
 - **百度艺术家改回走在线补全**：`MusicMerger.buildBaiduArtists` 由 `useSongCover=true` 改回 `false`，保证百度艺术家优先尝试网易云/酷狗/iTunes 拿歌手本人照片，拿不到才由 P4 歌曲封面兜底。`buildLocalArtists` 保留 `useSongCover=true`（本地曲库大，全量在线请求会限流，直接用歌曲封面）。
 - **移除已下线的百度音乐 API**：`musicapi.taihe.com` DNS 解析失败，已从 `ArtistCoverResolver` 移除 P2 百度音乐搜索。
 
-## [v2.26.28] - 2026-09-05
+## \[v2.26.28] - 2026-09-05
 
 ### Fixed
 
@@ -2233,14 +2349,14 @@
 - **移除已下线的百度音乐 API**：`musicapi.taihe.com` DNS 解析失败已不可用，从 `ArtistCoverResolver` 移除 P2 百度音乐搜索兜底，避免对 4 万+ 艺术家发无效请求触发限流。在线补全仅保留 iTunes。
 - **艺术家封面解析收敛护栏**：为 `resolveArtistCoversAsync` 新增 `artistCoverAttempts` / `artistCoverMaxAttempts`，与专辑封面解析一致，切断 `updateMergedData ↔ resolveArtistCoversAsync` 无成果时的重复请求循环。
 
-## [v2.26.27] - 2026-09-05
+## \[v2.26.27] - 2026-09-05
 
 ### Fixed
 
 - **百度网盘索引只扫到约 4493 首（实际 4 万+）**：`BaiduPanApi.listAllAudioPaged` 误用 `FILE_BASE`（`xpan/file`）端点调用 `listall`，百度静默降级为 `list` 语义不递归，只拿到根目录第一层文件。修正为 `MULTIMEDIA_BASE`（`xpan/multimedia`），与百度官方文档 `listall` 接口规范一致，递归分页（`has_more`/`cursor`）正常工作。
 - **索引后不提取封面**：`rebuildBaiduIndex` 此前误以为 `listall+web=1` 返回的 `thumbs` 能覆盖音频封面，实际百度只为图片/视频生成缩略图，音频文件 `coverThumb` 几乎全为 null，`startApicExtraction()` 从未被调用。现扫描完成后统计 `coverUrl == null` 的音频条目，如有则自动触发 APIC 后台提取内嵌 ID3 封面。
 
-## [v2.26.26] - 2026-09-05
+## \[v2.26.26] - 2026-09-05
 
 ### Fixed
 
@@ -2251,16 +2367,17 @@
 - **百度网盘旧配置自动纠正**：`AppPreferences.getBaiduMusicRootDirSync()` / `getBaiduMvDirSync()` 读取时检测路径是否在沙盒 `/apps/NASMusicTV` 下，不在则自动纠正并回写
 - **设置页目录默认描述更新**：音乐根目录和 MV 目录的默认描述从旧路径 `/音乐` 改为百度沙盒路径 `/apps/NASMusicTV`（中/英双语）
 
-## [v2.26.25] - 2026-09-05
+## \[v2.26.25] - 2026-09-05
 
 ### Fixed
 
 - **百度网盘设置页目录默认描述更新**：音乐根目录和 MV 目录的默认描述从旧路径 `/音乐` 改为百度沙盒路径 `/apps/NASMusicTV`，与实际权限和代码默认值一致（中/英双语）
 - **百度网盘旧配置自动纠正**：`AppPreferences.getBaiduMusicRootDirSync()` / `getBaiduMvDirSync()` 读取时检测路径是否在沙盒 `/apps/NASMusicTV` 下，不在则自动纠正为沙盒目录并回写，解决 DataStore 中残留旧路径 `/音乐` 导致设置页仍显示无权限路径的问题
 
-## [v2.26.24] - 2026-09-05
+## \[v2.26.24] - 2026-09-05
 
 ### Fixed
+
 - **只有第一张图有描线过程，后续函数直接出全图**：`GAP → DRAW` 迁移时未清零 `drawAccumulator`——首图靠 `onEnter` 归零，之后每个周期累加器残留 `8000ms`，新图第一帧即满足"描线完成"直接进 HOLD。现迁移时归零
 
 ### Changed
@@ -2268,65 +2385,70 @@
 - **百度网盘封面提取改为扫描后后台渐进执行**：扫描阶段（`scanDirTree`/`fullScan`）恢复为纯目录遍历，不再提取 APIC 封面，扫描速度提升数倍。扫描完成后自动启动 `extractApicInBackground()`，并发数 5、每批 20 条写入索引，避免百度限流。设置页新增封面提取进度条（Box 进度条 + 百分比文字），提取完成后进度条自动消失。
 
 ### Fixed
+
 - **只有第一张图有描线过程，后续函数直接出全图**：`GAP → DRAW` 迁移时未清零 `drawAccumulator`——首图靠 `onEnter` 归零，之后每个周期累加器残留 `8000ms`，新图第一帧即满足"描线完成"直接进 HOLD。现迁移时归零
 
 ### Changed
 
 - **versionCode 102 → 103，versionName 2.26.23 → 2.26.24**
 
-## [v2.26.23] - 2026-09-04
+## \[v2.26.23] - 2026-09-04
 
 ### Fixed
 
 - **`path.hashCode()` 作主键碰撞丢 USB 歌（复审 P2，方案 A）**：USB / 文件遍历扫描（`MusicScanner.scanFile`）原用 `file.absolutePath.hashCode().toLong()` 作 `LocalSongEntity.mediaStoreId` 主键。32-bit 哈希在约 7.7 万文件时碰撞概率≈50%，`@Insert(REPLACE)` 下碰撞条目互相覆盖、静默丢歌。改为 `HashUtils.stablePathHash64()`（FNV-1a 64-bit），分布均匀、碰撞概率可忽略，且对同一 path 跨进程/启动/设备完全确定。因 id 取值整体变化，同步将 `LocalMusicDatabase` 版本 1→2（`fallbackToDestructiveMigration(true)` 已配，升级即破坏性重建），避免旧 32-bit id 行残留造成重复条目。MediaStore 通道（`scanAllMusic`）始终用真实 MediaStore ID，不受影响。
 
 ### Fixed
+
 - **只有第一张图有描线过程，后续函数直接出全图**：`GAP → DRAW` 迁移时未清零 `drawAccumulator`——首图靠 `onEnter` 归零，之后每个周期累加器残留 `8000ms`，新图第一帧即满足"描线完成"直接进 HOLD。现迁移时归零
 
 ### Changed
 
 - **versionCode 101 → 102，versionName 2.26.22 → 2.26.23**
 
-## [v2.26.22] - 2026-09-04
+## \[v2.26.22] - 2026-09-04
 
 ### Fixed
 
 - **LocalMusicDatabase 无破坏性迁移（方案 A）**：`LocalMusicDatabase` 原仅配 `.fallbackToDestructiveMigrationOnDowngrade()`，即 schema 版本**升级**时不会触发破坏性重建、且无任何 `Migration` 实现——一旦后续给实体加字段/索引导致 `version` 提升，Room 会抛 `IllegalStateException: A migration from 1 to 2 was required but not found`，本地音乐库直接崩溃不可用。改为 `.fallbackToDestructiveMigration(true)`（含 `dropAllTables` 的重载，避免 no-arg 版本在新 Room 中的 deprecation 警告），升级与降级均走破坏性重建。本地索引可由重扫重建，无需维护 `Migration` 类，消除版本演进时的迁移代码负担与崩溃风险。
 
 ### Fixed
+
 - **只有第一张图有描线过程，后续函数直接出全图**：`GAP → DRAW` 迁移时未清零 `drawAccumulator`——首图靠 `onEnter` 归零，之后每个周期累加器残留 `8000ms`，新图第一帧即满足"描线完成"直接进 HOLD。现迁移时归零
 
 ### Changed
 
 - **versionCode 100 → 101，versionName 2.26.21 → 2.26.22**
 
-## [v2.26.21] - 2026-09-04
+## \[v2.26.21] - 2026-09-04
 
 ### Fixed
 
 - **B20 续：播放整张合并专辑仍只取 NAS 歌（同根因的播放路径）**：`AppRoot` 的 `onPlayAlbum`（HomeScreen / LibraryScreen）原用 `songs.filter { it.albumId == album.id }`，合并专辑 `id` 是 NAS id，本地/百度同名歌整张播放时仍被漏掉。改为调用 `MainViewModel.playAlbumMultiSource(album)`——复用 `loadAlbumSongs` 的 `filterSongsByAlbumName` 多源取数（NAS → `adapter.getAlbumSongs`；本地/百度 → 按专辑名匹配），按 `title|artist|durationMs` 跨源去重后整张播放。方案 B 对 B20 的覆盖现已完整（详情页显示 + 整张播放）。
 
 ### Fixed
+
 - **只有第一张图有描线过程，后续函数直接出全图**：`GAP → DRAW` 迁移时未清零 `drawAccumulator`——首图靠 `onEnter` 归零，之后每个周期累加器残留 `8000ms`，新图第一帧即满足"描线完成"直接进 HOLD。现迁移时归零
 
 ### Changed
 
 - **versionCode 99 → 100，versionName 2.26.20 → 2.26.21**
 
-## [v2.26.20] - 2026-09-04
+## \[v2.26.20] - 2026-09-04
 
 ### Fixed
 
 - **B20：专辑合并后「只留 NAS id」导致详情页丢本地歌（方案 B，从根上解决）**：`MusicMerger.mergeAlbums` 同名碰撞时保留 NAS 专辑的 `id`，本地/百度同名专辑的 `id` 被丢弃，而 `MainViewModel.loadAlbumSongs` 按 `id` 前缀路由——合并专辑 `id` 是 NAS id，点进去只返回 NAS 歌曲，本地/百度同名歌在详情页不可见、不可播。现给 `Album` 增加 `sourceIds: List<String>` 字段，`mergeAlbums` 在碰撞/新建时把 NAS、本地、百度的原始来源 id 全部收集进 `sourceIds`；`loadAlbumSongs` 改为读取 `album.sourceIds`（单源 album 回退到 `albumId`，向后兼容），对每个来源分别取数——NAS 走 `adapter.getAlbumSongs`、本地/百度按专辑名匹配——再拼接并跨源去重（按 `title|artist|durationMs`）后写入缓存。
 
 ### Fixed
+
 - **只有第一张图有描线过程，后续函数直接出全图**：`GAP → DRAW` 迁移时未清零 `drawAccumulator`——首图靠 `onEnter` 归零，之后每个周期累加器残留 `8000ms`，新图第一帧即满足"描线完成"直接进 HOLD。现迁移时归零
 
 ### Changed
 
 - **versionCode 98 → 99，versionName 2.26.19 → 2.26.20**
 
-## [v2.26.19] - 2026-09-04
+## \[v2.26.19] - 2026-09-04
 
 ### Fixed
 
@@ -2349,33 +2471,35 @@
 - 回归测试 `ArtistSplitterTest`（15 例）与 `MusicMergerTest`（4 例），覆盖合唱拆分与同名不同写法合并。
 
 ### Fixed
+
 - **只有第一张图有描线过程，后续函数直接出全图**：`GAP → DRAW` 迁移时未清零 `drawAccumulator`——首图靠 `onEnter` 归零，之后每个周期累加器残留 `8000ms`，新图第一帧即满足"描线完成"直接进 HOLD。现迁移时归零
 
 ### Changed
 
 - **versionCode 97 → 98，versionName 2.26.18 → 2.26.19**
 
-## [v2.26.16] - 2026-09-04
+## \[v2.26.16] - 2026-09-04
 
 ### Fixed
 
 - **MusicScanner 递归无深度限制（P2）**：`scanPath` 用 `walkTopDown()` 递归整个目录树、无上限，深目录或符号链接循环会无限递归、主线程 IO 卡死。已加 `.maxDepth(8)` 防护。
 - **Bilibili MV 标题解析每次编译正则（P2）**：`stripHtml` 每次调用都 `Regex("<[^>]+>")` 重新编译，已将正则提为 companion object 预编译常量 `HTML_TAG_REGEX`。
 
-## [v2.26.18] - 2026-09-04
+## \[v2.26.18] - 2026-09-04
 
 ### Fixed
 
 - **跨线程可变集合无同步（P2）**：`FeiniuAdapter.cookieStore`（`mutableMapOf`）被 OkHttp `CookieJar` 回调在 dispatcher 线程池并发读写，HashMap 非线程安全，并发 `put` 可能结构损坏；`NavidromeAdapter._favoriteIds`（`mutableSetOf`）在 `Dispatchers.IO` 的多个 suspend 函数里并发读写收藏状态。二者均改为 `java.util.Collections.synchronizedMap` / `synchronizedSet` 包装，零行为变更。
 
 ### Fixed
+
 - **只有第一张图有描线过程，后续函数直接出全图**：`GAP → DRAW` 迁移时未清零 `drawAccumulator`——首图靠 `onEnter` 归零，之后每个周期累加器残留 `8000ms`，新图第一帧即满足"描线完成"直接进 HOLD。现迁移时归零
 
 ### Changed
 
 - **versionCode 96 → 97，versionName 2.26.17 → 2.26.18**
 
-## [v2.26.17] - 2026-09-04
+## \[v2.26.17] - 2026-09-04
 
 ### Fixed
 
@@ -2385,13 +2509,14 @@
 - **Jellyfin 曲库计数 `Limit=0` 语义风险（P2）**：`getSongsTotalCount` 意图「只取 1 条拿 `TotalRecordCount`」，但 `Limit=0` 在 Jellyfin 表示「无限制返回全部」，会拉全量曲库。已改 `Limit=1` 澄清意图（返回值不变）。
 
 ### Fixed
+
 - **只有第一张图有描线过程，后续函数直接出全图**：`GAP → DRAW` 迁移时未清零 `drawAccumulator`——首图靠 `onEnter` 归零，之后每个周期累加器残留 `8000ms`，新图第一帧即满足"描线完成"直接进 HOLD。现迁移时归零
 
 ### Changed
 
 - **versionCode 95 → 96，versionName 2.26.16 → 2.26.17**
 
-## [v2.26.15] - 2026-09-04
+## \[v2.26.15] - 2026-09-04
 
 ### Fixed
 
@@ -2401,19 +2526,19 @@
 
 - **冗余 `WAKE_LOCK` 权限声明（P2）**：全代码库无任何 `WakeLock`/`PowerManager` 引用，Media3 `MediaLibraryService` 自行管理唤醒锁，应用层声明属冗余，已删除。
 
-## [v2.26.14] - 2026-09-04
+## \[v2.26.14] - 2026-09-04
 
 ### Fixed
 
 - **seek 窗口内暂停/播放状态失真（P5）**：`onIsPlayingChanged` 在 `seekPending` 时直接 `return`，seek 期间（≤1 秒）的暂停/播放事件被吞，`_isPlaying` 不更新，播放按钮卡在错误状态直到下次回调。已改为 seek 期间仍同步 `_isPlaying`（纯状态记录），仅跳过进度轮询启停等有副作用的操作。
 
-## [v2.26.13] - 2026-09-04
+## \[v2.26.13] - 2026-09-04
 
 ### Fixed
 
 - **飞牛/道理鱼 getSongs 除零崩溃（B14）**：`getSongs(limit, offset)` 里 `(offset / limit)` 在 `limit <= 0` 时抛 `ArithmeticException`。已改为 `safeLimit = if (limit > 0) limit else PAGE_SIZE`，两个 adapter 同步修复。
 
-## [v2.26.12] - 2026-09-04
+## \[v2.26.12] - 2026-09-04
 
 ### Fixed
 
@@ -2421,7 +2546,7 @@
 
 - **Navidrome/Subsonic 专辑列表硬上限 500 无分页（B10）**：`getAlbums` 硬编码 `size=500`，超过 500 张专辑的用户会丢失专辑。已改为按页循环拉取（每页 500，`offset` 递增），直到返回不足一页或达到安全上限（100 页 / 5 万张）。
 
-## [v2.26.11] - 2026-09-04
+## \[v2.26.11] - 2026-09-04
 
 ### Fixed
 
@@ -2431,7 +2556,7 @@
 
 - **Demucs 解码器/抽取器异常路径泄漏（P8）**：`decodeAudioToTempFile` 的 `MediaCodec`/`MediaExtractor` 仅在正常路径 `release()`，catch 分支未释放，解码异常时资源泄漏。已将二者提升为函数级变量，`finally` 块统一 `stop()`/`release()`。
 
-## [v2.26.10] - 2026-09-04
+## \[v2.26.10] - 2026-09-04
 
 ### Fixed
 
@@ -2439,7 +2564,7 @@
 
 - **iTunes 封面永远返回低清图（B16）**：`artworkUrl.replace("100x100", "600x600")` 的返回值被丢弃（未 `return`），实际永远返回 100×100 低清封面。已改为返回替换后的 600×600 高清图。
 
-## [v2.26.9] - 2026-09-04
+## \[v2.26.9] - 2026-09-04
 
 ### Fixed
 
@@ -2451,7 +2576,7 @@
 
 - **删除 `checkPreSeparation` 死代码**：预分离触发函数无任何调用点（`AccompanimentCache.startPreSeparation` 也因此无外部调用），且注释「进度 > 50%」与实现「阈值 5%」矛盾。已删除该函数及其独占的 `PRE_SEPARATION_THRESHOLD` 常量。
 
-## [v2.26.8] - 2026-09-04
+## \[v2.26.8] - 2026-09-04
 
 ### Fixed
 
@@ -2465,7 +2590,7 @@
 
 - **`refreshApiVersions()` 重复调用（C9）**：`connectToSavedServer` 成功路径连续调用两次（多一次网络请求），已删除重复调用。
 
-## [v2.26.7] - 2026-09-04
+## \[v2.26.7] - 2026-09-04
 
 ### Fixed
 
@@ -2477,7 +2602,7 @@
 
 - **Subsonic `getSongsByIds` 串行 N+1（B13）**：逐个 `getSong` 串行请求，队列恢复数十首歌时 RTT 累加成秒级卡顿。改为并发请求（`supervisorScope` + `async` + 8 路信号量限流），失败单曲不影响整体。
 
-## [v2.26.6] - 2026-09-04
+## \[v2.26.6] - 2026-09-04
 
 ### Fixed
 
@@ -2493,13 +2618,13 @@
 
 - **Navidrome `getSongs` 末页 N+1 遍历（B8）**：翻页到末页时，服务端正常返回空 `songs` 数组，原实现把「空数组」误判为端点异常，每次都触发 `fallbackGetSongs` 遍历全部专辑逐个 `getAlbumSongs`（N+1），大曲库下卡死。改为仅当 `songs` 字段**完全缺失**（格式不兼容）才走 fallback；空数组直接返回空列表（正常末页）。
 
-## [v2.26.5] - 2026-09-04
+## \[v2.26.5] - 2026-09-04
 
 ### Fixed
 
 - **AppPreferences JSON 偏好「解析失败→回写空」数据丢失模式（P0）**：所有 JSON 型偏好的「读-改-写」写入点（播放记录、最近播放 id、播放次数、最近歌曲对象、网络收藏、本地歌单增删改、搜索历史、均衡器 bands）原先都是 `catch (e) { 空集合 }` 把 JSON 解析失败转成空数据，随后**无条件 `gson.toJson(updated)` 回写覆盖** —— 一次 JSON 异常（写入截断/字段变更）就会把用户积累的数百条播放记录/收藏/歌单抹成空。现引入 `safeParseJson()` 统一安全解析：解析失败记日志并返回 `null`，各写入点改为「解析失败即 `return@edit` 跳过回写，保留原数据」，从根上杜绝覆盖式数据丢失。`gson.fromJson` 调用统一补显式泛型实参以消除平台类型推断问题。
 
-## [v2.26.4] - 2026-09-04
+## \[v2.26.4] - 2026-09-04
 
 ### Fixed
 
@@ -2507,35 +2632,37 @@
 - **PlayerManager `with` 误用致主线程加载 166MB 模型 ANR**：`enableHighQualityRemoval` 中 `separator.initialize(modelPath)`（166MB 模型加载）与 `separator.separate(...)` 两处误用 `with(Dispatchers.IO)`（Kotlin 作用域函数，接收者传入但仍在当前线程内联执行），应为 `withContext(Dispatchers.IO)` 真正切到 IO 线程。已改为 `withContext`，消除开伴唱即 ANR/黑屏。
 - **Demucs 输出流失败不关闭 + 残缺 WAV 缓存投毒**：`separate()` 的输出流在异常路径不关闭、失败时残留「44 字节 WAV 头 + 部分 PCM」的残缺文件。已把输出流/输出文件提升到 `try` 外，`finally` 统一关闭流，并在失败（`success=false`）时删除残缺 WAV，避免伴奏缓存误判为有效。
 
-## [v2.26.3] - 2026-09-04
+## \[v2.26.3] - 2026-09-04
 
 ### Fixed
+
 - **只有第一张图有描线过程，后续函数直接出全图**：`GAP → DRAW` 迁移时未清零 `drawAccumulator`——首图靠 `onEnter` 归零，之后每个周期累加器残留 `8000ms`，新图第一帧即满足"描线完成"直接进 HOLD。现迁移时归零
 
 ### Changed
 
 - **网络封面（Meting/网易云）检索改为多候选回退，提升百度网盘专辑封面命中率**：原实现只用「代表歌曲标题 + 艺术家」检索一次，失败即放弃；而百度歌曲常缺艺术家标签，标题也可能不规范（`01.mp3`、乱码）。现按「信息可靠度」依次尝试最多 4 组检索词：**标题+艺术家 → 仅标题 → 目录名推断的专辑名+艺术家 → 仅专辑名**，取首个非空结果即停。要点：百度专辑名是从**目录名**推断的（`MusicMerger.buildBaiduAlbums` 取 path 倒数第二段），常为「周杰伦」「新建文件夹」之类，直接当检索词命中率极低，故降级为兜底候选；歌曲标题来自文件名/ID3，可靠度更高，优先使用。`MetingApiService.searchCoverUrl` 对空艺术家有正确处理（按纯标题检索），传空串安全。
 
-## [v2.26.2] - 2026-09-04
+## \[v2.26.2] - 2026-09-04
 
 ### Fixed
 
 - **封面解析循环收敛（消除 CPU/电量/流量开销）**：`updateMergedData()` 末尾无条件调用 `resolveAlbumCoversAsync()`，而后者解析结束后**不判断是否有成果**又无条件回调 `updateMergedData()`，形成 `updateMergedData → resolveAlbumCoversAsync → updateMergedData → …` 的**无中断条件**后台循环 —— 持续重复 merge 专辑/艺术家、统计 songCount，并对解析不出的专辑反复发网络请求（iTunes/百度）。现加两道收敛护栏：① 只对「仍缺封面且尝试次数未达上限」的专辑发起解析（每专辑最多 2 次，保留 1 次重试以容忍瞬时网络失败），无待解析项时直接返回；② 仅在**确实解析出新封面**时才回调 `updateMergedData()` 重建 UI。新出现的专辑不在尝试表中，仍会被正常解析，不影响首次封面获取。
 - **艺术家封面解析去除冗余重建**：`resolveArtistCoversAsync()` 原先无论有无成果都回调 `updateMergedData()` 触发全量 merge；改为仅在解析出新封面时重建（该方法由 `loadArtists` 触发，不与 `updateMergedData` 互调，本身不构成循环，此项为消除多余开销）。
 
-## [v2.26.1] - 2026-09-04
+## \[v2.26.1] - 2026-09-04
 
 ### Fixed
 
 - **百度网盘侧车封面 dlink 缺少 access_token（封面一律 403）**：`BaiduCoverProvider.ensureAccessToken()` 原先只拼接**空的** `access_token=`（从未获取 token 值），导致所有不含 token 的侧车封面 dlink 请求被百度拒绝、Coil 加载失败；且该类构造时未注入 `BaiduOAuthClient`，根本无从取 token。现注入 `BaiduOAuthClient`（`NasMusicApp`），改为真正调用 `getValidAccessToken()` 并做 URL 编码（与 `BaiduStreamFactory.resolveStreamUrl` 处理一致）；取不到 token 时返回 `null`，交由后续「内嵌 APIC → 网络封面」fallback 继续处理，不再产生无效 URL。
 
-## [v2.26.0] - 2026-09-03
+## \[v2.26.0] - 2026-09-03
 
 ### Added
 
 - **专辑/艺术家详情页歌曲「加入歌单」按钮**：`AlbumDetailScreen`/`ArtistDetailScreen` 的歌曲行新增 `onAddToPlaylist` 回调，复用 `UnifiedSongRow` 已有的 `+` 按钮；`AppRoot` 将 `pickerSong` 提升到顶层，使加入歌单弹窗在曲库/专辑详情/艺术家详情三处共用
 
 ### Fixed
+
 - **只有第一张图有描线过程，后续函数直接出全图**：`GAP → DRAW` 迁移时未清零 `drawAccumulator`——首图靠 `onEnter` 归零，之后每个周期累加器残留 `8000ms`，新图第一帧即满足"描线完成"直接进 HOLD。现迁移时归零
 
 ### Changed
@@ -2548,7 +2675,7 @@
 
 - **「我的」页移除「最近播放」分区**：首页已有最近播放，移除以避免三栏过窄；保留收藏 + 本地歌单两栏
 
-## [v2.25.8] - 2026-09-03
+## \[v2.25.8] - 2026-09-03
 
 ### Fixed
 
@@ -2556,7 +2683,7 @@
 - **曲库字母索引条位置错误（居中而非右边缘）**：`SideLetterIndex` 内部 `Column` 的子项用 `Box(fillMaxWidth())`，在父 `Box(align(CenterEnd))` 中把整列撑成全宽，导致 `align(CenterEnd)` 失效、字母靠 `Column(CenterHorizontally)` 居中。给 `Column` 加固定窄宽 `.width(letterSize + 8.dp)`，让 `align(CenterEnd)` 把整条钉在右边缘。`AlbumsTab`/`ArtistsTab` 共用该 Composable，一处修复两处生效。真机验证：字母条已归位到右边缘 ✅
 - **百度网盘歌曲无法播放（根因：TV/盒子 ROM 的 AndroidKeyStore 不支持 AES KeyGenerator）**：`util/CryptoUtils.kt` 的 `getOrCreateKey()` 用 `KeyGenerator.getInstance("AES", "AndroidKeyStore")`，在电视 ROM 上抛 `NoSuchAlgorithmException`，导致百度 access_token 解密失败 → `resolveStreamUrl` 取不到 dlink → 播放失败。改为由固定口令 SHA‑256 派生软件密钥（`SecretKeySpec`，不依赖 KeyGenerator/KeyStore），`decrypt` 先试软件密钥、回退旧 AndroidKeyStore 密钥以兼容手机端存量加密数据。`AppPreferences` 的百度 token、NAS 的 apiToken/password 均走此工具，一并变稳。代码已推电视、运行无崩溃；**行为验证待用户在电视上重新授权（重登）百度网盘一次**——旧 token 由旧密钥加密、电视解不开，须重登用新密钥重新加密，之后点歌复测
 
-## [v2.25.7] - 2026-09-02
+## \[v2.25.7] - 2026-09-02
 
 ### Added
 
@@ -2566,6 +2693,7 @@
 - **`PinyinUtils.toPinyin()` 全拼方法**：新增完整拼音转换（"周杰伦" → "zhoujielun"），原有 `getInitials()` 重命名为 `toPinyinInitials()`（保留兼容别名）
 
 ### Fixed
+
 - **只有第一张图有描线过程，后续函数直接出全图**：`GAP → DRAW` 迁移时未清零 `drawAccumulator`——首图靠 `onEnter` 归零，之后每个周期累加器残留 `8000ms`，新图第一帧即满足"描线完成"直接进 HOLD。现迁移时归零
 
 ### Changed
@@ -2573,7 +2701,7 @@
 - **`SearchAggregator` 新增 `isTVDevice` 构造参数**：PRECISE 过滤阶段根据设备类型决定是否启用拼音匹配，手机端零额外开销
 - **`NasMusicApp` 构造 `SearchAggregator` 时传入 `isTVDevice`**：通过 `packageManager.hasSystemFeature("android.software.leanback")` 检测
 
-## [v2.25.6] - 2026-09-01
+## \[v2.25.6] - 2026-09-01
 
 ### Added
 
@@ -2582,6 +2710,7 @@
 - **`BackendAdapter.getApiVersion()` 接口**：各后端适配器实现该方法，返回结构化版本信息（`apiVersion` 旧字段标记为 deprecated）
 
 ### Fixed
+
 - **只有第一张图有描线过程，后续函数直接出全图**：`GAP → DRAW` 迁移时未清零 `drawAccumulator`——首图靠 `onEnter` 归零，之后每个周期累加器残留 `8000ms`，新图第一帧即满足"描线完成"直接进 HOLD。现迁移时归零
 
 ### Changed
@@ -2589,7 +2718,7 @@
 - **设置页关于页分段渲染**：后端连接段 + API 版本号段 + 外部服务段，按钮文字显式指定颜色（未选中态亮色，遵循 SettingsScreen 修复规范）
 - **`MainViewModel` 版本聚合**：新增 `apiVersions` StateFlow + `refreshApiVersions()`，在初始化 / 连接成功 / 断开连接时刷新
 
-## [v2.25.5] - 2026-09-01
+## \[v2.25.5] - 2026-09-01
 
 ### Fixed
 
@@ -2601,15 +2730,16 @@
 - **DataStore 冲突导致切换语言闪退**：`AppRoot` 中 `onChangeLanguage` 从 `recreate()` 改为 `finish() + newIntent + exit(0)` 三连，避免 `recreate()` 触发 DataStore 并发写入冲突
 - **K歌变速弹窗文字折行**：`KaraokeStepPickerDialog` 弹窗宽度从 360dp 拉宽至 420dp，当前值按钮宽度从 160dp 拉宽至 200dp，防止 "Original speed" 等较长文本折行
 
-## [v2.25.4] - 2026-09-01
+## \[v2.25.4] - 2026-09-01
 
 ### Added
 
 - **中英文语言切换功能**：设置页新增语言选择器，支持「跟随系统 / 中文 / English」三种模式，运行时切换无需重启应用。实现方式：`AppCompatDelegate.setApplicationLocales(LocaleListCompat)` + DataStore 持久化
-- **英文翻译资源文件** `values-en/strings.xml`：完整覆盖所有用户可见 UI 字符串（~870 行），含 Compose UI、Web 页面 HTML、播放器错误信息等
+- **英文翻译资源文件** `values-en/strings.xml`：完整覆盖所有用户可见 UI 字符串（\~870 行），含 Compose UI、Web 页面 HTML、播放器错误信息等
 - **Web 页面 HTML 国际化**：BackupTransferServer / ModelTransferServer / RemoteControlHtml 三个 HTTP 服务器的静态 HTML 常量改为动态生成函数（`buildXxxHtml(context)`），所有文本走 `context.getString()`，JS 字符串通过注入 `var STR = {...}` 对象实现多语言
 
 ### Fixed
+
 - **只有第一张图有描线过程，后续函数直接出全图**：`GAP → DRAW` 迁移时未清零 `drawAccumulator`——首图靠 `onEnter` 归零，之后每个周期累加器残留 `8000ms`，新图第一帧即满足"描线完成"直接进 HOLD。现迁移时归零
 
 ### Changed
@@ -2625,32 +2755,34 @@
 - 未迁移的硬编码字符串：数据常量（天气描述/枚举标签/过滤关键词/错误码映射）、AppLog 日志、代码注释
 - 所有 `html_backup_*` / `html_model_*` / `html_remote_*` / `html_common_*` 字符串资源已添加到 `values/strings.xml` 和 `values-en/strings.xml`
 
-## [v2.25.3] - 2026-09-01
+## \[v2.25.3] - 2026-09-01
 
 ### Fixed
+
 - **只有第一张图有描线过程，后续函数直接出全图**：`GAP → DRAW` 迁移时未清零 `drawAccumulator`——首图靠 `onEnter` 归零，之后每个周期累加器残留 `8000ms`，新图第一帧即满足"描线完成"直接进 HOLD。现迁移时归零
 
 ### Changed
 
-- **UI 字符串外部化（第三批 — PlayerManager + DemucsSeparator）**：将播放引擎层剩余的 ~35 处用户可见硬编码中文字符串迁移至 `res/values/strings.xml`，使用 `applicationContext.getString()` / `context.getString()` 模式。覆盖范围：
+- **UI 字符串外部化（第三批 — PlayerManager + DemucsSeparator）**：将播放引擎层剩余的 \~35 处用户可见硬编码中文字符串迁移至 `res/values/strings.xml`，使用 `applicationContext.getString()` / `context.getString()` 模式。覆盖范围：
   - PlayerManager：下载错误（无文件/HTTP失败/超时/网络错误/异常）、高质量分离错误（组件未就绪/模型未下载/模型路径不可用/初始化失败/分离失败/OOM/异常）、分离进度（下载音频/加载模型/预下载/完成/分离完成）、播放错误
   - DemucsSeparator：模型错误（文件不存在/OOM/初始化失败/未初始化/内存不足）、分离错误（OOM/异常/无音轨/解码OOM/解码失败）、分离进度（解码音频/分段处理/分离中/完成）
   - NasMusicApp：`PlayerManager()` → `PlayerManager(this)` 传入 applicationContext
-- **strings.xml 新增 39 行字符串资源**，覆盖 player_error_*、hq_error_*、hq_progress_*、hq_success_*、demucs_error_*、demucs_progress_* 等
+- **strings.xml 新增 39 行字符串资源**，覆盖 player_error\_*、hq_error\_*、hq_progress\_*、hq_success\_*、demucs_error\_*、demucs_progress\_* 等
 
 ### Notes
 
 - PlayerManager 和 DemucsSeparator 的构造函数已接受 Context 参数
 - 剩余中文字符串仅存在于：Web 页面 HTML（BackupTransferServer/ModelTransferServer/RemoteControlHtml）、数据常量（天气描述/枚举标签/过滤关键词/错误码映射）、代码注释
 
-## [v2.25.2] - 2026-08-31
+## \[v2.25.2] - 2026-08-31
 
 ### Fixed
+
 - **只有第一张图有描线过程，后续函数直接出全图**：`GAP → DRAW` 迁移时未清零 `drawAccumulator`——首图靠 `onEnter` 归零，之后每个周期累加器残留 `8000ms`，新图第一帧即满足"描线完成"直接进 HOLD。现迁移时归零
 
 ### Changed
 
-- **UI 字符串外部化（第二批 — MainViewModel）**：将 MainViewModel.kt 中剩余的 ~60 处用户可见硬编码中文字符串迁移至 `res/values/strings.xml`，使用 `getApplication<Application>().getString()` 模式。覆盖范围：
+- **UI 字符串外部化（第二批 — MainViewModel）**：将 MainViewModel.kt 中剩余的 \~60 处用户可见硬编码中文字符串迁移至 `res/values/strings.xml`，使用 `getApplication<Application>().getString()` 模式。覆盖范围：
   - 连接状态消息（成功/失败/检查设置）
   - 错误提示（加载失败、搜索失败、播放失败、收藏失败、刷新失败等）
   - 播放列表操作（创建/删除/重命名/添加/移除）
@@ -2661,16 +2793,17 @@
   - 电台/Jamendo 加载失败
   - 天气心情切换失败
   - 百度网盘认证（获取设备码/用户拒绝/授权超时）
-- **strings.xml 新增 18 行字符串资源**，覆盖 weather_switch_mood_error、network_search_failed、browse_search_failed、resolve_url_*、play_failed_with_msg、local_music_refreshed、backup_* 等
+- **strings.xml 新增 18 行字符串资源**，覆盖 weather_switch_mood_error、network_search_failed、browse_search_failed、resolve_url\_*、play_failed_with_msg、local_music_refreshed、backup\_* 等
 
 ### Notes
 
 - MainViewModel.kt 中的运行时错误/Toast 消息已全部外部化
 - 代码注释、过滤关键词、电台预设列表、AppLog 消息中的中文保持原样（非用户可见 UI 字符串）
 
-## [v2.25.1] - 2026-08-31
+## \[v2.25.1] - 2026-08-31
 
 ### Fixed
+
 - **只有第一张图有描线过程，后续函数直接出全图**：`GAP → DRAW` 迁移时未清零 `drawAccumulator`——首图靠 `onEnter` 归零，之后每个周期累加器残留 `8000ms`，新图第一帧即满足"描线完成"直接进 HOLD。现迁移时归零
 
 ### Changed
@@ -2692,7 +2825,7 @@
 - ~~MainViewModel.kt 中的 138 个运行时错误/Toast 消息（含字符串插值）~~ → 已在 v2.25.2 中完成迁移
 - 代码注释中的中文保持原样（非用户可见 UI 字符串）
 
-## [v2.25.0] - 2026-08-30
+## \[v2.25.0] - 2026-08-30
 
 ### Added
 
@@ -2710,33 +2843,34 @@
 - **StorageVolume API 兼容性**：`getPath()`/`isMounted()` 改用反射兼容 API 22+
 - **GBK 编码支持**：`Charsets.GBK` 改用 `Charset.forName("GBK")` 兼容 Kotlin stdlib
 
-## [v2.24.5] - 2026-08-30
+## \[v2.24.5] - 2026-08-30
 
 ### Fixed
 
-- **人声分离 OOM 崩溃**：`DemucsSeparator.separate()` 重构为逐段流式写入，不再累积全长度 vocals 数组（~60MB），改为边推理边写入 WAV 文件；新增内存预检（低于 200MB 可用空间时拒绝执行），避免被 Android lowmemorykiller 杀掉前台进程
+- **人声分离 OOM 崩溃**：`DemucsSeparator.separate()` 重构为逐段流式写入，不再累积全长度 vocals 数组（\~60MB），改为边推理边写入 WAV 文件；新增内存预检（低于 200MB 可用空间时拒绝执行），避免被 Android lowmemorykiller 杀掉前台进程
 
-## [v2.24.4] - 2026-08-30
+## \[v2.24.4] - 2026-08-30
 
 ### Added
 
 - **天气电台页面**：首页天气卡片点击可跳转至独立天气电台页面，显示天气信息、心情选择器（FlowRow 自动换行两行排列）和电台歌曲列表；点击单曲即播并跳转播放页
 - **关于页版权说明**：设置→关于页底部新增网络音乐版权免责声明，明确本应用仅为技术聚合工具，不存储不分发音乐文件
 
-## [v2.24.3] - 2026-08-30
+## \[v2.24.3] - 2026-08-30
 
 ### Fixed
 
 - **百度网盘授权对话框中文乱码**：`BaiduAuthDialog.kt` 在 `face859` 重构（fontSize `XX.sp` → `FontSize.xx()`）时文件编码从 UTF-8 损坏为 GBK+U+FFFD 混杂，导致 KDoc 注释与「复制」按钮文字、「百度网盘设备码」剪贴板标签等中文字符串在编译后显示为乱码。从 `9c44159` 版本恢复中文字符，保留 `face859` 的 `FontSize.xx()` 调用与 `65a912b` 的 TV +6sp 字号
 - **APK 文件名格式统一**：本地 `assembleRelease` 输出与 GitHub Actions CI 上传/发布均使用 `NASMusicTV-release-v{版本号点转横线}.apk` 格式（如 `NASMusicTV-release-v2-24-3.apk`），CI 从 `build.gradle.kts` 读取 `versionName` 自动生成文件名
 
-## [v2.24.2] - 2026-08-29
+## \[v2.24.2] - 2026-08-29
 
 ### Fixed
 
 - **DemucsSeparator 初始化 OOM 崩溃**：`initialize()` 从 `modelFile.readBytes()` + `createSession(bytes)` 改为 `createSession(modelPath)`，ONNX Runtime 底层 mmap 加载 166MB 模型，不再占用 JVM 堆内存，避免电视设备堆内存不足被系统 SIGKILL
 
 ### Fixed
+
 - **只有第一张图有描线过程，后续函数直接出全图**：`GAP → DRAW` 迁移时未清零 `drawAccumulator`——首图靠 `onEnter` 归零，之后每个周期累加器残留 `8000ms`，新图第一帧即满足"描线完成"直接进 HOLD。现迁移时归零
 
 ### Changed
@@ -2744,7 +2878,7 @@
 - **TV 全局字号 -6sp**：`FontSize` 所有 `*Tv` 常量减小 6sp（Caption 24→18, Small 26→20, Body 29→23, Button 31→25, Subtitle 35→29, Title 39→33, Display 45→39, DisplayLarge 53→47），界面文字整体更紧凑
 - **曲库歌曲条目文字统一**：`UnifiedSongRow` 歌曲标题从 `FontSize.subtitle()` 改为 `FontSize.button()`，与歌手名、时长、按钮文字大小一致
 
-## [v2.24.1] - 2026-08-29
+## \[v2.24.1] - 2026-08-29
 
 ### Fixed
 
@@ -2755,6 +2889,7 @@
 - **设置页"扫码上传模型"按钮不显示**：模型下载区按钮从 `Row + fillMaxWidth` 改为 `Box(weight(1f))` 分两列并排，修复按钮在 Row 内互相挤压导致不渲染的问题
 
 ### Fixed
+
 - **只有第一张图有描线过程，后续函数直接出全图**：`GAP → DRAW` 迁移时未清零 `drawAccumulator`——首图靠 `onEnter` 归零，之后每个周期累加器残留 `8000ms`，新图第一帧即满足"描线完成"直接进 HOLD。现迁移时归零
 
 ### Changed
@@ -2762,7 +2897,7 @@
 - **`ModelTransferServer` 路径管理统一**：新增 `getModelFile(context)` 静态工厂方法与 `create(context, onModelUploaded)` 工厂构造，`ModelTransferDialog` 不再自行构造 `modelFile`，避免路径不一致
 - **`ModelTransferServer` API 重命名**：`start()`/`stop()` → `startServer()`/`stopServer()`，避免遮蔽 `NanoHTTPD` 父类方法需要 `override` 修饰符
 
-## [v2.24.0] - 2026-08-29
+## \[v2.24.0] - 2026-08-29
 
 ### Added
 
@@ -2770,7 +2905,7 @@
 - **设置页模型路径显示**：设置页模型下载区显示当前模型文件路径及大小
 - **"扫码上传模型"入口**：设置页模型下载区在已下载/未下载状态下均提供"扫码上传模型"按钮，点击弹出 QR 码弹窗
 
-## [v2.23.0] - 2026-08-28
+## \[v2.23.0] - 2026-08-28
 
 ### Added
 
@@ -2782,11 +2917,12 @@
 - **K歌页分离进度提示**：高质量模式转换伴奏时显示"正在转换伴奏…"浮层（含进度百分比和阶段描述），转换期间原始音频正常播放
 
 ### Fixed
+
 - **只有第一张图有描线过程，后续函数直接出全图**：`GAP → DRAW` 迁移时未清零 `drawAccumulator`——首图靠 `onEnter` 归零，之后每个周期累加器残留 `8000ms`，新图第一帧即满足"描线完成"直接进 HOLD。现迁移时归零
 
 ### Changed
 
-- **模型与 APK 分离**：APK 不再内置 Spleeter 模型文件，release APK 体积从 ~186MB 降至 ~20MB；高质量模式需在设置页独立下载模型后才能启用
+- **模型与 APK 分离**：APK 不再内置 Spleeter 模型文件，release APK 体积从 \~186MB 降至 \~20MB；高质量模式需在设置页独立下载模型后才能启用
 - **高质量模式门控**：`MainViewModel.toggleSeparationMode` / `setSeparationMode` 在切换到高质量模式前检查模型是否已下载，未下载时拒绝切换并回退快速模式
 - **`SettingSwitch` 支持禁用态**：新增 `enabled` 参数，未下载模型时高质量开关置灰不可点
 - **伴唱/原唱切换逻辑重构**：`toggleVocalRemoval` 同时协调 DSP（快速模式）和文件切换（高质量模式），修复快速模式伴唱无声和切换模式后状态错乱
@@ -2804,12 +2940,12 @@
 
 - **Spleeter 模型与 DSP 层**：删除 `SpleeterSeparator.kt`（Spleeter ONNX）与 `SpleeterDsp.kt`（STFT/iSTFT/Wiener），由 HT-Demucs FT `DemucsSeparator` 取代
 
-## [v2.22.2] - 2026-08-27
+## \[v2.22.2] - 2026-08-27
 
 ### Added
 
-- **K歌页面升降调控制**：新增"调"按钮，支持 -12 ~ +12 半音步进调节（步长 1），持久化到 DataStore，重启后恢复上次设置
-- **K歌页面变速控制**：新增"速"按钮，支持 0.5x ~ 1.5x 速度调节（步长 0.1），持久化到 DataStore，重启后恢复上次设置
+- **K歌页面升降调控制**：新增"调"按钮，支持 -12 \~ +12 半音步进调节（步长 1），持久化到 DataStore，重启后恢复上次设置
+- **K歌页面变速控制**：新增"速"按钮，支持 0.5x \~ 1.5x 速度调节（步长 0.1），持久化到 DataStore，重启后恢复上次设置
 - **频谱遮罩人声消除处理器**：新增 `SpectralMaskProcessor`（STFT + 自适应频谱遮罩），替代原有 `VocalRemovalProcessor`（Mid/Side DSP），人声消除效果从 ⭐⭐ 提升至 ⭐⭐⭐
 - **PlayerManager 升降调/变速 API**：新增 `setPitch(semitones)` / `setSpeed(speed)` / `resetPitch()` / `resetSpeed()` 方法
 - **Spleeter ONNX 高质量人声分离**：新增 `SpleeterSeparator`（ONNX Runtime 推理）+ `SpleeterDsp`（STFT/iSTFT/Wiener），支持 FP16 量化模型，人声消除效果从 ⭐⭐⭐ 提升至 ⭐⭐⭐⭐
@@ -2817,6 +2953,7 @@
 - **分离模式切换**：K歌页面新增"质"按钮，快速/高质量模式一键切换；设置页新增默认分离模式选项
 
 ### Fixed
+
 - **只有第一张图有描线过程，后续函数直接出全图**：`GAP → DRAW` 迁移时未清零 `drawAccumulator`——首图靠 `onEnter` 归零，之后每个周期累加器残留 `8000ms`，新图第一帧即满足"描线完成"直接进 HOLD。现迁移时归零
 
 ### Changed
@@ -2829,7 +2966,7 @@
 - **PlaybackParameters.withPitch() 编译错误**：改为使用 `PlaybackParameters(speed, pitch)` 构造函数（ExoPlayer API 差异）
 - **TV Surface onClick 编译错误**：`Surface` 无 `onClick` 参数，改用 `Box` + `Modifier.clickable`
 
-## [v2.22.1] - 2026-08-27
+## \[v2.22.1] - 2026-08-27
 
 ### Added
 
@@ -2861,13 +2998,14 @@
 - **我的页歌单 ? 按钮改为行内删除图标**：UnifiedSongRow 新增 onDelete，移除右上角叠加
 
 ### Fixed
+
 - **只有第一张图有描线过程，后续函数直接出全图**：`GAP → DRAW` 迁移时未清零 `drawAccumulator`——首图靠 `onEnter` 归零，之后每个周期累加器残留 `8000ms`，新图第一帧即满足"描线完成"直接进 HOLD。现迁移时归零
 
 ### Changed
 
 - **深度review修复**：搜索源硬编码抽 DEFAULT_SEARCH_SOURCES 常量；BaiduNetdiskService 提取 searchInternal 共用方法；recordPlayWithSong 合并为单次 DataStore edit；refreshBrowseSongs 在 produce 外构造 aggregator
 
-## [v2.22.0] - 2026-08-24
+## \[v2.22.0] - 2026-08-24
 
 ### Added
 
@@ -2878,6 +3016,7 @@
 - **启动崩溃保护**：`WindowInsetsControllerCompat.hide()` 加 `try-catch` 保护，避免部分设备兼容性问题导致启动闪退
 
 ### Fixed
+
 - **只有第一张图有描线过程，后续函数直接出全图**：`GAP → DRAW` 迁移时未清零 `drawAccumulator`——首图靠 `onEnter` 归零，之后每个周期累加器残留 `8000ms`，新图第一帧即满足"描线完成"直接进 HOLD。现迁移时归零
 
 ### Changed
@@ -2906,7 +3045,7 @@
 - **手机端全屏白条**：`WindowInsetsControllerCompat` 隐藏系统栏，支持滑动临时唤醒
 - **曲库页 tab 标签亮色**：LibraryTab 标签文字显式指定亮色
 
-## [v2.21.0] - 2026-08-23
+## \[v2.21.0] - 2026-08-23
 
 ### Added
 
@@ -2920,7 +3059,7 @@
 
 - **NetworkMonitorTest 断言与防抖设计对齐**：`onCapabilitiesChanged without internet` / `onLost` 两个用例修正为当前防抖策略语义（WiFi 抖动不误报断网、onLost 仅已连接后回调），并新增"capabilities 抖动序列"专项测试——209 个单元测试全部通过
 
-## [v2.20.0] - 2026-08-22
+## \[v2.20.0] - 2026-08-22
 
 ### Added
 
@@ -2931,6 +3070,7 @@
 - **手机端默认横屏**：手机端全界面横屏使用（SENSOR_LANDSCAPE），贴近 TV 布局
 
 ### Fixed
+
 - **只有第一张图有描线过程，后续函数直接出全图**：`GAP → DRAW` 迁移时未清零 `drawAccumulator`——首图靠 `onEnter` 归零，之后每个周期累加器残留 `8000ms`，新图第一帧即满足"描线完成"直接进 HOLD。现迁移时归零
 
 ### Changed
@@ -2946,7 +3086,7 @@
 - **手机端点击失效**：`FocusableSurface` 原基于 `androidx.tv.material3.Surface`（onClick 绑定 D-Pad 焦点与 OK 键，不响应触摸），已重写为 `Box + combinedClickable`（触摸点击/长按 + 遥控器 OK 键双兼容，焦点边框仅 TV 显示）——修复手机端所有页面无法点击的问题
 - **手机端默认竖屏**：改为手机端默认横屏使用
 
-## [v2.19.0] - 2026-08-21
+## \[v2.19.0] - 2026-08-21
 
 ### Added
 
@@ -2957,6 +3097,7 @@
 - **Subsonic 单元测试**：13 个测试覆盖认证逻辑和 API 调用
 
 ### Fixed
+
 - **只有第一张图有描线过程，后续函数直接出全图**：`GAP → DRAW` 迁移时未清零 `drawAccumulator`——首图靠 `onEnter` 归零，之后每个周期累加器残留 `8000ms`，新图第一帧即满足"描线完成"直接进 HOLD。现迁移时归零
 
 ### Changed
@@ -2965,7 +3106,7 @@
 - **设置页**：支持后端列表更新为 "Jellyfin / Navidrome / Subsonic"
 - **README**：项目简介和功能说明更新，纳入 Subsonic 支持
 
-## [v2.18.1] - 2026-08-21
+## \[v2.18.1] - 2026-08-21
 
 ### Added
 
@@ -2973,6 +3114,7 @@
 - **网盘设置分组**：设置页"网盘"分区新增"百度网盘"/"其他网盘"分组，阿里云盘/123 网盘/夸克网盘灰显"敬请期待"占位
 
 ### Fixed
+
 - **只有第一张图有描线过程，后续函数直接出全图**：`GAP → DRAW` 迁移时未清零 `drawAccumulator`——首图靠 `onEnter` 归零，之后每个周期累加器残留 `8000ms`，新图第一帧即满足"描线完成"直接进 HOLD。现迁移时归零
 
 ### Changed
@@ -2995,7 +3137,7 @@
 - **百度授权返回键失效**：`dismissOnBackPress=true` + `onDismissRequest=onCancel` 修复
 - **目录选择器返回键失效**：同上方案修复
 
-## [v2.18.0] - 2026-08-20
+## \[v2.18.0] - 2026-08-20
 
 ### Added
 
@@ -3011,6 +3153,7 @@
 - **搜B站按钮**：百度 MV 搜索结果不理想时，一键切到 B 站搜索
 
 ### Fixed
+
 - **只有第一张图有描线过程，后续函数直接出全图**：`GAP → DRAW` 迁移时未清零 `drawAccumulator`——首图靠 `onEnter` 归零，之后每个周期累加器残留 `8000ms`，新图第一帧即满足"描线完成"直接进 HOLD。现迁移时归零
 
 ### Changed
@@ -3024,7 +3167,7 @@
 - 编译通过：`BUILD SUCCESSFUL`，`testDebugUnitTest` 191 tests, 189 passed
 - ProGuard：显式 keep 百度 DTO 类
 
-## [v2.17.4] - 2026-08-17
+## \[v2.17.4] - 2026-08-17
 
 ### Added
 
@@ -3033,13 +3176,14 @@
 - **歌词加载性能优化**：缓存命中时立即显示歌词，不等待后端/网络请求
 
 ### Fixed
+
 - **只有第一张图有描线过程，后续函数直接出全图**：`GAP → DRAW` 迁移时未清零 `drawAccumulator`——首图靠 `onEnter` 归零，之后每个周期累加器残留 `8000ms`，新图第一帧即满足"描线完成"直接进 HOLD。现迁移时归零
 
 ### Changed
 
 - **歌词优先级**：自动加载时按 `缓存 → 内嵌 → 网络` 优先级选择
 
-## [v2.17.3] - 2026-08-17
+## \[v2.17.3] - 2026-08-17
 
 ### Added
 
@@ -3047,13 +3191,14 @@
 - **网络歌词持久化缓存**：新增 `LyricsPersistentCache`，参照 `MvPersistentCache` 模式——`lyrics_cache.json`（索引）+ `{songId}.lrc`（独立文件），LRU 2000 条；用户切到网络歌词时暂存（pending），歌曲播放完成时提交（commit）；下次播放时自动读取缓存并显示"缓存"来源标签，可选中高亮和切换
 
 ### Fixed
+
 - **只有第一张图有描线过程，后续函数直接出全图**：`GAP → DRAW` 迁移时未清零 `drawAccumulator`——首图靠 `onEnter` 归零，之后每个周期累加器残留 `8000ms`，新图第一帧即满足"描线完成"直接进 HOLD。现迁移时归零
 
 ### Changed
 
 - **批量播放网络歌曲性能优化**：`playNetworkBatch` 不再预先串行解析全部 30 首歌的播放链接（延迟从 30×RTT 降至 1×RTT），改为只即时解析第一首后立即更新队列并开始播放，后续歌曲沿用现有的 `onNeedResolveStreamUrl` 懒加载机制
 
-## [v2.17.2] - 2026-08-11
+## \[v2.17.2] - 2026-08-11
 
 ### Fixed
 
@@ -3068,13 +3213,14 @@
 - **JellyfinAdapter utf8Body GBK 回退无日志**：GBK 回退触发时打 DEBUG 日志标记哪些响应触发了回退，便于排查编码问题
 - **NavidromeAdapter API 版本硬编码**：`v=1.16.1` 和 `c=NASMusicTV` 提取为 `companion object` 常量（`API_VERSION`/`CLIENT_NAME`），注释说明这是 Subsonic 协议版本
 
-## [v2.17.1] - 2026-08-10
+## \[v2.17.1] - 2026-08-10
 
 ### Added
 
 - **遥控页队列删除**：`RemoteControlHtml` 队列行新增 ✕ 删除按钮 + `removeItem(index)`，遥控服务器新增 `/api/queue/remove` 路由（`handleRemove` -> `RemoteCallbacks.removeFromQueue` -> `MainViewModel.removeFromQueue` -> `PlayerManager.removeFromQueue`），与 TV 端队列页删除语义一致
 
 ### Fixed
+
 - **只有第一张图有描线过程，后续函数直接出全图**：`GAP → DRAW` 迁移时未清零 `drawAccumulator`——首图靠 `onEnter` 归零，之后每个周期累加器残留 `8000ms`，新图第一帧即满足"描线完成"直接进 HOLD。现迁移时归零
 
 ### Changed
@@ -3087,13 +3233,14 @@
 - **K歌页二维码被覆盖不显示**：`KaraokePlaybackScreen` 的二维码 `Image` 加 `.zIndex(10f)`（补 `import androidx.compose.ui.zIndex`）。根因：Compose Box 中后声明元素绘制在上层，K歌页二维码先声明、被后声明的全屏背景 + 暗色遮罩覆盖；MTV 页二维码因在 Box 末尾声明正常
 - **遥控页长按拖拽超时失效**：`fetchQueue` 增加 `if (dragState) return;` 守卫 + 补 `touchcancel` 监听（复用 `onTouchEnd` 清理状态）。根因：队列每 5 秒轮询 `renderQueue` 会用 `innerHTML` 整表重建 DOM，长按激活拖拽后若按住超过一个轮询周期，被拖拽元素变成游离节点，移动状态在没有松手的情况下失效；守卫保证触摸/拖拽期间不重建队列 DOM，松手后轮询自动恢复
 
-## [v2.17.0] - 2026-08-10
+## \[v2.17.0] - 2026-08-10
 
 ### Added
 
 - **手机遥控（扫码控制）**：K歌/MTV 全屏页右上角显示二维码（`QrCodeGenerator` 生成，含 token 的 URL），手机扫码打开遥控页（`RemoteControlServer` NanoHTTPD 自建服务，端口 18082 + token 鉴权 + `Connection: close`），可查看当前队列、播放/移动/添加歌曲、搜索 NAS 与网络音乐（`/api/queue`、`/api/queue/play`、`/api/queue/move`、`/api/queue/add`、`/api/search`、`/api/status`；`PlayerManager.playAt` / `moveQueueItem`）；遥控页 HTML 内嵌于 `RemoteControlHtml`，队列每 5 秒轮询刷新
 
 ### Fixed
+
 - **只有第一张图有描线过程，后续函数直接出全图**：`GAP → DRAW` 迁移时未清零 `drawAccumulator`——首图靠 `onEnter` 归零，之后每个周期累加器残留 `8000ms`，新图第一帧即满足"描线完成"直接进 HOLD。现迁移时归零
 
 ### Changed
@@ -3101,7 +3248,7 @@
 - **遥控服务器按需启动**：`MainViewModel` 不再在 `init` 时启动遥控服务器（原常驻），改为 `ensureRemoteControlStarted()` 在进入 K歌（`onEnterKaraokeMode`）或 MTV（`enterMvMode`）模式时按需启动，`onCleared` 统一停止——降低 TV 资源受限设备上的常驻端口/线程开销（排查 TV WiFi/ADB 断连诱因时发现的最高嫌疑项）
 - **遥控页轮询间隔 3s → 5s**：降低手机端连接频率，减少 TV 端 NanoHTTPD 线程创建/销毁压力
 
-## [v2.16.0] - 2026-08-09
+## \[v2.16.0] - 2026-08-09
 
 ### Added
 
@@ -3110,6 +3257,7 @@
 - **备份/恢复补全**：`BackupData` 新增 MV 持久缓存条目（`mvCacheEntries`）+ 8 项遗漏设置（天气开关/手动城市/自动刷新、封面滤镜开关/模糊半径/暗色遮罩、音乐源、歌词字号）；天气 API Key 敏感不备份；旧版备份文件恢复时新字段用默认值，向后兼容
 
 ### Fixed
+
 - **只有第一张图有描线过程，后续函数直接出全图**：`GAP → DRAW` 迁移时未清零 `drawAccumulator`——首图靠 `onEnter` 归零，之后每个周期累加器残留 `8000ms`，新图第一帧即满足"描线完成"直接进 HOLD。现迁移时归零
 
 ### Changed
@@ -3122,7 +3270,7 @@
 - **MTV 连播几首后停在最后一帧**：`endedHandled`/`errorReported` 从 `remember` 改为 `remember(mv.videoUrl)`，无缝切歌时新 URL 触发标志重置，否则第一首 MV 设 `true` 后后续 `STATE_ENDED` 被忽略
 - **MTV 模式下网络抖动频繁弹提示**：`onNetworkAvailable` 加去重守卫（已可用时跳过）；MTV 模式（`showMv=true`）下抑制"网络已恢复/断开"弹窗，网络状态仍追踪、自动重连仍运行
 
-## [v2.15.0] - 2026-08-09
+## \[v2.15.0] - 2026-08-09
 
 ### Added
 
@@ -3133,6 +3281,7 @@
 - **MTV 搜索单元测试**：`MvSearchManagerTest` 12 例覆盖缓存命中/多源 fallback/单源异常不阻断/空结果不缓存/TTL 过期重搜/`clearCache`/缓存 key 归一化/`resolveMv`；`BilibiliMvServiceTest` 13 例覆盖 B 站搜索结果解析（候选列表/非 video 过滤/HTML 去标签/相似度排序/封面 URL 补全）与直链提取（durl/dash 回退/code 错误/空值跳过/非法 JSON），用本地 JSON fixture 不联网（Robolectric）
 
 ### Fixed
+
 - **只有第一张图有描线过程，后续函数直接出全图**：`GAP → DRAW` 迁移时未清零 `drawAccumulator`——首图靠 `onEnter` 归零，之后每个周期累加器残留 `8000ms`，新图第一帧即满足"描线完成"直接进 HOLD。现迁移时归零
 
 ### Changed
@@ -3147,13 +3296,13 @@
 - **MV 播放失败**：直链过期播放失败时自动清缓存重搜一次（`onMvPlaybackError` + `mvRetryDone` 防死循环）
 - **切歌后卡在无导航栏播放页**：`AppRoot` 监听 `mvState` 变 `NotFound` 且 `showMv=true` 时自动 `exitMvMode()`
 
-## [v2.14.0] - 2026-08-08
+## \[v2.14.0] - 2026-08-08
 
 ### Added
 
 - **设置页新增视频端点配置（MTV 音乐视频搜索端点）**：网络搜索分区新增「视频端点」小节，预设端点单选（B站官方 API `https://api.bilibili.com`）+ 自定义端点输入框（校验 `http://`/`https://` 前缀，空串恢复默认），选中端点打 ✓ 高亮；数据链路完整 —— `AppSettings.mvApiBaseUrl` → `AppPreferences`（`keyMvApiBaseUrl` + `setMvApiBaseUrl` + `getMvApiBaseUrlSync()` 同步读 + 备份恢复）→ `MainViewModel.updateMvApiBaseUrl()` → `SettingsScreen`；新文件 `backend/network/mv/BilibiliMvService.kt` 作为 MTV 搜索端点常量宿主（`DEFAULT_BASE_URL` / `PRESET_ENDPOINTS`），供后续 MTV 搜索实现复用
 
-## [v2.13.5] - 2026-08-08
+## \[v2.13.5] - 2026-08-08
 
 ### Added
 
@@ -3161,6 +3310,7 @@
 - **K 歌逐字节奏单元测试**：`KaraokePacingFractionTest` 5 例覆盖 0/1 边界、半程覆盖 > 0.5、90% 仍 < 1、全程单调不减（`app/src/test/.../ui/components/`）
 
 ### Fixed
+
 - **只有第一张图有描线过程，后续函数直接出全图**：`GAP → DRAW` 迁移时未清零 `drawAccumulator`——首图靠 `onEnter` 归零，之后每个周期累加器残留 `8000ms`，新图第一帧即满足"描线完成"直接进 HOLD。现迁移时归零
 
 ### Changed
@@ -3171,18 +3321,20 @@
 
 - **K 歌页进度细线初始位置错误**：细线 Box 作为歌词框父 Box 的第二子项，默认 `TopStart` 对齐被叠到歌词框顶部 → 加 `.align(Alignment.BottomCenter)` 贴到框下沿上方 8dp、与歌词底部 padding 不重叠（`KaraokePlaybackScreen`）
 
-## [v2.13.4] - 2026-08-08
+## \[v2.13.4] - 2026-08-08
 
 ### Fixed
+
 - **只有第一张图有描线过程，后续函数直接出全图**：`GAP → DRAW` 迁移时未清零 `drawAccumulator`——首图靠 `onEnter` 归零，之后每个周期累加器残留 `8000ms`，新图第一帧即满足"描线完成"直接进 HOLD。现迁移时归零
 
 ### Changed
 
 - **人声消除（方案 B）算法参数调整，修复"人声没了、音乐也没了"**：Mid vocal 频段由"完全挖空"改为"深度衰减保留 15%"——完全归零会把与人声同频段的居中乐器（主旋律/吉他等）一并抹掉，参考 Audacity 官方"伴奏变薄就降低 Strength"思路；Side vocal 频段保留系数 0.12→0.5（只轻度削减，保住立体声宽度/混响伴奏）；高通截止 6kHz→8kHz（保留镲片/空气感，Audacity 建议 High Cut ≥ 8000Hz）；补偿增益 1.6x→1.25x（衰减式处理后电平掉落小，避免削波与噪声放大）（`VocalRemovalProcessor`）
 
-## [v2.13.3] - 2026-08-08
+## \[v2.13.3] - 2026-08-08
 
 ### Fixed
+
 - **只有第一张图有描线过程，后续函数直接出全图**：`GAP → DRAW` 迁移时未清零 `drawAccumulator`——首图靠 `onEnter` 归零，之后每个周期累加器残留 `8000ms`，新图第一帧即满足"描线完成"直接进 HOLD。现迁移时归零
 
 ### Changed
@@ -3195,16 +3347,17 @@
 - **`resolveAndPlayByIndex` 加固**：补强索引边界与空集合防护，避免逐字歌词连带异常（`MainViewModel`）
 - **修复 16 条单元测试失败**：`LrcParserTest` 补挂 Robolectric Runner（`android.util.Log` 不再抛 not mocked）；`NetworkMonitor` 支持注入 `NetworkRequest`、测试改用 `@Config(sdk=[30])` 规避 Robolectric 4.11.1 缺失的 `registerNetworkCallback` shadow（`NetworkMonitor` / 测试类）
 
-## [v2.13.2] - 2026-08-08
+## \[v2.13.2] - 2026-08-08
 
 ### Fixed
+
 - **只有第一张图有描线过程，后续函数直接出全图**：`GAP → DRAW` 迁移时未清零 `drawAccumulator`——首图靠 `onEnter` 归零，之后每个周期累加器残留 `8000ms`，新图第一帧即满足"描线完成"直接进 HOLD。现迁移时归零
 
 ### Changed
 
 - **K 歌歌词改为滚动窗口逐行推进**：两行槽位固定（偶数句在顶部、奇数句在底部）不再整组跳动替换，当前句播完进入下一句时，另一槽位内容换成再下一句（句2 开始播放时顶行换为句3，句3 播放时底行换为句4），下一句始终在另一槽位白色预览、轮到时原地变黄（`KaraokeLyricsView`）
 
-## [v2.13.1] - 2026-08-08
+## \[v2.13.1] - 2026-08-08
 
 ### Fixed
 
@@ -3212,7 +3365,7 @@
 - **K 歌歌词逐字高亮改为平滑进度**：不再按字跳变，黄色进度按行时长比例连续推进，边界可落在半个字上（`TextLayoutResult` 像素级插值裁剪）
 - **K 歌模式自动切歌停留在 K 歌页**：移除 `showKaraoke` 对 `currentSong` 的 remember key 依赖，唱完自动下一首不再跳回普通播放页（`NowPlayingScreen`）
 
-## [v2.13.0] - 2026-08-08
+## \[v2.13.0] - 2026-08-08
 
 ### Added
 
@@ -3221,9 +3374,10 @@
   - `KaraokePlaybackScreen` / `KaraokeLyricsView` / `VocalToggleButton`（新增）：全屏伴奏播放页、固定 2 行逐字高亮歌词、红 色"伴奏/原唱"切换按钮
   - `PlaybackService`（自定义 RenderersFactory 注入 AudioProcessor）、`PlayerManager`（开关方法）、`MainViewModel`（`vocalRemovalEnabled` 状态）、`NowPlayingScreen` / `PlayerControls` / `AppRoot`（条件渲染 + 入口按钮）
 
-## [v2.12.8] - 2026-08-07
+## \[v2.12.8] - 2026-08-07
 
 ### Fixed
+
 - **只有第一张图有描线过程，后续函数直接出全图**：`GAP → DRAW` 迁移时未清零 `drawAccumulator`——首图靠 `onEnter` 归零，之后每个周期累加器残留 `8000ms`，新图第一帧即满足"描线完成"直接进 HOLD。现迁移时归零
 
 ### Changed
@@ -3235,9 +3389,10 @@
 - **"我的"页面歌单列表项与歌曲行对齐**：`PlaylistCard` 增加固定行高 100dp，歌单名 19sp->23sp（与歌名一致），歌曲数 16sp->20sp（与歌手一致），操作按钮 16sp->21sp + 内边距加大
 - **NowPlaying 收藏按钮**：内边距 6dp->10dp
 
-## [v2.12.7] - 2026-08-07
+## \[v2.12.7] - 2026-08-07
 
 ### Fixed
+
 - **只有第一张图有描线过程，后续函数直接出全图**：`GAP → DRAW` 迁移时未清零 `drawAccumulator`——首图靠 `onEnter` 归零，之后每个周期累加器残留 `8000ms`，新图第一帧即满足"描线完成"直接进 HOLD。现迁移时归零
 
 ### Changed
@@ -3248,26 +3403,27 @@
   - `PlaylistManagementScreen` 行：行高 80dp，歌名 18sp，歌手 15sp，时长 15sp
   - `PlaylistSongRow`（MineScreen 歌单内歌曲）：行高 96dp，封面 52dp，歌名 18sp，歌手 15sp，时长 15sp
 
-## [v2.12.6] - 2026-08-05
+## \[v2.12.6] - 2026-08-05
 
 ### Added
 
 - **网络歌词候选切换**：再次按下"在线歌词"按钮时，会重新搜索酷狗/网易云并取下一个候选歌词，解决歌词匹配错误时无法换一个的问题。
   涉及 `LyricsNetworkProvider`（`fetchFromKugou`/`fetchFromNetease` 返回多条候选）、`LyricsManager`（`getLyricsFromSource` 支持 `candidateIndex`）、`MainViewModel`（`switchLyricsSource` 递增索引）
 
-## [v2.12.5] - 2026-08-04
+## \[v2.12.5] - 2026-08-04
 
 ### Added
 
 - **「我的」页面收藏列表新增「播放全部」按钮**：左栏「收藏」标题行右侧新增 `ButtonChip`（复用 `common_play_all` 文案），收藏列表非空时显示；点击后将合并后的 NAS + 网络收藏歌曲（按 id 去重）整队加入播放队列并从第一首开始播放（`playQueue` 内部自动异步解析网络歌曲的 streamUrl），随后跳转播放页
 
-## [v2.12.4] - 2026-08-03
+## \[v2.12.4] - 2026-08-03
 
 ### Added
 
 - **输入弹窗全面支持二维码扫码输入**：`TextInputDialog` 的 `showQrCode` 默认值改为 `true`，所有输入弹窗（服务器连接、天气 API Key、Meting 端点、歌单新建/重命名等）默认显示右侧二维码，手机扫码即可远程输入，与搜索窗口体验统一
 
 ### Fixed
+
 - **只有第一张图有描线过程，后续函数直接出全图**：`GAP → DRAW` 迁移时未清零 `drawAccumulator`——首图靠 `onEnter` 归零，之后每个周期累加器残留 `8000ms`，新图第一帧即满足"描线完成"直接进 HOLD。现迁移时归零
 
 ### Changed
@@ -3278,7 +3434,7 @@
 
 - **旧网络音乐入口 `NetworkScreen`**：无任何调用者（已被 `NetworkMusicContainer` + `SearchSubTab` 取代），整个文件死代码移除；相关注释同步更新
 
-## [v2.12.3] - 2026-08-03
+## \[v2.12.3] - 2026-08-03
 
 ### Fixed
 
@@ -3287,6 +3443,7 @@
 - **搜索历史「填入」死状态**：`TextInputDialog` 历史项选中回调中的 `text = query` 写入在弹窗立即关闭后不可见，属死状态；已移除，由调用方 `onHistorySelect` 直接执行搜索 + 关闭弹窗
 
 ### Fixed
+
 - **只有第一张图有描线过程，后续函数直接出全图**：`GAP → DRAW` 迁移时未清零 `drawAccumulator`——首图靠 `onEnter` 归零，之后每个周期累加器残留 `8000ms`，新图第一帧即满足"描线完成"直接进 HOLD。现迁移时归零
 
 ### Changed
@@ -3297,13 +3454,13 @@
 
 - **`AppPreferences.clearSearchHistory()`** 死代码：已定义但从未被任何 UI 调用，移除
 
-## [v2.12.2] - 2026-08-02
+## \[v2.12.2] - 2026-08-02
 
 ### Added
 
 - **扫码传输备份**：设置页「数据管理」分区新增「扫码传输备份」按钮，TV 端弹出二维码（端口 18081），手机扫码后浏览器打开备份管理页，支持：下载 TV 备份到手机（卸载 app 后备份不丢）、上传手机备份到 TV、直接在手机上点「恢复」按钮远程恢复备份到 TV。解决此前备份仅存于电视本地、卸载即清空的问题
 
-## [v2.12.1] - 2026-08-02
+## \[v2.12.1] - 2026-08-02
 
 ### Added
 
@@ -3312,13 +3469,14 @@
 - **搜索历史记录**：自动记录搜索关键词与次数（同名合并计数），30 天 TTL 自动清理 + 200 条上限裁剪，应用启动时清理过期条目；已纳入数据备份/恢复
 
 ### Fixed
+
 - **只有第一张图有描线过程，后续函数直接出全图**：`GAP → DRAW` 迁移时未清零 `drawAccumulator`——首图靠 `onEnter` 归零，之后每个周期累加器残留 `8000ms`，新图第一帧即满足"描线完成"直接进 HOLD。现迁移时归零
 
 ### Changed
 
 - **TextInputDialog 新增可选参数**：`showQrCode`/`showHistory`/`historyItems`/`onHistorySelect`，默认不传则行为不变（服务器地址、歌单命名等非搜索入口不受影响）
 
-## [v2.12.0] - 2026-08-01
+## \[v2.12.0] - 2026-08-01
 
 ### Added
 
@@ -3328,6 +3486,7 @@
 - **数据备份 / 恢复**：设置页新增「数据管理」分区——导出全部可持久化数据（服务器配置 / 设置 / 收藏 / 歌单 / 队列 / 播放统计 / 均衡器等）到 `Downloads/NASMusic/`（API 29+ 走 MediaStore 免权限），支持备份文件列表浏览与从文件恢复；**敏感字段（密码 / API Token / 天气 API Key）一律不导出**，恢复后需重新输入密码连接服务器
 
 ### Fixed
+
 - **只有第一张图有描线过程，后续函数直接出全图**：`GAP → DRAW` 迁移时未清零 `drawAccumulator`——首图靠 `onEnter` 归零，之后每个周期累加器残留 `8000ms`，新图第一帧即满足"描线完成"直接进 HOLD。现迁移时归零
 
 ### Changed
@@ -3339,7 +3498,7 @@
 - **备份文件断电丢失（API < 29）**：部分电视 ROM（如创维 Android 5.1.1）的外部存储 `/mnt/sdcard` 是 RAM-backed rootfs 目录，非真实挂载点，断电即清空，导出到 `Downloads/NASMusic/` 的备份重启后消失。改为主备份写入应用内部存储 `filesDir/NASMusic/`（`/data` 真闪存，断电不丢），另尽力写一份到公共 Downloads 供文件管理器访问；列表合并两处按名称去重，删除时同步删两份副本
 - **网络音乐「收藏」按钮跳转失效**：此前点击网络音乐页的「收藏」入口仅切换到 DISCOVER Tab（no-op），现正确跳转「我的」页收藏列表
 
-## [v2.11.0] - 2026-08-01
+## \[v2.11.0] - 2026-08-01
 
 ### Added
 
@@ -3360,19 +3519,21 @@
 - **歌曲列表序号全部显示 "00"**：`SongRow` 此前显示的是歌曲内嵌的 `trackNumber` 元数据（网络歌曲与多数本地文件为 0），现改为显示列表序号 `index + 1`；非列表场景（发现页"正在播放"单曲）显示播放图标「▶」。涉及曲库、网络音乐、歌单详情、天气电台、搜索、浏览等全部使用 `SongRow` 的页面
 - **网络歌曲播放约 5 首后后续歌曲无法播放**：入队时预解析的播放直链有时效，URL 过期后 `onPlayerError` 仅因链接非空就直接跳下一首，导致级联失败。改为出错时自动重新解析当前歌曲链接并重试一次（同一首仅重试一次，防死循环），仍失败才跳下一首
 
-## [v2.10.9] - 2026-07-30
+## \[v2.10.9] - 2026-07-30
 
 ### Added
+
 - 多维度浏览（网络音乐 > 浏览 Tab）：语种（粤/国/英/日/韩）、纯音乐（萨克斯/笛子/吉他/钢琴/古筝/二胡/小提琴）、年代（70/80/90/00后）、情怀（红歌/草原/民歌）、风格（民谣/摇滚/古风/说唱）五维度组合筛选
 - 多维度自由组合搜索：选中维度选项后自动拼接关键词搜索，支持"换一批"随机切换关键词、"播放全部"批量播放
 
-## [v2.10.8] - 2026-07-30
+## \[v2.10.8] - 2026-07-30
 
 ### Added
+
 - 频谱可视化主题：ColorFlow（渐变流光）、NeonPulse（霓虹脉冲）、ClassicalWave（古典波形）三种视觉主题
 - 设置页新增"频谱主题"选择器，主题选择持久化到 DataStore
 
-## [v2.10.7] - 2026-07-30
+## \[v2.10.7] - 2026-07-30
 
 ### Fixed
 
@@ -3382,6 +3543,7 @@
 - **QueueScreen 播放/暂停按钮无焦点**：中间 PlayPause Box 缺少 `.focusable()` 和 `.clickable`，导致遥控器无法聚焦操作
 
 ### Fixed
+
 - **只有第一张图有描线过程，后续函数直接出全图**：`GAP → DRAW` 迁移时未清零 `drawAccumulator`——首图靠 `onEnter` 归零，之后每个周期累加器残留 `8000ms`，新图第一帧即满足"描线完成"直接进 HOLD。现迁移时归零
 
 ### Changed
@@ -3389,7 +3551,7 @@
 - **NowPlaying info 面板改为占用封面区域**：信息按钮触发后复用封面空间显示 SongInfoPanel，按钮文字同步切换"信息"/"封面"
 - **QueueScreen 控制按钮居中**：`Arrangement.spacedBy` 改为 `Arrangement.Center` + 显式 Spacer
 
-## [v2.10.6] - 2026-07-30
+## \[v2.10.6] - 2026-07-30
 
 ### Fixed
 
@@ -3397,6 +3559,7 @@
 - **`utf8Body()` 过量日志拖慢电视**：每次 API 响应打 3 行 hex/状态日志，Android TV logd 开销累加显著，全部移除
 
 ### Fixed
+
 - **只有第一张图有描线过程，后续函数直接出全图**：`GAP → DRAW` 迁移时未清零 `drawAccumulator`——首图靠 `onEnter` 归零，之后每个周期累加器残留 `8000ms`，新图第一帧即满足"描线完成"直接进 HOLD。现迁移时归零
 
 ### Changed
@@ -3406,7 +3569,7 @@
 
 ---
 
-## [v2.10.5] - 2026-07-30
+## \[v2.10.5] - 2026-07-30
 
 ### Fixed
 
@@ -3415,6 +3578,7 @@
 - **ButtonChip 编译器歧义**：新增 `modifier` 参数后尾随 lambda 导致 4 处调用编译失败，全部改为显式命名参数
 
 ### Fixed
+
 - **只有第一张图有描线过程，后续函数直接出全图**：`GAP → DRAW` 迁移时未清零 `drawAccumulator`——首图靠 `onEnter` 归零，之后每个周期累加器残留 `8000ms`，新图第一帧即满足"描线完成"直接进 HOLD。现迁移时归零
 
 ### Changed
@@ -3423,7 +3587,7 @@
 
 ---
 
-## [v2.10.4] - 2026-07-27
+## \[v2.10.4] - 2026-07-27
 
 ### Fixed
 
@@ -3431,6 +3595,7 @@
 - **天气电台封面与歌曲列表分离**：移除独立的封面墙，`SongRow` 增加封面缩略图，封面融入歌曲行中
 
 ### Fixed
+
 - **只有第一张图有描线过程，后续函数直接出全图**：`GAP → DRAW` 迁移时未清零 `drawAccumulator`——首图靠 `onEnter` 归零，之后每个周期累加器残留 `8000ms`，新图第一帧即满足"描线完成"直接进 HOLD。现迁移时归零
 
 ### Changed
@@ -3439,7 +3604,7 @@
 
 ---
 
-## [v2.10.3] - 2026-07-27
+## \[v2.10.3] - 2026-07-27
 
 ### Added
 
@@ -3452,6 +3617,7 @@
 - **随心听只加载少量歌曲或消失**：NAS 拉取量从 20 增至 50，网络歌单从随机抽 1 个改为打乱逐个尝试直到凑满 20 首；刷新失败时保留已有数据，区块不消失
 
 ### Fixed
+
 - **只有第一张图有描线过程，后续函数直接出全图**：`GAP → DRAW` 迁移时未清零 `drawAccumulator`——首图靠 `onEnter` 归零，之后每个周期累加器残留 `8000ms`，新图第一帧即满足"描线完成"直接进 HOLD。现迁移时归零
 
 ### Changed
@@ -3460,7 +3626,7 @@
 
 ---
 
-## [v2.10.2] - 2026-07-27
+## \[v2.10.2] - 2026-07-27
 
 ### Fixed
 
@@ -3469,6 +3635,7 @@
 - **艺术家歌曲去重**：`loadArtistSongsMap()` 合并到 `artistSongsMap` 时按 `song.id` 去重，避免与 `buildArtistMapsIncremental` 的歌曲重复
 
 ### Fixed
+
 - **只有第一张图有描线过程，后续函数直接出全图**：`GAP → DRAW` 迁移时未清零 `drawAccumulator`——首图靠 `onEnter` 归零，之后每个周期累加器残留 `8000ms`，新图第一帧即满足"描线完成"直接进 HOLD。现迁移时归零
 
 ### Changed
@@ -3478,7 +3645,7 @@
 
 ---
 
-## [v2.10.1] - 2026-07-27
+## \[v2.10.1] - 2026-07-27
 
 ### Fixed
 
@@ -3489,7 +3656,7 @@
 
 ---
 
-## [v2.10.0] - 2026-07-27
+## \[v2.10.0] - 2026-07-27
 
 ### Added
 
@@ -3503,7 +3670,7 @@
 
 ---
 
-## [v2.9.0] - 2026-07-26
+## \[v2.9.0] - 2026-07-26
 
 ### Added
 
@@ -3518,7 +3685,7 @@
 
 ---
 
-## [v2.8.1] - 2026-07-26
+## \[v2.8.1] - 2026-07-26
 
 ### Fixed
 
@@ -3526,6 +3693,7 @@
 - **拆分艺术家详情页歌曲为空**：`loadArtistSongs()` 在按拆分后艺术家名（如 `"不一定"`）查找时，从合成 ID（`原ID|名称`）提取原始后端 ID 请求歌曲列表，然后通过 `ArtistSplitter.split()` 过滤出包含该艺术家的歌曲，详情页不再空白
 
 ### Fixed
+
 - **只有第一张图有描线过程，后续函数直接出全图**：`GAP → DRAW` 迁移时未清零 `drawAccumulator`——首图靠 `onEnter` 归零，之后每个周期累加器残留 `8000ms`，新图第一帧即满足"描线完成"直接进 HOLD。现迁移时归零
 
 ### Changed
@@ -3535,17 +3703,17 @@
 
 ---
 
-## [v2.8.0] - 2026-07-21
+## \[v2.8.0] - 2026-07-21
 
 ### Added
 
 - **SpectrumAnalyzer (频谱分析器)**：全新 Android Visualizer FFT 引擎，代替旧版随机动画。
   - 512 个 FFT 复数 → 幅值计算 → 自适应噪声基底（P-1）→ 分段密集感知映射（32柱）→ 战区增益（鼓点×2.2/人声×1.8/高频×0.3）
-  - 归一化锚定低频区（柱子5~19）峰值，`max(..., 0.01f)` 防除零保护
+  - 归一化锚定低频区（柱子5\~19）峰值，`max(..., 0.01f)` 防除零保护
   - 链式增强：`sqrt + pow(1.5)` 对比度压扩，小信号被压低、大信号保留
   - 自适应 runningPeak 衰减（×0.94/帧 ≈ 3s 归零）
 - **VisualEqualizer 完整重写**：从 3 种静态视觉主题改为实时 FFT 频谱渲染。
-  - 频域三角平滑 [0.25, 0.5, 0.25] 消除柱间锯齿
+  - 频域三角平滑 \[0.25, 0.5, 0.25] 消除柱间锯齿
   - 动态噪声门限（低于帧均值 15% 置零）
   - 每根柱子独立 Attack/Release 系数（鼓点区 0.96/0.12，人声区 0.80/0.20，边缘区 0.60/0.40）
   - 帽子（峰值指示线）：金色横杠，柱子超过时瞬间跳顶，反之 ×0.993/帧缓慢下落
@@ -3557,6 +3725,7 @@
   - 释放时自动清理 Visualizer 资源
 
 ### Fixed
+
 - **只有第一张图有描线过程，后续函数直接出全图**：`GAP → DRAW` 迁移时未清零 `drawAccumulator`——首图靠 `onEnter` 归零，之后每个周期累加器残留 `8000ms`，新图第一帧即满足"描线完成"直接进 HOLD。现迁移时归零
 
 ### Changed
@@ -3579,7 +3748,7 @@
 
 ---
 
-## [v2.7.0] - 2026-07-20
+## \[v2.7.0] - 2026-07-20
 
 ### Added
 
@@ -3590,6 +3759,7 @@
 - **播放统计 (PlayRecord)**：记录播放次数与最后播放时间，首页"最近播放"列表基于统计数据展示
 
 ### Fixed
+
 - **只有第一张图有描线过程，后续函数直接出全图**：`GAP → DRAW` 迁移时未清零 `drawAccumulator`——首图靠 `onEnter` 归零，之后每个周期累加器残留 `8000ms`，新图第一帧即满足"描线完成"直接进 HOLD。现迁移时归零
 
 ### Changed
@@ -3607,7 +3777,7 @@
 
 ---
 
-## [v2.6.2] - 2026-07-03
+## \[v2.6.2] - 2026-07-03
 
 ### Fixed
 
@@ -3620,7 +3790,7 @@
 
 ---
 
-## [v2.6.1] - 2026-07-03
+## \[v2.6.1] - 2026-07-03
 
 ### Fixed
 
@@ -3634,7 +3804,7 @@
 
 ---
 
-## [v2.6.0] - 2026-07-03
+## \[v2.6.0] - 2026-07-03
 
 ### Added
 
@@ -3644,6 +3814,7 @@
 - **封面滤镜设置**：设置页新增 COVER 分区，支持封面高斯模糊强度调节（0–25dp）和暗色遮罩透明度调节（0–100%），实时应用到播放页封面
 
 ### Fixed
+
 - **只有第一张图有描线过程，后续函数直接出全图**：`GAP → DRAW` 迁移时未清零 `drawAccumulator`——首图靠 `onEnter` 归零，之后每个周期累加器残留 `8000ms`，新图第一帧即满足"描线完成"直接进 HOLD。现迁移时归零
 
 ### Changed
@@ -3662,7 +3833,7 @@
 
 ---
 
-## [v2.5.1] - 2026-07-01
+## \[v2.5.1] - 2026-07-01
 
 ### Fixed
 
@@ -3680,6 +3851,7 @@
 - **搜索框和平台切换同行布局**：搜索输入框与网易云/QQ/酷狗切换按钮置于同一行
 
 ### Fixed
+
 - **只有第一张图有描线过程，后续函数直接出全图**：`GAP → DRAW` 迁移时未清零 `drawAccumulator`——首图靠 `onEnter` 归零，之后每个周期累加器残留 `8000ms`，新图第一帧即满足"描线完成"直接进 HOLD。现迁移时归零
 
 ### Changed
@@ -3688,7 +3860,7 @@
 
 ---
 
-## [v2.5.0] - 2026-07-01
+## \[v2.5.0] - 2026-07-01
 
 ### Added
 
@@ -3701,6 +3873,7 @@
 - CoverCarousel.kt autoCycle 参数：解耦轮播节奏与播放状态
 
 ### Fixed
+
 - **只有第一张图有描线过程，后续函数直接出全图**：`GAP → DRAW` 迁移时未清零 `drawAccumulator`——首图靠 `onEnter` 归零，之后每个周期累加器残留 `8000ms`，新图第一帧即满足"描线完成"直接进 HOLD。现迁移时归零
 
 ### Changed
@@ -3713,11 +3886,11 @@
 ### Removed
 
 - LibraryScreen 中的 NetworkTab 组件及相关参数（170+ 行代码已迁移到 NetworkScreen）
-- strings.xml 中的 7 个 library_network* 字符串（替换为新的 network_* 字符串）
+- strings.xml 中的 7 个 library_network\* 字符串（替换为新的 network\_\* 字符串）
 
 ---
 
-## [v2.4.4] - 2026-07-01
+## \[v2.4.4] - 2026-07-01
 
 ### Fixed
 
@@ -3732,6 +3905,7 @@
 - EqualizerScreen 每 recomposition 重新分配 bandLabels 问题：提升为顶层 `val` 编译期常量
 
 ### Fixed
+
 - **只有第一张图有描线过程，后续函数直接出全图**：`GAP → DRAW` 迁移时未清零 `drawAccumulator`——首图靠 `onEnter` 归零，之后每个周期累加器残留 `8000ms`，新图第一帧即满足"描线完成"直接进 HOLD。现迁移时归零
 
 ### Changed
@@ -3739,13 +3913,13 @@
 - `NetworkMusicService.search()` 新增 `limit: Int = 0` 参数（0 表示使用默认值）；接口方法添加完整 KDoc `@param`/`@return`/`@throws` 错误契约；新增 `searchCoverUrl()` 默认方法
 - `NetworkMusicManager.searchCoverUrl` 移除 `if (svc !is MetingApiService) continue` 硬编码类型判断，所有实现类均调用接口默认 `searchCoverUrl()`
 - `AppSettings.defaultNetworkSource` 类型从 `String` 改为 `NetworkSource` 枚举（METING / ALAPI / JIOSAAVN），编译期类型安全，消除运行时字符串拼写错误；AppPreferences 新增 `fromKey()` / `fromName()` 转换器 + `NetworkSource` 类型 setter，DataStore 仍存储 key 字符串向后兼容
-- EqualizerScreen 波段 -9~-1 不可达验证：当前循环逻辑已正确处理所有 10 个波段值，无需修改（code review 标记已关闭）
+- EqualizerScreen 波段 -9\~-1 不可达验证：当前循环逻辑已正确处理所有 10 个波段值，无需修改（code review 标记已关闭）
 - SettingsScreen 的 IO 线程 `MutableState` 写入包裹 `withContext(Dispatchers.Main)` 确保 Compose 状态更新发生在主线程
 - 版本号升级至 v2.4.4，`versionCode` 递增至 11
 
 ---
 
-## [v2.4.3] - 2026-06-30
+## \[v2.4.3] - 2026-06-30
 
 ### Fixed
 
@@ -3759,11 +3933,12 @@
 - JellyfinAdapter `utf8Body()` 回退过宽：移除希腊/西里尔字母触发 GBK 回退的逻辑，仅当出现 U+FFFD 时回退，避免破坏合法的希腊/西里尔音乐元数据
 - PlaybackService `onDestroy()` 释放顺序：交换 `session.release()` 与 `player.release()` 顺序，先释放 Session 再释放 Player，避免资源竞争
 - ArtistSplitter 正则匹配不完整：`feat\.` 改为 `feat\.?`，支持 "feat" 无句点变体；拆分逻辑改为迭代拆分（`for(delim).flatMap{part.split(delim)}`），支持多分隔符级联匹配
-- EqualizerScreen 波段 -9~-1 不可达：原循环逻辑 `band <= -10f -> 0f` 跳过负值区间，改为 `if (band >= 10f) -10f else band + 1f` 使所有波段值可循环递增
+- EqualizerScreen 波段 -9\~-1 不可达：原循环逻辑 `band <= -10f -> 0f` 跳过负值区间，改为 `if (band >= 10f) -10f else band + 1f` 使所有波段值可循环递增
 - BackendRegistry 并发安全：`getAdapter()`/`getConfig()`/`getServerDisplayName()`/`isConnected()`/`disconnect()`/`initialize()` 全部使用 `synchronized(lock)` 保护状态读写
 - AppPreferences DataStore 阻塞主线程：`getDefaultNetworkSourceSync()`/`getMetingApiBaseUrlSync()` 的 `runBlocking` 改为 `runBlocking(Dispatchers.IO)`
 
 ### Fixed
+
 - **只有第一张图有描线过程，后续函数直接出全图**：`GAP → DRAW` 迁移时未清零 `drawAccumulator`——首图靠 `onEnter` 归零，之后每个周期累加器残留 `8000ms`，新图第一帧即满足"描线完成"直接进 HOLD。现迁移时归零
 
 ### Changed
@@ -3773,7 +3948,7 @@
 
 ---
 
-## [v2.4.1] - 2026-06-26
+## \[v2.4.1] - 2026-06-26
 
 ### Added
 
@@ -3794,6 +3969,7 @@
 - 切换页面后歌词高亮模式丢失：`NowPlayingScreen` 用 `remember`/`rememberSaveable` 保存 `highlightMode`，由于 AppRoot 用 `when (currentScreen)` 切换页面、离开的页面离开 composition，状态丢失，返回后重置为逐行；将 `lyricsHighlightMode` 提升到 `MainViewModel` StateFlow，跨页面切换保留用户选择，含逐字时间戳的歌词仍自动切到逐字模式
 
 ### Fixed
+
 - **只有第一张图有描线过程，后续函数直接出全图**：`GAP → DRAW` 迁移时未清零 `drawAccumulator`——首图靠 `onEnter` 归零，之后每个周期累加器残留 `8000ms`，新图第一帧即满足"描线完成"直接进 HOLD。现迁移时归零
 
 ### Changed
@@ -3804,7 +3980,7 @@
 
 ---
 
-## [v2.4.2] - 2026-06-26
+## \[v2.4.2] - 2026-06-26
 
 ### Fixed
 
@@ -3813,6 +3989,7 @@
 - Jellyfin 分页缺失导致数据丢失：`getAlbums`/`getFavorites`/`getSongsByGenre`/`getSongsByYearRange` 4 处硬编码 `Limit=1000` 改为分页循环，参照 `getArtists` 模式，超过 1000 项时不再截断
 
 ### Fixed
+
 - **只有第一张图有描线过程，后续函数直接出全图**：`GAP → DRAW` 迁移时未清零 `drawAccumulator`——首图靠 `onEnter` 归零，之后每个周期累加器残留 `8000ms`，新图第一帧即满足"描线完成"直接进 HOLD。现迁移时归零
 
 ### Changed
@@ -3825,7 +4002,7 @@
 
 ---
 
-## [v2.4.0] - 2026-06-25
+## \[v2.4.0] - 2026-06-25
 
 ### Added
 
@@ -3886,6 +4063,7 @@
 - 歌词加载误报"加载歌词失败"：`loadLyricsForCurrentSong` 的 `catch (e: Exception)` 错误捕获了协程 `CancellationException`（切歌时 `lyricsLoadJob.cancel()` 触发）；新增 `catch (CancellationException) { throw e }` 重新抛出取消异常，不当作错误提示
 
 ### Fixed
+
 - **只有第一张图有描线过程，后续函数直接出全图**：`GAP → DRAW` 迁移时未清零 `drawAccumulator`——首图靠 `onEnter` 归零，之后每个周期累加器残留 `8000ms`，新图第一帧即满足"描线完成"直接进 HOLD。现迁移时归零
 
 ### Changed
@@ -3901,7 +4079,7 @@
 
 ---
 
-## [v2.2.0] - 2026-06-22
+## \[v2.2.0] - 2026-06-22
 
 ### Added
 
@@ -3911,7 +4089,7 @@
 - TV 桌面图标显示修复：添加 `LAUNCHER` 类别，确保应用图标在桌面显示
 - 字符串资源化（B-3/B-8）：创建 `strings.xml`，替换 6+ 个屏幕中所有硬编码中文 UI 字符串
 - DI 容器（B-9）：`NasMusicApp` 作为控制反转容器，移除 `getInstance()` 静态方法
-- Activity + ViewModel 拆分（B-10）：MainActivity 从 678 行精简至 ~275 行，抽取 `AppRoot`/`NetworkMonitor`/`MediaKeyHandler`
+- Activity + ViewModel 拆分（B-10）：MainActivity 从 678 行精简至 \~275 行，抽取 `AppRoot`/`NetworkMonitor`/`MediaKeyHandler`
 - 统一异步状态（B-12）：新增 `UiState<T>` 密封类（Loading/Success/Error）+ `RetryUtil` 指数退避重试
 - 播放模式迁移（B-13）：`_playMode` 从 PlayerManager 迁移到 MainViewModel，新增 `derivePlayMode()`
 - 单元测试补充（B-5）：UiStateTest、TimeUtilsTest、RetryUtilTest、MediaKeyHandlerTest、NetworkMonitorTest
@@ -3947,6 +4125,7 @@
 - 全量加载歌曲导致内存溢出：改为分页加载（每页 200 首）
 
 ### Fixed
+
 - **只有第一张图有描线过程，后续函数直接出全图**：`GAP → DRAW` 迁移时未清零 `drawAccumulator`——首图靠 `onEnter` 归零，之后每个周期累加器残留 `8000ms`，新图第一帧即满足"描线完成"直接进 HOLD。现迁移时归零
 
 ### Changed
@@ -3961,7 +4140,7 @@
 
 ---
 
-## [v2.1.0] - 2026-06-21
+## \[v2.1.0] - 2026-06-21
 
 ### Added
 
@@ -3985,6 +4164,7 @@
 - 连接资源泄漏修复：应用退出时 OkHttp 连接池正确释放，不再需要重启 Jellyfin
 
 ### Fixed
+
 - **只有第一张图有描线过程，后续函数直接出全图**：`GAP → DRAW` 迁移时未清零 `drawAccumulator`——首图靠 `onEnter` 归零，之后每个周期累加器残留 `8000ms`，新图第一帧即满足"描线完成"直接进 HOLD。现迁移时归零
 
 ### Changed
@@ -4024,6 +4204,7 @@
 - D-pad 左右键跳转修复：处理 `KeyDown` → `KeyUp` 事件类型适配不同 Android TV 固件
 
 ### Fixed
+
 - **只有第一张图有描线过程，后续函数直接出全图**：`GAP → DRAW` 迁移时未清零 `drawAccumulator`——首图靠 `onEnter` 归零，之后每个周期累加器残留 `8000ms`，新图第一帧即满足"描线完成"直接进 HOLD。现迁移时归零
 
 ### Changed
@@ -4037,12 +4218,12 @@
 
 ### Removed
 
-- 废弃代码清理：删除 `backend/jellyfin/` 和 `backend/navidrome/` 旧 Retrofit 实现（共 6 个文件，~500 行死代码）
+- 废弃代码清理：删除 `backend/jellyfin/` 和 `backend/navidrome/` 旧 Retrofit 实现（共 6 个文件，\~500 行死代码）
 - Retrofit 依赖移除：`com.squareup.retrofit2:retrofit` 和 `com.squareup.retrofit2:converter-gson`（不再需要）
 
 ---
 
-## [1.0.0] - 初始发布
+## \[1.0.0] - 初始发布
 
 ### Added
 
