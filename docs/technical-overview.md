@@ -17635,4 +17635,64 @@ Added 一行「设置 → 通用 新增「焦点高亮」开关（默认开）�
 **未做 / 未验**：未推送、未 tag、未编 release APK（E51 移植件 ⛔ 不外发，见
 `docs/e51-lofi-city-plan.md` §2.6）；斯德哥尔摩真机观感未测。
 
+### 10.273 v2.39.7 — E51 其余六城落地：编译清零 + 接线 + 全量验证转绿（2026-10-23）
+
+**结果**：可渲染城市从 5 座升到 **11 座**（新增温哥华、芝加哥、布达佩斯、波士顿·老州议会、
+东京·室内、墨西哥城）。三项验证一次全绿：`compileDebugKotlin` **0 error**、
+`testDebugUnitTest` **2580 例 / 0 失败**（含 `LofiCityRegistryGateTest` 6 例、
+`LofiSceneSnapshotTest` 2 例）、`lintDebug` `BUILD SUCCESSFUL`（4m26s）。
+
+**本地提交（⛔ 均未推送）**：`8292f4f` vancouver-fix → `d306475` tokyo-room-fix →
+`4dbf211` boston-fix → `8a41704` chicago-fix → `e892944` budapest-fix →
+`79bf008` budapest-fix2 → `4eade60` lofi-wire（接线）。
+
+**六处典型直译陷阱（"JS 里合法、Kotlin 里必红"的一类，记录防复发）**：
+① `jsRound` 只吃 `Double`（`jsRound((yl - 1).toDouble())`），传 `Int` 直接编译不过；
+② 比较语义必须照上游**原样**保留：东京·室内桥窗上游是 `y === top + 3`、玻璃边
+`y === glassTop(x) - 1`，早期译法把它"归一化"成 `top == jsRound(y)` ⇒ 整排窗错位一格，
+已改回 `y.toDouble() == top + 3`；
+③ 波士顿的 `R25` 需要 **Double 重载**（`(g.g.ty + 3).toDouble()`、`2.0`、
+`max(1, dh - 1).toDouble()`），传 `Int` 会静默选错重载；
+④ JS `Math.min/max` 是变参，Kotlin 无 3 参 `min`/`max` ⇒ `minOf`/`maxOf`；
+⑤ Int/Double 混算要显式补齐：`i % 8 == 0.0`、`floor((y - 162) / 6.0)`、`y = top.toInt()`；
+⑥ `rect`/`putPx` 是 `PixCtx` 的**扩展函数** ⇒ 必须写 `sx2.rect(...)`（芝加哥 10 处），
+不带接收者即 `receiver type mismatch`。
+
+**布达佩斯另有结构性修正**（`e892944`）：`drawPest` 整段从机械直译产物重写为真 Kotlin
+（`p.set`、`WinDef` 具名实参、`glowRamp` 用 `IntArray`）；`import pixel.streak` 并不存在
+（`streak` 是 `PixelReflector` 的**成员**）⇒ 改为注入 `PixelReflector` + 私有转发；
+24 处 `makeHalo(n, "#…")` 需先 `hex(...)`；`drawStormLight` 的 5 参 `drawImage` 本仓库没有
+⇒ 改 9 参全源矩形形态；`SHIP6` 字段名 `x0/x1` 与上游 `t0/t1` 不一致，已对齐；
+`PuffDef`/`FlakeDef` 的 `k` 补 `.toDouble()`。
+
+**`79bf008` 的越界修正（"上游靠 canvas 裁剪、我们不能靠"这一类）**：`drawFar9` 的远端楼块
+上游写 `x <= 480` 并真的画到 `x = 480`，JS 画布把它裁掉，Kotlin 直接
+`ArrayIndexOutOfBoundsException: Index 480` ⇒
+`val x1 = minOf(blk[1], PIXEL_W - 1)`。**通用口径：上游任何"画到画布边界外"的坐标
+都要在 Kotlin 侧夹到 `PIXEL_W - 1` / `PIXEL_H - 1`。**
+
+**接线（`4eade60`）**：
+- `LofiScenes.build` 补齐 11 城分支（此前只有 5 支），`SCENES_BUILT` 同步到 11 项 ——
+  门禁 R4 要求两者逐 id 相等。
+- ⚠️ `SCENES_BUILT` 必须写 **registry 的 look id**（`boston-old-state-house`、`tokyo-room`），
+  写城市 id（`boston` / `tokyo`）不成立：`byId` 查不到，R6 逐字段对账必红。
+- registry 三处 `focusX = 0.0` 回填为手译值：`budapest` 189、`stockholm` 322、
+  `mexico-city` 212（上游是符号表达式，生成脚本解析不到就落 0.0 ⇒
+  **任何 `focusX = 0.0` 都要当占位看待，不能当真值**）。
+- `LofiCityMexicoCity.events` 改为**惰性 getter**：`lateinit ORGAN_T` 在 `init {}` 之后才赋值，
+  而构造期就要读 `events` ⇒ `UninitializedPropertyAccessException`。⚠️ 这是
+  `lateinit` + `init{}` 顺序问题的通用形态，其它城若在字段初始化阶段求值 `events` 同样要改。
+
+**京都退回未完成态（本轮唯一"倒退"的处置）**：`LofiCityKyoto.kt` 改名
+`LofiCityKyoto.kt.bak`（未跟踪、不参与编译），并已从 `SCENES_BUILT` 摘除。它不是"待修件"
+而是**半成品**：16 个上游函数完全缺失（`drawLeaf2`/`drawGroundLeaves`/`logBack`/`drawShoro`/
+`look11`/`drawRouteWalker`/`geikoLantern`/`couplePhoto`/`sitFig`/`drawCounter`/`drawBenchGuests`/
+`drawServer`/`drawSweeper`/`drawRickshaw`/`drawCat11`/`prerender37`），支撑类型层从未写
+（`R30` 94 次、`hh` 66 次、`LookOpts`、`W22`、`FigureLook`、`FigSize`、`Puff`、`Cluster`、
+`TreeArt`、`Pool`、`LaneWin`、`PixWin`、`RoutePos`），`renderFrame37` 仍是 1 行桩，
+另有约 53 行 JS 残留 ⇒ 需整城重写（≈ Stockholm 单城工作量）。
+
+**未做 / 未验**：未推送、未 tag、未编 release APK（§2.6 不外发）；六城真机观感未测；
+余下 45 个场景（含京都）未开工。
+
 
