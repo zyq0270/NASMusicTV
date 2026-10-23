@@ -17695,4 +17695,71 @@ Added 一行「设置 → 通用 新增「焦点高亮」开关（默认开）�
 **未做 / 未验**：未推送、未 tag、未编 release APK（§2.6 不外发）；六城真机观感未测；
 余下 45 个场景（含京都）未开工。
 
+### 10.274 v2.39.7 — E51 京都整城重写落地：`trim24` 偏移缺陷与源码门禁 G-E51-J（2026-10-23）
+
+**结果**：可渲染城市 11 → **12 座**（京都）。`LofiCityKyoto.kt` **3333 行**（上游 1885 行），
+16 个缺失函数 + 12 组类型层全部补齐；错误链 **1304 → 626 → 131 → 17 → 2 → 0**，全程无跨文件错误。
+接线三处：`LofiScenes.build()` 的 `"kyoto" -> KyotoScene()`、`SCENES_BUILT` 加 `"kyoto"`、
+注册表 `focusX 0.0 → 240.0`（`PAG.cx`；`0.0` 是同步脚本对该城解析失败留下的占位）。
+
+#### 一、⛔ 本轮唯一的实质缺陷：`trim24` 的偏移在类型层被静默丢弃
+
+上游 `trim24(p)` 返回**对象** `{c, x, y}`，`blit25(o) = drawImage(o.c, o.x, o.y)`——偏移与像素同等重要。
+直译到 Kotlin 后它对应 `Pixmap`（`canvas` + `x/y`）。把返回类型写成 `PixelCanvas` 后，唯一能过编译的
+写法就是 `return trim24(p).canvas`：**偏移在此丢失，编译器不报错**（`PixelCanvas` 是从 `Pixmap`
+里取出的合法值）。更进一步，为了消掉 `blit25` 的 `None of candidates` 报错，曾加入
+
+```kotlin
+private fun blit25(c: PixelCanvas) = ctx37.drawImage(c, 0.0, 0.0)
+```
+
+它把 (0,0) 硬编码，**等于把漏洞合法化**。受影响的 8 处：`TEA_C`/`PARASOL_C`/`WALL_C`/`SHORO_C`/
+`ANDON_C`（`trim24` 精灵）+ `LANE5`（坡道）+ `HILLS3`（山脊）+ `TreeArt.wood`（树冠），全部整体平移
+——画面"像京都"但建筑飘在半空。
+
+**为什么现有门禁全过**：G-E51-B 只对元数据；`LofiSceneSnapshotTest` 的 S1 非空 / S2 随时间变 /
+S3 确定性**对"整体平移"完全不敏感**（平移既不改非空比例，也不改帧间差异）。只有导出 PNG 肉眼判读
+才能发现——这正是 §9 P4 要求每城交 4 个时刻快照的原因，也是"编译清零 ≠ 移植正确"的最新例证。
+
+**处置（覆盖余下 44 城）**：
+1. 新增门禁 **G-E51-J** `LofiTrimOffsetSourceGateTest`：J1 禁止同一行出现 `trim24(...)` + `.canvas`；
+   J2 禁止裸画布版 `blit25` 重载；N0–N4 负向自证（含"注释内同形文本不得误判""跨行搬迁偏移的合法形态
+   `PixWin(c = o.canvas, x = o.x, y = o.y)` 不得误报""扫描根不得空转"）。
+2. **删除** `blit25(PixelCanvas)` 重载：此后把 trim 结果降级成裸 canvas 会直接编译失败，
+   编译器重新成为守卫（原 `None of candidates` 报错本就是在报警，不该被重载消掉）。
+3. 定死判定口径：**上游 `return trim24(...)` ⇒ Kotlin 必须 `: Pixmap`，字段也必须 `Pixmap`**；
+   `.canvas` 只允许出现在偏移被显式消费的两处（`blit25(Pixmap)`、`PixWin` 的兄弟字段组装）。
+
+#### 二、`create()` 必须同时调两个初始化函数
+
+`initConstants()` 与 `initPrerenderCaches()` 是两段（上游对应常量块与 `prerender37()`）。拆开后
+20 多个 `lateinit` 缓存没有 `init{}` 兜底，`create()` 只调前者时**编译完全正常**，只在首帧渲染崩：
+`UninitializedPropertyAccessException: lateinit property SKY_C37 has not been initialized`
+（`LofiSceneSnapshotTest` 一次抓到 2 例）。**通用形态：常量表与预渲染缓存分两个函数时，
+少调一个只在渲染期发作，编译期零信号。**
+
+#### 三、其余直译陷阱（余下城市照用）
+
+- `TORO` 字段是 `x`/`base`，上游写作 `y` ⇒ 直译必踩 `Unresolved reference 'y'`；
+- `Cluster.k` 是 `Double`（上游 `6 + Math.floor(...)` 天然浮点），写成 Int 在具名实参处报 Int→Double；
+- `arrayOf(0xFFe0a050, …)` 里超 `Int.MAX` 的是 **Long 字面量**，`intArrayOf` / `pick23(IntArray)` 都不收
+  ⇒ 颜色一律 `hex("#…")`；
+- 引擎无 `clip()` ⇒ 京都水洼第二遍 0.6α 倒影**有意省略**（已在 `renderFrame37` KDoc 注明，只影响 6 处
+  水洼浓度）；无 `source-in` ⇒ `renderPagodaShade` 用 `sourceInFill()` 逐像素重涂 alpha 形状；
+- `hs.noren[1] > "b"`（noren 十六进制串第 2 位）⇒ `(noren and 0xFF0000) >= 0xF00000`（红通道 ≥ 0xF0）；
+- 本项目无广告 ⇒ `PITCH30` 不移植：`drawBillboard32` 的 `if (!PITCH30.covers(t, pitch))` 改 `run { }`
+  并注释"恒走 MATCHA 分支"，删掉 `PITCH30.draw(...)`；
+- `PixWin.c` 必须可空（山脊窗口只有坐标、没有画布），`blit25(PixWin)` 遇到 null 直接跳过。
+
+#### 四、验证与状态
+
+`compileDebugKotlin` **0 error**；`LofiCityRegistryGateTest` 6 例 + `LofiSceneSnapshotTest` 3 例 +
+`LofiTrimOffsetSourceGateTest` 7 例全绿；全量 `testDebugUnitTest --rerun-tasks` **2587 例 / 255 类 / 0 失败**
+（2 skipped，比上一轮 2580 例多出的正是 G-E51-J 的 7 例）；行尾按 `.gitattributes` 的 `eol=lf` 归一（中途 CRLF 1792 /
+LF 1540 混用是多段 splice 的副产物，**PowerShell 多行字符串替换在混合行尾文件上会静默失配**）。
+快照导出 `logs_temp/lofi_render/kyoto_t000|060|120|228.png` 肉眼复核：二年坂坡道、五重塔、茶屋暖簾、
+钟楼、石墙、石灯、MATCHA 广告牌、红叶与地面落叶均归位；水洼为纯黑硬边椭圆（倒影省略的预期结果）。
+**本地提交 `617a85c`**（⛔ 未推送、未 tag、未编 release，§2.6）；余下 **44 个场景**未开工。
+
+
 
