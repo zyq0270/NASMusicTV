@@ -1,5 +1,7 @@
 # NAS Music TV
 
+简体中文 | [English](README_EN.md)
+
 一款开源的 Android 音乐播放器（TV / 手机 / 平板通用）：聚合 NAS（Jellyfin / Navidrome / Subsonic / 道理鱼 / 飞牛）、网络音乐、百度网盘、本地音乐等多音乐源，支持逐字卡拉OK歌词、K 歌伴奏、MTV 音乐视频、天气电台等电视专属体验。同一 APK 同时适配电视（遥控器）与手机（触屏）。
 
 [![Release](https://img.shields.io/github/v/release/hxzhang2000/NASMusicTV?color=blue&label=Release)](https://github.com/hxzhang2000/NASMusicTV/releases)
@@ -61,15 +63,33 @@
 
 ## 界面预览
 
-- **首页**：当前播放、最近播放、实时天气、均衡器频谱预览
-- **播放页**：封面 + 歌词、封面滤镜、进度条与控制按钮、可视化、歌曲详情
-- **曲库页**：搜索 / 发现 / 电台 / 专辑 / 艺术家 / 歌曲 / 流派 / 年代
-- **详情页**：专辑与艺术家详情，歌曲列表 + 播放全部
-- **队列页**：播放队列管理
-- **我的页**：收藏 + 最近播放 + 本地歌单
-- **设置页**：主题（跟随系统 / 深色 / 浅色）、动画、播放模式、缓存、均衡器、歌词缩放、封面滤镜、天气 API Key、各音乐源端点
-- **连接页**：五种 NAS 后端，默认端口自动切换
-- **关于页**：后端类型 + API 版本号 + 连接状态
+| 首页 | 播放页 |
+|:---:|:---:|
+| <img src="screenshots/01-dashboard.jpg" width="440" alt="首页"><br>**首页**：当前播放 / 最近播放 / 实时天气 / 频谱预览 | <img src="screenshots/02-player.jpg" width="440" alt="播放页"><br>**播放页**：封面 + 歌词 + 可视化 + 歌曲详情 |
+| <img src="screenshots/03-karaoke.jpg" width="440" alt="逐字卡拉OK歌词"><br>**逐字卡拉 OK 歌词** | <img src="screenshots/04-mtv.jpg" width="440" alt="MTV音乐视频"><br>**MTV 全屏音乐视频** |
+| <img src="screenshots/05-visualizer.jpg" width="440" alt="全屏可视化"><br>**全屏可视化**：30+ 套特效 | <img src="screenshots/06-library.jpg" width="440" alt="曲库"><br>**曲库**：专辑 / 艺术家 / 歌曲 / 流派 / 年代 |
+| <img src="screenshots/07-discover.jpg" width="440" alt="发现页"><br>**发现页**：六维度筛选 | <img src="screenshots/08-search.jpg" width="440" alt="搜索"><br>**搜索**：拼音首字母 + 子串匹配 |
+| <img src="screenshots/09-weather-radio.jpg" width="440" alt="天气电台"><br>**天气电台**：按实时天气匹配心情电台 | <img src="screenshots/10-detail.jpg" width="440" alt="专辑详情"><br>**专辑详情** |
+| <img src="screenshots/11-queue.jpg" width="440" alt="播放队列"><br>**播放队列**：增删改与排序 | <img src="screenshots/12-mine.jpg" width="440" alt="我的"><br>**我的**：收藏 / 最近播放 / 本地歌单 |
+| <img src="screenshots/13-settings.jpg" width="440" alt="设置"><br>**设置**：主题 / 均衡器 / 歌词缩放 / 各音乐源端点 | <img src="screenshots/14-connection.jpg" width="440" alt="连接页"><br>**连接页**：五种 NAS 后端 |
+| <img src="screenshots/15-about.jpg" width="440" alt="关于"><br>**关于**：后端类型 + API 版本 + 连接状态 | <img src="screenshots/16-remote.jpg" width="220" alt="手机遥控"><br>**手机遥控**：K 歌 / MTV 全屏页扫码，手机查看队列、搜索加歌 |
+
+## 下载安装
+
+**系统要求**：Android 5.1（API 22）及以上，电视 / 手机 / 平板通用。同一 APK 自动识别设备类型——电视走遥控器焦点体系，手机走触屏交互。搭载 ARMv7 的老电视同样可以安装，高负载特效会自动降级。
+
+**下载地址**：[Releases](https://github.com/hxzhang2000/NASMusicTV/releases) 页的 `app-release.apk`。
+
+**安装到电视**：U 盘拷贝 APK 后用文件管理器安装；或通过 adb 无线安装：
+
+```bash
+adb connect <电视IP>:5555
+adb -s <电视IP>:5555 install -r app-release.apk
+```
+
+**安装到手机 / 平板**：直接安装 APK（需在系统设置里允许"安装未知应用"）。
+
+**首次使用**：进入「连接页」添加你的 NAS 后端（Jellyfin / Navidrome / Subsonic / 道理鱼 / 飞牛）。没有 NAS 也可以直接用网络音乐、百度网盘、公共电台和天气电台。
 
 ## 构建与运行
 
