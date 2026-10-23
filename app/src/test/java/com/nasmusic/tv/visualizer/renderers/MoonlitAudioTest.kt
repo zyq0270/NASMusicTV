@@ -436,8 +436,8 @@ class MoonlitAudioTest {
         //    最近邻放大 ⇒ 基类那一次全屏 drawRect 必须关掉（否则同一暗角叠两遍，四角明显发死）。
         //    `postFx = PostFx(vignette = 0.18f)` 的字面量同样保留：它是 `FxCoverageScanTest` 的
         //    认定依据，也是 `needsDamageCoalescer` 的输入（改判 `PostFx.NONE` 会踩 E47 那条反向教训）。
-        assertEquals("只许 E44 / E46 / E47 / E48 / E49 / E51 覆写暗角钩子（其余效果的暗角必须仍是 postFx 字面量）",
-            listOf("BirdsFlockRenderer.kt", "DesertSmokeRenderer.kt", "LofiCityRenderer.kt", "MoonlitRenderer.kt", "SnowCedarRenderer.kt", "TripodFogRenderer.kt"), overriders.sorted())
+        assertEquals("只许 E44 / E46 / E47 / E48 / E49 覆写暗角钩子（其余效果的暗角必须仍是 postFx 字面量）",
+            listOf("BirdsFlockRenderer.kt", "DesertSmokeRenderer.kt", "MoonlitRenderer.kt", "SnowCedarRenderer.kt", "TripodFogRenderer.kt"), overriders.sorted())
         assertTrue("基类默认值必须是哨兵（不覆盖）",
             mainFileText("RendererFx.kt").contains("vignetteOverride(fx: FxFrame): Float = NO_VIGNETTE_OVERRIDE"))
     }

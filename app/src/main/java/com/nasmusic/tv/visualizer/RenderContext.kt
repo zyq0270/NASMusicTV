@@ -4,7 +4,6 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.ImageBitmap
 import com.nasmusic.tv.backend.photo.PhotoScaleMode
 import com.nasmusic.tv.data.model.VisualQuality
-import com.nasmusic.tv.visualizer.pixel.LofiCityCursor
 import com.nasmusic.tv.visualizer.photo.PhotoTransitionId
 
 /**
@@ -74,14 +73,6 @@ class RenderContext {
 
     /** 音频反应强度 `0..1`（音频反应开关关闭时恒为 `0`，§5.5「不卡节拍」） */
     var photoAudioBoost: Float = 0f
-
-    // ── 像素城市（`LOFI_CITY`，E51 §12.3）─────────────────────────────────
-    //
-    // 与照片墙同一条口径：**不进 `update()`**（位置参数已经 16 个了），由 `VisualizerStage`
-    // 在进入舞台时挂一次。⚠️ 它是**渲染器写给 UI 看**的反向通道：渲染器只写字段，
-    // 右下角那张卡自己定时读 ⇒ 绘制阶段不写快照状态（见 [LofiCityCursor] 的类注释）。
-    // `null` = 当前没有叠层卡（其余 35 个渲染器零感知）。
-    var lofiCityCursor: LofiCityCursor? = null
 
     val width: Float get() = canvasSize.width
     val height: Float get() = canvasSize.height

@@ -11,7 +11,6 @@ import com.nasmusic.tv.visualizer.renderers.ConstellationRenderer
 import com.nasmusic.tv.visualizer.renderers.DesertSmokeRenderer
 import com.nasmusic.tv.visualizer.renderers.LiquidGridRenderer
 import com.nasmusic.tv.visualizer.renderers.LiquidRippleRenderer
-import com.nasmusic.tv.visualizer.renderers.LofiCityRenderer
 import com.nasmusic.tv.visualizer.renderers.MatrixRainRenderer
 import com.nasmusic.tv.visualizer.renderers.MilkdropRenderer
 import com.nasmusic.tv.visualizer.renderers.MoonlitRenderer
@@ -94,10 +93,10 @@ object VisualizerRendererFactory {
         VisualizerTheme.BIRDS_FLOCK -> BirdsFlockRenderer()
         // E48「大漠孤烟」零外部资产（14 类位图全在首帧 boot 程序化烘焙）⇒ ⛔ 不收 Context。
         VisualizerTheme.DESERT_SMOKE -> DesertSmokeRenderer()
-        // E51「像素城市」零外部资产（场景位图全在 onEnter 后程序化烘焙）⇒ ⛔ 不收 Context。
-        // ⚠️ 本行的字面形态 `-> LofiCityRenderer(` 被 ParticleBudgetGateTest 的工厂映射正则消费，
-        // 双变体的开关在 create() 外层，⛔ 不要写成 `-> if (...) ... else ...`。
-        VisualizerTheme.LOFI_CITY -> LofiCityRenderer()
+        // E51「像素城市」：渲染器实现不随本仓库外发（来源不可外发）⇒ 此处无实现可创建。
+        // ⚠️ 分支必须留在 `when` 里：枚举项仍在（备份 JSON 按名反查会命中），删掉分支就不穷尽了。
+        // 本机自用版与外部生产版都在 create() 外层先被拦下；这里只是穷尽性兜底，回落默认效果。
+        VisualizerTheme.LOFI_CITY -> CircularRingRenderer()
     }
 
     /**
