@@ -542,6 +542,31 @@
 > 与「⏳ 待用户」标注原样保留，供追溯）。
 
 
+## 第十六轮（2026-10-22，3 个）—— 浅色主题收官 + 飞牛「列表 0 首」闭环，✅ 归档
+
+> 本轮是**纯文档动作**（所有者明示「只操作文档，不操作代码」）：三次 `git mv` + 文件顶部归档状态头 +
+> 必要的旧路径引用改写，**`app/src/**` 一行未改**。
+
+| 文档 | 判定依据 | 被谁引用（已改写） | 挂起决策 |
+|---|---|---|---|
+| `light-theme-plan.md` | ✅ **已落地并出货**：主题地基 `59f2211` + 系统栏底色 `ef18161`，随 **v2.39.6** 出货；真机反馈又催出两轮补丁（§12 的 I11 三处对比度、I12 系统栏底色），2026-10-21 手机上验证通过。权威落码记录 = `docs/technical-overview.md` **§10.265**；版本条目 = `CHANGELOG.md` 的 `## [v2.39.6]` 段。门禁 = `ThemeContrastTest` 3 / `ThemeModeTest` 10 / `ThemeBackupCompatTest` 10 / `SystemBarColorTest` 4 例。⚠️ 原状态头「待真机验收」是**过期标记**，已被归档头取代 | `docs/technical-overview.md` §10.265 的开发计划指向 ×1、`Theme.kt` 的 `NasMusicColors` KDoc ×1 ⇒ **后者按所有者「只操作文档」要求保持原样未改**（该 KDoc 记为待办，见右列） | ⏳ **`Theme.kt:154` 的 KDoc 仍指旧路径** `docs/light-theme-plan.md`：本轮明确不动源码 ⇒ 留作下次代码改动的顺手项（死链不影响编译）。⏳ 方案 §12 的 I10 真机 §8 视觉走查、G-03「α=0.85 聚焦底 + 白字」截图实测仍由所有者执行 |
+| `feiniu-track-list-empty-improvement-plan.md` | ✅ **已落地并出货**：根因定为 **H1b**（单条字段类型异常中断整页解析），落地 T0 逐条隔离 + T1 安全访问器 + T7 失败原因上 UI，随 **v2.39.3**（`2b725d1`，2026-10-20）出货；`duration:"154100.5"` 由 `longOf` 解析（`FeiniuAdapter.kt:1393`）⇒ **T2/T3 未启用**。回归网 = `FeiniuAdapterTrackParseTest` 9 例。⚠️ 原状态头「尚未在真机复现确认」是**过期标记** | 与 `feiniu-diagnose.sh` 互引 **6 处**（正文 §0/§9.1 ×3/附录 B），已全部改为同目录相对写法（`feiniu-diagnose.sh`，`docs/` 前缀去掉）；`CHANGELOG.md` / `technical-overview.md` / `AGENTS.md` 零引用 | ⏳ §9.4「改码后 5 步复测」是给用户的操作清单，未见回填 —— 但 v2.39.3 已出货且后续版本未再报同类问题，按「已闭环」处理 |
+| `feiniu-diagnose.sh` | ✅ **配套取证脚本随方案一起归档**：未被 `app/` 或任何构建脚本调用，属一次性诊断工具；对应方案已闭环。它仍是同类「飞牛列表为 0 / 搜索无结果」问题的首选取证手段（§9.2 决策表可复用） | 自身头部「对应 docs/…」已改为「同目录 …」；正文用法示例按原样保留（脚本现位于 `docs/archive/`，从仓库根调用需带 `docs/archive/` 前缀 —— 正文未改，此差异记录在此） | — |
+
+> ⚠️ **移动方式 = `git mv`**（三份文件均已在库中，历史保留）；文件顶部各加归档状态头，正文**一字未删**，
+> 原状态头以「过期标记」形式显式保留在下方而不删除（与第三轮、第十一轮同一处理）。
+>
+> ⛔ **死链自检**：`grep -rn "docs/light-theme-plan\|docs/feiniu-diagnose\|docs/feiniu-track-list"` 排除 `.git/` / `.box-agent/` 后
+> **残留 1 处**（`Theme.kt:154`），是本轮「只操作文档」约束下**有意保留**的已知项，不是遗漏。
+>
+> 📌 **`docs/` 根口径**（`git ls-tree --name-only HEAD docs/ | grep -c '\.md$'`，HEAD 实测）：入库 Markdown **9 → 7 篇**
+> = 活文档 2（`technical-overview.md` / `conventions-adaptive-ui.md`）+ 现役名册 1（`visualizer-effects-list.md`）
+> + 在办方案 4（`blackhole-visualizer-plan.md` / `e45-orbital-plan.md` / `e50-qianli-jiangshan-plan.md` / `e51-lofi-city-plan.md`）；
+> 入库 shell 脚本 1 → 0。⚠️ 上文第九～十五轮里「5 篇 / 4 篇」的旧计数一并作废，以本段为准。
+>
+> ⚠️ **不进 `CHANGELOG.md`**：按本仓规矩文档改动不登记，且本轮无代码变更。
+
+
 ## 回滚
 
 归档为**纯移动**（`git mv`，历史保留），未删除任何内容。整体回滚：

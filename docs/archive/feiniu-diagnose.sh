@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 #
 # feiniu-diagnose.sh — NASMusicTV 飞牛音乐适配器 · 分步诊断脚本
-# 对应 docs/feiniu-track-list-empty-improvement-plan.md §4（复现与诊断）
+# 对应 同目录 feiniu-track-list-empty-improvement-plan.md §4（复现与诊断）
+#
+# 🗄️ 归档状态（2026-10-22）：对应方案已随 v2.39.3 落地（`2b725d1`），本脚本随之归档。
+#    它仍是同类「飞牛列表为 0 / 搜索无结果」问题的取证工具，用法与输出格式均未变。
 #
 # 用途：复现 APP 对飞牛 music 服务的确切请求，把服务端「信封 code/msg」与
 #       单条曲目字段结构抓出来，一次定性是「服务端拒绝参数」还是「APP 解析失败」。
