@@ -17761,5 +17761,66 @@ LF 1540 混用是多段 splice 的副产物，**PowerShell 多行字符串替换
 钟楼、石墙、石灯、MATCHA 广告牌、红叶与地面落叶均归位；水洼为纯黑硬边椭圆（倒影省略的预期结果）。
 **本地提交 `005756c`**（⛔ 未推送、未 tag、未编 release，§2.6）；余下 **44 个场景**未开工。
 
+### 10.275 v2.39.7 — E51 墨尔本整城落地：伪 3D 相机 + 深度缓冲（2026-10-23）
+
+**结果**：可渲染城市 12 → **13 座**（墨尔本）。`LofiCityMelbourne.kt` **3855 行**（上游 1987 行），
+分五批落地（基础层 → 常量层 → 静态层 → 街景层 → 动态层/装配层），每批一次 `compileDebugKotlin`，
+错误链最后一段只剩 **4 条 `Conflicting declarations` + 5 条连带 `Overload resolution ambiguity`**。
+接线三处：`LofiScenes.build()` 加 `"melbourne" -> MelbourneScene()`、`SCENES_BUILT` 加 `"melbourne"`、
+注册表 `focusX` 基线测绘时已是 `222.0`（无需回填）。
+
+墨尔本是 E51 里**与已落地 12 城不同类**的一座：不是 2D 画家算法叠层，而是
+**伪 3D 相机（`VX/VY/EYE8/BRG2/FL/CXP2/HZ11`）+ 全局深度缓冲 `ZBUF` + 材质闭包（`Mat`/`RoundMat`）**，
+地面与墙面逐像素投影后按 `u = depthOf(x,y)` 写深度。这带来两条**层序硬约束**：
+`renderMarks` 读全局 `ZBUF` ⇒ 必须排在 `renderGround13` 之后、`resetZbuf()` 之前；
+`renderFrame46` 开头必须 `resetZbuf()`（否则第 2 帧起遮挡关系全错，且**画面仍然"像墨尔本"**）。
+
+#### 一、三个只有编译才暴露的缺陷
+
+① **`DRZ_LIGHTS`/`DRZ_LIGHTS_BB` 重复声明**：字段区早已有这两行（322-323），收尾批次又加了一组。
+报错形态很有欺骗性——列表最前面是 4 条 `Conflicting declarations`，随后是**五处不相干位置**
+（1265/1274/3625/3634/3867）的 `Overload resolution ambiguity between candidates: var DRZ_LIGHTS … var DRZ_LIGHTS`。
+**根因行号永远在列表最前**，追歧义点只会白跑。
+② **`winLit7` 对结构体鸭子类型**：上游 `winLit7 = (w, t) => w.mode === "on" || …` 同时被 `WINS14`（`Win`）
+与 `SWIN`（`Swin`）调用；Kotlin 必须给两个重载，只写 `Win` 版会让 `SWIN` 那侧编译不过。
+③ **缓存字段类型要按上游实际产物定**：`CLOUDS31` 是 `makeCloudLayer29` 的产物 `CloudLayer{c,y,k}` 而非 `Pixmap`；
+`LIT_C2` 是 `LITP2.canvas`（`PixelCanvas`，供 `drawImage` 九参区域拷贝）而非 `Pixmap`。
+两者写成 `Pixmap` 都能通过"逐行翻译"的阅读复核，只在装配层崩。
+
+#### 二、`renderFrame46` 层序（照抄上游 1633-1657，⛔ 别重排）
+
+`resetZbuf` → `drawSky33` → `GROUND_C9` → `drawFar13` → `drawDrizzle6(DRZ2[0])` → `drawStation2` →
+`drawGulls11` → `drawCorners` → `drawRoad3` → `drawRings13` → `WIRES_C` → `drawDrizzle6(DRZ2[1])` →
+`drawStreetLife` → `drawDrizzle6(DRZ2[2])` → `VIG_C46`。
+`drawStreetLife` 的 DL 排序是**降序**（`sort((a,b) => b[0]-a[0])`，远者先画），灯晕在 DL 全部画完后**再叠加**；
+雨被拆成前/中/后三批正是为了让电车与行人夹在中间（`DRZ2[0..2]`）。
+
+#### 三、其余直译口径（余下城市照用）
+
+- 本项目无广告 ⇒ `PITCH30`/`PITCH39` 不移植，`drawBoard6` 只保留自有广告牌分支，`pitch` 恒 `null`；
+- 跨城共享的 `drawWeather(...)` 不移植（同京都）⇒ 本城只保留母题 `drizzle`：
+  `weather ∈ {null, "city", "drizzle"}` 开雨，其余关；
+- `WEATHER46`/`WX46`/`WX_BB45`（未移植的共享天气层）不移植，但 `DRZ_LIGHTS`/`DRZ_LIGHTS_BB`
+  **属城市数据（雨滴灯晕染色光源）⇒ 移植**，在 `prerender46()` 内初始化；
+- `SPOTS`/`boxOf`（站点 UI 热区，不参与绘制）不移植；`LOOKS` 记忆化不做（`look18` 纯函数，省掉只影响分配）；
+- `SceneEvent` 无 `dur` 字段、`pan` 只收单值 ⇒ `pan: [0.4, -0.9]` 取**首值** `0.4`（Chicago 先例），`dur` 丢弃；
+- `STRIDE = (t) => step(t, 768) & 1` 的 `step` 是**引擎循环计数**（`PixelConstants.step`），不是时间取整；
+- `Int / Int` 截断：`(sy3 - HZ11) / 60` 必须写 `/ 60.0`；`zat(sx2, sy3)` 的上游入参是 `(sy3|0)*W + (sx2|0)`
+  ⇒ 浮点实参一律 `.toInt()` 截断；
+- `CLOUDS31` 的云带滚动用 `scrollPix(t, k, W)` 铺两遍（`-off` 与 `W-off`），别改成单次 `drawImage`。
+
+#### 四、验证与状态
+
+`compileDebugKotlin` **0 error**；`LofiTrimOffsetSourceGateTest`（G-E51-J，7 例）通过；
+`LofiSceneSnapshotTest` 三口径（S1 非空 ≥20% / S2 四帧亮度差 >0.5 / S3 同 t 逐像素相等）通过；
+全量 `testDebugUnitTest --rerun-tasks` + `lintDebug` **2587 例 / 255 类 / 0 失败 / 2 skipped，lint 绿**（12m45s）。
+快照 `logs_temp/lofi_render/melbourne_t000|060|120|228.png` 肉眼判读：Flinders 街车站（绿穹顶 + 拱廊 + 钟楼）、
+Eureka 塔金色塔冠、联邦广场三角板、Young & Jackson 砖楼、进站电车（t=120）、雨幕与湿地倒影、
+「FLAT WHITE / GULL CAFE」广告牌全部归位；无空白层、无错位、无整帧同色。
+**本地提交 `d93add1`**（⛔ 未推送、未 tag、未编 release）；余下 **44 个场景**未开工（`CityRegistry.CITIES` 共 57 条，`SCENES_BUILT` 13 条）。
+
+⚠️ 同日发现：其它进程已把本地 `main` 整体推到 `origin`，13 城移植件曾进入公开仓库；
+已按所有者授权将仓库**转为 private**止血，历史剥离待单独授权（详见 `AGENTS.md` 的 E51 条目与 §2.6）。
+
 
 
