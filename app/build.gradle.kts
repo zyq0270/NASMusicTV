@@ -56,6 +56,30 @@ val cryptoPassphrase = readKeystoreProperty("cryptoPassphrase")
 val lofiCityEnabled: String = (readLocalProperty("lofi.city") ?: providers.gradleProperty("lofi.city").orNull)
     .toString().toBooleanStrictOrNull()?.toString() ?: "false"
 
+// E51「像素城市」源码存在性护栏（配合上面的发布隔离开关）：
+// `lofi.city=true` 的语义是"本次构建要含**真**的像素城市效果"，但 E51 移植件**不上传本仓库**
+// （公开仓库，代码不外发）。它们有两种可能的来源：
+//   ① 分支 `feat/e51-private` 里被跟踪的源码（app/src/main/java/.../visualizer/e51）；
+//   ② 本机 Gradle 初始化脚本挂进来的**仓库外覆盖层**（~/.gradle/init.d/10-nasmusic-e51-local.gradle，
+//      它把 `e51.overlay` 这个项目属性指到覆盖层目录）。
+// 两者都没有时带着这个开关构建，Gradle 不会报错：工厂会把 LOFI_CITY 映射到 `CircularRingRenderer()`
+// （穷尽性兜底），于是会**静默**编出一个"主题在、效果是通用圆环"的假包。故此处显式失败。
+if (lofiCityEnabled == "true") {
+    val e51Tracked = rootProject.file("app/src/main/java/com/nasmusic/tv/visualizer/e51")
+    val e51Overlay = (rootProject.findProperty("e51.overlay") as String?)
+        ?.let { File(it) }
+        ?.takeIf { it.isDirectory }
+    if (!e51Tracked.isDirectory && e51Overlay == null) {
+        throw GradleException(
+            "E51「像素城市」：lofi.city=true，但既没有分支内的 E51 源码，也没有本机覆盖层。\n" +
+                "  · 要出**带真效果**的本地包：切到分支 feat/e51-private 构建，或让本机 Gradle 初始化脚本\n" +
+                "    （~/.gradle/init.d/10-nasmusic-e51-local.gradle）挂上仓库外覆盖层。\n" +
+                "  · 在没有 E51 源码的分支上构建：请把 local.properties 的 lofi.city 设为 false，\n" +
+                "    否则会编出一个「主题可选、效果却是通用兜底」的假包。"
+        )
+    }
+}
+
 android {
     namespace = "com.nasmusic.tv"
     compileSdk = 34
