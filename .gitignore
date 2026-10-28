@@ -45,6 +45,10 @@ release_notes.md
 
 # OpenCode internal state
 .omo/
+# .opencode/ = OpenCode 工具自身状态（node_modules / package.json / 会话日志等），全部忽略；
+# rules.md 是仓库提交规范文档（AGENTS.md 引用），例外保留在仓
+.opencode/*
+!.opencode/rules.md
 
 # App release builds
 app/release/
@@ -126,3 +130,6 @@ app/src/lofi-upstream/
 
 # SDD 计划执行工作区（ledger / briefs / review packages，不入仓）
 .superpowers/
+
+# 本地记忆 / 会话工作笔记（agent 工作记忆，不入仓）
+memory/
