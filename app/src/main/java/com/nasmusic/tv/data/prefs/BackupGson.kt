@@ -9,7 +9,6 @@ import com.google.gson.stream.JsonReader
 import com.google.gson.stream.JsonToken
 import com.google.gson.stream.JsonWriter
 import com.nasmusic.tv.backend.photo.PhotoScaleMode
-import com.nasmusic.tv.data.model.NetworkSource
 import com.nasmusic.tv.data.model.VisualQuality
 import com.nasmusic.tv.data.model.VisualizerTheme
 import com.nasmusic.tv.util.AppLog
@@ -64,13 +63,15 @@ private const val TAG = "BackupGson"
  * - 非 null：按兼容规则解析出的值
  *
  * ⚠️ `VisualizerTheme.fromKey()` / `VisualQuality.fromKey()` **未命中时返回各自的 `Default`**
- * （不会返回 null），这正是我们想要的迁移结果，所以它们永远走第 ② 级；
- * `NetworkSource.fromKey()` 未命中返回 `null`，会继续落到第 ③ 级。
+ * （不会返回 null），这正是我们想要的迁移结果，所以它们永远走第 ② 级。
+ *
+ * ⚠️ `AppSettings.defaultNetworkSource` 自 v2.39.8 起是 **`String`**（`NetworkSource` 枚举已删），
+ * Gson 不再经过枚举适配器：老备份里的 `"METING"` 会原样读成字符串，
+ * 由 `AppPreferences` 的 `normalizeNetworkSourceKey()` 折回 key。
  */
 private fun resolveLegacyEnumName(clazz: Class<*>, raw: String): Enum<*>? = when (clazz) {
     VisualizerTheme::class.java -> VisualizerTheme.fromKey(raw)
     VisualQuality::class.java -> VisualQuality.fromKey(raw)
-    NetworkSource::class.java -> NetworkSource.fromKey(raw)
     // 照片墙（§7.3 进 AppSettings 后受同一个坑约束）
     PhotoScaleMode::class.java -> PhotoScaleMode.fromKey(raw)
     // ⚠️ `PhotoTransitionId` **刻意不在这里**：它还没有 `fromKey` 之外的历史名，

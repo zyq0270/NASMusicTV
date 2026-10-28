@@ -12,7 +12,7 @@ package com.nasmusic.tv.data.model
  * @param artist 艺术家
  * @param album 专辑名
  * @param coverUrl 封面 URL（端点 URL 或直联 URL）
- * @param networkSource 网络来源（"meting"/"alapi"/"jiosaavn"）
+ * @param networkSource 网络来源（"meting"/"baidu"/"jamendo"）
  * @param networkId 源平台原始 ID
  * @param addedAtMs 收藏时间戳（毫秒）
  */

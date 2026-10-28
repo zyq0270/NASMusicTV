@@ -49,7 +49,6 @@ import androidx.tv.material3.Text
 import com.nasmusic.tv.R
 import com.nasmusic.tv.data.model.AppSettings
 import com.nasmusic.tv.data.model.BaiduFile
-import com.nasmusic.tv.data.model.NetworkSource
 import com.nasmusic.tv.data.model.PlayMode
 import com.nasmusic.tv.data.model.ThemeMode
 import com.nasmusic.tv.data.model.VisualQuality
@@ -79,6 +78,8 @@ import com.nasmusic.tv.ui.screens.settings.LyricsKaraokeSettingsState
 import com.nasmusic.tv.ui.screens.settings.LogsSettingsActions
 import com.nasmusic.tv.ui.screens.settings.LogsSettingsSection
 import com.nasmusic.tv.ui.screens.settings.LogsSettingsState
+import com.nasmusic.tv.ui.screens.settings.LxSubBlockActions
+import com.nasmusic.tv.ui.screens.settings.LxSubBlockState
 import com.nasmusic.tv.util.LogSnapshot
 import com.nasmusic.tv.util.LogStore
 import com.nasmusic.tv.ui.screens.settings.NetworkMusicDialogActions
@@ -92,6 +93,7 @@ import com.nasmusic.tv.ui.screens.settings.PhotoWallRuntimeState
 import com.nasmusic.tv.ui.screens.settings.PhotoWallSettingsActions
 import com.nasmusic.tv.ui.screens.settings.PhotoWallSettingsSection
 import com.nasmusic.tv.ui.screens.settings.PhotoWallSettingsState
+import com.nasmusic.tv.ui.screens.settings.MusicSourceRow
 import com.nasmusic.tv.ui.screens.settings.SourcesActions
 import com.nasmusic.tv.ui.screens.settings.SourcesDialogActions
 import com.nasmusic.tv.ui.screens.settings.SourcesSettingsSection
@@ -125,7 +127,7 @@ import com.nasmusic.tv.ui.theme.UiMode
     androidx.compose.ui.ExperimentalComposeUiApi::class
 )
 @Composable
-fun SettingsScreen(
+internal fun SettingsScreen(
     settings: AppSettings,
     onChangeThemeMode: (ThemeMode) -> Unit,
     onToggleAnimations: (Boolean) -> Unit,
@@ -295,7 +297,15 @@ fun SettingsScreen(
     onRebuildBaiduIndex: (() -> Unit)? = null,
     onNavigateToServerConnect: (() -> Unit)? = null,
     // T7：改网络搜索默认源（SOURCES 卡⑤，写 DataStore）
-    onChangeDefaultNetworkSource: (NetworkSource) -> Unit = {},
+    // v2.39.8：类型改为 services map 的 key（`meting` / `baidu` / `jamendo`，方案 §7.5）
+    onChangeDefaultNetworkSource: (String) -> Unit = {},
+    // v2.39.8：卡④ 启停单个源（方案 §7.5）
+    onToggleSourceEnabled: (String, Boolean) -> Unit = { _, _ -> },
+    /** 当前网络音乐平台（`MusicSource.apiKey`），用于卡④ Meting 行的「当前平台」 */
+    networkPlatformKey: String = com.nasmusic.tv.data.model.MusicSource.DEFAULT_API_KEY,
+    // v2.39.8：卡④ 洛雪子块（方案 §7.1；紧贴 Meting 行下方，状态与动作由 MainViewModel 提供）
+    lxSubBlock: LxSubBlockState = LxSubBlockState(),
+    lxActions: LxSubBlockActions = LxSubBlockActions(),
     // v2.36.0 竖屏两级页（方案 §4.6 / §8.7）：当前进入的分区（null = 一级列表）
     selectedSection: SettingsSection? = null,
     onOpenSection: (SettingsSection) -> Unit = {},
@@ -700,6 +710,35 @@ var activeSection by remember { mutableStateOf(SettingsSection.GENERAL) }
                     )
                 }
                 SettingsSection.SOURCES -> item {
+                    // 卡④ 源行（方案 §7.5）：顺序固定 Meting → 百度网盘 → Jamendo；
+                    // 洛雪子块由 Phase 3 插在 Meting 与「百度网盘」之间。
+                    val endpointLabel = run {
+                        val current = settings.metingApiBaseUrl.trim().trimEnd('/')
+                        com.nasmusic.tv.backend.network.MetingApiService.PRESET_ENDPOINTS
+                            .firstOrNull { it.second.trimEnd('/') == current }
+                            ?.let { stringResource(it.first) }
+                            ?: stringResource(R.string.settings_meting_custom_endpoint)
+                    }
+                    // v2.39.8（用户 2026-10-28）：卡④ **只留 Meting 一行**。
+                    // 百度网盘（卡③）与 Jamendo（卡⑤）各有自己的卡与开关，
+                    // ⛔ 不要再出现在这里 —— 那正是「百度网盘开关重复」的来源。
+                    val defaultSuffix = " · " + stringResource(R.string.settings_source_is_default)
+                    val metingDefault = settings.defaultNetworkSource == com.nasmusic.tv.backend.network.NetworkSongId.METING_SOURCE
+                    val musicSources = listOf(
+                        MusicSourceRow(
+                            key = com.nasmusic.tv.backend.network.NetworkSongId.METING_SOURCE,
+                            title = stringResource(R.string.settings_source_meting),
+                            status = stringResource(
+                                R.string.settings_source_meting_status,
+                                com.nasmusic.tv.data.model.MusicSource.fromApiKey(networkPlatformKey).displayName,
+                                endpointLabel,
+                            ) + if (metingDefault) defaultSuffix else "",
+                            enabled = settings.metingEnabled,
+                            // 歌单 / 艺人 / 封面目录：当前只有 Meting 真实现了这三个接口
+                            // （BaiduNetdiskService / JamendoService 的 getPlaylist 直接返回空）。
+                            providesCatalog = true,
+                        ),
+                    )
                     SourcesSettingsSection(
                         state = SourcesSettingsState(
                             isConnected = isConnected,
@@ -717,6 +756,8 @@ var activeSection by remember { mutableStateOf(SettingsSection.GENERAL) }
                             baiduApicExtracted = baiduApicExtracted,
                             baiduApicTotal = baiduApicTotal,
                             defaultNetworkSource = settings.defaultNetworkSource,
+                            musicSources = musicSources,
+                            jamendoClientId = jamendoClientId,
                         ),
                         actions = SourcesActions(
                             onNavigateToServerConnect = onNavigateToServerConnect,
@@ -728,6 +769,39 @@ var activeSection by remember { mutableStateOf(SettingsSection.GENERAL) }
                             onLogoutBaidu = onLogoutBaidu,
                             onRebuildBaiduIndex = onRebuildBaiduIndex,
                             onChangeDefaultNetworkSource = onChangeDefaultNetworkSource,
+                            onToggleSourceEnabled = onToggleSourceEnabled,
+                            // 卡⑤ Jamendo 的 Client ID 编辑：复用本页唯一的 endpointEditor 对话框宿主。
+                            // ⚠️ NODE 前提：`jamendoClientId` 是经 `remember` 逐字段保存的局部值，只能在首次取值。
+                            onEditJamendoClientId = if (onChangeJamendoClientId != null) {
+                                {
+                                    endpointEditor = EndpointEditor(
+                                        titleRes = R.string.settings_jamendo_client_id,
+                                        hintRes = R.string.settings_jamendo_client_id,
+                                        value = jamendoClientId,
+                                    ) { input ->
+                                        onChangeJamendoClientId.invoke(input.trim())
+                                        endpointEditor = null
+                                    }
+                                }
+                            } else null,
+                        ),
+                        lxState = lxSubBlock,
+                        // 洛雪脚本订阅地址的输入框复用本页唯一对话框宿主（§7.1：无嵌套弹窗）
+                        lxActions = lxActions.copy(
+                            onImport = {
+                                endpointEditor = EndpointEditor(
+                                    titleRes = R.string.lx_import_dialog_title,
+                                    hintRes = R.string.lx_import_dialog_hint,
+                                    value = "",
+                                ) { input ->
+                                    val trimmed = input.trim()
+                                    // scheme 不合法时不关闭对话框（用户可继续改）
+                                    if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+                                        lxActions.onImportUrl(trimmed)
+                                        endpointEditor = null
+                                    }
+                                }
+                            }
                         ),
                         dialogs = SourcesDialogActions(
                             onShowBaiduAuthDialog = { showBaiduAuthDialog = true },
@@ -827,7 +901,6 @@ var activeSection by remember { mutableStateOf(SettingsSection.GENERAL) }
                     NetworkMusicSection(
                         state = NetworkMusicSettingsState(
                             metingApiBaseUrl = settings.metingApiBaseUrl,
-                            jamendoClientId = jamendoClientId,
                             mvApiBaseUrl = mvApiBaseUrl,
                             lyricsKugouBaseUrl = lyricsKugouBaseUrl,
                             lyricsNeteaseBaseUrl = lyricsNeteaseBaseUrl,
@@ -837,7 +910,6 @@ var activeSection by remember { mutableStateOf(SettingsSection.GENERAL) }
                         ),
                         actions = NetworkMusicSettingsActions(
                             onChangeMetingApiBaseUrl = onChangeMetingApiBaseUrl,
-                            onChangeJamendoClientId = onChangeJamendoClientId,
                             onChangeMvApiBaseUrl = onChangeMvApiBaseUrl,
                             onChangeLyricsKugouBaseUrl = onChangeLyricsKugouBaseUrl,
                             onChangeLyricsNeteaseBaseUrl = onChangeLyricsNeteaseBaseUrl,
@@ -867,16 +939,6 @@ var activeSection by remember { mutableStateOf(SettingsSection.GENERAL) }
                                         onChangeMetingApiBaseUrl?.invoke(trimmed)
                                         endpointEditor = null
                                     }
-                                }
-                            },
-                            onShowJamendoClientIdDialog = {
-                                endpointEditor = EndpointEditor(
-                                    titleRes = R.string.settings_jamendo_client_id,
-                                    hintRes = R.string.settings_jamendo_client_id,
-                                    value = jamendoClientId,
-                                ) { input ->
-                                    onChangeJamendoClientId?.invoke(input.trim())
-                                    endpointEditor = null
                                 }
                             },
                             onShowMvUrlDialog = {

@@ -38,8 +38,44 @@ data class AppSettings(
     val defaultPlayMode: PlayMode = PlayMode.SEQUENTIAL,
     val cacheLyrics: Boolean = true,
     val cacheCover: Boolean = true,
-    // 网络音乐默认源（NetworkSource 枚举，编译期类型安全）
-    val defaultNetworkSource: NetworkSource = NetworkSource.DEFAULT,
+    /**
+     * 网络音乐默认源，值为 `NetworkMusicManager.services` 的 key（`"meting"` / `"baidu"` /
+     * `"jamendo"`），**不再是 `NetworkSource` 枚举**（该枚举已于 v2.39.8 删除：
+     * 它只含 `meting`/`alapi`/`jiosaavn`，后两者从来没有实现，而真正实现着的 baidu /
+     * jamendo 不在枚举里）。
+     *
+     * ⚠️ 持久化值可能是已删除源的旧 key（`"alapi"` / `"jiosaavn"`）——
+     * 有效性校验在 `NetworkMusicManager.defaultSource` 的 getter（运行期才知道注册了哪些源），
+     * ⛔ 不要在这里或 `AppPreferences` 里判。
+     */
+    val defaultNetworkSource: String = "meting",
+    /**
+     * Meting 源总开关（默认 true ⇒ 升级后行为不变）。
+     *
+     * 关 ⇒ 构造期**不注册** `meting` service ⇒ 搜索 / 取链 / 歌单 / 艺人全部不可用；
+     * 洛雪取链通道插在 Meting 内部，随之失效（方案 §7.5）。
+     */
+    val metingEnabled: Boolean = true,
+    /**
+     * NAS 服务器作为音乐源的开关（v2.39.8，默认 true ⇒ 升级后行为不变）。
+     *
+     * ⚠️ 与「NAS 是否已连接」是**两件事**：本开关只决定 NAS 参不参与搜索 / 浏览；
+     * 没连服务器时开关开着也搜不到任何东西（`backendRegistry.getAdapter()` 为 null）。
+     * 关掉它不清连接、也不清凭据，重新打开即恢复。
+     */
+    val nasMusicEnabled: Boolean = true,
+    /**
+     * Jamendo 源总开关（默认 true）。
+     * ⚠️ **生效 = 本开关 且 Client ID 非空**（未配置 Client ID 时本来就不注册）。
+     */
+    val jamendoEnabled: Boolean = true,
+    /**
+     * 洛雪取链通道总开关（方案 §8，**默认 false**）。
+     *
+     * 不是「源」，是 Meting 的第二条取链通道 ⇒ 只影响取链，不影响搜索；
+     * Meting 关掉时它必然失效（enhancer 就插在 `MetingApiService` 内部）。
+     */
+    val lxEnabled: Boolean = false,
     // Meting-API 端点 URL（由 AppPreferences.getMetingApiBaseUrlSync() 提供默认值）
     val metingApiBaseUrl: String = "",
     // MTV 视频搜索端点 URL（由 AppPreferences.getMvApiBaseUrlSync() 提供默认值）

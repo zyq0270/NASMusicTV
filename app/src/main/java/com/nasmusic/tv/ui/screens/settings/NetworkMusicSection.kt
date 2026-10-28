@@ -19,10 +19,15 @@ import androidx.compose.material.icons.filled.Settings
 import com.nasmusic.tv.ui.theme.FontSize
 import com.nasmusic.tv.ui.theme.NasMusicColors
 
-/** 网络音乐设置分区状态（Meting/Jamendo/MV/歌词端点/天气 Key/网络测试状态） */
+/**
+ * 网络音乐设置分区状态（Meting/MV/歌词端点/天气 Key/网络测试状态）。
+ *
+ * ⚠️ v2.39.8：**不再含 `jamendoClientId`** —— Jamendo 已独立成「音乐来源」卡⑤，
+ * 开关与 Client ID 都在那张卡里（用户 2026-10-28：「Jamendo 应该独立」）。
+ * ⛔ 不要再把它加回来：同一份凭据出现在两个分区，就是「同一件事两个入口」。
+ */
 data class NetworkMusicSettingsState(
     val metingApiBaseUrl: String,
-    val jamendoClientId: String,
     val mvApiBaseUrl: String,
     val lyricsKugouBaseUrl: String,
     val lyricsNeteaseBaseUrl: String,
@@ -34,7 +39,6 @@ data class NetworkMusicSettingsState(
 /** 网络音乐设置分区动作（URL 编辑对话框由宿主持有） */
 data class NetworkMusicSettingsActions(
     val onChangeMetingApiBaseUrl: ((String) -> Unit)?,
-    val onChangeJamendoClientId: ((String) -> Unit)?,
     val onChangeMvApiBaseUrl: ((String) -> Unit)?,
     val onChangeLyricsKugouBaseUrl: ((String) -> Unit)?,
     val onChangeLyricsNeteaseBaseUrl: ((String) -> Unit)?,
@@ -45,7 +49,6 @@ data class NetworkMusicSettingsActions(
 /** URL 编辑对话框触发回调（对话框本体保持在 SettingsScreen，避免状态重复） */
 data class NetworkMusicDialogActions(
     val onShowMetingUrlDialog: () -> Unit,
-    val onShowJamendoClientIdDialog: () -> Unit,
     val onShowMvUrlDialog: () -> Unit,
     val onShowLyricsKugouDialog: () -> Unit,
     val onShowLyricsNeteaseDialog: () -> Unit,
@@ -127,43 +130,9 @@ internal fun NetworkMusicSection(
             }
 
             // --- 网络搜索：Jamendo Client ID（CC 独立音乐）---
-            if (actions.onChangeJamendoClientId != null) {
-                Spacer(modifier = Modifier.height(16.dp))
-                Text(
-                    text = stringResource(R.string.settings_jamendo_client_id_desc),
-                    color = NasMusicColors.TextSecondary,
-                    fontSize = FontSize.body(),
-                    modifier = Modifier.padding(bottom = 8.dp, start = 4.dp)
-                )
-                // 当前值状态卡 + 修改按钮
-                SettingsTile(
-                    onClick = { dialogs.onShowJamendoClientIdDialog() },
-                    modifier = androidx.compose.ui.Modifier.fillMaxWidth(),
-                ) {
-                    androidx.compose.foundation.layout.Column(
-                        modifier = androidx.compose.ui.Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = SettingsTokens.rowHPadding, vertical = SettingsTokens.rowVPadding)
-                    ) {
-                        Text(
-                            text = if (state.jamendoClientId.isBlank())
-                                stringResource(R.string.settings_not_configured_hint)
-                            else state.jamendoClientId.take(24) + if (state.jamendoClientId.length > 24) "…" else "",
-                            color = if (state.jamendoClientId.isBlank()) NasMusicColors.TextSecondary
-                                    else NasMusicColors.Primary,
-                            fontSize = FontSize.button(),
-                            maxLines = 1,
-                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                        )
-                        Text(
-                            text = stringResource(R.string.settings_tap_to_edit),
-                            color = com.nasmusic.tv.ui.components.LocalFocusableContentColor.current,
-                            fontSize = FontSize.small(),
-                            modifier = androidx.compose.ui.Modifier.padding(top = 2.dp)
-                        )
-                    }
-                }
-            }
+            // ⛔ v2.39.8：已迁至「音乐来源」卡⑤（Jamendo 独立卡，用户 2026-10-28 要求）。
+            //    同一份凭据**只能有一个入口** —— 在两个分区各放一份，改一个、看另一个，
+            //    正是这次要清掉的重复。
         }
 
         // 卡③ MV 端点：预设 + 自定义

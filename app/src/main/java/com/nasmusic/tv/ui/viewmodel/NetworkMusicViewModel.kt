@@ -344,14 +344,6 @@ class NetworkMusicViewModel(app: Application) : AndroidViewModel(app) {
         triggerBaiduIndexScanIfNeeded()
     }
 
-    /** 设置百度源总开关 */
-    fun setBaiduEnabled(enabled: Boolean) {
-        viewModelScope.launch {
-            prefs.baidu.setBaiduEnabled(enabled)
-            refreshBaiduConnectionState()
-        }
-    }
-
     /** 启动设备码授权流程：请求设备码并开始轮询 */
     fun startBaiduDeviceCodeFlow() {
         AppLog.d("BaiduAuth", "startBaiduDeviceCodeFlow: called, current state=${_baiduConnectionState.value}")

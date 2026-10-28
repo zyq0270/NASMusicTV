@@ -56,6 +56,15 @@
 -keep class org.jaudiotagger.** { *; }
 -dontwarn org.jaudiotagger.**
 
+# QuickJS 宿主（洛雪音源）——两条独立的硬约束：
+# 1) `QuickJSNativeImpl` 的 native 方法按 JNI 名字解析，`QuickJS.callJavaCallback` 等
+#    静态回调由 C 侧按名字反射调用 ⇒ 类与方法名都不能改；
+# 2) `LxScriptHost` 用反射读 `QuickJS.runtimePtr` / `JSContext.contextPtr`
+#    去调 `JS_ExecutePendingJob`（JNA）⇒ 字段名也不能改。
+-keep class com.quickjs.** { *; }
+-keep class net.java.dev.jna.** { *; }
+-dontwarn net.java.dev.jna.**
+
 # 音乐可视化（visualizer 包）——20 套渲染器经 VisualizerRendererFactory 按枚举名创建，
 # 且 AudioFrame/CoverPalette 参与跨层引用；枚举名会持久化到 DataStore（visualizer_theme /
 # visualizer_quality）。R8 收缩枚举常量或重命名后会导致主题解析失败 / 渲染器创建失败。

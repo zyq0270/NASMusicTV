@@ -42,10 +42,11 @@
 | `code-review-deferred-analysis-2026-09-04.md` + `.docx` | 复审暂缓项分析；三项均已处理 |
 | `codebase-architecture.html` | 架构快照，一次性产物 |
 
-### 已落地的功能方案（22）
+### 已落地的功能方案（23）
 
 | 文档 | 判定依据（CHANGELOG / 源码） |
 |---|---|
+| `lx-music-source-plan.md` | 洛雪音源已在 CHANGELOG v2.39.8 记录（`backend/network/lx/**` 已存在）；⚠️ **未决项：真机 T1 ④ / T17 / T19 未执行**（2026-10-28 电视离线），见 §10.276 第八节 |
 | `pinyin-search-plan.md` | 拼音搜索已实现（v2.25.7） |
 | `subsonic-support-plan.md` | `SubsonicAdapter.kt` / `SubsonicRestClient.kt` 已存在 |
 | `daoliyu-feiniu-backend-plan.md` | `DaoliyuAdapter.kt` / `FeiniuAdapter.kt` / `FeiniuUrl.kt` 已存在 |

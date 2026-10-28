@@ -67,7 +67,15 @@ enum class SearchType {
          * 快照，开关翻转后下一次搜索立即生效）；每次搜索实时读 DataStore
          * （有内存缓存，开销可忽略）。
          */
-        private val localMusicEnabled: suspend () -> Boolean = { true }
+        private val localMusicEnabled: suspend () -> Boolean = { true },
+        /**
+         * v2.39.8：NAS 服务器作为音乐源的开关（用户 2026-10-28：NAS 缺独立开关）。
+         *
+         * 与 [localMusicEnabled] 同形 —— **suspend provider**，开关翻转后下一次搜索立即生效。
+         * ⛔ 不要改成构造期快照：`SearchAggregator` 在 `onCreate` 建一次，快照会让开关永远停在
+         * 启动时的值（这正是 `LocalMusicGateTest` 当初钉住的同一类缺陷）。
+         */
+        private val nasMusicEnabled: suspend () -> Boolean = { true }
     ) {
         companion object {
             private const val TAG = "SearchAggregator"
@@ -155,7 +163,10 @@ enum class SearchType {
             // 实时从 registry 获取当前 adapter：SearchAggregator 在 onCreate 时创建，
             // 此时 NAS 可能未连接（adapter=null）；用户后续连接后需实时拿到新 adapter
             val backendAdapter = backendRegistry?.getAdapter()
-            if (MusicSourceType.NAS in sources && backendAdapter != null) {
+            // v2.39.8（用户 2026-10-28）：NAS 缺独立开关 ⇒ 与 LOCAL 同形实时判开关。
+            // ⛔ 不只是 UI 层隐藏：关掉后搜索聚合器必须真的不查 NAS，
+            //    否则「关了还在结果里出现」是最难排查的一类静默失效。
+            if (MusicSourceType.NAS in sources && backendAdapter != null && nasMusicEnabled()) {
                 try {
                     if (isPinyinQuery && nasLocalSongs.isNotEmpty() && isTVDevice) {
                         // 拼音搜索：NAS 服务端不认拼音，改用本地缓存 + 客户端拼音匹配

@@ -354,4 +354,52 @@ class NetworkMusicManagerTest {
         // 同 id 候选被跳过，无其他候选
         assertNull(result)
     }
+
+    // ==================== 默认源有效性校验（v2.39.8 方案 §7.5） ====================
+
+    /**
+     * 持久化值可能指向未注册 / 已关闭 / 已删除的源（老 DataStore 里的 `"alapi"`）。
+     * `defaultSource` 必须回退到**第一个已注册源**，⛔ 不能原样透传 —— 否则
+     * `orderedServices()` 退化、`services[src]` 取链返回 null，表现是「搜索能用、歌单页空白」。
+     */
+    @Test
+    fun `默认源指向未注册的 key 时回退到第一个已注册源`() {
+        val only = NetworkMusicManager(
+            services = mapOf("jamendo" to fakeServiceA),
+            defaultSourceProvider = { "alapi" }
+        )
+        assertEquals("jamendo", only.defaultSource)
+    }
+
+    /** 已注册的默认源原样返回（正常路径不能被回退逻辑改写）。 */
+    @Test
+    fun `默认源已注册时原样返回`() {
+        assertEquals("sourceA", manager.defaultSource)
+    }
+
+    /**
+     * 一个源都没注册（三种源全关）时返回原值、不崩：调用方据此判空，
+     * 由 `NasMusicApp.repairDefaultNetworkSource()` 返回 null 且**不写盘**（保留用户原选择）。
+     */
+    @Test
+    fun `一个源都没注册时默认源原样返回且不崩`() {
+        val empty = NetworkMusicManager(
+            services = emptyMap(),
+            defaultSourceProvider = { "alapi" }
+        )
+        assertEquals("alapi", empty.defaultSource)
+    }
+
+    @Test
+    fun `注册后默认源立刻可用`() {
+        val m = NetworkMusicManager(
+            services = emptyMap(),
+            defaultSourceProvider = { "meting" }
+        )
+        assertEquals("meting", m.defaultSource)
+        m.registerService(fakeServiceA) // sourceId = "sourceA"
+        assertEquals("sourceA", m.defaultSource)
+        m.unregisterService("sourceA")
+        assertEquals("meting", m.defaultSource)
+    }
 }

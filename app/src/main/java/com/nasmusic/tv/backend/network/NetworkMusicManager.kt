@@ -120,9 +120,24 @@ class NetworkMusicManager(
     fun isProbedDead(song: Song): Boolean =
         song.isNetworkSong && deadProbeCache.containsKey(playUrlKey(song, effectiveQuality(song)))
 
-    /** 获取当前默认源 ID */
+    /**
+     * 获取当前默认源 ID。
+     *
+     * ⚠️ **这里才是「默认源指向不存在的源」的修复点**（方案 §7.5）：
+     * `AppPreferences` 只存字符串，它不知道运行时注册了哪些源 —— 老用户 DataStore 里的
+     * `"alapi"` / `"jiosaavn"`（枚举时代留下的 key）会原样流到这里。
+     * 原样透传的后果是 `services[defaultSource]` 为 null ⇒ `getPlaylist` / `findArtist`
+     * 全返回 null，而搜索照常（只是退化成 Map 迭代顺序）—— 「搜索能用但歌单页空白」。
+     *
+     * ⛔ 不能简单回退 `"meting"`：meting 也可能被用户关掉（那时它不在 `services` 里）。
+     * ⛔ 也不要把它挪进 `AppPreferences`：那是把「运行时注册表」的知识泄漏进持久化层。
+     */
     val defaultSource: String
-        get() = defaultSourceProvider()
+        get() {
+            val raw = defaultSourceProvider()
+            return if (services.containsKey(raw)) raw
+            else services.keys.firstOrNull() ?: raw
+        }
 
     /**
      * 搜索歌曲

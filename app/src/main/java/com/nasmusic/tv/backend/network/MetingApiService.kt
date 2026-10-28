@@ -61,6 +61,11 @@ class MetingApiService(
      */
     private val probe: PlayabilityProbe? = null,
     /**
+     * 洛雪音源增强层（方案 §5.4）。null = 未启用 / 未安装脚本，行为与改造前**逐字符一致**。
+     * 生产由 `NetworkMusicManager` 按开关注入；单测注入假 host（⛔ 不打网络）。
+     */
+    private val enhancer: com.nasmusic.tv.backend.network.lx.PlayUrlEnhancer? = null,
+    /**
      * 端点 fallback 用的预设端点列表（[buildEndpointFallbackOrder] 的数据源）。
      *
      * ⚠️ **默认 [PRESET_ENDPOINTS] 与改造前逐字符等价 ⇒ 线上行为零变化**：
@@ -145,6 +150,24 @@ class MetingApiService(
             R.string.meting_endpoint_redcha to "https://meting.api.redcha.cn/api",
             R.string.meting_endpoint_qijieya to "https://api.qijieya.cn/meting"
         )
+
+        /**
+         * 实测**只支持 netease** 的端点（方案 §2.4：对 `kg` / `tx` 直接回
+         * `{"status":400,"message":"server 参数不合法"}`）。
+         *
+         * ⚠️ 这是「已知不支持」的**正列表**，⛔ 不要改成「不在支持列表里就提示」：
+         * 自建 Meting 端点默认支持全平台，按白名单反推会把用户自己的服务说成残废。
+         */
+        private val NETEASE_ONLY_ENDPOINTS: Set<String> = setOf(
+            "https://meting.mikus.ink/api",
+            "https://meting.api.redcha.cn/api",
+        )
+
+        /** 端点是否是「已知只支持 netease」的那几个公共预设（用于洛雪子块底部灰字，§7.3） */
+        fun isNeteaseOnlyEndpoint(baseUrl: String?): Boolean {
+            val normalized = baseUrl?.trim()?.trimEnd('/') ?: return false
+            return NETEASE_ONLY_ENDPOINTS.any { it.trimEnd('/').equals(normalized, ignoreCase = true) }
+        }
     }
 
     /**
@@ -389,6 +412,19 @@ class MetingApiService(
      */
     override suspend fun resolvePlayUrlDetailed(song: Song, quality: Int): ResolveResult =
         withContext(Dispatchers.IO) {
+            // 洛雪增强（新增路径）：命中即返回；null / 异常继续走下面原 302 链路。
+            // ⚠️ CancellationException 必须原样抛出：吞掉取消会让播放抢占失效。
+            if (enhancer != null) {
+                val enhanced = try {
+                    enhancer.tryResolve(song, quality)
+                } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                    throw cancelled
+                } catch (t: Throwable) {
+                    AppLog.w(TAG, "enhance: 增强层异常，回退原链路 —— ${t.javaClass.simpleName}")
+                    null
+                }
+                if (enhanced != null) return@withContext enhanced
+            }
             val netId = song.networkId ?: return@withContext ResolveResult(song.streamUrl, quality)
             val server = serverProvider()
             val endpoints = buildEndpointFallbackOrder(baseUrl)
@@ -635,7 +671,9 @@ class MetingApiService(
                         coverUrl = pic,
                         isNetworkSong = true,
                         networkSource = sourceId,
-                        networkId = netId
+                        networkId = netId,
+                        // 平台快照：之后用户切平台再播这首，洛雪仍按原平台取链（方案 §4.1）
+                        networkPlatform = serverProvider()
                     )
                 } catch (e: Exception) {
                     AppLog.d(DIAG, "parseSongs[$idx] error: ${e.message}")

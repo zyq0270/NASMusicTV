@@ -65,7 +65,6 @@ import com.nasmusic.tv.data.model.MusicSourceType
 import com.nasmusic.tv.data.model.MvInfo
 import com.nasmusic.tv.data.model.MvCandidate
 import com.nasmusic.tv.data.model.MvSearchResult
-import com.nasmusic.tv.data.model.NetworkSource
 import com.nasmusic.tv.data.model.RadioStation
 import com.nasmusic.tv.data.model.isRadioSong
 import com.nasmusic.tv.ui.screens.LibraryTab
@@ -117,6 +116,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.ConcurrentHashMap
@@ -637,10 +637,353 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
      * Flow 实时刷新，搜索侧经 `defaultSourceProvider`（NasMusicApp:343）读取。
      * 判据只认 `appSettings` Flow（`DefaultNetworkSourcePrefTest`），⛔ 不断言
      * `getDefaultNetworkSourceSync()` 的收敛时序（ProviderMirrorTest 5997380 教训）。
+     *
+     * v2.39.8：类型由枚举改为 `String`（= `NetworkMusicManager.services` 的 key，方案 §7.5）。
      */
-    fun updateDefaultNetworkSource(source: NetworkSource) {
+    fun updateDefaultNetworkSource(source: String) {
         viewModelScope.launch { prefs.setDefaultNetworkSource(source) }
     }
+
+    /**
+     * 启停一个网络音乐源（方案 §7.5 / §7.7 第 5 条）。
+     *
+     * 机制一律是 `registerService` / `unregisterService`，⛔ **不要**改成在
+     * `orderedServices()` 里过滤——那只覆盖 `search`，`resolvePlayUrl` 用
+     * `services[src]` 精确路由，关掉的源照样能取链。
+     *
+     * 三个源的「活着」语义各不相同（构造期塞 map / `baiduConfig.isActive` / clientId 判空），
+     * 所以这里分支处理，不引入统一开关 map。
+     */
+    fun setSourceEnabled(key: String, enabled: Boolean) {
+        viewModelScope.launch {
+            when (key) {
+                NetworkSongId.METING_SOURCE -> {
+                    prefs.setMetingEnabled(enabled)
+                    if (enabled) nasMusicApp.networkMusicManager.registerService(nasMusicApp.metingApiService)
+                    else nasMusicApp.networkMusicManager.unregisterService(key)
+                }
+                // v2.39.8（用户 2026-10-28）：NAS 是**独立音乐源**，此前没有自己的开关。
+                // ⚠️ 它不是 `NetworkMusicManager` 的 service（走 `backendRegistry`），所以无需注册/注销：
+                //    门控在 `SearchAggregator` 的 NAS 分支（实时读开关）与浏览/歌单入口。
+                // ⛔ 关掉**不清连接、不清凭据** —— 那会让「临时不想搜 NAS」变成「要重新输口令」。
+                AppPreferences.SOURCE_NAS -> {
+                    prefs.setNasMusicEnabled(enabled)
+                }
+                AppPreferences.SOURCE_BAIDU -> {
+                    prefs.baidu.setBaiduEnabled(enabled)
+                    nasMusicApp.refreshBaiduServiceRegistration()
+                    netVM.refreshBaiduConnectionState()
+                }
+                AppPreferences.SOURCE_JAMENDO -> {
+                    prefs.setJamendoEnabled(enabled)
+                    nasMusicApp.refreshJamendoServiceRegistration()
+                }
+                else -> return@launch
+            }
+            // 关源 ⇒ 当前默认源可能已失效，立刻自愈（§7.6 第 2 条）
+            val switched = nasMusicApp.repairDefaultNetworkSource()
+            if (switched != null) {
+                showError(
+                    getApplication<Application>()
+                        .getString(R.string.settings_source_default_switched, sourceTitle(switched))
+                )
+            }
+        }
+    }
+
+    /** 源 key → 界面名（一次性提示里用，与设置页源行标题同源）。 */
+    private fun sourceTitle(key: String): String {
+        val res = when (key) {
+            NetworkSongId.METING_SOURCE -> R.string.settings_source_meting
+            AppPreferences.SOURCE_BAIDU -> R.string.settings_source_baidu
+            AppPreferences.SOURCE_JAMENDO -> R.string.settings_source_jamendo
+            AppPreferences.SOURCE_LX -> R.string.settings_source_lx
+            else -> return key
+        }
+        return getApplication<Application>().getString(res)
+    }
+
+    // ================= 洛雪（LX）取链（方案 §7.1–§7.3） =================
+
+    /**
+     * 引擎可达性：null = 后台求值中（UI 不置灰，避免启动瞬间闪一下灰）。
+     * ⛔ 判据是「真的 `dlopen` 成功了吗」，不是 SDK 版本（`LxEngineAvailability`）。
+     */
+    private val _lxEngineAvailable = MutableStateFlow<Boolean?>(null)
+    internal val lxEngineAvailable: StateFlow<Boolean?> = _lxEngineAvailable.asStateFlow()
+
+    /** 引擎不可用时的原因（给子块那行灰字用） */
+    private val _lxEngineUnavailableReason = MutableStateFlow<String?>(null)
+    internal val lxEngineUnavailableReason: StateFlow<String?> = _lxEngineUnavailableReason.asStateFlow()
+
+    private val _lxSessions = MutableStateFlow<Map<String, LxScriptView>>(emptyMap())
+    private val _lxVerifyAll = MutableStateFlow<LxVerifyAllState?>(null)
+    internal val lxVerifyAll: StateFlow<LxVerifyAllState?> = _lxVerifyAll.asStateFlow()
+
+    private var lxVerifyJob: Job? = null
+
+    /**
+     * 脚本行列表 = 落盘元数据 + 本次会话的验证状态。
+     *
+     * ⚠️ 不能在 ViewModel 构造期直接读 `lastStatus` 之外的东西：脚本正文与 runtime 都在
+     * `NasMusicApp`，这里的 View 只是**快照**，真正加载发生在 `refreshLxRuntime()`。
+     */
+    internal val lxScriptViews: StateFlow<List<LxScriptView>> = combine(
+        nasMusicApp.lxScriptRepo.entries,
+        _lxSessions,
+    ) { entries, sessions ->
+        entries.map { entry ->
+            val session = sessions[entry.id]
+            LxScriptView(
+                entry = entry,
+                running = session?.running == true,
+                stage = session?.stage ?: LxVerifyStage.IDLE,
+                currentSource = session?.currentSource,
+                index = session?.index ?: 0,
+                total = session?.total ?: 0,
+                l1 = session?.l1,
+                livePlatforms = session?.livePlatforms.orEmpty(),
+                result = session?.result ?: com.nasmusic.tv.backend.network.lx.LxStatusCodec.decode(entry.lastStatus),
+            )
+        }
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    /**
+     * 洛雪取链总开关（§7.7 第 6 条）。
+     *
+     * ⛔ **必须显式清直链缓存**：洛雪不是 service，切它不触发任何 `unregisterService`，
+     * 而它取到的直链在缓存里仍记为 `meting:<id>` —— 不清就会「关了洛雪还在播洛雪给的链」。
+     */
+    fun setLxEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            prefs.lx.setEnabled(enabled)
+            nasMusicApp.networkMusicManager.clearPlayUrlCache()
+            nasMusicApp.refreshLxRuntime()
+        }
+    }
+
+    /** 单脚本启停（与总开关是「与」关系，§7.1 硬约束 1） */
+    fun setLxScriptEnabled(id: String, enabled: Boolean) {
+        viewModelScope.launch {
+            nasMusicApp.lxScriptRepo.setEnabled(id, enabled)
+            nasMusicApp.refreshLxRuntime()
+        }
+    }
+
+    /** 从 URL 导入 / 更新一个脚本（失败保留旧版，`LxScriptRepo` 保证） */
+    fun importLxSource(url: String) {
+        val trimmed = url.trim()
+        if (trimmed.isEmpty()) return
+        viewModelScope.launch {
+            nasMusicApp.lxScriptRepo.installFromUrl(trimmed)
+                .onSuccess { entry ->
+                    nasMusicApp.refreshLxRuntime()
+                    showError(getApplication<Application>().getString(R.string.lx_import_ok, entry.name))
+                }
+                .onFailure { t ->
+                    showError(
+                        getApplication<Application>().getString(
+                            R.string.lx_import_failed,
+                            t.message ?: t.javaClass.simpleName,
+                        )
+                    )
+                }
+        }
+    }
+
+    /** 「刷新全部」：按登记的 URL 重下一遍正文，再重建 host（mtime 变了才重建） */
+    fun refreshLxScripts() {
+        viewModelScope.launch {
+            val entries = nasMusicApp.lxScriptRepo.snapshot().filter { it.url.isNotBlank() }
+            var failed = 0
+            for (entry in entries) {
+                if (nasMusicApp.lxScriptRepo.installFromUrl(entry.url).isFailure) failed++
+            }
+            nasMusicApp.refreshLxRuntime()
+            showError(
+                if (failed == 0) {
+                    getApplication<Application>().getString(R.string.lx_refresh_ok)
+                } else {
+                    getApplication<Application>().getString(R.string.lx_refresh_partial, failed)
+                }
+            )
+        }
+    }
+
+    /**
+     * 单源「验证」：默认 `QUICK`（全部已声明平台 × 各自最高档）。
+     *
+     * 与「全部验证」的区别见 §7.2 的脚注：这里回答「这个源在各平台行不行」。
+     */
+    internal fun verifyLxScript(id: String, depth: com.nasmusic.tv.backend.network.lx.LxProbeDepth =
+        com.nasmusic.tv.backend.network.lx.LxProbeDepth.QUICK) {
+        // ⛔ 原来的静默 `return` 是「点了验证没反应」的一半原因：另一个验证正在跑时，
+        //    用户完全无从得知（按钮没变、页面没提示）。这里必须给一句人话。
+        if (lxVerifyJob?.isActive == true) {
+            showError(getApplication<Application>().getString(R.string.lx_verify_busy))
+            return
+        }
+        lxVerifyJob = viewModelScope.launch(Dispatchers.IO) {
+            try {
+                runOneLxVerify(id, depth)
+            } finally {
+                clearLxRunningFlags()
+            }
+        }
+    }
+
+    /**
+     * 「全部验证」：串行跑所有**可用**源（含已关闭的 —— 关着也可能想测），`SWEEP` 深度。
+     *
+     * ⚠️ 串行是硬要求：每个脚本一个 QuickJS runtime、内部单线程，并发既不加速也吃内存。
+     *
+     * ⚠️ v2.39.8：判据由 `it.installed` 放宽为「已安装 **或** 有下载地址」。
+     * 出厂内置的源**只登记 URL、不内置正文**（§9.4），按老判据它们全被跳过 ——
+     * 于是「全部验证」在全新安装上永远报「还没有可验证的脚本」，而这恰恰是用户
+     * 最想一键体检的时候。正文由 [runOneLxVerify] 按需补下载。
+     */
+    fun verifyAllLxScripts() {
+        if (lxVerifyJob?.isActive == true) {
+            showError(getApplication<Application>().getString(R.string.lx_verify_busy))
+            return
+        }
+        lxVerifyJob = viewModelScope.launch(Dispatchers.IO) {
+            val verifiable = nasMusicApp.lxScriptRepo.snapshot()
+                .filter { it.installed || it.url.isNotBlank() }
+            if (verifiable.isEmpty()) {
+                showError(getApplication<Application>().getString(R.string.lx_verify_no_scripts))
+                return@launch
+            }
+            _lxVerifyAll.value = LxVerifyAllState(running = true, done = 0, total = verifiable.size, currentName = null)
+            try {
+                verifiable.forEachIndexed { index, entry ->
+                    // 用户在「全部验证」跑到一半点了停止 ⇒ 立刻收手，不要继续下一个源。
+                    // ⚠️ 这里用 `lxVerifyJob.isActive` 而不是 `ensureActive()`：本文件没有
+                    //    `kotlinx.coroutines.ensureActive` 的 import，而 `stopLxVerify` 取消的
+                    //    正是 `lxVerifyJob` ⇒ 判据等价且不引入新的依赖。
+                    if (lxVerifyJob?.isActive != true) return@launch
+                    _lxVerifyAll.value = LxVerifyAllState(true, index, verifiable.size, entry.name)
+                    runOneLxVerify(
+                        entry.id,
+                        com.nasmusic.tv.backend.network.lx.LxProbeDepth.SWEEP,
+                    )
+                }
+            } finally {
+                _lxVerifyAll.value = null
+                clearLxRunningFlags()
+            }
+        }
+    }
+
+    /** 「停止」（§7.2）：取消在途验证；`LxProbeRunner` 的 finally 会打断脚本请求 */
+    fun stopLxVerify() {
+        lxVerifyJob?.cancel()
+        _lxVerifyAll.value = null
+        clearLxRunningFlags()
+    }
+
+    private suspend fun runOneLxVerify(id: String, depth: com.nasmusic.tv.backend.network.lx.LxProbeDepth) {
+        updateLxSession(id) {
+            LxScriptView(
+                entry = it?.entry ?: com.nasmusic.tv.backend.network.lx.LxSourceEntry(
+                    id = id, name = id, url = "", enabled = false,
+                    version = null, installedAt = 0, lastStatus = null,
+                ),
+                running = true,
+                stage = LxVerifyStage.LOADING,
+                result = it?.result,
+            )
+        }
+        try {
+            // ── v2.39.8 修复：内置源出厂只登记 URL、正文要按需下载（§9.4 不内置脚本）──
+            //
+            // ⛔ 这里是「点验证只闪一下」的真正根因：正文缺失时 `hostProvider` 返回 null，
+            //    `LxProbeRunner` 立刻吐 `L1_NOT_INSTALLED`，整轮在几十毫秒内结束 ——
+            //    界面只从「验证」跳到「重试」，中间没有任何可读信息。
+            //    正确做法：**先补下载**（有 URL 才能下），失败才如实报下载错误。
+            val entry = nasMusicApp.lxScriptRepo.snapshot().firstOrNull { it.id == id }
+            if (entry != null && !entry.installed && entry.url.isNotBlank()) {
+                updateLxSession(id) { view -> view?.copy(stage = LxVerifyStage.DOWNLOADING) }
+                val install = nasMusicApp.lxScriptRepo.installFromUrl(entry.url)
+                install.onFailure { t ->
+                    AppLog.w("LxVerify", "[$id] 正文下载失败：${t.javaClass.simpleName}: ${t.message}")
+                    updateLxSession(id) { view ->
+                        view?.copy(
+                            running = false,
+                            stage = LxVerifyStage.FAILED,
+                            l1 = com.nasmusic.tv.backend.network.lx.LxL1.Failed(
+                                com.nasmusic.tv.backend.network.lx.LxFailReason.L1_SCRIPT_ERROR,
+                                t.message ?: t.javaClass.simpleName,
+                            ),
+                        )
+                    }
+                }
+                if (install.isFailure) return
+                // 正文到位 ⇒ 重建 host（`LxHostPool.hostFor` 按文件存在与否取 host）
+                nasMusicApp.refreshLxRuntime()
+                updateLxSession(id) { view -> view?.copy(stage = LxVerifyStage.LOADING) }
+            }
+
+            nasMusicApp.lxProbeRunner.verify(id, depth).collect { event ->
+                when (event) {
+                    is com.nasmusic.tv.backend.network.lx.LxProbeEvent.L1Done -> updateLxSession(id) { view ->
+                        view?.copy(
+                            stage = if (event.l1 is com.nasmusic.tv.backend.network.lx.LxL1.Loaded)
+                                LxVerifyStage.PROBING else LxVerifyStage.FAILED,
+                            l1 = event.l1,
+                            total = (event.l1 as? com.nasmusic.tv.backend.network.lx.LxL1.Loaded)
+                                ?.sources?.size ?: 0,
+                        )
+                    }
+                    is com.nasmusic.tv.backend.network.lx.LxProbeEvent.PlatformStart -> updateLxSession(id) { view ->
+                        view?.copy(currentSource = event.source, index = event.index, total = event.total)
+                    }
+                    is com.nasmusic.tv.backend.network.lx.LxProbeEvent.PlatformDone -> updateLxSession(id) { view ->
+                        view?.copy(livePlatforms = view.livePlatforms + (event.probe.source to event.probe))
+                    }
+                    is com.nasmusic.tv.backend.network.lx.LxProbeEvent.Finished -> {
+                        val json = com.nasmusic.tv.backend.network.lx.LxStatusCodec.encode(event.report)
+                        nasMusicApp.lxScriptRepo.saveLastStatus(id, json)
+                        updateLxSession(id) { view ->
+                            view?.copy(
+                                running = false,
+                                stage = if (event.report.l1 is com.nasmusic.tv.backend.network.lx.LxL1.Loaded)
+                                    LxVerifyStage.DONE else LxVerifyStage.FAILED,
+                                currentSource = null,
+                                result = com.nasmusic.tv.backend.network.lx.LxStatusCodec.decode(json),
+                                // ⚠️ livePlatforms 必须留着：异步明细（L2/L3 逐档尝试）只存在这里，
+                                //  `lastStatus` 只有压缩后的结论。清空会让刚跑完的验证立刻显示「无明细」。
+                            )
+                        }
+                    }
+                    com.nasmusic.tv.backend.network.lx.LxProbeEvent.Cancelled -> updateLxSession(id) { view ->
+                        view?.copy(running = false, stage = LxVerifyStage.IDLE)
+                    }
+                    is com.nasmusic.tv.backend.network.lx.LxProbeEvent.AttemptDone -> Unit
+                }
+            }
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            updateLxSession(id) { view -> view?.copy(running = false, stage = LxVerifyStage.IDLE) }
+            throw cancelled
+        } catch (t: Throwable) {
+            AppLog.w("LxVerify", "[$id] 验证异常：${t.javaClass.simpleName}: ${t.message}")
+            updateLxSession(id) { view -> view?.copy(running = false, stage = LxVerifyStage.FAILED) }
+        }
+    }
+
+    private fun updateLxSession(id: String, transform: (LxScriptView?) -> LxScriptView?) {
+        _lxSessions.update { current ->
+            val next = transform(current[id]) ?: return@update current
+            current + (id to next)
+        }
+    }
+
+    private fun clearLxRunningFlags() {
+        _lxSessions.update { current ->
+            current.mapValues { (_, view) -> if (view.running) view.copy(running = false) else view }
+        }
+    }
+
 
     // ================= 天气电台（R-1：逻辑已迁至 WeatherRadioViewModel，以上为转发） =================
 
@@ -693,6 +1036,20 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
         // 合并 ServerViewModel 的加载态到本地通道
         viewModelScope.launch {
             serverVM.isLoading.collect { _isLoading.value = it }
+        }
+        // 洛雪引擎可达性：`loadLibrary` 要读磁盘 + 重定位，⛔ 必须在后台线程求值。
+        // 判据只用「真的 dlopen 成功了吗」，不按 SDK 版本硬卡（方案 §7.7 第 7 条）。
+        viewModelScope.launch(Dispatchers.IO) {
+            when (val engine = com.nasmusic.tv.backend.network.lx.LxEngineAvailability.state) {
+                is com.nasmusic.tv.backend.network.lx.EngineState.Available -> {
+                    _lxEngineAvailable.value = true
+                    _lxEngineUnavailableReason.value = null
+                }
+                is com.nasmusic.tv.backend.network.lx.EngineState.Unavailable -> {
+                    _lxEngineAvailable.value = false
+                    _lxEngineUnavailableReason.value = engine.reason
+                }
+            }
         }
     }
 
@@ -814,6 +1171,25 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
         scope = viewModelScope,
         started = SharingStarted.Eagerly,
         initialValue = AppSettings()
+    )
+
+    /**
+     * v2.39.8（方案 §7.7 第 3 条）：三个网络音乐源**全部关闭**。
+     *
+     * 搜索页据此把「搜索无结果」换成「未启用任何音乐源，请到 设置 → 音乐来源 开启」——
+     * 前者会让用户以为网络坏了。判据与注册逻辑同一份语义（§7.5）：
+     * meting 开关 · baidu `isActive` · jamendo 开关且 clientId 非空。
+     */
+    val noNetworkSourceEnabled: StateFlow<Boolean> = combine(
+        prefs.appSettings,
+        prefs.baidu.baiduConfigFlow,
+        prefs.network.jamendoClientIdFlow,
+    ) { s, baiduCfg, jamendoClientId ->
+        !s.metingEnabled && !baiduCfg.isActive && !(s.jamendoEnabled && jamendoClientId.isNotBlank())
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.Eagerly,
+        initialValue = false
     )
 
     // 服务器配置
@@ -3861,15 +4237,11 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
         }
     }
 
-    /** 更新 Jamendo Client ID 并动态注册/注销服务 */
+    /** 更新 Jamendo Client ID 并动态注册/注销服务（生效 = 开关 **且** clientId 非空，§7.5） */
     fun updateJamendoClientId(id: String) {
         viewModelScope.launch {
             prefs.network.setJamendoClientId(id)
-            if (id.isNotBlank()) {
-                nasMusicApp.networkMusicManager.registerService(nasMusicApp.jamendoService)
-            } else {
-                nasMusicApp.networkMusicManager.unregisterService("jamendo")
-            }
+            nasMusicApp.refreshJamendoServiceRegistration()
             _jamendoState.value = UiState.Success(emptyList())
             _jamendoActiveTag.value = ""
         }

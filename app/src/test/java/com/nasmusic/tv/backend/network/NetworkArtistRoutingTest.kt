@@ -61,10 +61,25 @@ class NetworkArtistRoutingTest {
         assertNull(mgr.getArtistSongs("1", 0))
     }
 
+    /**
+     * v2.39.8：默认源指向**未注册**的 key（老 DataStore 里的 `"alapi"` / `"jiosaavn"`）
+     * 时，`defaultSource` getter 会折到第一个已注册源 —— 否则 `findArtist` / `getPlaylist`
+     * 全返回 null，表现为「搜索能用但艺人页空白」（方案 §7.5）。
+     */
     @Test
-    fun `默认源未注册时返回 null（与 resolvePlayUrl 的未注册源分支同语义）`() = runBlocking {
+    fun `默认源未注册时回退到第一个已注册源`() = runBlocking {
         val mgr = NetworkMusicManager(
             services = mapOf("meting" to ArtistService()),
+            defaultSourceProvider = { "ghost" }
+        )
+        assertEquals("6452", mgr.findArtist("周杰伦")?.id)
+    }
+
+    /** 负向自证：一个源都没注册时仍然是 null（不能凭空造出艺人）。 */
+    @Test
+    fun `没有任何已注册源时返回 null`() = runBlocking {
+        val mgr = NetworkMusicManager(
+            services = emptyMap(),
             defaultSourceProvider = { "ghost" }
         )
         assertNull(mgr.findArtist("周杰伦"))

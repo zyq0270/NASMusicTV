@@ -88,8 +88,11 @@ android {
         applicationId = "com.nasmusic.tv"
         minSdk = 22
         targetSdk = 34
-        versionCode = 192
-        versionName = "2.39.7"
+        versionCode = 193
+        versionName = "2.39.8"
+
+        // 洛雪宿主的引擎测试依赖 native 库，只能在设备上跑（见文件末尾 androidTestImplementation 注释）
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         ndk {
             abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64")
@@ -308,6 +311,13 @@ dependencies {
     // jaudiotagger (音频元数据读写：封面/歌词内嵌，LGPL；GPL v3 项目整体合规)
     implementation("net.jthink:jaudiotagger:3.0.1")
 
+    // 洛雪自定义音源：QuickJS 沙箱（方案 §2.6 / §9.2）
+    // 库已停更（2021-10），但只服务于「脚本取链」，搜索链路完全不受影响。
+    // ⚠️ 它的 JNI 从不调用 `JS_ExecutePendingJob` ⇒ `async/await` 不会推进，
+    //    所以下面用 JNA 直接调 `libquickjs.so` 导出的该函数（见 LxJobPump.kt）。
+    implementation("io.github.taoweiji.quickjs:quickjs-android:1.4.6")
+    implementation("net.java.dev.jna:jna:5.13.0@aar")
+
     // Testing
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.7.3")
@@ -320,6 +330,10 @@ dependencies {
     testImplementation("androidx.room:room-testing:2.7.1")
     androidTestImplementation("androidx.test.ext:junit:1.1.5")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.5.1")
+    // 洛雪宿主测试：QuickJS 是 native 库，Robolectric（JVM）载不进 .so，
+    // 所以 T2–T6 的引擎测试只能放 androidTest，在真机/电视上跑（方案 §9.7）。
+    androidTestImplementation("androidx.test:runner:1.5.2")
+    androidTestImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
 }
 
 /**

@@ -88,6 +88,8 @@ internal fun LibraryBranch(
                     val libraryActiveTab by viewModel.libraryActiveTab.collectAsState()
                     val librarySearchKeyword by viewModel.librarySearchKeyword.collectAsState()
                     val enabledSearchSources by viewModel.searchVM.enabledSearchSources.collectAsState()
+                    // v2.39.8（方案 §7.7 第 3 条）：全部网络音乐源关闭时搜索页显示引导而非「无结果」
+                    val noNetworkSourceEnabled by viewModel.noNetworkSourceEnabled.collectAsState()
                     // 艺人全量方案 §3.5/§3.6：搜索页打标集合 + 艺人续页状态
                     val searchUnplayableIds by viewModel.searchVM.searchUnplayableIds.collectAsState()
                     val artistPaging by viewModel.searchVM.artistPaging.collectAsState()
@@ -143,6 +145,7 @@ val discoverCurrentDimensionValues = remember(browseSelections) {
                         songsPaging = mergedSongsPaging,
                         searchResults = searchResultsList,
                         isSearching = isSearching,
+                        noNetworkSourceEnabled = noNetworkSourceEnabled,
                         searchUnplayableIds = searchUnplayableIds,
                         artistPaging = artistPaging,
                         onLoadMoreArtistSongs = { viewModel.searchVM.loadMoreArtistSongs() },

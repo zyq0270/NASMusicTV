@@ -2,7 +2,6 @@ package com.nasmusic.tv.backend.network
 
 import com.nasmusic.tv.backend.download.model.downloadKey
 import com.nasmusic.tv.backend.download.model.downloadKeyOf
-import com.nasmusic.tv.data.model.NetworkSource
 import com.nasmusic.tv.data.model.Song
 import kotlinx.coroutines.runBlocking
 import okhttp3.mockwebserver.MockResponse
@@ -114,11 +113,12 @@ class NetworkArtistSongIdContractTest {
     // ── F5（终审 B1）：红线 2 合法值收口到 NetworkSongId.METING_SOURCE 后的等价门 ──
 
     @Test
-    fun `F5 权威常量与枚举 key 和 sourceId 三者必须一致`() {
+    fun `F5 权威常量与注册表 key 和 sourceId 三者必须一致`() {
         // main 源集的 8 个声明点收口后，剩余两个「合法独立位」必须恒等于权威常量：
-        // ① NetworkSource 枚举 key（UI 侧，⛔ 不改枚举本身）；② MetingApiService.sourceId（接口实现值）
+        // ① 注册表 key（`NetworkMusicManager.services` 的键，v2.39.8 起旧枚举已删除）；
+        // ② MetingApiService.sourceId（接口实现值）
         assertEquals("红线 2 唯一合法值漂移", "meting", NetworkSongId.METING_SOURCE)
-        assertEquals(NetworkSongId.METING_SOURCE, NetworkSource.METING.key)
+        assertEquals(NetworkSongId.METING_SOURCE, com.nasmusic.tv.data.prefs.AppPreferences.NETWORK_SOURCE_PRIORITY.first())
         val svc = MetingApiService(
             baseUrlProvider = { "https://invalid.invalid/api" },
             // 本用例只读 svc.sourceId，今天一个请求都不发；这里注入空列表是**预防性**的——
@@ -128,8 +128,8 @@ class NetworkArtistSongIdContractTest {
         )
         assertEquals(NetworkSongId.METING_SOURCE, svc.sourceId)
         // 注册表 key（NasMusicApp services map 的键）就是同一个常量；负自检：
-        // 若有人把枚举 key 或 sourceId 改漂，上面两条断言之一必红。
-        // ⚠️ 这里⛔ 不用 assertNotEquals(…, ALAPI.key)：常量退化成 "" 时它照样通过，
+        // 若有人把常量或 sourceId 改漂，上面两条断言之一必红。
+        // ⚠️ 这里⛔ 不用 assertNotEquals(…, "baidu")：常量退化成 "" 时它照样通过，
         //   真正钉住值的是上面那条字面量断言 + 下面这条非空断言。
         assertTrue("红线 2 合法值不得为空串", NetworkSongId.METING_SOURCE.isNotBlank())
     }

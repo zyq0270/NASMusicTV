@@ -17824,3 +17824,172 @@ Eureka 塔金色塔冠、联邦广场三角板、Young & Jackson 砖楼、进站
 
 
 
+
+### 10.276 v2.39.8 — 洛雪音源支持：QuickJS 宿主 + 两级健康路由 + 三级验证（2026-10-28）
+
+方案：`docs/archive/lx-music-source-plan.md`（1698 行）。
+一句话定位：**搜索仍走 Meting，洛雪只负责「用脚本换一条更高音质的播放直链」**，取不到就逐字符退回原 302 链路。
+
+#### 一、宿主线程模型（`backend/network/lx/LxScriptHost.kt`）
+
+三条同时成立，缺一条必死锁：
+
+1. **一个脚本 = 一个 `createRuntimeWithEventQueue()` + 一个 `JSContext` + 一个库内 HandlerThread**。
+   库的每次 native 调用都会**阻塞调用方**直到 JS 线程执行完，所以公开的 `suspend` 入口一律要求不在主线程；
+   内存经不起第二份 runtime，验证与播放**共用同一个 host**（`LxHostPool` 按 `scriptId` 缓存，`mtime` 变了才重建）。
+2. **绝不在 JS 线程上同步等 IO**：`lx.request` 走 OkHttp `enqueue`，响应回到 IO 线程后再
+   `postEventQueue { … }` 投回 JS 线程。
+3. **每次 JS 调用结束后都要排空 job 队列**：`quickjs-android:1.4.6`（2021-10 停更）**从不调用
+   `JS_ExecutePendingJob`** ⇒ `async/await` 永不推进。解法是用 JNA 反射 `QuickJS.runtimePtr` /
+   `JSContext.contextPtr` 后直接调 `libquickjs.so` 导出的该函数（`LxJobPump` / `JnaLxJobPump`）。
+   ⛔ 因此 R8 必须保留 `com.quickjs.**`（JNI 按名字解析 + 反射读字段）与 `net.java.dev.jna.**`（`proguard-rules.pro`）。
+
+`load()` 等 `inited` 的上限 10 s；超时与求值抛错都**销毁整个 runtime** 并记 `L1_TIMEOUT` / `L1_SCRIPT_ERROR`
+（脚本级 `Broken` 的依据）。
+
+引擎判据 `LxEngineAvailability.state` 只认 `System.loadLibrary("quickjs")` + `("quickjs-android")`
+**真的成功**，⛔ 不看 `SDK_INT`：AAR 是 `minSdkVersion 18`、`android.` 包引用全是 API 1，按版本号硬卡会
+**既误杀又漏放**（ABI 缺失 / ROM 裁 native / 内存不足都会让加载失败）。结论 `@Volatile` 双检缓存一次。
+
+依赖：`io.github.taoweiji.quickjs:quickjs-android:1.4.6` + `net.java.dev.jna:jna:5.13.0@aar`；
+ABI 仍是三项（AAR 自带的 `x86` 被 `abiFilters` 丢掉）。`p_align` 实测（脚本读 ELF program header）：
+`arm64-v8a` / `armeabi-v7a` / `x86_64` × `libquickjs.so` + `libquickjs-android.so` **全部 0x1000**
+⇒ 16 KB 页对齐未满足，lint 的 `Aligned16KB` 与 `onnxruntime-android` 同属既有 Warning 一类，
+**不是本版引入的 Error**（`targetSdk 34` 下尚未触发强制要求）。
+
+#### 二、`lx.*` 实现清单（`assets/lx/boot.js` + 原生回调）
+
+`console.*`（d/i/w/e，group/time 为空实现）、`setTimeout/clearTimeout/setInterval/clearInterval`
+（库内 HandlerThread 定时器）、`Buffer`（`from/alloc/isBuffer/concat` + `toString(enc)`：utf8 / latin1 /
+base64 / hex）、`lx.request`（GET/POST、`Content-Type: application/json` 时 body 自动解析、Promise 与
+回调双形态、`__nativeCancel` 可打断）、`lx.utils.buffer.from/bufToString`、`lx.utils.crypto`
+（`md5` / `randomBytes` / `aesEncrypt` / `aesDecrypt` / `rsaEncrypt`）、`lx.utils.zlib.inflate/deflate`、
+`lx.on` / `lx.send`（`inited` 由此回传）、`lx.currentScriptInfo`（由 `LxScriptHeader` 在求值**之前**解析
+头部注释的 `@name/@version/@author/@description/@homepage`，`@name` 缺失即拒绝安装）、
+`lx.EVENT_NAMES` / `lx.env` / `lx.version`。
+
+#### 三、字段映射（实测，`LxPlatformMap` 是唯一真相源）
+
+| 洛雪 source | musicInfo 必需字段 | Meting server | 项目平台 key |
+|---|---|---|---|
+| `wy` | `songmid` | `netease` | `netease` |
+| `tx` | `songmid` | `tencent` | `tencent` |
+| `kg` | `hash` | `kugou` | `kugou` |
+| `kw` | `songmid` | `kuwo` | `kuwo` |
+| `mg` | `copyrightId` | `migu` | `migu` |
+
+⚠️ **必须填完整 musicInfo**（`hash` + `songmid` + `copyrightId` + `name` + `singer` + `albumName` +
+`albumId` + `interval`，能填的都填）：Flower 按平台分字段（`tx/wy/kw` 只认 `songmid`、`kg` 只认 `hash`、
+`mg` 只认 `copyrightId`），Huibq 用 `hash ?? songmid` 兜底 —— 只给一个字段会在某些源上莫名失败。
+`Song.networkPlatform` 由 `MetingApiService.parseSongs()` 填充，null 时 enhancer 回落到当前声明的平台。
+
+#### 四、音质映射（`LxQualityMapper`）
+
+| 项目档位 | 洛雪候选（按优先序） |
+|---|---|
+| `AUTO`(0) | 按脚本声明的 `qualitys` 顺序（洛雪 `type` 必填，没有「不指定」） |
+| `STANDARD`(128) | `128k` |
+| `GOOD`(192) | `320k` → `128k`（洛雪没有 192k） |
+| `HIGH`(320) | `320k` → `128k` |
+| `LOSSLESS`(999) | `master` → `hires` → `atmos` → `atmos_plus` → `flac24bit` → `flac` → `320k` |
+
+- **与声明求交集，交集为空即返回 null**（走 Meting 原链路）——「选了无损、源只声明 128k」不许静默降级；
+  同一档位内逐档下探是脚本自己声明的降级路径，允许。
+- 反向 `fromLx()` 必须把 `master` / `hires` / `atmos` 一并映射到 `LOSSLESS`，否则会出现
+  「请求无损、`actualQuality` 报 AUTO」的降级提示失效（正反两个方向对同一批值必须一致）。
+- ⚠️ `qualitys` 是**声明**不是**能力**：最终以 L3 验活为准。
+
+#### 五、三级验证判据（`LxUrlInspector` + `LxProbeRunner` + `LxAnchorTable`）
+
+| 层 | 判据 | 预算 |
+|---|---|---|
+| L1 | `host.load()` 收到 `inited`，且脚本声明了至少一个平台 | 10 s |
+| L2 | 脚本 `musicUrl` 返回非空且形如 `http(s)://`、不含 `undefined` / `null` | 8 s（每次） |
+| L3 | 带 `Range: bytes=0-511` 真取一次，只读前 **8 字节**判容器魔数 | 3 s |
+
+平台级 20 s、脚本级 60 s（超预算的平台记 `BUDGET`，整份报告 `truncated = true`）。
+四档深度：`SWEEP`（只探 `kg` × 最高档，其余平台 reason = **`SKIPPED_BY_DEPTH`**）、`QUICK`（全部已声明
+平台 × 各自最高档）、`FULL`（前两档，命中即停）、`MATRIX`（全部声明档位）。
+
+⛔ **`judgeL3` 故意比 `HttpPlayabilityProbe.classify()` 更严，两条判据不许合并**：
+播放链路把「不确定」归 `UNKNOWN` 并放行（误判 DEAD 会跳歌 + 负面缓存 5 分钟，代价不可逆）；
+验证按钮不写任何缓存，所以 `401/403 → HTTP_403`、`404/410 → HTTP_404`、`429`、`5xx` **必须显式判失败**，
+否则 UI 显示「存疑」会让用户以为「还能用，只是没测准」。其余状态码委托 `classify()`；`UNKNOWN` 时用魔数
+兜底（`fLaC` / `OggS` / `ID3` / MPEG 同步字 / `ftyp`），魔数也对不上才 `Doubtful`。404/410 单独成
+`HTTP_404` 而不是落到 `NOT_AUDIO`：前者是「直链失效 / 模板过期」，后者是「返回的不是音频」，修复动作不同。
+
+锚点表（`LxAnchorTable`，按 source **分表**，⛔ 绝不合成一个 musicInfo —— 同一首《晴天》的 `songmid`
+在 `tx` 与 `wy` 是两套 id 却共用键名）：`kg` = `b3a52a7a…`、`tx` = `0039MnYb0qxYhV`、
+`wy` = `186016`，三者 `verified = true`；`kw` / `mg` **无可靠样本** ⇒ `verified = false` ⇒ 结论记
+`NO_ANCHOR`（⛔ 不伪造 id：假 id 的 404 会被读成「源不支持该平台」，把「我们没样本」谎报成「源不行」）。
+
+红线：探测是**纯观察者** —— 不写 `Degraded`、不清直链缓存、不改 `enabled`、不写 `deadProbeCache`；
+但**必须**在探测期间置 `probing`（`tryAcquire` 立刻返回 false ⇒ 用户按播放马上走 Meting，不排在探测后面干等），
+`finally { host.cancelPending() }` 保证「停止」真的打断在途请求。
+
+#### 六、路由、持久化与 UI
+
+- **两级健康状态**（`LxSourceRegistry`）：脚本级 `Broken`（load 失败 / JS 抛错 / runtime 崩 ⇒ 该脚本**所有**平台停用）
+  与平台级 `Degraded`（键 = `(scriptId, source)`，连败 3 次 ⇒ **只停该平台**，5 分钟冷却，到期自动恢复**一次**尝试）。
+  两者**互不覆盖**（`markScriptOk` 不清平台降级，`markSuccess` 不清脚本级）。
+  ⛔ 只按 `scriptId` 记是这里最容易犯的错：连播三首网易失败会把整份脚本打成不可用，而同一份脚本最强的
+  酷狗也跟着停 5 分钟。
+- **增强层**（`LxPlayUrlEnhancer`）在 `MetingApiService.resolvePlayUrlDetailed()` 开头插入，`null` 时行为与改造前
+  **逐字符一致**；内部全包 try/catch（`CancellationException` 原样抛），不做重试循环；命中结果必须复用既有
+  `PlayabilityProbe` 跟一跳验活（`UNKNOWN` 放行），死链按 null 回退。
+- 持久化：`settings_lx_enabled`（默认 **false**）+ `settings_lx_sources`（JSON，出厂两条 **只登记 URL 不内置正文**：
+  墨澜 / 星海）。正文存 `filesDir/lx_sources/<id>.js`，写临时文件再 rename（**更新失败保留旧版**）。
+- `lastStatus` 只存紧凑结论（`ts/l1/version/truncated/platforms{src:{v,r,q,c,mismatch}}`），**不存任何 URL**；
+  超 24 h 置灰标「结果已过期」但不清除；只用于展示，⛔ 加载时不得据此改 `enabled` 或喂给 registry。
+- UI：洛雪子块紧贴 Meting 行、左侧 2 dp 竖线用 `drawBehind`（不可聚焦、不影响焦点顺序）；Meting 关闭时整块
+  置灰但**不隐藏**且保留原值；引擎不可用时开关置灰并显示原因。切洛雪总开关**显式清直链缓存**（洛雪不是 service，
+  不触发 `unregisterService`）。
+- 两级平台提示（§2.4.1）：`NoDeclaredSource`（警示色，静态：已启用源都没声明当前平台）与
+  `AllFailed(hoursAgo)`（灰字「播放将走 Meting」，动态：该平台验证结果全 ❌）。判据是**声明 + 验证结果**，
+  ⛔ 不是「平台 == 网易」—— 后者等于把当前源生态固化成代码。`lxPlatformHintOf` 在「有脚本尚未 L1 加载」或
+  「声明该平台的脚本缺结果」时返回 null（缺结果 ≠ 死）。
+- 端点提示是**正向白名单**（`MetingApiService.NETEASE_ONLY_ENDPOINTS` = mikus / redcha），自建端点永不被误标。
+
+#### 七、本轮测试抓出的两个真缺陷
+
+1. `LxProbeRunner` 的直链校验原先写 `Regex("^https?://").matches(url)` —— `matches()` 是**全串匹配**，
+   任何真实直链都不匹配 ⇒ 每个平台都被判 `BAD_URL` 再打成 `DEAD`（验证功能会「全红」）。新增的
+   `LxProbeRunnerTest` 有 7 例当场失败（`expected:<HTTP_403> but was:<BAD_URL>`），改为前缀判断后转绿。
+2. `NetworkMusicManager.defaultSource` 自愈：老 DataStore / 老备份里的 `"alapi"` / `"jiosaavn"` 原样透传会让
+   `services[defaultSource]` 为 null ⇒ `getPlaylist` / `findArtist` 全 null 而搜索照常（「搜索能用但艺人页空白」）。
+   现在未知 key 折到**第一个已注册源**（⛔ 不能简单回退 `meting`，它也可能被用户关掉）。
+   连带更新 `NetworkArtistRoutingTest`：原「默认源未注册 ⇒ null」断言改为「回退第一个已注册源」，
+   并新增「一个源都没注册 ⇒ 仍为 null」的负向自证。
+
+#### 八、验证与状态
+
+- `testDebugUnitTest` 全量 **248 类 / 2574 例 / 0 失败 / 0 error / 0 skipped**（本版**最后一次改动之后**重跑，
+  与 androidTest 编译同批 `BUILD SUCCESSFUL in 3m 28s`；含 `Lx*Test` 8 类 92 例）。
+- `lintDebug` **0 errors / 173 warnings**（`--no-daemon` 单批与 release 同时跑）。洛雪引入的告警**只有依赖类别两条**，
+  均已核实为既有同类的延伸而非代码问题：
+  - `Aligned16KB`：`quickjs-android:1.4.6` 的 `arm64-v8a/libquickjs-android.so`、`jna:5.13.0` 的
+    `x86_64/libjnidispatch.so`（实测 `p_align = 0x1000`，与既有 `onnxruntime-android` 同一类 Warning；
+    `targetSdk 34` 尚未强制 16 KB）。
+  - `NewerVersionAvailable`：`jna 5.13.0 → 5.19.1`（`@aar` 形态与已验证的反射路径锁定 5.13.0）。
+  另：方案 §7.4 列过、但**没有任何渲染点**的 `lx_l1_ok` 已删除（174 → 173 就是这一条）。
+- `assembleRelease` **`BUILD SUCCESSFUL in 25m 44s`**：`NASMusicTV-release-v2-39-8.apk` **31,557,225 B**，
+  对 v2.39.7 的 29,791,079 B 增量 **+1,766,146 B（+1.77 MB / +5.93%）**。增量全部来自 native：
+  3 ABI × { `libquickjs.so` 997,336 / 464,524 / 1,140,960、`libquickjs-android.so` 239,672 / 120,420 / 256,328、
+  `libjnidispatch.so` 168,176 / 122,296 / 118,584 }，原始合计 ≈ 3.63 MB、压缩后 1.77 MB —— 在方案 §11.2
+  的「< 2 MB」预算内。
+- APK 复量（`aapt2 dump badging` / `apksigner verify` / zip 清单）：`versionCode='193' versionName='2.39.8'`、
+  `minSdkVersion 22` / `targetSdkVersion 34`、`native-code: arm64-v8a / armeabi-v7a / x86_64`、
+  五个 `uses-feature-not-required`（leanback / touchscreen / portrait / landscape / usb.host ⇒ 电视与手机均仍可装）；
+  签名 `CN=NASMusicTV`，证书 SHA-256 `24ed591af66cb9256597139d5a7a1a918dcd33e88244678113835b1d6cb46dfe`
+  （与 v2.38.6 以来**同钥** ⇒ 覆盖安装不需卸载）；APK 内 `assets/lx/` 仅 `boot.js` 一个文件、`node_modules` 命中 **0**。
+- `assembleDebugAndroidTest` 通过（`app-debug-androidTest.apk` 711,945 B）⇒ T2–T6 引擎测试**编译可用**，运行仍需设备。
+- 洛雪新增单测 92 例：`LxStatusCodecTest`(10) / `LxJudgeL3Test`(9) / `LxProbeRunnerTest`(22，假 host 注入不打网络) /
+  `LxPlayUrlEnhancerTest`(15) / `LxQualityMapperTest`(12) / `LxSourceRegistryTest`(10) / `LxPlatformMapTest`(8) /
+  `LxScriptHeaderTest`(6)。
+- 引擎测试（T2–T6）在 `androidTest`：`LxScriptHostTest` + 7 份**自建夹具**（不含第三方脚本正文），
+  `@Before` 直接断言 `LxEngineAvailability.state` 可用 —— 这就是 T1 ④ 的门禁。
+- ⏳ **真机项未跑**（2026-10-28 电视 192.168.0.114 离线，ping 100% 丢包）：T1 ④ API 22 上
+  `state == Available`、`.so` 改名后的 `Unavailable` 负向自证、T17 §11 验收清单、T19 真机复验。
+  ⛔ 本条不写「应该能跑」—— 老电视能否用只能用 `connectedDebugAndroidTest` 说话。
+- 文档：方案已归档；`CHANGELOG.md` v2.39.8 只记用户可感知变更。版本 `193 / "2.39.8"`。
+- 未推送、未 tag（E51 引用纪律不变）。

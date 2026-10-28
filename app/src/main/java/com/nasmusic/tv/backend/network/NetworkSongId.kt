@@ -14,8 +14,8 @@ object NetworkSongId {
      *
      * main 源集原先有 8 个声明点各自硬编码 `"meting"`，常量漂移时只有播放会坏
      * （`NetworkMusicManager` 精确路由不 fallback）——全部收口到这里。
-     * ⛔ 代码位不得再写裸字面量（例外：`NetworkSource.METING` 枚举 key 属 UI 侧，由
-     * `NetworkArtistSongIdContractTest` 断言与本常量一致）；注释/KDoc 里的 `"meting"` 说明文字不动。
+     * ⛔ 代码位不得再写裸字面量；注释/KDoc 里的 `"meting"` 说明文字不动。
+     * v2.39.8 起 `NetworkSource` 枚举已删除（方案 §7.5），UI 侧直接用本常量作 key。
      */
     const val METING_SOURCE: String = "meting"
 

@@ -178,6 +178,8 @@ fun LibraryScreen(
     songsPaging: SongsPagingState = SongsPagingState(),
     searchResults: List<Song> = emptyList(),
     isSearching: Boolean = false,
+    /** v2.39.8：三个网络音乐源全关（搜索页显示「未启用任何音乐源」引导，方案 §7.7 第 3 条） */
+    noNetworkSourceEnabled: Boolean = false,
     // 艺人全量方案：搜索页的打标集合与艺人续页状态（全部带默认值）
     searchUnplayableIds: Set<String> = emptySet(),
     artistPaging: SongsPagingState = SongsPagingState(),
@@ -649,6 +651,7 @@ fun LibraryScreen(
                         searchKeyword = filterQuery,
                         searchResults = searchResults,
                         isSearching = isSearching,
+                        noNetworkSourceEnabled = noNetworkSourceEnabled,
                         unplayableIds = searchUnplayableIds,
                         artistPaging = artistPaging,
                         onLoadMoreArtistSongs = onLoadMoreArtistSongs,

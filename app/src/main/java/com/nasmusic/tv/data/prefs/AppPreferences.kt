@@ -13,6 +13,7 @@ import java.io.File
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import com.nasmusic.tv.backend.network.MetingApiService
+import com.nasmusic.tv.backend.network.NetworkSongId
 import com.nasmusic.tv.backend.network.mv.BilibiliMvService
 import com.nasmusic.tv.backend.photo.PhotoScaleMode
 import com.nasmusic.tv.backend.playlist.PlaylistParsers
@@ -24,7 +25,6 @@ import com.nasmusic.tv.data.model.CloudDriveType
 import com.nasmusic.tv.data.model.EqualizerPreset
 import com.nasmusic.tv.data.model.LocalPlaylist
 import com.nasmusic.tv.data.model.NetworkFavoriteItem
-import com.nasmusic.tv.data.model.NetworkSource
 import com.nasmusic.tv.data.model.PlayMode
 import com.nasmusic.tv.data.model.SearchHistoryItem
 import com.nasmusic.tv.data.model.ServerConfig
@@ -64,6 +64,9 @@ class AppPreferences internal constructor(private val context: Context) {
     val player: PlayerPrefs by lazy { PlayerPrefs(this) }
     val lyrics: LyricsPrefs by lazy { LyricsPrefs(this) }
     val network: NetworkMusicPrefs by lazy { NetworkMusicPrefs(this) }
+
+    /** 洛雪音源域（方案 §8：`settings_lx_enabled` + `settings_lx_sources`） */
+    val lx: LxPrefs by lazy { LxPrefs(this) }
     val baidu: BaiduPrefs by lazy { BaiduPrefs(this) }
     val download: DownloadPrefs by lazy { DownloadPrefs(this) }
     val weather: WeatherPrefs by lazy { WeatherPrefs(this) }
@@ -103,6 +106,23 @@ class AppPreferences internal constructor(private val context: Context) {
 
         /** URL 可达性持久化判定窗口（24h）：窗口内的「不可达」标记重启后不重测 */
         const val songReachabilityWindowMs = 24 * 60 * 60 * 1000L
+
+        // ── 网络音乐源总开关的 key（= `NetworkMusicManager.services` 的 key，方案 §7.5）──
+        /** 百度网盘源：开关**复用** `CloudDriveConfig.isActive`，不另存布尔 */
+        const val SOURCE_BAIDU = "baidu"
+        /** NAS 服务器作为音乐源（v2.39.8；不是 `NetworkMusicManager` 的 service，走 `backendRegistry`） */
+        const val SOURCE_NAS = "nas"
+        /** Jamendo 源 */
+        const val SOURCE_JAMENDO = "jamendo"
+        /** 洛雪取链通道：**不是 service**，是 Meting 的增强层（§7.5 / §8） */
+        const val SOURCE_LX = "lx"
+
+        /**
+         * 「默认源」的偏好顺序：默认源被关掉时，按此顺序取第一个已注册的源顶替。
+         * ⛔ 不要依赖 `services` 的迭代顺序（`ConcurrentHashMap` 无序，重启后可能变）。
+         */
+        val NETWORK_SOURCE_PRIORITY: List<String> =
+            listOf(NetworkSongId.METING_SOURCE, SOURCE_BAIDU, SOURCE_JAMENDO)
 
         /** 屏幕方向 SharedPreferences 镜像键（v2.36.0） */
         internal const val KEY_ORIENTATION_MIRROR = "screen_orientation"
@@ -174,7 +194,15 @@ class AppPreferences internal constructor(private val context: Context) {
 
     // ---- provider 键内存镜像（Application scope 常驻收集更新）----
     @Volatile private var cachedMusicSource: String = com.nasmusic.tv.data.model.MusicSource.DEFAULT_API_KEY
-    @Volatile private var cachedDefaultNetworkSource: String = NetworkSource.DEFAULT.key
+    @Volatile private var cachedDefaultNetworkSource: String = NetworkSongId.METING_SOURCE
+    /** 网络源总开关镜像（§7.5；`isSourceEnabledSync` 读它） */
+    @Volatile private var cachedMetingEnabled: Boolean = true
+    @Volatile private var cachedNasMusicEnabled: Boolean = true
+    @Volatile private var cachedJamendoEnabled: Boolean = true
+    /** 洛雪取链通道总开关（§8，默认关；阶段 3 才接 UI） */
+    @Volatile private var cachedLxEnabled: Boolean = false
+    /** 百度网盘是否「启用且已登录」（= `CloudDriveConfig.isActive`，不落第二个布尔） */
+    @Volatile private var cachedBaiduActive: Boolean = false
     /** F2-6：音质档位镜像（默认 AUTO） */
     @Volatile private var cachedQualityTier: Int = QUALITY_TIER_AUTO
     @Volatile private var cachedJamendoClientId: String = ""
@@ -224,8 +252,30 @@ class AppPreferences internal constructor(private val context: Context) {
                 .distinctUntilChanged().collect { cachedMusicSource = it }
         }
         scope.launch {
-            dataStore.data.map { it[keyDefaultNetworkSource] ?: NetworkSource.DEFAULT.key }
-                .distinctUntilChanged().collect { cachedDefaultNetworkSource = NetworkSource.fromKey(it)?.key ?: it }
+            dataStore.data.map { normalizeNetworkSourceKey(it[keyDefaultNetworkSource]) }
+                .distinctUntilChanged().collect { cachedDefaultNetworkSource = it }
+        }
+        // 网络源总开关（方案 §7.5）：Meting / Jamendo / 洛雪各一个布尔；百度复用 baiduConfig.isActive
+        scope.launch {
+            dataStore.data.map { it[keyMetingEnabled] ?: true }
+                .distinctUntilChanged().collect { cachedMetingEnabled = it }
+        }
+        scope.launch {
+            dataStore.data.map { it[keyNasMusicEnabled] ?: true }
+                .distinctUntilChanged().collect { cachedNasMusicEnabled = it }
+        }
+        scope.launch {
+            dataStore.data.map { it[keyJamendoEnabled] ?: true }
+                .distinctUntilChanged().collect { cachedJamendoEnabled = it }
+        }
+        scope.launch {
+            dataStore.data.map { it[keyLxEnabled] ?: false }
+                .distinctUntilChanged().collect { cachedLxEnabled = it }
+        }
+        scope.launch {
+            dataStore.data.map { prefs ->
+                loadCloudDriveConfigs(prefs[keyCloudDriveConfig] ?: "{}")[CloudDriveType.BAIDU.key]?.isActive ?: false
+            }.distinctUntilChanged().collect { cachedBaiduActive = it }
         }
         // F2-6：音质档位镜像（qualityTierProvider 同步读，注册进 MetingApiService）
         scope.launch {
@@ -317,6 +367,18 @@ class AppPreferences internal constructor(private val context: Context) {
     private val keyLyricsKugouBaseUrl = stringPreferencesKey("settings_lyrics_kugou_base_url")
     private val keyLyricsNeteaseBaseUrl = stringPreferencesKey("settings_lyrics_netease_base_url")
     private val keyJamendoClientId = stringPreferencesKey("settings_jamendo_client_id")
+    /**
+     * 网络源总开关（方案 §7.5 / §8）。默认值分别是 true / true / false ⇒
+     * **升级后行为与旧版逐字节一致**（新增开关默认全开，洛雪是唯一例外）。
+     */
+    private val keyMetingEnabled = booleanPreferencesKey("settings_meting_enabled")
+    /** NAS 音乐源开关（v2.39.8，默认 true ⇒ 升级后行为不变） */
+    private val keyNasMusicEnabled = booleanPreferencesKey("settings_nas_music_enabled")
+    private val keyJamendoEnabled = booleanPreferencesKey("settings_jamendo_enabled")
+    private val keyLxEnabled = booleanPreferencesKey("settings_lx_enabled")
+
+    /** 洛雪脚本列表（JSON 数组，方案 §8；正文不入 DataStore） */
+    private val keyLxSourcesJson = stringPreferencesKey("settings_lx_sources")
 
     // --- B-2 最近播放 & 播放次数（序列化为 JSON）---
     private val keyRecentSongs = stringPreferencesKey("recent_songs")
@@ -876,7 +938,11 @@ class AppPreferences internal constructor(private val context: Context) {
             defaultPlayMode = PlayMode.fromOrdinal(prefs[keyPlayMode] ?: 0),
             cacheLyrics = prefs[keyCacheLyrics] ?: true,
             cacheCover = prefs[keyCacheCover] ?: true,
-            defaultNetworkSource = prefs[keyDefaultNetworkSource]?.let { NetworkSource.fromKey(it) ?: NetworkSource.fromName(it) } ?: NetworkSource.DEFAULT,
+            defaultNetworkSource = normalizeNetworkSourceKey(prefs[keyDefaultNetworkSource]),
+            metingEnabled = prefs[keyMetingEnabled] ?: true,
+            nasMusicEnabled = prefs[keyNasMusicEnabled] ?: true,
+            jamendoEnabled = prefs[keyJamendoEnabled] ?: true,
+            lxEnabled = prefs[keyLxEnabled] ?: false,
             metingApiBaseUrl = endpointOrDefault(prefs[keyMetingApiBaseUrl], MetingApiService.DEFAULT_BASE_URL),
             mvApiBaseUrl = endpointOrDefault(prefs[keyMvApiBaseUrl], BilibiliMvService.DEFAULT_BASE_URL),
             lyricsKugouBaseUrl = endpointOrDefault(prefs[keyLyricsKugouBaseUrl], com.nasmusic.tv.lyrics.LyricsNetworkProvider.DEFAULT_KUGOU_BASE_URL),
@@ -973,8 +1039,28 @@ class AppPreferences internal constructor(private val context: Context) {
         dataStore.edit { it[keyLyricsFontScale] = scale.coerceIn(0.7f, 1.6f).toDouble() }
     }
 
-    suspend fun setDefaultNetworkSource(source: NetworkSource) =
-        dataStore.edit { it[keyDefaultNetworkSource] = source.key }
+    suspend fun setDefaultNetworkSource(source: String) =
+        dataStore.edit { it[keyDefaultNetworkSource] = source }
+
+    /** 网络源总开关（方案 §7.5）。⛔ 只落盘；注册/注销由 `MainViewModel.setSourceEnabled` 负责。 */
+    suspend fun setMetingEnabled(enabled: Boolean) = dataStore.edit { it[keyMetingEnabled] = enabled }
+
+    /** NAS 音乐源开关（v2.39.8）。⛔ 只落盘；不清连接、不清凭据。 */
+    suspend fun setNasMusicEnabled(enabled: Boolean) = dataStore.edit { it[keyNasMusicEnabled] = enabled }
+
+    suspend fun setJamendoEnabled(enabled: Boolean) = dataStore.edit { it[keyJamendoEnabled] = enabled }
+
+    /** 洛雪取链通道总开关（§8）。⛔ 切换后必须清直链缓存，见 `MainViewModel.setLxEnabled`。 */
+    suspend fun setLxEnabled(enabled: Boolean) = dataStore.edit { it[keyLxEnabled] = enabled }
+
+    /**
+     * 洛雪脚本元数据（JSON 数组；正文存 `filesDir/lx_sources/<id>.js`，见 `LxScriptRepo`）。
+     *
+     * `null` = 从没写过 ⇒ 由 `LxSourceEntry.parseList` 回退到出厂默认两条（墨澜 + 星海）。
+     */
+    val lxSourcesJsonFlow: Flow<String?> = dataStore.data.map { it[keyLxSourcesJson] }
+
+    suspend fun setLxSourcesJson(json: String) = dataStore.edit { it[keyLxSourcesJson] = json }
 
     suspend fun setVisualizerTheme(theme: VisualizerTheme) =
         dataStore.edit { it[keyVisualizerTheme] = theme.name }
@@ -1266,6 +1352,28 @@ class AppPreferences internal constructor(private val context: Context) {
      * R-7 第三类修复（路 A）：读 @Volatile 内存镜像。
      */
     fun getDefaultNetworkSourceSync(): String = cachedDefaultNetworkSource
+
+    /**
+     * 网络源总开关的**同步快照**（`@Volatile` 镜像，方案 §7.5 S1）。
+     *
+     * 百度走 `CloudDriveConfig.isActive`（= 启用 **且** 已登录），洛雪走 `settings_lx_enabled`。
+     * ⚠️ 只回答「用户把这个源开着吗」；**不回答**「它能不能用」—— 那是
+     * `NetworkMusicManager.services` 的事，别在这里判。
+     */
+    fun isSourceEnabledSync(key: String): Boolean = when (key) {
+        NetworkSongId.METING_SOURCE -> getMetingEnabledSync()
+        SOURCE_NAS -> getNasMusicEnabledSync()
+        SOURCE_BAIDU -> getBaiduActiveSync()
+        SOURCE_JAMENDO -> getJamendoEnabledSync()
+        SOURCE_LX -> getLxEnabledSync()
+        else -> false
+    }
+
+    fun getMetingEnabledSync(): Boolean = cachedMetingEnabled
+    fun getNasMusicEnabledSync(): Boolean = cachedNasMusicEnabled
+    fun getJamendoEnabledSync(): Boolean = cachedJamendoEnabled
+    fun getLxEnabledSync(): Boolean = cachedLxEnabled
+    fun getBaiduActiveSync(): Boolean = cachedBaiduActive
 
     /** F2-6：同步读取音质档位（MetingApiService qualityTierProvider 用） */
     fun getQualityTierSync(): Int = cachedQualityTier
@@ -1922,6 +2030,14 @@ class AppPreferences internal constructor(private val context: Context) {
         prefs[keyJamendoClientId] ?: ""
     }
 
+    /**
+     * 当前音乐平台（Meting 的 `server` 参数，如 `netease`）。
+     * 设置页卡④ 的 Meting 行要用它显示「当前平台：酷狗 · 端点 qijieya」（方案 §7.8 结论 2）。
+     */
+    val musicSourceFlow: Flow<String> = dataStore.data.map { prefs ->
+        prefs[keyMusicSource] ?: com.nasmusic.tv.data.model.MusicSource.DEFAULT_API_KEY
+    }
+
     /** 异步保存某网盘配置（增量合并到现有 Map） */
     suspend fun saveCloudDriveConfig(config: CloudDriveConfig) {
         dataStore.edit { prefs ->
@@ -2114,7 +2230,12 @@ class AppPreferences internal constructor(private val context: Context) {
                 prefs[keyPlayMode] = settings.defaultPlayMode.ordinalOrDefault()
                 prefs[keyCacheLyrics] = settings.cacheLyrics
                 prefs[keyCacheCover] = settings.cacheCover
-                prefs[keyDefaultNetworkSource] = settings.defaultNetworkSource.keyOrDefault()
+                prefs[keyDefaultNetworkSource] = normalizeNetworkSourceKey(settings.defaultNetworkSource)
+                // 网络源总开关（§7.5）：老备份没有这两个字段 → Gson 无参构造器给默认 true，
+                // 与旧版行为一致（⛔ 不要在这里把缺失当 false）。
+                prefs[keyMetingEnabled] = settings.metingEnabled
+                prefs[keyNasMusicEnabled] = settings.nasMusicEnabled
+                prefs[keyJamendoEnabled] = settings.jamendoEnabled
                 // P2 修复（2026-09-22 审查）：恢复路径同样过端点校验——恶意/异常
                 // 备份不能把请求流量重定向到任意字符串端点；非法值回落默认。
                 // ⚠️ 空串同样回落默认（[endpointOrDefault]）：备份里未定制字段就是空串，
@@ -2224,9 +2345,27 @@ private fun VisualQuality?.nameOrDefault(): String =
 private fun PlayMode?.ordinalOrDefault(): Int =
     this?.ordinal ?: PlayMode.SEQUENTIAL.ordinal
 
-/** 网络音乐源：null → [NetworkSource.DEFAULT] */
-private fun NetworkSource?.keyOrDefault(): String =
-    this?.key ?: NetworkSource.DEFAULT.key
+/**
+ * 网络音乐默认源 key 归一化（**只做字符串，不判有效性**）。
+ *
+ * `NetworkSource` 枚举已于 v2.39.8 删除（它只含 `meting`/`alapi`/`jiosaavn`，后两者从来没有实现），
+ * 但历史数据里仍会以三种形态出现：
+ * - DataStore：`setDefaultNetworkSource` 写的 key（`"meting"`）
+ * - 老备份 JSON：字段类型曾是枚举 ⇒ Gson 写的是**枚举名**（`"METING"`）
+ * - 降级安装的旧 APK：会在读到时按 `fromName` 再转回去
+ *
+ * 这里把枚举名折回 key，其余原样返回。⚠️ **"alapi" / "jiosaavn" 有意不映射掉** ——
+ * 它们从未注册过，交给 `NetworkMusicManager.defaultSource` 的 getter 在运行期回退；
+ * 在持久化层「猜」一个替代源会把用户的显式选择悄悄改掉。
+ */
+private fun normalizeNetworkSourceKey(raw: String?): String {
+    val v = raw?.trim().orEmpty()
+    return when {
+        v.isEmpty() -> NetworkSongId.METING_SOURCE
+        v.equals("METING", ignoreCase = true) -> NetworkSongId.METING_SOURCE
+        else -> v
+    }
+}
 
 /** 照片墙转场：null → [PhotoTransitionId.Default]（`CROSSFADE`） */
 private fun PhotoTransitionId?.nameOrDefault(): String =

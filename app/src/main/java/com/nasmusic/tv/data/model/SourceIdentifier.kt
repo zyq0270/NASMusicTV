@@ -62,7 +62,7 @@ val Song.sourceType: MusicSourceType
         networkSource == "weather" -> MusicSourceType.WEATHER_RADIO
         // Jamendo 歌曲的 networkSource 为 "jamendo"
         networkSource == "jamendo" -> MusicSourceType.JAMENDO
-        // 其他网络歌曲（meting/alapi/jiosaavn 等）统一归为 NETWORK_MUSIC
+        // 其他网络歌曲（meting/baidu/jamendo 之外的）统一归为 NETWORK_MUSIC
         isNetworkSong -> MusicSourceType.NETWORK_MUSIC
         else -> MusicSourceType.NETWORK_MUSIC
     }

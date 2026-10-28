@@ -57,6 +57,8 @@ fun SearchTab(
     searchKeyword: String,
     searchResults: List<Song>,
     isSearching: Boolean,
+    /** v2.39.8（方案 §7.7 第 3 条）：全部网络音乐源关闭 ⇒ 空结果时显示开启引导，不显示「搜索无结果」 */
+    noNetworkSourceEnabled: Boolean = false,
     favoriteIds: Set<String>,
     queueSongIds: Set<String> = emptySet(),
     // 艺人全量方案 Q1(b)：仅艺人分支填充的"可能无版权"旁路集合（⛔ 不塞进 Song）
@@ -151,8 +153,10 @@ fun SearchTab(
                     contentAlignment = Alignment.Center
                 ) {
                         Text(
-                            text = stringResource(R.string.search_no_results),
-                            color = NasMusicColors.TextSecondary,
+                            text = if (noNetworkSourceEnabled) stringResource(R.string.settings_no_music_source_desc)
+                                   else stringResource(R.string.search_no_results),
+                            color = if (noNetworkSourceEnabled) NasMusicColors.Warning
+                                    else NasMusicColors.TextSecondary,
                             fontSize = FontSize.button()
                     )
                 }

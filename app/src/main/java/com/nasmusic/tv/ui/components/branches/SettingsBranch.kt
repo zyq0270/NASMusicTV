@@ -105,6 +105,44 @@ internal fun SettingsBranch(
                         initial = com.nasmusic.tv.data.model.CloudDriveConfig(com.nasmusic.tv.data.model.CloudDriveType.BAIDU)
                     )
                     val jamendoClientId by viewModel.prefs.network.jamendoClientIdFlow.collectAsState(initial = "")
+                    // v2.39.8：卡④ Meting 行的「当前平台」（与搜索结果页同一份 StateFlow）
+                    val networkPlatformKey by viewModel.searchNetworkPlatform.collectAsState()
+                    // v2.39.8：洛雪子块（方案 §7.1）—— 会话态在 MainViewModel，这里只做投影 + 接线
+                    val lxScriptViews by viewModel.lxScriptViews.collectAsState()
+                    val lxEngineAvailable by viewModel.lxEngineAvailable.collectAsState()
+                    val lxEngineUnavailableReason by viewModel.lxEngineUnavailableReason.collectAsState()
+                    val lxVerifyAll by viewModel.lxVerifyAll.collectAsState()
+                    val lxSubBlockState = remember(
+                        lxScriptViews, lxEngineAvailable, lxEngineUnavailableReason, lxVerifyAll,
+                        settings.metingEnabled, settings.lxEnabled,
+                        networkPlatformKey, settings.metingApiBaseUrl,
+                    ) {
+                        val now = System.currentTimeMillis()
+                        LxSubBlockState(
+                            engineAvailable = lxEngineAvailable,
+                            engineReason = lxEngineUnavailableReason,
+                            metingEnabled = settings.metingEnabled,
+                            lxEnabled = settings.lxEnabled,
+                            scripts = lxScriptViews,
+                            verifyAll = lxVerifyAll,
+                            platformHint = lxPlatformHintOf(lxScriptViews, networkPlatformKey, now),
+                            neteaseOnlyEndpoint = com.nasmusic.tv.backend.network.MetingApiService
+                                .isNeteaseOnlyEndpoint(settings.metingApiBaseUrl),
+                            now = now,
+                        )
+                    }
+                    val lxSubBlockActions = remember(viewModel) {
+                        LxSubBlockActions(
+                            onToggleEnabled = viewModel::setLxEnabled,
+                            onToggleScript = { id, enabled -> viewModel.setLxScriptEnabled(id, enabled) },
+                            onVerify = { id -> viewModel.verifyLxScript(id) },
+                            onVerifyAll = viewModel::verifyAllLxScripts,
+                            onStop = viewModel::stopLxVerify,
+                            onRefreshAll = viewModel::refreshLxScripts,
+                            onImportUrl = viewModel::importLxSource,
+                            // onImport（打开输入框）由 SettingsScreen 覆盖 —— 对话框宿主在那边
+                        )
+                    }
                     val separationMode by viewModel.vocalVM.separationMode.collectAsState()
                     // T10：歌词字号 / 高亮（与播放页 NowPlayingBranch 读的是同一份持久化 key）
                     val lyricsFontScale by viewModel.prefs.lyrics.lyricsFontScale.collectAsState(initial = 1.0f)
@@ -283,7 +321,10 @@ internal fun SettingsBranch(
                         baiduApicExtracting = baiduApicExtracting,
                         baiduApicExtracted = baiduApicExtracted,
                         baiduApicTotal = baiduApicTotal,
-                        onToggleBaiduEnabled = { viewModel.netVM.setBaiduEnabled(it) },
+                        // v2.39.8：卡③ 与卡④ 的百度开关走同一条路径（含默认源自愈与一次性提示）
+                        onToggleBaiduEnabled = {
+                            viewModel.setSourceEnabled(com.nasmusic.tv.data.prefs.AppPreferences.SOURCE_BAIDU, it)
+                        },
                         onStartBaiduDeviceCode = { viewModel.netVM.startBaiduDeviceCodeFlow() },
                         onCancelBaiduDeviceCode = { viewModel.netVM.cancelBaiduDeviceCode() },
                         onLogoutBaidu = { viewModel.netVM.logoutBaidu() },
@@ -294,6 +335,10 @@ internal fun SettingsBranch(
                         onNavigateToServerConnect = { viewModel.navVM.navigateTo(Screen.ServerConnect) },
                         // T7：默认网络搜索源（写 DataStore，方案 §6-10）
                         onChangeDefaultNetworkSource = { viewModel.updateDefaultNetworkSource(it) },
+                        onToggleSourceEnabled = { key, enabled -> viewModel.setSourceEnabled(key, enabled) },
+                        networkPlatformKey = networkPlatformKey,
+                        lxSubBlock = lxSubBlockState,
+                        lxActions = lxSubBlockActions,
                         // 服务器连接设置
                         serverConfig = serverConfig,
                         isConnected = isConnected,
@@ -477,6 +522,46 @@ internal fun SettingsBranch(
                             onDismiss = { showPlaylistImportDialog = false }
                         )
                     }
+}
+
+/**
+ * 洛雪平台提示（方案 §2.4.1 两级表）。
+ *
+ * ⛔ 判据只能是「**声明**里有没有该 source」和「**验证结果**是什么」，
+ * 把「当前平台 = 网易」写死成条件会把这批源当下的能力固化成代码里的平台判断（§7.9）。
+ *
+ * @return null = 不提示（无验证结果 / 该平台有任一 ✅ / 声明尚未可知）
+ */
+private fun lxPlatformHintOf(
+    scripts: List<LxScriptView>,
+    platformKey: String,
+    now: Long,
+): LxPlatformHint? {
+    val source = com.nasmusic.tv.backend.network.lx.LxPlatformMap.toLxSource(platformKey) ?: return null
+    val enabled = scripts.filter { it.entry.enabled }
+    if (enabled.isEmpty()) return null
+
+    fun declaredOf(view: LxScriptView): Set<String> =
+        (view.l1 as? com.nasmusic.tv.backend.network.lx.LxL1.Loaded)?.sources?.toSet()
+            ?: view.result?.platforms?.keys
+            ?: emptySet()
+
+    // 声明只在脚本被加载（L1）后才知道：还没加载过的源不能拿来断言「无可用源」
+    if (enabled.any { (it.l1 as? com.nasmusic.tv.backend.network.lx.LxL1.Loaded) == null && it.result == null }) {
+        return null
+    }
+
+    val declaring = enabled.filter { source in declaredOf(it) }
+    if (declaring.isEmpty()) return LxPlatformHint.NoDeclaredSource
+
+    // 「全部 ❌」必须建立在「每一份声明都有结果」上 —— 缺结果 ≠ 死
+    val statuses = declaring.map { it.platformOf(source) }
+    if (statuses.any { it == null }) return null
+    val present = statuses.filterNotNull()
+    if (present.any { it.verdict != com.nasmusic.tv.backend.network.lx.LxPlatformVerdict.DEAD }) return null
+
+    val newest = declaring.mapNotNull { it.result?.ts }.maxOrNull() ?: return null
+    return LxPlatformHint.AllFailed(hoursAgo = (now - newest).coerceAtLeast(0L) / 3_600_000L)
 }
 
 /**

@@ -243,7 +243,7 @@ internal enum class Trail { None, Arrow }
  *   不跟随 `contentColor`；不降透明度的话「置灰的开关」看起来和能点的一样亮。
  */
 @Composable
-private fun SwitchTrack(checked: Boolean, enabled: Boolean = true) {
+internal fun SwitchTrack(checked: Boolean, enabled: Boolean = true) {
     val onText = stringResource(R.string.settings_on)
     val offText = stringResource(R.string.settings_off)
     Box(

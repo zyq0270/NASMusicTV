@@ -112,7 +112,11 @@ object CacheInventory {
         // ── 应用数据（⛔ 不是缓存，登记只为让"总数比可清之和大"这件事有解释）──
         CacheEntry(dir = "datastore", root = CacheRoot.FILES_DIR, group = CacheGroup.APP_DATA,
             labelRes = R.string.settings_cache_dir_prefs, descRes = R.string.settings_cache_dir_prefs_desc,
-            deletable = false, clearVia = null)
+            deletable = false, clearVia = null),
+        // 洛雪音源脚本正文（`LxScriptRepo`，`filesDir/lx_sources/<id>.js`）：
+        // 是用户导入的**数据**而非缓存，⛔ 不能随手删（删了要重新导入 + 重新验证）。
+        CacheEntry(dir = "lx_sources", root = CacheRoot.FILES_DIR, group = CacheGroup.APP_DATA,
+            labelRes = R.string.settings_cache_dir_lx_sources, deletable = false, clearVia = null)
     )
 
     /** 分组小计用的稳定顺序 */

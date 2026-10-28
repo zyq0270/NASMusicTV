@@ -5,7 +5,7 @@ import com.nasmusic.tv.data.model.Song
 /**
  * 网络音乐服务接口
  *
- * 抽象不同网络音乐源（Meting-API、AlAPI、JioSaavn 等）的统一访问层。
+ * 抽象不同网络音乐源（Meting-API、百度网盘、Jamendo 等）的统一访问层。
  * 实现类负责将各源平台的响应转换为统一的 [Song] 模型。
  *
  * v2.2.0 适配规范：
@@ -17,7 +17,7 @@ import com.nasmusic.tv.data.model.Song
  */
 interface NetworkMusicService {
 
-    /** 来源标识，如 "meting" / "alapi" / "jiosaavn" */
+    /** 来源标识，如 "meting" / "baidu" / "jamendo" */
     val sourceId: String
 
     /**

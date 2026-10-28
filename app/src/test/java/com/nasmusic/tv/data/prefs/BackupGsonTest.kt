@@ -3,7 +3,6 @@ package com.nasmusic.tv.data.prefs
 import com.google.gson.Gson
 import com.nasmusic.tv.backend.photo.PhotoScaleMode
 import com.nasmusic.tv.data.model.AppSettings
-import com.nasmusic.tv.data.model.NetworkSource
 import com.nasmusic.tv.data.model.PlayMode
 import com.nasmusic.tv.data.model.VisualQuality
 import com.nasmusic.tv.data.model.VisualizerTheme
@@ -87,21 +86,20 @@ class BackupGsonTest {
     }
 
     /**
-     * 第 ③ 级回落：未知名字 + `fromKey()` **返回 null** 的枚举。
+     * v2.39.8：`defaultNetworkSource` 已是 **`String`**（`NetworkSource` 枚举已删除，方案 §7.5），
+     * 未知值不再经枚举容错，而是**原样保留**。
      *
-     * `NetworkSource.fromKey()` 未命中返回 null（它按 `key` 小写匹配，不认枚举名），
-     * 因此会穿过第 ② 级、落到第 ③ 级「首个常量」。
+     * 这是刻意的分层：Gson 层不替用户改设置；纠正分两处——
+     * `AppPreferences.normalizeNetworkSourceKey()`（枚举名 `"METING"` → key）
+     * 与 `NetworkMusicManager.defaultSource` 的 getter（指向未注册源 → 第一个已注册源）。
      */
     @Test
-    fun `an unknown network source falls back to the first constant, never null`() {
+    fun `an unknown network source is preserved as a raw string`() {
         val settings = backupGson.fromJson(
             """{"defaultNetworkSource":"NO_SUCH_SOURCE"}""",
             AppSettings::class.java
         )
-        val source: NetworkSource? = settings.defaultNetworkSource
-        assertNotNull("容错适配器绝不允许把非空枚举字段写成 null", source)
-        assertEquals(NetworkSource.entries.first(), source)
-        assertEquals(NetworkSource.METING, source)
+        assertEquals("NO_SUCH_SOURCE", settings.defaultNetworkSource)
     }
 
     /**

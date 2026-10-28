@@ -21,6 +21,13 @@ import com.nasmusic.tv.backend.local.AlbumCoverResolver
 import com.nasmusic.tv.backend.local.ArtistCoverResolver
 import com.nasmusic.tv.backend.local.CoverUrlPersistentCache
 import com.nasmusic.tv.backend.local.ItunesCoverSearcher
+import com.nasmusic.tv.backend.network.lx.LxHostPool
+import com.nasmusic.tv.backend.network.lx.LxPlayUrlEnhancer
+import com.nasmusic.tv.backend.network.lx.LxProbeRunner
+import com.nasmusic.tv.backend.network.lx.LxScriptRepo
+import com.nasmusic.tv.backend.network.lx.LxSourceRegistry
+import com.nasmusic.tv.backend.network.lx.LxUrlInspector
+import com.nasmusic.tv.backend.network.lx.PlayUrlEnhancer
 import com.nasmusic.tv.backend.network.baidu.BaiduCoverProvider
 import com.nasmusic.tv.backend.network.baidu.BaiduFileIndexCache
 import com.nasmusic.tv.backend.network.baidu.BaiduHttpDataSourceFactory
@@ -100,6 +107,26 @@ class NasMusicApp : Application(), ImageLoaderFactory {
         private set
     lateinit var networkMusicManager: NetworkMusicManager
         private set
+    /**
+     * Meting 服务实例（方案 §7.5 S2）：构造期按 `settings_meting_enabled` 决定是否注册，
+     * 运行时开关切换由 `MainViewModel.setSourceEnabled` 调 `registerService` / `unregisterService`。
+     * ⚠️ 注册/注销需要**同一个实例**，所以不能再写成 `mapOf(… MetingApiService(…))` 的临时对象。
+     */
+    lateinit var metingApiService: MetingApiService
+        private set
+
+    // ─────────────── 洛雪（LX）取链（方案 §5）───────────────
+    // 四个组件都是 internal：类型本身不对外暴露，只有 MainViewModel（同模块）用得到。
+    /** 脚本级 / 平台级健康状态（§5.5） */
+    internal lateinit var lxSourceRegistry: com.nasmusic.tv.backend.network.lx.LxSourceRegistry
+    /** 脚本文本（filesDir）+ 元数据（DataStore）存取（§5.3） */
+    internal lateinit var lxScriptRepo: com.nasmusic.tv.backend.network.lx.LxScriptRepo
+    /** 运行中的 QuickJS 宿主持有者（§5.4.1.5：一个脚本一个 runtime） */
+    internal lateinit var lxHostPool: com.nasmusic.tv.backend.network.lx.LxHostPool
+    /** 插在 `MetingApiService.resolvePlayUrlDetailed()` 最前面的取链增强层（§5.4） */
+    internal lateinit var lxPlayUrlEnhancer: com.nasmusic.tv.backend.network.lx.PlayUrlEnhancer
+    /** 验证按钮的编排器（§5.4.1.5） */
+    internal lateinit var lxProbeRunner: com.nasmusic.tv.backend.network.lx.LxProbeRunner
     /**
      * v2.35.0 多码率：单曲音质覆盖（两级模型的"单曲"层）。
      * 独立 DataStore 文件，500 条 LRU 上限（方案 §2.3.1）。
@@ -371,22 +398,71 @@ val baiduOAuthClient: BaiduOAuthClient by lazy { BaiduOAuthClient(this, baiduOkH
         modelDownloadManager = ModelDownloadManager(this) { appPreferences.getModelDownloadUrlSync() }
         playerManager.setModelDownloadManager(modelDownloadManager)
         // 网络音乐管理器：注册所有网络源，默认源与 Meting 端点均由 AppSettings 动态提供
-        val services = mapOf(
-            NetworkSongId.METING_SOURCE to MetingApiService(
-                baseUrlProvider = { appPreferences.network.getMetingApiBaseUrlSync() },
-                serverProvider = { appPreferences.network.getMusicSourceSync() },
-                // F2-6：音质档位（AUTO=0 不传 br；显式档位走降级链）
-                qualityTierProvider = { appPreferences.getQualityTierSync() },
-                // 艺人全量方案 Q2：网易免鉴权优先。基址复用歌词那个设置项（不新增设置项）
-                netease = NeteaseOpenApi(
-                    baseUrlProvider = { appPreferences.lyrics.getLyricsNeteaseBaseUrlSync() }
-                ),
-                // 艺人全量方案 §3.8 第 1 步（Q4）：判据做实——跟一跳拿最终 Content-Type
-                probe = HttpPlayabilityProbe()
-            )
+        //
+        // ⚠️ 启动期的源开关**必须直接读 DataStore**，不能用 `get*EnabledSync()` 镜像：
+        //    `startProviderMirrors(...)`（上方 341 行）在 applicationScope 上异步收集，
+        //    与本方法并发执行 —— 此刻镜像可能仍是编译期默认值，
+        //    会把用户已关掉的源错误地注册回来（症状：关了还在搜索里出现）。
+        val bootSettings = runBlocking { appPreferences.appSettings.first() }
+        val bootJamendoClientId = runBlocking { appPreferences.jamendoClientIdFlow.first() }
+        // ─────────────── 洛雪（LX）取链（方案 §5）───────────────
+        // 增强层**始终挂上**、靠「可用脚本列表为空」表达未启用：MetingApiService 只构造一次，
+        // 运行时开关不可能重建它（§7.7 第 6 条：洛雪不是 service，切它不触发任何注销）。
+        lxSourceRegistry = LxSourceRegistry()
+        lxScriptRepo = LxScriptRepo(appPreferences, File(filesDir, "lx_sources"))
+        lxHostPool = LxHostPool(
+            repo = lxScriptRepo,
+            // 与脚本下载 / 探测共用同一个连接池；脚本侧要跑十几秒的长请求，超时单独给
+            httpClient = OkHttpClient.Builder()
+                .dispatcher(BackendRegistry.sharedDispatcher)
+                .connectionPool(BackendRegistry.sharedConnectionPool)
+                .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+                .readTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+                .followRedirects(true)
+                .build(),
+            bootScriptProvider = {
+                assets.open("lx/boot.js").bufferedReader(Charsets.UTF_8).use { it.readText() }
+            },
         )
+        val httpPlayabilityProbe = HttpPlayabilityProbe()
+        lxPlayUrlEnhancer = com.nasmusic.tv.backend.network.lx.LxPlayUrlEnhancer(
+            registry = lxSourceRegistry,
+            // ⚠️ 每次取链都读一次快照：脚本刷新 / 启停后无需重建 MetingApiService
+            slots = { lxHostPool.currentSlots },
+            probe = httpPlayabilityProbe,
+            fallbackPlatform = { appPreferences.network.getMusicSourceSync() },
+        )
+        lxProbeRunner = com.nasmusic.tv.backend.network.lx.LxProbeRunner(
+            registry = lxSourceRegistry,
+            inspector = com.nasmusic.tv.backend.network.lx.LxUrlInspector(),
+            hostProvider = { id -> lxHostPool.hostFor(id) },
+        )
+        // 启动期只在开关打开时加载脚本（`load()` 会建 QuickJS runtime 并执行正文，是重活）
+        if (bootSettings.lxEnabled) {
+            applicationScope.launch { refreshLxRuntime() }
+        }
+        metingApiService = MetingApiService(
+            baseUrlProvider = { appPreferences.network.getMetingApiBaseUrlSync() },
+            serverProvider = { appPreferences.network.getMusicSourceSync() },
+            // F2-6：音质档位（AUTO=0 不传 br；显式档位走降级链）
+            qualityTierProvider = { appPreferences.getQualityTierSync() },
+            // 艺人全量方案 Q2：网易免鉴权优先。基址复用歌词那个设置项（不新增设置项）
+            netease = NeteaseOpenApi(
+                baseUrlProvider = { appPreferences.lyrics.getLyricsNeteaseBaseUrlSync() }
+            ),
+            // 艺人全量方案 §3.8 第 1 步（Q4）：判据做实——跟一跳拿最终 Content-Type
+            probe = httpPlayabilityProbe,
+            // 洛雪增强（§5.4）：命中即返回，未启用/全档失败时逐字符退回原 302 链路
+            enhancer = lxPlayUrlEnhancer,
+        )
+        // ⛔ 不要「先全注册再注销」：中间会有一瞬所有源都在（方案 §7.7 第 4 条）
+        val bootServices = if (bootSettings.metingEnabled) {
+            mapOf(NetworkSongId.METING_SOURCE to metingApiService)
+        } else {
+            emptyMap()
+        }
         networkMusicManager = NetworkMusicManager(
-            services = services,
+            services = bootServices,
             defaultSourceProvider = { appPreferences.network.getDefaultNetworkSourceSync() },
             // v2.35.0 多码率：全局默认档位 + 单曲覆盖（两级模型，方案 §2.3）
             qualityTierProvider = { appPreferences.getQualityTierSync() },
@@ -402,10 +478,13 @@ val baiduOAuthClient: BaiduOAuthClient by lazy { BaiduOAuthClient(this, baiduOkH
         if (runBlocking { appPreferences.baidu.baiduConfigFlow.first() }.isActive) {
             networkMusicManager.registerService(baiduNetdiskService)
         }
-        // Jamendo：仅当已配置 client_id 时注册（未配置时 Jamendo Tab 显示引导）
-        if (appPreferences.network.getJamendoClientIdSync().isNotBlank()) {
+        // Jamendo：开关 **且** 已配置 client_id 才注册（方案 §7.5：生效 = 两条件）
+        if (bootSettings.jamendoEnabled && bootJamendoClientId.isNotBlank()) {
             networkMusicManager.registerService(jamendoService)
         }
+        // 默认源自愈（§7.6 第 2 条）：持久化值可能指向已关闭/已删除的源。
+        // 异步执行——启动路径不该为一次设置修复多等一轮 IO。
+        applicationScope.launch { repairDefaultNetworkSource() }
 
         // 歌单导入补全器：依赖 backendRegistry + networkMusicManager + appPreferences
         // 放在各后端注册完成后，供 PlayerViewModel / MainViewModel 播放时同步补全 stub
@@ -581,7 +660,9 @@ autoDownloadController = com.nasmusic.tv.backend.download.AutoDownloadController
             localMusicRepository = localMusicRepository,
             isTVDevice = isTVDevice,
             // M7（§5.2）：suspend provider，与同文件 appSettings.first() 既有写法一致
-            localMusicEnabled = { appPreferences.appSettings.first().localMusicEnabled }
+            localMusicEnabled = { appPreferences.appSettings.first().localMusicEnabled },
+            // v2.39.8：NAS 源开关同样实时读（不传构造期快照）
+            nasMusicEnabled = { appPreferences.appSettings.first().nasMusicEnabled }
         )
 
         // 启动时清理超过 30 天的搜索历史
@@ -622,8 +703,56 @@ autoDownloadController = com.nasmusic.tv.backend.download.AutoDownloadController
         if (cfg.isActive) {
             networkMusicManager.registerService(baiduNetdiskService)
         } else {
-            networkMusicManager.unregisterService("baidu")
+            networkMusicManager.unregisterService(AppPreferences.SOURCE_BAIDU)
         }
+    }
+
+    /**
+     * Jamendo 注册刷新：生效条件 = 开关开启 **且** client_id 非空（方案 §7.5）。
+     * 只改 client_id 而不刷新会留下「开关关了但服务还在」的不一致，故两者都走这里。
+     */
+    suspend fun refreshJamendoServiceRegistration() {
+        val settings = appPreferences.appSettings.first()
+        val clientId = appPreferences.jamendoClientIdFlow.first()
+        if (settings.jamendoEnabled && clientId.isNotBlank()) {
+            networkMusicManager.registerService(jamendoService)
+        } else {
+            networkMusicManager.unregisterService(AppPreferences.SOURCE_JAMENDO)
+        }
+    }
+
+    /**
+     * 默认源自愈（方案 §7.6 第 2 条）：持久化值可能指向已关闭 / 已注销的源，
+     * 此时按 [AppPreferences.NETWORK_SOURCE_PRIORITY] 切到第一个可用源。
+     *
+     * @return 发生切换时返回新默认源；无需切换或一个源都没有时返回 null（此时不写盘，
+     * 保留用户原选择——源重新开启后能自动恢复）。
+     */
+    suspend fun repairDefaultNetworkSource(): String? {
+        val registered = networkMusicManager.availableSources()
+        if (registered.isEmpty()) return null
+        val current = appPreferences.appSettings.first().defaultNetworkSource
+        if (current in registered) return null
+        val next = AppPreferences.NETWORK_SOURCE_PRIORITY.firstOrNull { it in registered }
+            ?: networkMusicManager.defaultSource
+        appPreferences.setDefaultNetworkSource(next)
+        AppLog.i("NasMusicApp", "repairDefaultNetworkSource: '$current' 不可用，已切到 '$next'")
+        return next
+    }
+
+    /**
+     * 洛雪运行时对齐：总开关 / 脚本列表 / 正文刷新后都要调一次（方案 §5.4.1.5）。
+     *
+     * ⚠️ 必须在**后台线程**：`LxHostPool.sync` 会建 QuickJS runtime 并执行脚本正文。
+     * 关掉总开关时**不是**拆掉增强层（`MetingApiService` 只构造一次、拆不掉），
+     * 而是清空可用脚本列表 —— 增强层随即逐次返回 null，退回原 302 链路。
+     */
+    internal suspend fun refreshLxRuntime() {
+        if (!appPreferences.appSettings.first().lxEnabled) {
+            lxHostPool.closeAll()
+            return
+        }
+        lxHostPool.sync(lxScriptRepo.snapshot())
     }
 
     /**
@@ -647,6 +776,8 @@ autoDownloadController = com.nasmusic.tv.backend.download.AutoDownloadController
 
     override fun onTerminate() {
         super.onTerminate()
+        // QuickJS runtime 持有 native 内存，GC 回收不到：退出前显式关掉
+        if (::lxHostPool.isInitialized) runCatching { lxHostPool.closeAll() }
         applicationScope.cancel()
     }
 }
