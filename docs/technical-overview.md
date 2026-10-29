@@ -18106,5 +18106,6 @@ class SourceVisibility(
 | `lintDebug` | ✅ 0 error（CI 为 blocking，不得引入新 error） |
 | 既有门禁回归 | ⚠️ 全量首跑 `2600 tests completed, 1 failed` ⇒ `LibrarySongsSourceWiringGateTest` 的 G2/G3 因合并点迁移而失效，**已按新链条改写**（不变量不变，见 §六 第 7 条），复跑全绿 |
 | 本地 release 出包（带 E51） | ✅ `assembleRelease "-Plofi.city=true"` → `app/build/outputs/apk/release/NASMusicTV-release-v2-39-9.apk`（**30.11 MB**）；`apksigner verify` V2 签名有效，证书 SHA-256 `24ed591a…b46dfe`（= `release-key.jks`，与既有 release 同钥）；`aapt2 dump badging` ⇒ `versionCode=194 / versionName=2.39.9`、`minSdk 22 / targetSdk 34`、三 ABI（arm64-v8a / armeabi-v7a / x86_64）；E51 覆盖层的各城市场景（Boston / Kyoto / Budapest / Hamburg / Chicago / BuenosAires / OldStateHouse / BostonGarden …）确认参与编译，dex 内可见 `LofiCityRenderer` / `CityRegistry` / 城市 id ⇒ **带真效果，非兜底假包**。⛔ 该包仅本机：E51 移植件不外发，不 push / 不 tag / 不发 release |
+| **追加轮次（chip 同步）的验证** | ✅ 在**干净 worktree**（基线 = `9bd35ec`，不含另一会话的在途代码）跑全量 `testDebugUnitTest --rerun-tasks` ⇒ **2603 例 / 0 失败**；⚠️ **`lintDebug` 本轮未取得结论** —— 主树被另一会话在途的 `visualizer/highway/**`（编译不过）打断，独立 worktree 的 lint 被中止（本会话主动终止构建）。release 构建中的 `lintVitalAnalyzeRelease`（fatal 级别子集）**通过**。⇒ 待另一会话的在途代码落地后补跑一次 `lintDebug` |
 
 ⚠️ **真机未跑**：方案 §7.3 的 V1–V19 需在电视（192.168.0.114）与手机上逐条复验，本轮只完成编译 + 单测 + lint 三项工程验证。
