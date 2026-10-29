@@ -216,6 +216,11 @@ fun LibraryScreen(
     onFilterQueryChange: (String) -> Unit = {},
     // 搜索来源点亮状态（由 ViewModel 驱动）
     enabledSearchSources: Set<MusicSourceType> = emptySet(),
+    /**
+     * 设置里**被关闭**的搜索源（方案 §5.3：源总开关与「点亮 chip」是**与**关系）。
+     * 这些源此刻不参与搜索 ⇒ chip 不能显示为点亮。
+     */
+    disabledSearchSources: Set<MusicSourceType> = emptySet(),
     onToggleSearchSource: (MusicSourceType) -> Unit = {},
     onEnableAllSearchSources: () -> Unit = {},
     // ── SEARCH Tab ──
@@ -658,6 +663,7 @@ fun LibraryScreen(
                         favoriteIds = favoriteIds,
                         queueSongIds = queueSongIds,
                         enabledSources = enabledSearchSources,
+                        disabledSearchSources = disabledSearchSources,
                         onToggleSource = onToggleSearchSource,
                         onEnableAllSources = onEnableAllSearchSources,
                         onPlaySong = onPlaySong,

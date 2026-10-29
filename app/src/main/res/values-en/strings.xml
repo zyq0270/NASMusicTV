@@ -869,6 +869,8 @@
     <string name="search_no_results">No results found</string>
     <string name="search_enter_keyword">Enter keywords to search music</string>
     <string name="search_filter_sources">Search Sources</string>
+    <string name="search_source_disabled_hint">%1$s is turned off in Settings → Music Sources</string>
+    <string name="search_source_disabled_badge">Off</string>
     <string name="search_all_sources">Enable All</string>
     <string name="search_artist_source_count">Network · %1$s %2$d/%3$d songs</string>
     <string name="search_artist_source_count_loaded">Network · %1$s %2$d songs (all loaded)</string>
@@ -1375,6 +1377,7 @@
     <string name="visualizer_theme_desert_smoke">Lone Smoke over the Dunes</string>
     <string name="visualizer_theme_dna">DNA double helix</string>
     <string name="visualizer_theme_ecg_wave">ECG wave</string>
+    <string name="visualizer_theme_highway">Highway</string>
     <string name="visualizer_theme_hypnotic_function">Hypnotic</string>
     <string name="visualizer_theme_light_beams">Light beams</string>
     <string name="visualizer_theme_liquid_grid">Liquid grid</string>

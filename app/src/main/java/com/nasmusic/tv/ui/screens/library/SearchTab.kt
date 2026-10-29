@@ -22,6 +22,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.tv.material3.ExperimentalTvMaterial3Api
@@ -69,6 +72,8 @@ fun SearchTab(
     onLoadMoreArtistSongs: () -> Unit = {},
     // 来源点亮（搜索范围选择）
     enabledSources: Set<MusicSourceType> = emptySet(),
+    // 设置 → 音乐源里已被关闭的来源（第三态：chip 灰显 + 「已关」小标，但**仍可聚焦、仍可点击**）
+    disabledSearchSources: Set<MusicSourceType> = emptySet(),
     onToggleSource: (MusicSourceType) -> Unit = {},
     onEnableAllSources: () -> Unit = {},
     onPlaySong: (Song) -> Unit,
@@ -133,6 +138,7 @@ fun SearchTab(
         // 来源点亮栏（决定搜索范围）
         SearchSourceBar(
             enabledSources = enabledSources,
+            disabledSearchSources = disabledSearchSources,
             onToggleSource = onToggleSource,
             onEnableAll = onEnableAllSources
         )
@@ -256,12 +262,38 @@ fun SearchTab(
  * 来源点亮栏（点亮模式）
  *
  * 决定"搜索哪些源"：点亮的源参与搜索，熄灭的源不参与。
- * 每个来源一个可切换 chip（点亮 = 亮色，熄灭 = 暗色），外加"全部点亮"按钮。
+ * 每个来源一个可切换 chip，外加"全部点亮"按钮。
+ *
+ * ### chip 的三种状态
+ * | 状态 | 视觉 | 点击后 |
+ * |---|---|---|
+ * | 设置里开着 · 已点亮 | `● 源名`，主色实底 | 熄灭该源 |
+ * | 设置里开着 · 未点亮 | `○ 源名`，主色淡底 | 点亮该源 |
+ * | **设置里已关闭** | `○ 源名 已关`，**中性灰**（比未点亮更弱）+ 次级小标 | 交由 ViewModel 处理（它会提示"该源已在设置中关闭"） |
+ *
+ * 三态**不是只靠颜色区分**：`●` / `○` 前缀区分点亮与熄灭，第三态在 `○` 之后追加
+ * 文字小标「已关」——完全去色（灰度屏 / 色觉障碍）也能读懂三者的区别。
+ *
+ * ### 为什么"设置关"的 chip 仍然可聚焦、仍然可点击
+ * - **必须可聚焦**：TV 上不可聚焦的项等于不存在——用户用遥控器走不到那个 chip，
+ *   也就永远不知道"这个源在设置里被关了"。灰显要靠"更弱的灰 + 小标"表达，
+ *   ⛔ 不能靠"不让点"（不可聚焦）来表达。
+ * - **必须可点击**：点击**不是**去切换点亮，而是把这次操作**转成一句提示**
+ *   （ViewModel 负责判定并提示"该源已在设置中关闭"）。若这里做成静默无效，
+ *   用户只会以为遥控器坏了。
+ *   ⛔ 本层**不自己判断要不要切换、也不自己弹提示**——判定与提示一律由 ViewModel 负责，
+ *   UI 只负责如实呈现三态。
+ *
+ * @param enabledSources 已点亮的来源（参与搜索）
+ * @param disabledSearchSources 在「设置 → 音乐源」里已被关闭的来源（第三态）
+ * @param onToggleSource 点击某个来源 chip（无论是否被设置关闭，都交由上层处理）
+ * @param onEnableAll 点击「全部点亮」
  */
 @OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
 private fun SearchSourceBar(
     enabledSources: Set<MusicSourceType>,
+    disabledSearchSources: Set<MusicSourceType> = emptySet(),
     onToggleSource: (MusicSourceType) -> Unit,
     onEnableAll: () -> Unit
 ) {
@@ -288,22 +320,73 @@ private fun SearchSourceBar(
             verticalAlignment = Alignment.CenterVertically
         ) {
         searchableSources.forEach { source ->
-            val isEnabled = source in enabledSources
+            // 第三态（设置里已关闭）**优先于**点亮状态：
+            // 该源被设置挡住时，即便它还留在 enabledSources 里，也不能显示成"可搜索"的实色 chip。
+            val isOffInSettings = source in disabledSearchSources
+            val isLit = source in enabledSources && !isOffInSettings
+            val sourceName = stringResource(source.displayNameRes)
+            val offBadge = stringResource(R.string.search_source_disabled_badge)
+            // 小标比源名更小一档（caption），弱于源名的 small
+            val badgeFontSize = FontSize.caption()
+            // 小标用"次级灰"：既弱于源名，又在"聚焦时的实灰底"上仍然读得清
+            val badgeColor = NasMusicColors.TextPrimary.copy(alpha = 0.6f)
+
             Spacer(modifier = Modifier.width(8.dp))
             FocusableSurface(
                 onClick = { onToggleSource(source) },
                 shape = RoundedCornerShape(8.dp),
                 focusedScale = 1.08f,
                 animationDurationMs = 150,
-                containerColor = if (isEnabled) NasMusicColors.Primary
-                else NasMusicColors.Primary.copy(alpha = 0.2f),
-                focusedContainerColor = NasMusicColors.Primary,
-                contentColor = if (isEnabled) NasMusicColors.OnPrimary
-                else NasMusicColors.TextPrimary,
-                focusedContentColor = NasMusicColors.OnPrimary
+                containerColor = when {
+                    // 设置开 · 已点亮 → 主色实底（既有行为，不改）
+                    isLit -> NasMusicColors.Primary
+                    // 设置开 · 未点亮 → 主色淡底（既有行为，不改）
+                    !isOffInSettings -> NasMusicColors.Primary.copy(alpha = 0.2f)
+                    // 设置关 → **中性灰**底（不用主色，一眼就和"未点亮"分开），且更弱
+                    else -> NasMusicColors.TextSecondary.copy(alpha = 0.15f)
+                },
+                focusedContainerColor = when {
+                    // 聚焦的"设置关"chip 用**实灰底**：与"聚焦的实色主底"（点亮态）一眼可分，
+                    // 又守住中性灰的"被关掉"语义；焦点环 + 缩放仍由 FocusableSurface 负责。
+                    isOffInSettings -> NasMusicColors.TextSecondary.copy(alpha = 0.45f)
+                    else -> NasMusicColors.Primary
+                },
+                contentColor = when {
+                    isLit -> NasMusicColors.OnPrimary
+                    // 设置关 → 源名也压暗一档（比未点亮更弱）
+                    isOffInSettings -> NasMusicColors.TextPrimary.copy(alpha = 0.75f)
+                    else -> NasMusicColors.TextPrimary
+                },
+                focusedContentColor = when {
+                    // 实灰底上用高亮文字，保证聚焦时依旧清晰可读
+                    isOffInSettings -> NasMusicColors.TextPrimary
+                    else -> NasMusicColors.OnPrimary
+                }
             ) {
+                // ⛔ 保持既有排版骨架：单个 Text 里 "● "/"○ " 前缀 + 源名。
+                // 第三态的小标用 AnnotatedString 的 span 追加在源名后面
+                // （不新增外层容器、不重排 chip 布局，小一号字号 + 次级灰与源名拉开层级）。
+                val chipText = remember(
+                    isLit,
+                    isOffInSettings,
+                    sourceName,
+                    offBadge,
+                    badgeFontSize,
+                    badgeColor
+                ) {
+                    buildAnnotatedString {
+                        append(if (isLit) "● " else "○ ")
+                        append(sourceName)
+                        if (isOffInSettings) {
+                            append("  ")
+                            withStyle(SpanStyle(fontSize = badgeFontSize, color = badgeColor)) {
+                                append(offBadge)
+                            }
+                        }
+                    }
+                }
                 Text(
-                    text = (if (isEnabled) "● " else "○ ") + stringResource(source.displayNameRes),
+                    text = chipText,
                     color = LocalFocusableContentColor.current,
                     fontSize = FontSize.small(),
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)

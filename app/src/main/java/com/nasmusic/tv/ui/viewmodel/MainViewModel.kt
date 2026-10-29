@@ -2364,7 +2364,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
 
                 // 构造一次聚合器（produce 内多次调用复用同一实例）
                 val aggregator = nasMusicApp.searchAggregator
-                val enabledSources = searchVM.enabledSearchSources.value
+                // 用**有效点亮集**（用户点亮 ∩ 设置里开着的源）——
+                // 设置里已关闭的源不能参与发现页搜索（方案 §5.3：chip 显示 / 结果 / 集合三者一致）
+                val enabledSources = searchVM.effectiveEnabledSearchSources.value
                 val baiduLabelCombo = buildLabelCombo()
 
                 val (_, shown) = pickBestFreshBatch(

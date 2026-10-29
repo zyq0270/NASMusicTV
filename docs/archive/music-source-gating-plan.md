@@ -741,3 +741,20 @@ fun setSourceEnabled(key, enabled) {
 1. 百度关源时复用「未登录」提示文案（实际是「已登录但关了源」），影响极小，未新增翻译资源。
 2. 关源瞬间停在专辑 / 艺术家详情页时，`_albumSongsCache` / `_artistDetailSongsCache` 的旧内容会短暂可见（这两个缓存不在 §3.3 处置表内）。
 3. `clearSourceScopedCaches` 只在 `setSourceEnabled` 这一个入口被调用 —— 绕过它直接改 `appSettings.nasMusicEnabled` 会导致清缓存不发生。
+
+### 10.5 追加轮次：搜索页来源 chip 与总开关同步（第二轮追加）
+
+**发现**：设置里关掉某个源后，曲库 → 搜索页的来源 chip 仍显示「● 点亮」，而该源**实际不参与搜索**（聚合器按可见性取交集）⇒ chip 对用户说谎；且「全部点亮」会把已关闭的源点亮回来 —— **违反本方案 §5.3**（「⛔ 不要让『全部点亮』把已关闭的源点亮回来」），是首轮实施的一处**漏项**（首轮只保证了结果侧正确，没管 chip 的显示语义）。
+
+**修法（所有者拍板：灰显 + 「已关」标 + 点击提示）**：把「点亮」拆成两个概念 ——
+
+| 概念 | 含义 | 用途 |
+|---|---|---|
+| `_enabledSearchSources`（用户的心意） | 可**含**被关掉的源，惰性保留 | 用户在设置里重新开启该源时，chip 自动回到点亮态 |
+| `effectiveEnabledSearchSources`（有效点亮集） | 点亮 ∩ 设置里开着的源 | **chip 显示 + 聚合器入参**，与聚合器内部的 `SourceVisibility` 兜底同源 |
+
+- `SearchViewModel.disabledSearchSources`：由 `prefs.appSettings` + `baiduConfigFlow` + `jamendoClientIdFlow` **每次发射时重建** `SourceVisibility` 快照算出（构造期快照会停在旧值）。
+- chip 三态：设置开·已点亮（主色实底）／设置开·未点亮（主色淡底）／**设置关**（**中性灰底** + caption 档「已关」小标）。
+- ⚠️ **灰显 ≠ 不可点**：TV 上不可聚焦等于不存在 ⇒ 设置关的 chip **仍可聚焦、仍可点击**，点击由 VM 转成「该源已在设置中关闭」的提示（静默无效会让用户以为遥控器坏了）。
+- 「全部点亮」目标集改为 `默认集 − 已关闭集`。
+- 新增门禁 `SearchSourceDisabledStateGateTest`（G1–G3 + 负向自证）。

@@ -85,6 +85,8 @@ internal fun LibraryBranch(
                     val libraryActiveTab by viewModel.libraryActiveTab.collectAsState()
                     val librarySearchKeyword by viewModel.librarySearchKeyword.collectAsState()
                     val enabledSearchSources by viewModel.searchVM.enabledSearchSources.collectAsState()
+                    // 方案 §5.3：设置里被关闭的搜索源（此刻不参与搜索）—— chip 需据此显示为「已关」
+                    val disabledSearchSources by viewModel.searchVM.disabledSearchSources.collectAsState()
                     // v2.39.8（方案 §7.7 第 3 条）：全部网络音乐源关闭时搜索页显示引导而非「无结果」
                     val noNetworkSourceEnabled by viewModel.noNetworkSourceEnabled.collectAsState()
                     // 艺人全量方案 §3.5/§3.6：搜索页打标集合 + 艺人续页状态
@@ -189,6 +191,7 @@ val discoverCurrentDimensionValues = remember(browseSelections) {
                         filterQuery = librarySearchKeyword,
                         onFilterQueryChange = { keyword -> viewModel.setLibrarySearchKeyword(keyword) },
                         enabledSearchSources = enabledSearchSources,
+                        disabledSearchSources = disabledSearchSources,
                         onToggleSearchSource = { source -> viewModel.searchVM.toggleSearchSource(source) },
                         onEnableAllSearchSources = { viewModel.searchVM.enableAllSearchSources() },
                         // ── SEARCH Tab ──

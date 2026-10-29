@@ -909,6 +909,8 @@
     <string name="search_no_results">未找到相关结果</string>
     <string name="search_enter_keyword">输入关键词搜索音乐</string>
     <string name="search_filter_sources">搜索来源</string>
+    <string name="search_source_disabled_hint">%1$s 已在「设置 → 音乐来源」中关闭</string>
+    <string name="search_source_disabled_badge">已关</string>
     <string name="search_all_sources">全部点亮</string>
     <string name="search_artist_source_count">网络音乐 · %1$s %2$d/%3$d 首</string>
     <string name="search_artist_source_count_loaded">网络音乐 · %1$s %2$d 首（已全部加载）</string>
@@ -1386,6 +1388,7 @@
     <string name="visualizer_theme_desert_smoke">大漠孤烟</string>
     <string name="visualizer_theme_dna">DNA 双螺旋</string>
     <string name="visualizer_theme_ecg_wave">心跳</string>
+    <string name="visualizer_theme_highway">厅野公路</string>
     <string name="visualizer_theme_hypnotic_function">催眠</string>
     <string name="visualizer_theme_light_beams">光轴</string>
     <string name="visualizer_theme_liquid_grid">液态网格</string>

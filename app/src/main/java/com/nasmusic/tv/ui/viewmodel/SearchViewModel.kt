@@ -9,6 +9,7 @@ import com.nasmusic.tv.backend.BackendRegistry
 import com.nasmusic.tv.backend.SearchAggregator
 import com.nasmusic.tv.backend.SearchType
 import com.nasmusic.tv.backend.FilterMode
+import com.nasmusic.tv.backend.SourceVisibility
 import com.nasmusic.tv.backend.network.NetworkArtistExpansion
 import com.nasmusic.tv.data.model.MusicSourceType
 import com.nasmusic.tv.data.model.Song
@@ -16,8 +17,11 @@ import com.nasmusic.tv.data.model.SongsPagingState
 import com.nasmusic.tv.data.model.UiState
 import com.nasmusic.tv.util.AppLog
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 /**
@@ -39,6 +43,44 @@ class SearchViewModel(
     // --- 搜索来源点亮状态（跨导航记忆，决定搜索哪些源） ---
     private val _enabledSearchSources = MutableStateFlow(MusicSourceType.DEFAULT_SEARCH_SOURCES)
     val enabledSearchSources: StateFlow<Set<MusicSourceType>> = _enabledSearchSources.asStateFlow()
+
+    /**
+     * 设置里**被关闭**的搜索源（= 此刻真正不参与搜索的源）。
+     *
+     * ⭐ 判据必须与聚合器内部**同一份语义**（[SourceVisibility]）：聚合器会按可见性取交集，
+     *    chip 若不同步就会「显示点亮、实际搜不到」= 对用户说谎。
+     *    聚合器各分支的判据：NAS → `nasMusicEnabled()`；LOCAL → `localMusicEnabled()`；
+     *    BAIDU/JAMENDO/NETWORK_MUSIC → [SourceVisibility.isVisible]。
+     *
+     * ⚠️ 这里每次设置流发射时**重建**一个 SourceVisibility 快照（不是构造期快照），
+     *    所以开关一变就会重算，不会停在旧值。
+     */
+    val disabledSearchSources: StateFlow<Set<MusicSourceType>> = combine(
+        prefs.appSettings,
+        prefs.baidu.baiduConfigFlow,
+        prefs.network.jamendoClientIdFlow,
+    ) { s, baiduCfg, jamendoClientId ->
+        val visibility = SourceVisibility(
+            nasEnabled = { s.nasMusicEnabled },
+            localEnabled = { s.localMusicEnabled },
+            metingEnabled = { s.metingEnabled },
+            baiduActive = { baiduCfg.isActive },
+            jamendoEnabled = { s.jamendoEnabled },
+            jamendoClientId = { jamendoClientId },
+        )
+        MusicSourceType.DEFAULT_SEARCH_SOURCES.filterNot { visibility.isVisible(it) }.toSet()
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
+
+    /**
+     * **有效点亮集** = 用户点亮集 ∩ 设置里开着的源。
+     *
+     * ⛔ 与 [enabledSearchSources] 的区别：后者是「用户的心意」（可以**含**被关掉的源，惰性保留，
+     *    这样用户在设置里重新开启该源时，chip 会自动回到点亮态）；
+     *    前者才是「此刻真的在参与搜索的源」——**chip 显示与聚合器入参都用它**。
+     */
+    val effectiveEnabledSearchSources: StateFlow<Set<MusicSourceType>> =
+        combine(_enabledSearchSources, disabledSearchSources) { lit, disabled -> lit - disabled }
+            .stateIn(viewModelScope, SharingStarted.Eagerly, MusicSourceType.DEFAULT_SEARCH_SOURCES)
 
     // --- 按需加载：搜索结果（服务端搜索）---
     private val _searchResults = MutableStateFlow<UiState<List<Song>>>(UiState.Success(emptyList()))
@@ -120,6 +162,15 @@ class SearchViewModel(
 
     /** 切换某来源的点亮/熄灭状态 */
     fun toggleSearchSource(source: MusicSourceType) {
+        // 设置里已关闭的源：chip 仍可点，但**不改变点亮状态**（点了也搜不到，静默无效会让人困惑）
+        // ⇒ 给出可执行的提示。
+        if (source in disabledSearchSources.value) {
+            val app = getApplication<Application>()
+            showMessage?.invoke(
+                app.getString(R.string.search_source_disabled_hint, app.getString(source.displayNameRes))
+            )
+            return
+        }
         val current = _enabledSearchSources.value.toMutableSet()
         if (source in current) current.remove(source) else current.add(source)
         _enabledSearchSources.value = current
@@ -128,11 +179,22 @@ class SearchViewModel(
         if (kw.isNotBlank()) searchSongsOnServer(kw, force = true)
     }
 
-    /** 全部点亮（回到默认状态） */
+    /**
+     * 全部点亮（回到默认状态）。
+     *
+     * ⭐ **目标集 = 默认搜索源 ∩ 当前设置里开着的源**（方案 §5.3）：
+     *    设置里已关闭的源**不得**被点亮回来 —— 否则 chip 显示「点亮」而实际搜不到 = 对用户说谎。
+     *
+     * ⚠️ **有意取舍**：用户在设置里重新开启某个源后，该源**需要再点一次「全部点亮」**才会回到点亮态。
+     *    这是方案 §5.3 的明文要求（「全部点亮」不能点亮已关闭的源），
+     *    而 [_enabledSearchSources] 仍**惰性保留**用户的心意（该源若此前已点亮，重开即恢复点亮；
+     *    若此前被用户手动熄灭，则维持熄灭）。
+     */
     fun enableAllSearchSources() {
-        // 已是全部点亮则跳过重搜，避免冗余网络请求
-        if (_enabledSearchSources.value == MusicSourceType.DEFAULT_SEARCH_SOURCES) return
-        _enabledSearchSources.value = MusicSourceType.DEFAULT_SEARCH_SOURCES
+        val target = MusicSourceType.DEFAULT_SEARCH_SOURCES - disabledSearchSources.value
+        // 已是目标则跳过重搜，避免冗余网络请求
+        if (_enabledSearchSources.value == target) return
+        _enabledSearchSources.value = target
         // 有活动关键词时按全部来源重新搜索（force 跳过缓存）
         val kw = librarySearchKeywordProvider()
         if (kw.isNotBlank()) searchSongsOnServer(kw, force = true)
@@ -168,13 +230,14 @@ class SearchViewModel(
         _searchResults.value = UiState.Loading
         viewModelScope.launch {
             // 跨源融合搜索：NAS + 网络音乐 + 百度网盘 + Jamendo + 本地 并行搜索，合并去重
-            // 按当前点亮来源搜索（点亮模式）
+            // 按**有效点亮集**搜索（点亮模式 ∩ 设置里开着的源）——
+            // 与聚合器内部的 SourceVisibility 兜底取同一语义 ⇒ chip 显示、结果、集合三者一致。
             try {
                 // 拼音搜索时需要本地缓存：NAS 歌曲、本地音乐、百度网盘索引
                 // 服务端不认拼音关键词，改用客户端 PinyinUtils.matches() 过滤
                 val result = searchAggregator.search(
                     query,
-                    sources = _enabledSearchSources.value,
+                    sources = effectiveEnabledSearchSources.value,
                     filterMode = FilterMode.PRECISE,
                     searchType = currentSearchType,
                     nasLocalSongs = nasLocalSongsProvider(),
@@ -190,7 +253,10 @@ class SearchViewModel(
                 // C1 闸门：网络源被熄灭、或本词没有 Meting 行 → **完全跳过展开**
                 // （expansion 会 reset，unplayableIds/paging 停在复位态，一个远程请求都不发）。
                 // 用户显式过滤掉的源不得被任何路径塞回结果。
-                val networkSourceLit = MusicSourceType.NETWORK_MUSIC in _enabledSearchSources.value
+                // ⚠️ 用**有效点亮集**（点亮 ∩ 设置里开着的源），与聚合器入参同源：
+                // 设置里关掉 Meting 时，这一层也必须判成「未点亮」，否则语义分叉
+                // （实际无害：关掉 Meting 后聚合器不返回 Meting 歌 ⇒ metingPart 为空 ⇒ 展开自动跳过）。
+                val networkSourceLit = MusicSourceType.NETWORK_MUSIC in effectiveEnabledSearchSources.value
                 val skipExpansion = !networkSourceLit || metingPart.isEmpty()
                 val expanded: List<Song> = if (skipExpansion) {
                     artistExpansion.reset()

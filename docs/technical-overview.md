@@ -18078,12 +18078,19 @@ class SourceVisibility(
 5. **`loadAlbumSongs` 与 `playAlbumMultiSource` 抽共用私有 helper**（`collectAlbumSongsMultiSource`）：保证两条路径的门控判据**逐字一致**，避免两套判定漂移。
 6. **Jamendo 三入口额外清空 `_jamendoState`**：只短路不清理的话，关 Jamendo 前的内容会继续显示（V9d 要求「不请求、**不显示**」）。
 7. **既有门禁 `LibrarySongsSourceWiringGateTest` 随链条迁移改写**：它钉的是「歌曲 Tab 必须含 NAS + 本地 + 百度三源」这条不变量，原断言点落在 `LibraryBranch` 的 `remember` 合并块上。合并迁入 VM 后该断言**必然失败**（全量单测实测：`2600 tests completed, 1 failed`）⇒ 把 G2/G3 改钉到新链条：`MainViewModel.visibleSongsPaging` 的三个输入（`_songsPaging` / `visibleLocalSongs` / `_baiduIndexedSongs`）+ `mergeLibrarySongs` 的三个实参 + `totalCount` 计入本地/百度 + `LibraryBranch` 消费 `viewModel.visibleSongsPaging` **且不得再出现第二处合并**。**被保护的不变量没有变**，只是断言点从 UI 层搬到 VM 合成层；六条负向自证全部保留并按新链条重写。
+8. **搜索页来源 chip 与音乐源总开关同步（第二轮追加）**：设置里关掉某个源后，曲库 → 搜索页的来源 chip 仍显示「● 点亮」，而该源实际**不参与搜索**（聚合器按可见性取交集）⇒ chip 对用户说谎；且「全部点亮」会把已关闭的源点亮回来（违反方案 §5.3）。⇒ 把「点亮」拆成两个概念：
+   - **`_enabledSearchSources`（用户的心意）** —— 可以**含**被关掉的源（惰性保留），这样用户在设置里重新开启该源时 chip 自动回到点亮态；
+   - **`effectiveEnabledSearchSources`（有效点亮集 = 点亮 ∩ 设置里开着的源）** —— **chip 显示与聚合器入参都用它**，二者与聚合器内部的 `SourceVisibility` 兜底取同一语义。
 
-#### 七、遗留（3 条）
+   `SearchViewModel.disabledSearchSources` 由 `prefs.appSettings` + `baiduConfigFlow` + `jamendoClientIdFlow` **每次发射时重建** `SourceVisibility` 快照算出（不是构造期快照 ⇒ 开关一变即重算）。chip 呈现三态：设置开·已点亮（主色实底）／设置开·未点亮（主色淡底）／**设置关**（**中性灰底** + caption 档「已关」小标，**仍可聚焦、仍可点击**——TV 上不可聚焦等于不存在，点击由 VM 转成「该源已在设置中关闭」的提示而非静默无效）。「全部点亮」的目标集改为 `默认集 − 已关闭集`。新增门禁 `SearchSourceDisabledStateGateTest`（G1–G3 + 负向自证）。
+9. **既有门禁 `ArtistSongsPagingTest` 的 C1 源码门随「有效点亮集」迁移改写**：它原本钉 `MusicSourceType.NETWORK_MUSIC in _enabledSearchSources.value` 的**字面形状**（意图是「熄灭 NETWORK_MUSIC 后不得被任何路径复活，VM 必须读点亮集合」）。改用 `effectiveEnabledSearchSources` 后该字面断言失效（实测 `2603 tests completed, 1 failed`）⇒ 改钉新形状**并加强不变量**：除断言 VM 读 `effectiveEnabledSearchSources.value`，还新增一条断言「有效点亮集必须由 `combine(_enabledSearchSources, disabledSearchSources)` 派生」——用户手动熄灭的源因此在任何路径都不可能被复活（比原先的单字符串检查更强）。
+
+#### 七、遗留（4 条）
 
 1. **百度关源时的提示文案偏**：复用既有的「百度网盘未登录，请前往 设置 → 网盘 开启并登录」，而实际场景是「已登录但关了源」。影响极小（该文案本身引导用户去设置页，方向不偏），未新增翻译资源。
 2. **关源瞬间停在专辑 / 艺术家详情页时**，`_albumSongsCache` / `_artistDetailSongsCache` 的旧内容会短暂可见（这两个缓存不在处置表内；设置页与详情页不同屏，实际触发概率极低）。
 3. **`clearSourceScopedCaches` 只在 `setSourceEnabled` 这一个入口被调用** —— 将来若有代码绕过它直接改 `appSettings.nasMusicEnabled`，清缓存不会发生。
+4. **「已关源」的初始值窗口**：`disabledSearchSources` 初值是 `emptySet()`、`effectiveEnabledSearchSources` 初值是 `DEFAULT_SEARCH_SOURCES` ⇒ 在 DataStore 首次发射前的**极短**窗口内，被关掉的源仍算「开着」。实际影响：开机后立刻进搜索页时，chip 可能短暂显示为点亮（该源的搜索结果仍被聚合器的 `SourceVisibility` 兜底挡住，**不会漏内容**）。未加额外缓冲——该窗口远短于一次冷启动的数据加载。
 
 #### 八、文件清单
 
