@@ -33,6 +33,19 @@ class NetworkMusicViewModel(app: Application) : AndroidViewModel(app) {
     private val baiduApi: BaiduPanApi get() = nasMusicApp.baiduPanApi
     private val baiduIndexCache: BaiduFileIndexCache get() = nasMusicApp.baiduFileIndexCache
 
+    /**
+     * ⭐ 百度网盘源当前是否「生效」（音乐源总开关的同步判据）。
+     *
+     * 取法沿用本类既有的 `prefs`（= `nasMusicApp.appPreferences`）：
+     * `prefs.getBaiduActiveSync()`（`AppPreferences.kt:1376`）——它是
+     * `CloudDriveConfig.isActive`（`enabled && tokens != null`，即**启用 且 已登录**）
+     * 的 `@Volatile` 同步镜像，**与 `NasMusicApp` 里 `registerService` 的判据完全一致**
+     * （`NasMusicApp.kt:478` 用的是同一个 `isActive`）。
+     * ⚠️ 只回答「用户把百度源开着吗」，**不回答**「它能不能用」——后者是 services map 的事
+     *    （与 `AppPreferences.isSourceEnabledSync` 的 KDoc 同一纪律）。
+     */
+    private val baiduSourceActive: Boolean get() = prefs.getBaiduActiveSync()
+
     /** 加入队列动作（经 MainViewModel 路由到 PlayerViewModel） */
     var onAddToQueue: ((List<Song>) -> Unit)? = null
     /** 播放动作（经事件路由到 PlayerViewModel） */
@@ -521,9 +534,20 @@ class NetworkMusicViewModel(app: Application) : AndroidViewModel(app) {
      * 播放当前目录（含子目录）的全部音频。
      *
      * 优先走本地索引（毫秒级）；索引未覆盖/缺失时回退递归 BFS 扫描网盘。
+     *
+     * ⭐ 音乐源总开关（方案 §3.2.1 第 20 项 / §5.2 通路 D）：百度源未生效
+     * （未启用或未登录）⇒ **不请求、不播放**，直接返回。
+     * 为什么必须在这里挡：百度共**四条**通路（方案 §5.2），A（`NetworkMusicManager.search`
+     * 走 services map）已随 `unregisterService` 失效，B（`SearchAggregator`）与
+     * C（`baiduIndexCache` 本地索引）在别的 lane 收口，**唯独本条（网盘目录播放）此前完全没被门控**。
      * @param onPlayAll 收集完成后回调（播放队列由调用方导航到 NowPlaying）
      */
     fun playAllNetdiskDir(dir: String, onPlayAll: (List<Song>) -> Unit) {
+        if (!baiduSourceActive) {
+            AppLog.i("NetworkMusicViewModel", "playAllNetdiskDir: 百度源未生效（未启用或未登录），已跳过播放")
+            showMessage?.invoke(getApplication<Application>().getString(R.string.netdisk_status_baidu_not_logged_in))
+            return
+        }
         viewModelScope.launch {
             val songs = collectAudioInDir(dir)
             if (songs.isEmpty()) {
@@ -534,8 +558,14 @@ class NetworkMusicViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** 收集目录（含子目录）内全部音频：优先索引，回退 API 递归扫描 */
+    /**
+     * 收集目录（含子目录）内全部音频：优先索引，回退 API 递归扫描。
+     *
+     * ⭐ 与 [playAllNetdiskDir] 同判据：百度源未生效 ⇒ 直接返回空列表
+     * （**连索引都不读、网盘都不递归**），保证关源后这条路一个请求都不发。
+     */
     private suspend fun collectAudioInDir(dir: String): List<Song> {
+        if (!baiduSourceActive) return emptyList()
         val base = dir.trimEnd('/')
         val index = baiduIndexCache.load()
         val indexed = index?.entries?.filter {

@@ -15,6 +15,7 @@ import com.nasmusic.tv.backend.BackendAdapter
 import com.nasmusic.tv.backend.FilterMode
 import com.nasmusic.tv.backend.SearchType
 import com.nasmusic.tv.backend.SearchAggregator
+import com.nasmusic.tv.backend.SourceVisibility
 import com.nasmusic.tv.backend.download.AutoDownloadController
 import com.nasmusic.tv.backend.download.DownloadStats
 import com.nasmusic.tv.backend.download.SongDownloadManager
@@ -62,6 +63,7 @@ import com.nasmusic.tv.data.model.Playlist
 import com.nasmusic.tv.data.model.EqualizerPreset
 import com.nasmusic.tv.data.model.MusicSource
 import com.nasmusic.tv.data.model.MusicSourceType
+import com.nasmusic.tv.data.model.sourceType
 import com.nasmusic.tv.data.model.MvInfo
 import com.nasmusic.tv.data.model.MvCandidate
 import com.nasmusic.tv.data.model.MvSearchResult
@@ -146,6 +148,17 @@ enum class LocalMusicNotice(@StringRes val messageRes: Int) {
 }
 
 /**
+ * 等源开关的**同步镜像**收敛的最长等待（毫秒）。
+ *
+ * ⚠️ 可见性判定读的是 `AppPreferences` 的 `@Volatile` 镜像，镜像是 DataStore collector
+ * **异步**写的 ⇒ `dataStore.edit{}` 返回时镜像未必已更新（方案 §5.9）。
+ */
+private const val SOURCE_MIRROR_AWAIT_TIMEOUT_MS = 1000L
+
+/** 等镜像收敛时的轮询间隔（毫秒）。 */
+private const val SOURCE_MIRROR_AWAIT_POLL_MS = 25L
+
+/**
  * 应用主 ViewModel
  * 管理播放器、歌曲队列、曲库数据、设置等
  */
@@ -157,6 +170,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
     val prefs = nasMusicApp.appPreferences
     /** 搜索历史（最近输入 + 最多搜索） */
     val searchHistory = prefs.history.searchHistory
+
+    /**
+     * 音乐源可见性判定（方案 §3.1 · 唯一真相源）。
+     *
+     * ⛔ 只回答「用户开没开」，不回答「它能不能用」—— 后者是 `backendRegistry` /
+     * `NetworkMusicManager.services` 的事，两者混在一起会让「NAS 未连接」被当成
+     * 「NAS 被关掉」（用户明明开着的源整片消失）。
+     *
+     * 供 UI 侧合成点使用（曲库 / 「我的」页等「关掉就不出现」的地方）。
+     */
+    val sourceVisibility: SourceVisibility get() = nasMusicApp.sourceVisibility
 
     // ⛔⛔ 以下三个 `by lazy` 声明**必须留在类顶部**（v2.39.3 补丁，2026-10-20）。
     //
@@ -299,6 +323,25 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
 
     /**
      * 加载首页仪表盘数据
+     *
+     * ### ⚠️ NAS 关时是「换数据源」，不是「整段跳过」（方案 §3.2.3）
+     *
+     * `adapter == null`（「没连 NAS」）的早退**保留**——那是既有语义。
+     * 但 **NAS 源被用户关掉**时**不能**照抄这个写法：照抄会让首页「最新添加专辑」
+     * 「收藏歌曲」**保留上一次的 NAS 内容不刷新** ⇒ 直接违反 S1（关掉就不出现）。
+     *
+     * ### 四个 total 的口径（S2：统计数字**不因关源而变**）
+     *
+     * | 字段 | 取值来源 | 关 NAS 时 |
+     * |---|---|---|
+     * | `totalAlbums` | `_albums`（**原始库存流**） | 保持（库存流永不清空） |
+     * | `totalSongs` | `_songs`（**原始库存流**） | 保持 |
+     * | `totalArtists` | `_artists`（**原始库存流**） | 保持 |
+     * | `totalPlaylists` | 上一次的值（**不发请求**） | 保持（唯一例外） |
+     *
+     * `totalPlaylists` 是唯一需要特判的：NAS 关时**不发 `adapter.getPlaylists()` 请求**
+     * （省一次请求），此时沿用 `_homeDashboardData.value.totalPlaylists`，
+     * ⛔ **不要写 0**（写了就是「扣减」，与 S2 冲突）。
      */
     fun loadHomeDashboard() {
         viewModelScope.launch {
@@ -308,26 +351,45 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
                 return@launch
             }
             try {
+                // ⚠️ 三个 total 读**原始库存流**（_albums/_songs/_artists）——它们永不清空，
+                //    所以关源后数字天然保持关前值（S2），⛔ 不要按可见性过滤它们。
                 val albums = _albums.value.dataOrNull() ?: emptyList()
                 val songs = _songs.value.dataOrNull() ?: emptyList()
                 val artists = _artists.value.dataOrNull() ?: emptyList()
-                val playlists = adapter.getPlaylists()
+                val nasVisible = sourceVisibility.isVisible(MusicSourceType.NAS)
+
+                // totalPlaylists：唯一例外 —— NAS 关时不发 getPlaylists() 请求，沿用上一次的值
+                val totalPlaylists = if (nasVisible) {
+                    adapter.getPlaylists().size
+                } else {
+                    _homeDashboardData.value.totalPlaylists
+                }
 
                 // 最新添加专辑（按年份降序排列）
-                val recentlyAdded = albums
-                    .filter { it.year != null }
-                    .sortedByDescending { it.year }
-                    .take(12)
-                    .ifEmpty { albums.take(12) }
+                // ⚠️ NAS 关 ⇒ 置空（S1：轮播不能残留 NAS 内容）
+                val recentlyAdded = if (nasVisible) {
+                    albums
+                        .filter { it.year != null }
+                        .sortedByDescending { it.year }
+                        .take(12)
+                        .ifEmpty { albums.take(12) }
+                } else {
+                    emptyList()
+                }
 
-                // 收藏歌曲
-                val favoriteSongs = _favoriteSongs.value.dataOrNull() ?: emptyList()
+                // 收藏歌曲：NAS 关 ⇒ 置空；再按可见性过滤一次（双重保险）
+                val favoriteSongs = if (nasVisible) {
+                    (_favoriteSongs.value.dataOrNull() ?: emptyList())
+                        .filter { sourceVisibility.isVisible(it) }
+                } else {
+                    emptyList()
+                }
 
                 _homeDashboardData.value = HomeDashboardData(
                     totalAlbums = albums.size,
                     totalSongs = songs.size,
                     totalArtists = artists.size,
-                    totalPlaylists = playlists.size,
+                    totalPlaylists = totalPlaylists,
                     recentlyAddedAlbums = recentlyAdded,
                     favoriteSongs = favoriteSongs.take(20)
                 )
@@ -399,6 +461,78 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
         combine(_localSongs, _localMusicEnabled) { songs, enabled ->
             if (enabled) songs else songs.filter { it.storageType == "DOWNLOAD" }
         }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    /**
+     * 源可见性变更的**重算信号**（方案 §5.10）。
+     *
+     * ⚠️ 可见性本身读的是 `AppPreferences` 的 `@Volatile` **同步镜像**，**不是 Flow** ⇒
+     * 开关翻转时**不会**自动触发任何下游流重算。这正是 v2 的 G1b 失败根因：
+     * UI 层的 `remember(songsPaging, localSongsList, baiduSongsList)` 三个键在开关翻转时
+     * 都不变 ⇒ 永不重算 ⇒ NAS 段永远不会被置空。
+     *
+     * ⇒ 凡是「可见性影响结果」的派生数据，一律挂这个信号；
+     * `bumpSourceRevision()` 在开关翻转时调用（方案 §3.5）。
+     */
+    private val _sourceRevision = MutableStateFlow(0L)
+
+    /** 递增源可见性重算信号（方案 §5.10）。 */
+    private fun bumpSourceRevision() {
+        _sourceRevision.value += 1
+    }
+
+    /**
+     * **可见歌曲分页**（方案 §3.3 G1 · 曲库「歌曲」Tab 的可见集）。
+     *
+     * = NAS 分页 + 本地歌曲 + 百度索引歌曲，按可见性过滤后合并。
+     *
+     * ### 为什么在 VM 侧合成（而不是 UI 侧 `remember`）
+     *
+     * v2 把合并钉在 `LibraryBranch.kt:61-71` 的 `remember(songsPaging, localSongsList,
+     * baiduSongsList)` —— 开关翻转时三个键都不变 ⇒ `remember` 永不重算 ⇒ NAS 段永远不会被
+     * 置空（方案 §3.3 G1 的「⭐ 关键改动」）。合并必须搬到 VM 侧。
+     *
+     * ### 各段的可见性口径
+     *
+     * | 段 | 可见时 | 不可见时 |
+     * |---|---|---|
+     * | NAS | `paging.songs` 原样 | **空**（关 NAS ⇒ NAS 歌一条都不列，但本地/百度照旧） |
+     * | 本地 | `visibleLocalSongs`（已含「关 = 只显示已下载」语义） | 同左 |
+     * | 百度 | `_baiduIndexedSongs` 原样 | **空**（关百度 ⇒ 百度条目一条都不列） |
+     *
+     * ### `totalCount` 口径
+     *
+     * ⚠️ **NAS 关时 NAS 的 `totalCount` 不参与** —— 否则会显示一个不存在的「N 首歌」
+     * （列表里已经没有 NAS 歌了，数字却还按全量算）。
+     *
+     * ⛔ 不要照抄 `LibraryBranch.kt:61-71` 那个「本地与百度都为空就直接返回 paging」的早退分支
+     * —— 那正是「NAS 关时 totalCount 仍是 NAS 旧值」的来源。
+     */
+    val visibleSongsPaging: StateFlow<SongsPagingState> =
+        combine(
+            _songsPaging,
+            visibleLocalSongs,
+            _baiduIndexedSongs,
+            _sourceRevision
+        ) { paging, local, baidu, _ ->
+            val nasVisible = sourceVisibility.isVisible(MusicSourceType.NAS)
+            val baiduVisible = sourceVisibility.isVisible(MusicSourceType.BAIDU_PAN)
+            val nasSongs = if (nasVisible) paging.songs else emptyList()
+            // 本地段：visibleLocalSongs 已实现「关 = 只显示已下载」，
+            // 这里只做**归属兜底**（⛔ 不得把已下载歌曲滤掉，见 `SourceVisibility` 的 DOWNLOAD 分支）。
+            val localSongs = local.filter { sourceVisibility.isVisible(it) }
+            val baiduSongs = if (baiduVisible) baidu else emptyList()
+            val merged = MusicMerger.mergeLibrarySongs(
+                nasSongs = nasSongs,
+                localSongs = localSongs,
+                baiduSongs = baiduSongs
+            )
+            paging.copy(
+                songs = merged,
+                totalCount = (if (nasVisible) paging.totalCount else 0) +
+                    localSongs.size + baiduSongs.size
+            )
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), _songsPaging.value)
+
 
     // --- 本地音乐权限接线（§5.5，照抄照片墙模板）---
 
@@ -688,6 +822,153 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
                         .getString(R.string.settings_source_default_switched, sourceTitle(switched))
                 )
             }
+            // 源可见性变了 ⇒ 递增重算信号，让依赖可见性的派生流（visibleSongsPaging 等）重算。
+            // ⚠️ 可见性读的是 @Volatile **同步镜像**、不是 Flow ⇒ 翻转时不会自动触发下游重算
+            // （方案 §5.10：凡是「可见性影响结果」的派生数据，一律挂 sourceRevision）。
+            //
+            // ⛔ 必须**先等镜像收敛再 bump**：镜像是 DataStore collector 异步写的，
+            // `dataStore.edit{}` 返回时镜像未必已更新 ⇒ 此刻就 bump 会让派生流拿**旧**可见性
+            // 重算，而此后没有新的上游发射 ⇒ 派生流停在旧值上（用户看到「开关没生效」）。
+            //
+            // 单独起协程：等待**不得**阻塞上面的默认源自愈与提示。
+            viewModelScope.launch {
+                awaitSourceMirror(key, enabled)
+                bumpSourceRevision()
+                if (!enabled) {
+                    // ================= 关源（方案 §3.5）=================
+                    // 1) 清该源独占缓存 —— **唯一**清理入口（见 clearSourceScopedCaches）
+                    clearSourceScopedCaches(key)
+                    // 2) 重算合并数据：专辑 / 艺术家是**合成期**数据，其可见性由 updateMergedData 判，
+                    //    不随原始库存流变化 ⇒ 关源后必须显式重算，否则 NAS 专辑仍留在列表里。
+                    updateMergedData()
+                    // 3) 首页：轮播/收藏按源清空（S1），四个统计读原始库存流保持不变（S2）
+                    loadHomeDashboard()
+                    // 4) 历史按 song.sourceType 过滤（只过滤展示，不删库，S3）
+                    loadRecentSongs(showLoading = false)
+                    // 5) 智能电台批次：关源**前**已缓存的批次里的该源歌也要被滤掉（方案 §3.3 G1c）
+                    _smartRadioBatch.value = _smartRadioBatch.value.filter { sourceVisibility.isVisible(it) }
+                } else {
+                    // ================= 重开（方案 §3.5）=================
+                    // ⚠️ 重开方向**必须**按源显式重拉：关源期间该源的流已被清空，
+                    //    光靠 registerService 不会恢复（NAS 走 backendRegistry，Meting 走 services map）。
+                    when (key) {
+                        AppPreferences.SOURCE_NAS -> {
+                            // loadLibrary 内部含 loadGenres / loadFavorites / loadRandomSongs / loadAllSongsBackground
+                            loadLibrary()
+                            // ⚠️ loadYears / loadPlaylists 是**独立入口**，loadLibrary 不触发它们
+                            loadYears()
+                            loadPlaylists()
+                        }
+                        NetworkSongId.METING_SOURCE -> {
+                            // 恢复随心听的网络段（loadRandomSongs 没有其它调用者）
+                            loadRandomSongs()
+                        }
+                        // 百度 / Jamendo：服务注册已由上方的 refresh*ServiceRegistration 处理；
+                        // 百度的本地索引缓存已在 clearSourceScopedCaches 中清掉，
+                        // 重开后由百度索引扫描流程重新填充。
+                        AppPreferences.SOURCE_BAIDU, AppPreferences.SOURCE_JAMENDO -> Unit
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * 关掉某个源时，清理「只属于该源、且没有合成点可过滤」的缓存（方案 §3.2.2）。
+     *
+     * ⛔ **不动原始库存流**（`_albums` / `_songs` / `_songsPaging` / `_artists`）——
+     * 它们是 S2 统计（首页「专辑 N / 歌曲 N / 艺术家 N」）的**读数来源**，
+     * 关源只影响「列出哪些条目」（S1），不改写「库里有这么多」。
+     *
+     * ### ⚠️ 这是**唯一**的清理入口
+     *
+     * v2 方案把清理寄托在「各 `load*` 的短路分支顺手清」——**那是死代码**：
+     * 这些 `load*` 在开关翻转时**根本没有调用者**（`loadGenres` 只在 `loadLibrary` 内被调；
+     * `loadYears` / `loadPlaylists` 只有 UI 的 retry 回调会触发）。
+     * ⇒ 必须由 [setSourceEnabled] 直接调用本函数。
+     *
+     * ### 各流的实际类型（置空时必须写同类型的值）
+     *
+     * | 流 | 类型 | 处置 |
+     * |---|---|---|
+     * | `_genres` | `UiState<List<Genre>>` | 置空 `UiState.Success(emptyList())` |
+     * | `_years` | `UiState<List<Int>>` | 置空 `UiState.Success(emptyList())` |
+     * | `_playlists` | `UiState<List<Playlist>>` | 置空 `UiState.Success(emptyList())` |
+     * | `_favoriteSongs` | `UiState<List<Song>>` | 置空 `UiState.Success(emptyList())` |
+     * | `_favoriteIds` | `Set<String>` | 置空（内容全部来自 NAS 收藏） |
+     * | `_randomSongs` | `List<Song>` | 按 `sourceType` 过滤（保留另一源的部分） |
+     * | `_baiduIndexedSongs` | `List<Song>` | 置空 `emptyList()` |
+     * | `_artistSongsMap` | `Map<String, List<Song>>` | 按 `sourceType` 过滤（`mapValues`） |
+     */
+    private fun clearSourceScopedCaches(source: String) {
+        when (source) {
+            AppPreferences.SOURCE_NAS -> {
+                // 这四个流**只由 NAS 填充**、**无统计消费者**、**没有可用的合成点**（UI 直读）
+                // ⇒ 置空是唯一可行处置（方案 §5.8）。
+                _genres.value = UiState.Success(emptyList())
+                _years.value = UiState.Success(emptyList())
+                _playlists.value = UiState.Success(emptyList())
+                _favoriteSongs.value = UiState.Success(emptyList())
+                // 心形 UI 态同步清理：_favoriteIds 的内容**全部**来自 NAS 收藏
+                // （网络/本地收藏走 networkFavoriteIds，不在这个流里）
+                _favoriteIds.value = emptySet()
+                // 混装流（NAS + Meting）：按 sourceType 过滤，**保留** Meting 段（⛔ 不要整条清空）
+                _randomSongs.value = _randomSongs.value.filter { it.sourceType != MusicSourceType.NAS }
+                // 艺术家 TAB 的曲目映射：由 NAS 歌增量构建 ⇒ 去掉 NAS 歌。
+                // ⚠️ 只**过滤**结果，不改动增量构建逻辑本身（buildArtistMapsIncremental）。
+                _artistSongsMap.value = _artistSongsMap.value.mapValues { (_, songs) ->
+                    songs.filter { it.sourceType != MusicSourceType.NAS }
+                }
+            }
+            AppPreferences.SOURCE_BAIDU -> {
+                // 百度独有，仅由 baiduIndexCache 填充，UI 直读
+                _baiduIndexedSongs.value = emptyList()
+            }
+            NetworkSongId.METING_SOURCE -> {
+                // 同上：只去掉网络歌，保留 NAS 段
+                _randomSongs.value = _randomSongs.value.filter {
+                    it.sourceType != MusicSourceType.NETWORK_MUSIC
+                }
+            }
+            // Jamendo 没有独立的缓存流（条目走 services map + 聚合器）
+            AppPreferences.SOURCE_JAMENDO -> Unit
+            else -> Unit
+        }
+    }
+
+    /**
+     * 等某个源开关的**同步镜像**收敛到目标值（方案 §5.9 的镜像窗口）。
+     *
+     * ⚠️ 为什么必须等：可见性判定读的是 `AppPreferences` 的 `@Volatile` 镜像，而镜像是
+     * DataStore collector **异步**写的 —— `dataStore.edit{}` 返回时镜像未必已更新。
+     * 此刻就 bump 重算信号 ⇒ 派生流拿**旧**可见性重算 ⇒ 而此后没有新的上游发射
+     * ⇒ 派生流会**停在旧值**上（用户看到「开关没生效」）。
+     *
+     * 有界等待（最多 ~1s）：超时也放行 —— 宁可慢一拍，不能卡死。
+     */
+    private suspend fun awaitSourceMirror(key: String, enabled: Boolean) {
+        // 百度：镜像 = 「启用 **且** 已登录」（`CloudDriveConfig.isActive`）⇒ 目标值取决于登录态，
+        // 这里先读一次当前配置定出期望值（登录态不会因开关翻转而改变）。
+        val expectedBaiduActive = if (key == AppPreferences.SOURCE_BAIDU) {
+            enabled && prefs.baidu.baiduConfigFlow.first().tokens != null
+        } else {
+            enabled
+        }
+        val deadline = System.currentTimeMillis() + SOURCE_MIRROR_AWAIT_TIMEOUT_MS
+        while (System.currentTimeMillis() < deadline) {
+            val converged = when (key) {
+                AppPreferences.SOURCE_BAIDU ->
+                    prefs.getBaiduActiveSync() == expectedBaiduActive
+                AppPreferences.SOURCE_JAMENDO ->
+                    prefs.getJamendoEnabledSync() == enabled
+                NetworkSongId.METING_SOURCE ->
+                    prefs.getMetingEnabledSync() == enabled
+                AppPreferences.SOURCE_NAS ->
+                    prefs.getNasMusicEnabledSync() == enabled
+                else -> true
+            }
+            if (converged) return
+            delay(SOURCE_MIRROR_AWAIT_POLL_MS)
         }
     }
 
@@ -1414,12 +1695,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
         // 运行期（M2/M3）+ 开关翻转时重算合并数据（U8：本地曲目从曲库即时消失/出现）。
         // ⚠️ 首个值也触发 updateMergedData：冷启动时缓存加载可能先于 DataStore 首读完成，
         // 若上次开关为关，这里负责把已进入 merged 数据的本地部分修正掉。
+        //
+        // P1a（方案 §3.3 G1）：本观察者同时是**应用级本地开关镜像的唯一写入者**
+        // （`NasMusicApp.cachedLocalMusicEnabled`）—— 见那里的「单一写入者」说明：
+        // 两个镜像必须由同一处翻转，否则会短暂分叉 ⇒ 派生流按旧值算完且不再重算。
         viewModelScope.launch {
             var wasEnabled: Boolean? = null
             prefs.appSettings
                 .map { it.localMusicEnabled }
                 .distinctUntilChanged()
                 .collect { enabled ->
+                    // ⛔ 顺序：先应用镜像、再 VM 镜像 ⇒ 两者在同一瞬间翻转
+                    nasMusicApp.setLocalMusicEnabledMirror(enabled)
                     _localMusicEnabled.value = enabled
                     if (enabled) startLocalMusicRuntime() else stopLocalMusicRuntime()
                     if (wasEnabled != enabled) updateMergedData()
@@ -1483,10 +1770,20 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
 
     /**
      * 加载收藏状态（B-1, B-12: UiState）
+     *
+     * P3（方案 §3.4）：按 `Song` 的实际归属过滤 —— 关闭的源不列出其收藏（S1）。
+     * ⛔ **只过滤展示，不删数据**（S3）：重开开关即恢复。
+     * ⚠️ 过滤点定死在这里（VM 内一次）—— UI 侧不得再写第二份 filter。
      */
     private suspend fun loadFavorites(adapter: BackendAdapter) {
+        // ⚠️ NAS 关 ⇒ **不请求**（方案 §3.2.1 #5）。
+        // ⛔ 原始库存流不动；本流的清理由 clearSourceScopedCaches 负责（关源方向唯一入口）。
+        if (!sourceVisibility.isVisible(MusicSourceType.NAS)) {
+            AppLog.d("NASMusic", "loadFavorites: NAS 已关闭，跳过请求")
+            return
+        }
         try {
-            val favorites = adapter.getFavorites()
+            val favorites = adapter.getFavorites().filter { sourceVisibility.isVisible(it) }
             _favoriteSongs.value = UiState.Success(favorites)
             _favoriteIds.value = favorites.map { it.id }.toSet()
             AppLog.d("NASMusic", "loadFavorites: ${favorites.size} favorites")
@@ -1502,6 +1799,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
      * 加载流派列表（A-3, B-12: UiState）
      */
     private suspend fun loadGenres(adapter: BackendAdapter) {
+        // ⚠️ NAS 关 ⇒ **不请求**（方案 §3.2.1 #4）。
+        if (!sourceVisibility.isVisible(MusicSourceType.NAS)) {
+            AppLog.d("NASMusic", "loadGenres: NAS 已关闭，跳过请求")
+            return
+        }
         try {
             _genres.value = UiState.Success(adapter.getGenres())
             val data = _genres.value.dataOrNull()
@@ -1516,6 +1818,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
 
     // --- 曲库（B-12: UiState）---
     private fun loadLibrary() {
+        // ⚠️ NAS 关 ⇒ **不拉 NAS**（方案 §3.2.1 #1）。
+        // ⛔ **不清空 `_albums` / `_songs`** —— 它们是原始库存流，是 S2 统计的读数来源（§3.0 契约）。
+        // ✅ 但**仍要调 updateMergedData()**：本地 / 百度照常显示（合并时 NAS 段由可见性置空）。
+        if (!sourceVisibility.isVisible(MusicSourceType.NAS)) {
+            AppLog.d("NASMusic", "loadLibrary: NAS 已关闭，跳过 NAS 拉取（保留本地/百度）")
+            _isLibraryLoading.value = false
+            updateMergedData()
+            return
+        }
         _isLibraryLoading.value = true
         _albums.value = UiState.Loading
         _songs.value = UiState.Loading
@@ -1569,16 +1880,31 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
 
     /**
      * SONGS Tab 首次激活时加载第一页
+     *
+     * ⚠️ NAS 关 ⇒ **不拉首页**（方案 §3.2.1 #22）。
+     * `totalCount` 的关源口径由派生的 [visibleSongsPaging] 处理（NAS 段不计入），
+     * ⛔ 本函数**不写** totalCount，也不清空 `_songsPaging`（原始库存流）。
      */
     fun loadSongsFirstPage() {
+        if (!sourceVisibility.isVisible(MusicSourceType.NAS)) {
+            AppLog.d("NASMusic", "loadSongsFirstPage: NAS 已关闭，跳过请求")
+            return
+        }
         if (_songsPaging.value.songs.isNotEmpty() || _songsPaging.value.isLoading) return
         loadSongsNextPage()
     }
 
     /**
      * 加载下一页歌曲（滚动到底部时触发）
+     *
+     * ⚠️ NAS 关 ⇒ **不拉分页**（方案 §3.2.1 #7）；**写回处再判一次**——
+     * 关源瞬间正在飞的请求，回来后必须丢弃（方案 §5.7），否则旧 NAS 歌会写回分页状态。
      */
     fun loadSongsNextPage() {
+        if (!sourceVisibility.isVisible(MusicSourceType.NAS)) {
+            AppLog.d("NASMusic", "loadSongsNextPage: NAS 已关闭，跳过请求")
+            return
+        }
         val state = _songsPaging.value
         if (state.isLoading || !state.hasMore || _isBackgroundLoadingAll.get()) return
         viewModelScope.launch {
@@ -1587,6 +1913,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
             try {
                 val offset = state.songs.size
                 val batch = adapter.getSongs(pageSize, offset)
+                // ⚠️ §5.7：在途请求的结果要丢弃（关源瞬间发出的请求不能写回）
+                if (!sourceVisibility.isVisible(MusicSourceType.NAS)) {
+                    _songsPaging.value = _songsPaging.value.copy(isLoading = false)
+                    AppLog.d("NASMusic", "loadSongsNextPage: NAS 已关闭，丢弃在途结果")
+                    return@launch
+                }
                 val totalCount = if (state.totalCount == 0) adapter.getSongsTotalCount() else state.totalCount
                 // v2.39.3（T7b）：区分「真没歌」与「加载失败」。
                 // 判定逻辑抽到 SongsPagingState.resolveError（纯函数，便于单测覆盖）。
@@ -1639,8 +1971,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
     /**
      * 后台全量加载歌曲：分页加载，每页立即显示，继续加载直到全部完成。
      * 与 loadSongsNextPage 共享 _songsPaging 状态，互斥运行。
+     *
+     * ⚠️ NAS 关 ⇒ **不发起全量拉取**（方案 §3.2.1 #8）。
+     * 循环内**再判一次**：关源瞬间在途的批次要丢弃（方案 §5.7）。
      */
     private fun loadAllSongsBackground() {
+        if (!sourceVisibility.isVisible(MusicSourceType.NAS)) {
+            AppLog.d("NASMusic", "loadAllSongsBackground: NAS 已关闭，跳过全量拉取")
+            return
+        }
         if (!_isBackgroundLoadingAll.compareAndSet(false, true)) return
         viewModelScope.launch {
             val adapter = backendRegistry.getAdapter() ?: run {
@@ -1652,6 +1991,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
                 while (true) {
                     val batch = adapter.getSongs(pageSize, offset)
                     if (batch.isEmpty()) break
+                    // ⚠️ §5.7：在途请求的结果要丢弃（关源瞬间发出的批次不能写回）
+                    if (!sourceVisibility.isVisible(MusicSourceType.NAS)) {
+                        AppLog.d("NASMusic", "loadAllSongsBackground: NAS 已关闭，丢弃在途批次")
+                        break
+                    }
                     val current = _songsPaging.value
                     val newState = SongsPagingState(
                         songs = current.songs + batch,
@@ -1680,11 +2024,20 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
      * - 网络音乐可用：从预设歌单随机抽取
      * - 两者混合，凑满 20 首
      * - 都不可用时 _randomSongs 保持空，首页不显示区块
+     *
+     * ### ⚠️ 采集期短路（方案 §3.2.1 #9 + §5.7b）
+     *
+     * - NAS 关 ⇒ **不取** NAS 随机曲（不请求）
+     * - Meting 关 ⇒ **不取**预设歌单（不请求）
+     * - ⚠️ 短路时**不要走**「失败保旧值」分支：那个分支只在「确实请求过但失败」时成立，
+     *   短路走它会把旧 NAS 随机曲留在首页 ⇒ 改为按可见性过滤旧值。
      */
     private suspend fun loadRandomSongs(adapter: BackendAdapter?) {
+        val nasVisible = sourceVisibility.isVisible(MusicSourceType.NAS)
+        val metingVisible = sourceVisibility.isVisible(MusicSourceType.NETWORK_MUSIC)
         val allSongs = mutableListOf<Song>()
-        // 1. NAS 后端随机歌曲（多拉一些确保够用）
-        if (adapter != null) {
+        // 1. NAS 后端随机歌曲（多拉一些确保够用）——NAS 关 ⇒ 不请求
+        if (adapter != null && nasVisible) {
             try {
                 val nasSongs = adapter.getRandomSongs(50)
                 AppLog.d("NASMusic", "loadRandomSongs: got ${nasSongs.size} NAS songs")
@@ -1694,7 +2047,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
             }
         }
         // 2. 网络歌曲：从多个预设歌单随机抽取，凑够 20 首
-        val shuffledPlaylists = preconfiguredPlaylists.shuffled()
+        // ⚠️ Meting 关 ⇒ **不请求**（方案 §3.2.1 #9）：歌单列表直接置空，循环体一次都不进
+        val shuffledPlaylists = if (metingVisible) preconfiguredPlaylists.shuffled() else emptyList()
         for ((playlistId, playlistName, _) in shuffledPlaylists) {
             if (allSongs.size >= 20) break
             try {
@@ -1708,9 +2062,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
                 AppLog.e("NASMusic", "loadRandomSongs network failed for '$playlistName'", e)
             }
         }
-        // 3. 打乱后取前 20 首。如果拉取失败则保留已有数据，不让区块消失
+        // 3. 写回
         if (allSongs.isNotEmpty()) {
             _randomSongs.value = allSongs.shuffled().take(20)
+        } else if (!nasVisible || !metingVisible) {
+            // ⚠️ §5.7b：短路（关源）**不走**「失败保旧值」分支 —— 旧值里含已关源的歌，
+            //    必须按可见性过滤掉（保留另一源的部分）。
+            _randomSongs.value = _randomSongs.value.filter { sourceVisibility.isVisible(it) }
         } else if (_randomSongs.value.isEmpty() && adapter != null) {
             // 有后端但没拉到任何歌曲，可能是临时网络问题，下次刷新会重试
             _randomSongs.value = emptyList()
@@ -1738,6 +2096,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
 
     private var _isShufflePlaying = false
 
+    /**
+     * 随心听自动续播。
+     *
+     * ⚠️ NAS 关 ⇒ **不续播 NAS 随机曲**（方案 §3.2.1 #10）：不请求。
+     * ⚠️ 关源期间本协程**继续活着**（用户可能已开启本地/网络段的播放），
+     *    所以这里只是「本轮不请求」，⛔ 不要 break 掉整个续播循环。
+     */
     private fun startShuffleRefill() {
         shuffleRefillJob?.cancel()
         shuffleRefillJob = viewModelScope.launch {
@@ -1746,6 +2111,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
                 val currentIdx = playerManager.playerState.value.currentIndex
                 val remaining = queue.size - currentIdx
                 if (remaining <= 5) {
+                    if (!sourceVisibility.isVisible(MusicSourceType.NAS)) {
+                        // NAS 关 ⇒ 不续播 NAS 随机曲（不请求）
+                        delay(5000)
+                        continue
+                    }
                     val adapter = backendRegistry.getAdapter() ?: break
                     try {
                         val newSongs = adapter.getRandomSongs(20)
@@ -1767,6 +2137,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
      * ARTISTS Tab 首次激活时加载艺术家列表（独立 API）
      */
     fun loadArtists() {
+        // ⚠️ NAS 关 ⇒ **不拉 NAS 艺术家**（方案 §3.2.1 #2）。
+        // ⛔ 原始库存流 `_artists` 不动（S2 统计读它）；合并侧的 NAS 段由 updateMergedData 置空。
+        if (!sourceVisibility.isVisible(MusicSourceType.NAS)) {
+            AppLog.d("NASMusic", "loadArtists: NAS 已关闭，跳过请求")
+            return
+        }
         if (_artists.value is UiState.Success && (_artists.value as UiState.Success).data.isNotEmpty()) return
         _artists.value = UiState.Loading
         viewModelScope.launch {
@@ -1826,6 +2202,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
      * YEARS Tab 首次激活时加载年份列表（独立 API）
      */
     fun loadYears() {
+        // ⚠️ NAS 关 ⇒ **不拉 NAS 年份**（方案 §3.2.1 #3）。
+        // ⛔ 不动 `_years` 的清空语义（那是 clearSourceScopedCaches 的职责）。
+        if (!sourceVisibility.isVisible(MusicSourceType.NAS)) {
+            AppLog.d("NASMusic", "loadYears: NAS 已关闭，跳过请求")
+            return
+        }
         if (_years.value is UiState.Success && (_years.value as UiState.Success).data.isNotEmpty()) return
         _years.value = UiState.Loading
         viewModelScope.launch {
@@ -1849,13 +2231,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
 
     /**
      * RECENT Tab 首次激活时按需批量查询最近播放歌曲
+     *
+     * P3（方案 §3.4）：按 `Song` 的实际归属过滤 —— 关闭的源不列出其历史（S1）。
+     * ⛔ **只过滤展示，不删库**（S3）：数据库里的记录仍在，重开开关即恢复（验收 V8）。
+     * ⚠️ 过滤点定死在这里（VM 内一次）—— UI 侧不得再写第二份 filter。
      */
     fun loadRecentSongs(showLoading: Boolean = true) {
         if (showLoading) _recentSongs.value = UiState.Loading
         viewModelScope.launch {
             try {
                 // 读取持久化的最近播放完整歌曲对象（含网络歌曲，不依赖 NAS 连接）
-                val recent = prefs.history.getRecentSongObjects()
+                val recent = prefs.history.getRecentSongObjects().filter { sourceVisibility.isVisible(it) }
                 _recentSongs.value = UiState.Success(recent)
                 AppLog.d("NASMusic", "loadRecentSongs: ${recent.size} recent songs loaded")
             } catch (e: Exception) {
@@ -2196,11 +2582,26 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
             // ⛔ 构造期竞态防护：构造未完成（by lazy 委托未初始化）前一律挂起等待，
             // 详见 constructorReady 的 KDoc（v2.37.0 启动 NPE 修复）
             constructorReady.await()
-            val nasAlbums = _albums.value.dataOrNull() ?: emptyList()
-            val nasArtists = _artists.value.dataOrNull() ?: emptyList()
+            // P1a（方案 §3.3 G1）：按可见性过滤后再合并 —— 关 NAS ⇒ NAS 专辑/艺术家传空，
+            // 关百度 ⇒ 百度索引不读、传空（**当前最严重的一处逃逸**），本地照旧。
+            //
+            // ⛔ **不清空 `_albums` / `_songs` / `_songsPaging` / `_artists`** —— 它们是**原始库存流**，
+            // 是 S2 统计（首页「专辑 N / 歌曲 N」）的读数来源（方案 §3.0 契约）。
+            // 过滤只发生在**合成期**，统计数字天然不受影响。
+            //
+            // ⚠️ 过滤必须**在传入之前**做：⛔ 不能合并完再按 `sourceIds` 剔除 —— 那会把
+            // 「NAS 与百度同名专辑」整条删掉，连同 NAS 那一份（方案 §5.4）。
+            val nasVisible = sourceVisibility.isVisible(MusicSourceType.NAS)
+            val baiduVisible = sourceVisibility.isVisible(MusicSourceType.BAIDU_PAN)
+            val nasAlbums = if (nasVisible) (_albums.value.dataOrNull() ?: emptyList()) else emptyList()
+            val nasArtists = if (nasVisible) (_artists.value.dataOrNull() ?: emptyList()) else emptyList()
             val localSongs = visibleLocalSongsNow()
-            val baiduSongs = baiduIndexCache.allSongs()  // 全量加载一次，供 buildBaiduAlbums/buildBaiduArtists 共用
+            // NAS 歌曲段（关 NAS 时为空）：供 updateArtistSongCounts 统计曲目数
+            val nasSongs = if (nasVisible) _songsPaging.value.songs else emptyList()
+            // 百度段：关源时**不读索引**（省一次磁盘解析）+ 传空
+            val baiduSongs = if (baiduVisible) baiduIndexCache.allSongs() else emptyList()
             // 歌曲 Tab 与专辑/艺术家共用这份索引结果，避免 UI 侧再触发一次磁盘解析
+            // ⚠️ 百度关时置空 ⇒ UI 直读 `_baiduIndexedSongs` 的地方（曲库歌曲 Tab）也一并清掉
             _baiduIndexedSongs.value = baiduSongs
 
             var mergedAlbums = MusicMerger.mergeAlbums(
@@ -2232,7 +2633,9 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
             _mergedArtists.value = mergedArtists
 
             // 用全量歌曲反向统计艺术家 songCount（复用已加载的 baiduSongs，避免再次 allSongs()）
-            updateArtistSongCounts(baiduSongs)
+            // ⚠️ NAS 段传**过滤后**的歌曲：关 NAS 后本地/百度艺术家卡片的曲目数不得虚高
+            // （原先内部自读 `_songsPaging.value.songs` ⇒ 读到未过滤的原始库存）。
+            updateArtistSongCounts(nasSongs, baiduSongs)
 
             // 异步解析缺失封面（百度侧车/APIC → iTunes → 本地ID3 → 歌曲 coverUrl 兜底）
             resolveAlbumCoversAsync(baiduSongs)
@@ -2247,10 +2650,16 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
      * 用全量歌曲（NAS + 本地 + 百度）反向统计每个艺术家的歌曲数，
      * 使艺术家卡片立即显示正确的 songCount，不必等到详情页加载。
      *
+     * @param nasSongs 已按可见性过滤的 NAS 歌曲列表（由 updateMergedData 传入）。
+     *        ⛔ 不再内部自读 `_songsPaging.value.songs` —— 那是**未过滤的原始库存**，
+     *        关 NAS 后本地/百度艺术家卡片的曲目数会虚高（方案 §2.2 C 段 / §3.2.1 #21）。
      * @param baiduSongs 已加载的百度歌曲列表（由 updateMergedData 传入，避免重复 allSongs()）
+     *        ⛔ **没有默认值**：默认值若是 `baiduIndexCache.allSongs()`，就是**未过滤的百度索引**
+     *        ⇒ 将来任何新增的单参调用都会让关百度后的艺术家曲目数虚高（方案 §3.3 G1）。
+     *        强制调用方显式传入**已按可见性过滤**的列表。
      */
-    private fun updateArtistSongCounts(baiduSongs: List<Song> = baiduIndexCache.allSongs()) {
-        val allSongs = _songsPaging.value.songs + visibleLocalSongsNow() + baiduSongs
+    private fun updateArtistSongCounts(nasSongs: List<Song>, baiduSongs: List<Song>) {
+        val allSongs = nasSongs + visibleLocalSongsNow() + baiduSongs
         // 按 ArtistSplitter 拆分后的艺术家名统计歌曲数
         val artistSongCounts = mutableMapOf<String, Int>()
         for (song in allSongs) {
@@ -2325,7 +2734,16 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
         if (coverResolveJob?.isActive == true) return
 
         coverResolveJob = viewModelScope.launch {
-            val allSongs = _songsPaging.value.songs + visibleLocalSongsNow() + (cachedBaiduSongs ?: baiduIndexCache.allSongs())
+            // P1a（方案 §3.3 G1）：封面匹配的**输入**也必须按源可见性过滤 ——
+            // `_songsPaging.value.songs` 是**未过滤的原始 NAS 库存**，百度索引也不能在
+            // 百度关源时继续参与匹配（否则被关掉的源会经封面「回流」到同名条目）。
+            // ⛔ 只过滤**输入**：`pending` 本身取自已过滤的 `_mergedAlbums`，本地条目仍需解析封面。
+            // ⛔ `visibleLocalSongsNow()` 原样保留（本地「关 = 只显示已下载」语义，方案 §5.6 红线）。
+            val nasVisible = sourceVisibility.isVisible(MusicSourceType.NAS)
+            val baiduVisible = sourceVisibility.isVisible(MusicSourceType.BAIDU_PAN)
+            val nasSongs = if (nasVisible) _songsPaging.value.songs else emptyList()
+            val baiduSongs = if (baiduVisible) (cachedBaiduSongs ?: baiduIndexCache.allSongs()) else emptyList()
+            val allSongs = nasSongs + visibleLocalSongsNow() + baiduSongs
             for (album in pending) {
                 albumCoverAttempts[album.id] = (albumCoverAttempts[album.id] ?: 0) + 1
             }
@@ -2378,7 +2796,13 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
                 artistCoverAttempts[artist.id] = (artistCoverAttempts[artist.id] ?: 0) + 1
             }
             // 全量歌曲（NAS + 本地 + 百度），用于 P4 歌曲封面兜底
-            val allSongs = _songsPaging.value.songs + visibleLocalSongsNow() + (cachedBaiduSongs ?: baiduIndexCache.allSongs())
+            // P1a（方案 §3.3 G1）：同 resolveAlbumCoversAsync —— **输入**按源可见性过滤
+            // （NAS 关 ⇒ 不读原始库存；百度关 ⇒ 不读索引、不用 cachedBaiduSongs）。
+            val nasVisible = sourceVisibility.isVisible(MusicSourceType.NAS)
+            val baiduVisible = sourceVisibility.isVisible(MusicSourceType.BAIDU_PAN)
+            val nasSongs = if (nasVisible) _songsPaging.value.songs else emptyList()
+            val baiduSongs = if (baiduVisible) (cachedBaiduSongs ?: baiduIndexCache.allSongs()) else emptyList()
+            val allSongs = nasSongs + visibleLocalSongsNow() + baiduSongs
 
             // 1. 主解析：P1(网易云) → P2(酷狗) → P3(iTunes) → P4(歌曲封面)
             if (pending.isNotEmpty()) {
@@ -2609,53 +3033,82 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
      * 分别取数后拼接并跨源去重；非合并专辑回退到单源 albumId，行为与旧版一致。
      * 从根上解决 B20：合并后只取 NAS 歌导致本地/百度同名歌在详情页不可见的问题。
      */
-    fun loadAlbumSongs(albumId: String) {
-        viewModelScope.launch {
-            val album = _selectedAlbum.value
-            val albumName = album?.name?.lowercase()?.trim().orEmpty()
-            // 合并专辑携带多源 id；单源（旧数据/未合并）回退到 albumId，向后兼容
-            val sources = album?.sourceIds?.takeIf { it.isNotEmpty() } ?: listOf(albumId)
+    /**
+     * 按 [Album.sourceIds] 的前缀分派，跨源收集专辑曲目（方案 §3.2.1 #11）。
+     *
+     * 三支**各自**判可见性再决定取不取：
+     * - `baidu_album_*` ⇒ 百度可见才读本地索引（否则**连索引都不读**）
+     * - `local_album_*` ⇒ 本地段用 [visibleLocalSongsNow]（已含「关 = 只显示已下载」语义，§5.6）；
+     *   附带的同名百度段按百度的可见性决定
+     * - 其余 ⇒ NAS 专辑 id：NAS 可见才请求；无 NAS 连接时按名兜底
+     *
+     * @return 去重后的曲目 + NAS 段的异常（由调用方决定提示方式）
+     */
+    private suspend fun collectAlbumSongsMultiSource(
+        album: Album?,
+        albumId: String
+    ): Pair<List<Song>, Exception?> {
+        val albumName = album?.name?.lowercase()?.trim().orEmpty()
+        // 合并专辑携带多源 id；单源（旧数据/未合并）回退到 albumId，向后兼容
+        val sources = album?.sourceIds?.takeIf { it.isNotEmpty() } ?: listOf(albumId)
+        val nasVisible = sourceVisibility.isVisible(MusicSourceType.NAS)
+        val baiduVisible = sourceVisibility.isVisible(MusicSourceType.BAIDU_PAN)
 
-            val collected = mutableListOf<Song>()
-            var nasError: Exception? = null
-            val adapter = backendRegistry.getAdapter()
+        val collected = mutableListOf<Song>()
+        var nasError: Exception? = null
+        val adapter = backendRegistry.getAdapter()
 
-            for (src in sources) {
-                when {
-                    src.startsWith("local_album_") -> {
-                        // 本地专辑详情：同时列出本地 + 百度同名歌（保留原行为）
-                        collected += filterSongsByAlbumName(albumName, visibleLocalSongsNow())
+        for (src in sources) {
+            when {
+                src.startsWith("local_album_") -> {
+                    // 本地专辑详情：同时列出本地 + 百度同名歌（保留原行为）
+                    collected += filterSongsByAlbumName(albumName, visibleLocalSongsNow())
+                    if (baiduVisible) {
                         collected += baiduIndexCache.songsByAlbumName(albumName)
                     }
-                    src.startsWith("baidu_album_") -> {
+                }
+                src.startsWith("baidu_album_") -> {
+                    if (baiduVisible) {
                         collected += baiduIndexCache.songsByAlbumName(albumName)
                     }
-                    else -> {
-                        if (adapter != null) {
-                            try {
-                                collected += adapter.getAlbumSongs(src)
-                            } catch (e: Exception) {
-                                nasError = e
-                            }
-                        } else {
-                            // 无 NAS 连接：用已加载歌曲按名兜底（保留原无 NAS 行为）
-                            val candidates = visibleLocalSongsNow() + baiduIndexCache.songsByAlbumName(albumName) + _songsPaging.value.songs
-                            collected += filterSongsByAlbumName(albumName, candidates)
+                }
+                else -> {
+                    if (!nasVisible) {
+                        // NAS 关 ⇒ 不请求该专辑（方案 §3.2.1 #11）
+                        continue
+                    }
+                    if (adapter != null) {
+                        try {
+                            collected += adapter.getAlbumSongs(src)
+                        } catch (e: Exception) {
+                            nasError = e
                         }
+                    } else {
+                        // 无 NAS 连接：用已加载歌曲按名兜底（保留原无 NAS 行为）
+                        val baiduFallback = if (baiduVisible) baiduIndexCache.songsByAlbumName(albumName) else emptyList()
+                        val candidates = visibleLocalSongsNow() + baiduFallback + _songsPaging.value.songs
+                        collected += filterSongsByAlbumName(albumName, candidates)
                     }
                 }
             }
+        }
 
-            // 跨源去重：同一首歌可能同时命中 NAS 与本地/百度（id 不同但曲目标识相同）
-            val seen = mutableSetOf<String>()
-            val result = collected.filter { song ->
-                seen.add("${song.title.lowercase().trim()}|${song.artist.lowercase().trim()}|${song.durationMs}")
-            }
+        // 跨源去重：同一首歌可能同时命中 NAS 与本地/百度（id 不同但曲目标识相同）
+        val seen = mutableSetOf<String>()
+        val result = collected.filter { song ->
+            seen.add("${song.title.lowercase().trim()}|${song.artist.lowercase().trim()}|${song.durationMs}")
+        }
+        return result to nasError
+    }
 
+    fun loadAlbumSongs(albumId: String) {
+        viewModelScope.launch {
+            val album = _selectedAlbum.value
+            val (result, nasError) = collectAlbumSongsMultiSource(album, albumId)
             val cache = _albumSongsCache.value.toMutableMap()
             cache[albumId] = result
             _albumSongsCache.value = cache
-            AppLog.d("NASMusic", "loadAlbumSongs multi-source: album=$albumName, ${result.size} songs, sources=${sources.size}")
+            AppLog.d("NASMusic", "loadAlbumSongs multi-source: album=${album?.name}, ${result.size} songs")
             if (nasError != null) {
                 AppLog.e("NASMusic", "loadAlbumSongs NAS source failed", nasError)
                 showError(getApplication<Application>().getString(R.string.load_album_songs_error, nasError.message?.take(50)))
@@ -2672,37 +3125,11 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
      */
     fun playAlbumMultiSource(album: Album) {
         viewModelScope.launch {
-            val albumName = album.name.lowercase().trim()
-            val sources = album.sourceIds.takeIf { it.isNotEmpty() } ?: listOf(album.id)
-            val collected = mutableListOf<Song>()
-            val adapter = backendRegistry.getAdapter()
-            for (src in sources) {
-                when {
-                    src.startsWith("local_album_") -> {
-                        collected += filterSongsByAlbumName(albumName, visibleLocalSongsNow())
-                        collected += baiduIndexCache.songsByAlbumName(albumName)
-                    }
-                    src.startsWith("baidu_album_") -> {
-                        collected += baiduIndexCache.songsByAlbumName(albumName)
-                    }
-                    else -> {
-                        if (adapter != null) {
-                            try {
-                                collected += adapter.getAlbumSongs(src)
-                            } catch (e: Exception) {
-                                AppLog.e("NASMusic", "playAlbumMultiSource NAS failed", e)
-                                showError(getApplication<Application>().getString(R.string.load_album_songs_error, e.message?.take(50)))
-                            }
-                        } else {
-                            val candidates = visibleLocalSongsNow() + baiduIndexCache.songsByAlbumName(albumName) + _songsPaging.value.songs
-                            collected += filterSongsByAlbumName(albumName, candidates)
-                        }
-                    }
-                }
-            }
-            val seen = mutableSetOf<String>()
-            val result = collected.filter { song ->
-                seen.add("${song.title.lowercase().trim()}|${song.artist.lowercase().trim()}|${song.durationMs}")
+            // 与 loadAlbumSongs 共用同一份分派 + 可见性判据（方案 §3.2.1 #11）
+            val (result, nasError) = collectAlbumSongsMultiSource(album, album.id)
+            if (nasError != null) {
+                AppLog.e("NASMusic", "playAlbumMultiSource NAS failed", nasError)
+                showError(getApplication<Application>().getString(R.string.load_album_songs_error, nasError.message?.take(50)))
             }
             if (result.isNotEmpty()) {
                 playQueue(result)
@@ -2738,6 +3165,10 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
 
     fun loadArtistSongs(artistName: String) {
         viewModelScope.launch(Dispatchers.Default) {
+            // ⚠️ NAS 关 ⇒ 不取 NAS 曲目；百度关 ⇒ 不取百度曲目（方案 §3.2.1 #12）。
+            // ⛔ **不清空** `_artistDetailSongsCache`：旧数据保持显示，直到新数据就绪后覆盖。
+            val nasVisible = sourceVisibility.isVisible(MusicSourceType.NAS)
+            val baiduVisible = sourceVisibility.isVisible(MusicSourceType.BAIDU_PAN)
             // 注意：不在加载开始时清空 _artistDetailSongsCache，否则在重新加载期间 UI 会显示空列表。
             // 旧数据保持显示，直到新数据就绪后直接覆盖。
             // artistSongsMap 以归一化名为键，此处理由同上，但 artistSongsMap 仅被 LibraryScreen 使用，
@@ -2752,14 +3183,17 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
                 val adapter = backendRegistry.getAdapter()
                 val (nasSongs, pagingSongs, localDeviceSongs, baiduSongs, networkSongs) = coroutineScope {
                     // 快源：纯内存读取，不放在 async 里直接同步取
-                    val fastPaging = async(Dispatchers.Default) { _songsPaging.value.songs }
+                    val fastPaging = async(Dispatchers.Default) { if (nasVisible) _songsPaging.value.songs else emptyList() }
                     val fastLocal = async(Dispatchers.Default) { visibleLocalSongsNow() }
                     // 百度索引：按艺术家直接在 raw entry 上过滤，不创建全部 Song 对象
-                    val fastBaidu = async(Dispatchers.Default) { baiduIndexCache.songsByArtist(artistName) }
+                    // ⚠️ 百度关 ⇒ 不读索引（方案 §3.2.1 #12）
+                    val fastBaidu = async(Dispatchers.Default) {
+                        if (baiduVisible) baiduIndexCache.songsByArtist(artistName) else emptyList()
+                    }
 
-                    // 慢源1: NAS 后端
+                    // 慢源1: NAS 后端（NAS 关 ⇒ 不请求）
                     val nasDeferred = async(Dispatchers.IO) {
-                        if (adapter != null) {
+                        if (adapter != null && nasVisible) {
                             val artistKey = ArtistSplitter.normalizeKey(artistName)
                             val rawMatchingIds = _rawArtistList
                                 .filter { ArtistSplitter.containsArtist(it.name, artistName) }
@@ -2901,6 +3335,11 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
         viewModelScope.launch {
             // 本地歌曲按 genre 过滤（不依赖 NAS）
             val localMatches = visibleLocalSongsNow().filter { it.genre?.equals(genre, ignoreCase = true) == true }
+            // ⚠️ NAS 关 ⇒ NAS 段为空、本地照旧（方案 §3.2.1 #16）：不请求
+            if (!sourceVisibility.isVisible(MusicSourceType.NAS)) {
+                onResult(localMatches)
+                return@launch
+            }
             val adapter = backendRegistry.getAdapter()
             if (adapter == null) {
                 onResult(localMatches)
@@ -2922,6 +3361,11 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
             // 本地歌曲按 year 过滤（不依赖 NAS）
             val localMatches = visibleLocalSongsNow().filter { song ->
                 song.year != null && song.year in fromYear..toYear
+            }
+            // ⚠️ NAS 关 ⇒ NAS 段为空、本地照旧（方案 §3.2.1 #17）：不请求
+            if (!sourceVisibility.isVisible(MusicSourceType.NAS)) {
+                onResult(localMatches)
+                return@launch
             }
             val adapter = backendRegistry.getAdapter()
             if (adapter == null) {
@@ -3075,7 +3519,10 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
         smartRadioBatchLoading = true
         nasMusicApp.smartRadioManager.generateOnly { batch, _ ->
             smartRadioBatchLoading = false
-            _smartRadioBatch.value = batch
+            // ⚠️ 批次侧（方案 §3.3 G1c）：按可见性过滤后再写入。
+            // 关源**瞬间已在生成中**的批次、以及关源**前**缓存的批次里的该源歌，都要被滤掉。
+            // （采集侧「不拉 NAS 样本」已由 SmartRadioManager 的 nasMusicEnabled provider 实现。）
+            _smartRadioBatch.value = batch.filter { sourceVisibility.isVisible(it) }
         }
     }
 
@@ -3226,6 +3673,9 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
 
     override suspend fun search(keyword: String): RemoteSearchResult = coroutineScope {
         val nasDeferred = async(Dispatchers.IO) {
+            // ⚠️ NAS 关 ⇒ 不查 NAS（方案 §3.2.1 #13）。
+            // 网络侧走 services map（关源即失效），这里只挡 NAS 这一支。
+            if (!sourceVisibility.isVisible(MusicSourceType.NAS)) return@async emptyList()
             try { backendRegistry.getAdapter()?.searchSongs(keyword) ?: emptyList() }
             catch (e: Exception) { AppLog.w("NASMusic", "remote search NAS failed: ${e.message}"); emptyList() }
         }
@@ -4005,6 +4455,12 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
     val selectedPlaylistSongs: StateFlow<UiState<List<Song>>> = _selectedPlaylistSongs.asStateFlow()
 
     fun loadPlaylists() {
+        // ⚠️ NAS 关 ⇒ 不拉 NAS 歌单（方案 §3.2.1 #6）。
+        // ⛔ `_playlists` 的清空由 clearSourceScopedCaches 负责（关源方向唯一入口）。
+        if (!sourceVisibility.isVisible(MusicSourceType.NAS)) {
+            AppLog.d("NASMusic", "loadPlaylists: NAS 已关闭，跳过请求")
+            return
+        }
         _playlists.value = UiState.Loading
         viewModelScope.launch {
             val adapter = backendRegistry.getAdapter() ?: run {
@@ -4024,6 +4480,12 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
     }
 
     fun selectPlaylist(playlist: Playlist) {
+        // ⚠️ NAS 关 ⇒ 不请求歌单曲目（方案 §3.2.1 #18）。
+        if (!sourceVisibility.isVisible(MusicSourceType.NAS)) {
+            AppLog.d("NASMusic", "selectPlaylist: NAS 已关闭，跳过请求")
+            _selectedPlaylistSongs.value = UiState.Success(emptyList())
+            return
+        }
         _selectedPlaylistSongs.value = UiState.Loading
         viewModelScope.launch {
             val adapter = backendRegistry.getAdapter() ?: run {
@@ -4085,6 +4547,11 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
 
     fun playPlaylist(playlist: Playlist) {
         viewModelScope.launch {
+            // ⚠️ NAS 关 ⇒ 不请求歌单曲目、也不播放（方案 §3.2.1 #18）
+            if (!sourceVisibility.isVisible(MusicSourceType.NAS)) {
+                AppLog.d("NASMusic", "playPlaylist: NAS 已关闭，跳过请求")
+                return@launch
+            }
             val adapter = backendRegistry.getAdapter() ?: return@launch
             try {
                 val songs = adapter.getPlaylistSongs(playlist.id)
@@ -4192,6 +4659,13 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
 
     /** 加载 Jamendo 热门榜（幂等：已有数据则不重复请求） */
     fun loadJamendoHot() {
+        // ⚠️ Jamendo 关 ⇒ **不请求**（方案 §3.2.1 #14）。
+        // ⛔ `jamendoConfigured`（只查 clientId）**不等于** `jamendoEnabled` —— 别混用。
+        if (!sourceVisibility.isVisible(MusicSourceType.JAMENDO)) {
+            AppLog.d("Jamendo", "loadJamendoHot: Jamendo 已关闭，跳过请求")
+            _jamendoState.value = UiState.Success(emptyList())
+            return
+        }
         if (_jamendoActiveTag.value.isBlank() && _jamendoState.value.dataOrNull()?.isNotEmpty() == true) return
         _jamendoActiveTag.value = ""
         viewModelScope.launch {
@@ -4208,6 +4682,12 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
 
     /** 按风格标签加载 Jamendo */
     fun loadJamendoTag(tag: String) {
+        // ⚠️ Jamendo 关 ⇒ **不请求**（方案 §3.2.1 #14）
+        if (!sourceVisibility.isVisible(MusicSourceType.JAMENDO)) {
+            AppLog.d("Jamendo", "loadJamendoTag: Jamendo 已关闭，跳过请求")
+            _jamendoState.value = UiState.Success(emptyList())
+            return
+        }
         if (_jamendoActiveTag.value == tag && _jamendoState.value.dataOrNull()?.isNotEmpty() == true) return
         _jamendoActiveTag.value = tag
         viewModelScope.launch {
@@ -4224,6 +4704,12 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
 
     /** 搜索 Jamendo 音乐 */
     fun searchJamendo(keyword: String) {
+        // ⚠️ Jamendo 关 ⇒ **不请求**（方案 §3.2.1 #14）
+        if (!sourceVisibility.isVisible(MusicSourceType.JAMENDO)) {
+            AppLog.d("Jamendo", "searchJamendo: Jamendo 已关闭，跳过请求")
+            _jamendoState.value = UiState.Success(emptyList())
+            return
+        }
         _jamendoActiveTag.value = ""
         viewModelScope.launch {
             _jamendoState.value = UiState.Loading
@@ -4287,7 +4773,12 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
         // ---- SearchViewModel 接线 ----
         searchVM.libraryActiveTabProvider = { _libraryActiveTab.value }
         searchVM.librarySearchKeywordProvider = { _librarySearchKeyword.value }
-        searchVM.nasLocalSongsProvider = { _songsPaging.value.songs }
+        // 拼音搜索用的 NAS 本地缓存：NAS 关时交空（防御性——当前 `SearchAggregator` 的 NAS 分支
+        // 整体被门控、根本不会读它；但若聚合器门控口径变化，未过滤的原始库存会直接进搜索结果）
+        searchVM.nasLocalSongsProvider = {
+            if (sourceVisibility.isVisible(MusicSourceType.NAS)) _songsPaging.value.songs
+            else emptyList()
+        }
         searchVM.localDeviceSongsProvider = { visibleLocalSongsNow() }
         searchVM.onAddToQueue = { playerManager.addToQueue(it) }
         searchVM.onPlayBatch = { songs, startIndex -> playNetworkBatch(songs, startIndex) }

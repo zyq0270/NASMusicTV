@@ -75,7 +75,17 @@ enum class SearchType {
          * ⛔ 不要改成构造期快照：`SearchAggregator` 在 `onCreate` 建一次，快照会让开关永远停在
          * 启动时的值（这正是 `LocalMusicGateTest` 当初钉住的同一类缺陷）。
          */
-        private val nasMusicEnabled: suspend () -> Boolean = { true }
+        private val nasMusicEnabled: suspend () -> Boolean = { true },
+        /**
+         * P1a（方案 §3.3 G2）：音乐源可见性判定器（唯一真相源，见 `backend/SourceVisibility.kt`）。
+         *
+         * ⛔ **默认 `null`** ⇒ `null` 视为「全部可见」，保持旧行为 ⇒ 不破坏既有调用方与测试。
+         *
+         * 为什么需要它（方案 §5.2）：百度 / Jamendo / 网络源三个分支此前**只看实例非空**
+         * （`baiduService != null` / `jamendoService != null` / `networkMusicManager != null`），
+         * 而这三个实例是**构造期注入**的、恒非空 ⇒ 关掉源后聚合搜索照样返回它们的结果。
+         */
+        private val sourceVisibility: SourceVisibility? = null
     ) {
         companion object {
             private const val TAG = "SearchAggregator"
@@ -98,6 +108,22 @@ enum class SearchType {
      * 自然收尾、结果丢弃（连接随即释放）。
      */
     private val escapeScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    /**
+     * 某个来源此刻是否「可见」（用户开没开）。
+     *
+     * `sourceVisibility == null`（未注入，e.g. 既有单测）⇒ 一律视为可见，保持旧行为。
+     */
+    private fun visible(type: MusicSourceType): Boolean =
+        sourceVisibility?.isVisible(type) ?: true
+
+    /**
+     * 按歌曲的**实际归属**判可见（历史 / 收藏这类「已存在的条目」，S3：只过滤展示、不删数据）。
+     *
+     * `sourceVisibility == null` ⇒ 一律视为可见，保持旧行为。
+     */
+    private fun visible(song: Song): Boolean =
+        sourceVisibility?.isVisible(song) ?: true
 
     /**
      * 硬超时：在 [escapeScope] 中执行 [block]，主协程限时等待结果。
@@ -196,7 +222,12 @@ enum class SearchType {
         }
 
         val networkDeferred = async {
-            if (MusicSourceType.NETWORK_MUSIC in sources && networkMusicManager != null) {
+            // P1a（方案 §3.3 G2 / §5.2）：网络源分支此前只判 `networkMusicManager != null`
+            // —— 实例恒非空 ⇒ 靠 services map **间接**受控。现在改为**显式**判可见性：
+            // 关掉 Meting 后本分支不再查询（即便网络源里还注册着别的服务）。
+            if (MusicSourceType.NETWORK_MUSIC in sources && networkMusicManager != null &&
+                visible(MusicSourceType.NETWORK_MUSIC)
+            ) {
                 try {
                     withHardTimeout(NETWORK_TIMEOUT) {
                         // Q2：「网易优先」只属于统一搜索入口（F1），⛔ 不得下沉到 MetingApiService.search()
@@ -217,7 +248,13 @@ enum class SearchType {
         }
 
         val baiduDeferred = async {
-            if (MusicSourceType.BAIDU_PAN in sources && baiduService != null) {
+            // P1a（方案 §3.3 G2 / §5.2）：百度分支此前只判 `baiduService != null`
+            // —— 实例是**构造期注入**的、恒非空 ⇒ 与 services map 完全无关，
+            // 关掉百度后聚合搜索**照样**返回百度结果（方案 §0 的「最严重的一处逃逸」）。
+            // 现在显式判可见性（= 启用 **且** 已登录）。
+            if (MusicSourceType.BAIDU_PAN in sources && baiduService != null &&
+                visible(MusicSourceType.BAIDU_PAN)
+            ) {
                 try {
                     if (isPinyinQuery && baiduLocalSongs.isNotEmpty() && isTVDevice) {
                         // 拼音搜索：百度网盘服务端不认拼音，改用本地索引缓存 + 客户端拼音匹配
@@ -254,7 +291,12 @@ enum class SearchType {
         }
 
         val jamendoDeferred = async {
-            if (MusicSourceType.JAMENDO in sources && jamendoService != null) {
+            // P1a（方案 §3.3 G2 / §5.2）：Jamendo 分支此前只判 `jamendoService != null`
+            // —— 同样是构造期注入的恒非空实例 ⇒ 关掉 Jamendo 后照样返回结果。
+            // 现在显式判可见性（= 开关开 **且** clientId 非空，与 registerService 判据一致）。
+            if (MusicSourceType.JAMENDO in sources && jamendoService != null &&
+                visible(MusicSourceType.JAMENDO)
+            ) {
                 try {
                     withHardTimeout(JAMENDO_TIMEOUT) {
                         jamendoService.search(keyword)
@@ -311,7 +353,24 @@ enum class SearchType {
         val localResults = localDeferred.await()
 
         // 合并所有结果
-        val allResults = nasResults + networkResults + baiduResults + jamendoResults + localResults
+        val merged = nasResults + networkResults + baiduResults + jamendoResults + localResults
+
+        // P1a（方案 §3.3 G2）：结果层兜底过滤 —— 按可见性再判一次。
+        //
+        // 为什么需要这一道（阶段一挡不住的三种情况，方案 §0.5 / §5.7）：
+        //  ① 采集期分支已经判过开关，但**在途请求**的结果会漏进 UI（关源瞬间已发出的请求）；
+        //  ② `fallback` 串源：网络源分支会把**别的源**的歌曲带回来并标成 NETWORK_MUSIC
+        //     （`networkMusicManager.search()` 搜的是 services map 里的全部服务）——
+        //     只看分支标签 NETWORK_MUSIC 判不出来，必须看**歌曲实际归属**；
+        //  ③ 分支标签与归属判定不一致（`Song.sourceType` 的 fallback 分支）。
+        //
+        // 判据 = 「分支标签可见」**且**「歌曲实际归属可见」：
+        //  · 分支标签（`RankedSong.source`）= 这条结果从哪个分支来的；
+        //  · 歌曲归属（`Song.sourceType`）= 这首歌**实际上**属于谁。
+        //
+        // ⚠️ 已下载歌曲（`sourceType == DOWNLOAD`）恒可见 —— 本地开关的语义是
+        //    「关 = 只显示已下载」，⛔ 不得把下载歌曲一起滤掉（方案 §5.6 红线）。
+        val allResults = merged.filter { visible(it.source) && visible(it.song) }
 
         // 精细过滤（搜索页）：按 searchType 维度匹配
         // 中文输入走子串匹配，拼音输入走拼音匹配，互不干扰

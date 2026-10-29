@@ -33,7 +33,6 @@ import androidx.compose.ui.unit.dp
 import androidx.tv.material3.Text
 import com.nasmusic.tv.R
 import com.nasmusic.tv.data.model.Album
-import com.nasmusic.tv.data.model.Song
 import com.nasmusic.tv.ui.LocalListBackHandler
 import com.nasmusic.tv.ui.components.adaptiveColumns
 import com.nasmusic.tv.ui.theme.FontSize
@@ -45,7 +44,6 @@ import kotlinx.coroutines.launch
 @Composable
 internal fun AlbumsTab(
     albums: List<Album>,
-    songs: List<Song>,
     onPlayAlbum: (Album) -> Unit,
     onOpenAlbumDetail: ((Album) -> Unit)? = null,
     listState: LazyGridState = rememberLazyGridState()

@@ -11,7 +11,6 @@ import androidx.tv.material3.ExperimentalTvMaterial3Api
 import com.nasmusic.tv.data.model.Screen
 import com.nasmusic.tv.data.model.Song
 import com.nasmusic.tv.data.model.ServerConfig
-import com.nasmusic.tv.backend.local.MusicMerger
 import com.nasmusic.tv.ui.viewmodel.MainViewModel
 import com.nasmusic.tv.data.model.*
 import com.nasmusic.tv.ui.screens.*
@@ -46,28 +45,26 @@ internal fun LibraryBranch(
                     val mergedAlbumList by viewModel.mergedAlbums.collectAsState(initial = emptyList())
                     val mergedArtistsList by viewModel.mergedArtists.collectAsState(initial = emptyList())
                     val yearsState by viewModel.years.collectAsState(initial = UiState.Success(emptyList()))
-                    val songsPaging by viewModel.songsPaging.collectAsState(initial = com.nasmusic.tv.data.model.SongsPagingState())
                     // 本地音乐总开关（§5.4）：visibleLocalSongs 在开关关闭时仅含已下载曲目
                     val localSongsList by viewModel.visibleLocalSongs.collectAsState(initial = emptyList())
-                    // 百度网盘索引歌曲：与专辑/艺术家共用 updateMergedData 的加载结果
-                    val baiduSongsList by viewModel.baiduIndexedSongs.collectAsState(initial = emptyList())
                     val searchResultsState by viewModel.searchVM.searchResults.collectAsState(initial = UiState.Success(emptyList()))
                     val albumList = albums.dataOrNull() ?: emptyList()
-                    val songList = songsState.dataOrNull() ?: emptyList()
                     val genreList = genres.dataOrNull() ?: emptyList()
                     val artistsList = artistsState.dataOrNull() ?: emptyList()
                     val yearsList = yearsState.dataOrNull() ?: emptyList()
-                    // 合并 NAS 分页歌曲 + 本地歌曲（含下载歌曲）+ 百度网盘索引歌曲，供曲库歌曲页展示
-                    val mergedSongsPaging = remember(songsPaging, localSongsList, baiduSongsList) {
-                        if (localSongsList.isEmpty() && baiduSongsList.isEmpty()) songsPaging
-                        else songsPaging.copy(
-                            songs = MusicMerger.mergeLibrarySongs(
-                                nasSongs = songsPaging.songs,
-                                localSongs = localSongsList,
-                                baiduSongs = baiduSongsList
-                            ),
-                            totalCount = songsPaging.totalCount + localSongsList.size + baiduSongsList.size
-                        )
+                    // 可见歌曲分页（方案 §3.3 G1 · 合成点已迁入 VM）：**合并在 VM 侧完成**，UI 只做透传。
+                    // ⛔ 不要在 UI 层再做一次歌曲合并 —— v2 把合并钉在本文件的一个 `remember(...)` 里，
+                    //    而它的三个键在**源开关翻转时都不变** ⇒ 永不重算 ⇒ NAS 段永远不会被置空
+                    //    （方案 §3.3 G1 的「⭐ 关键改动」）。
+                    //    现在由 VM 的 visibleSongsPaging（combine + sourceRevision）负责重算与合并。
+                    val mergedSongsPaging by viewModel.visibleSongsPaging.collectAsState(initial = com.nasmusic.tv.data.model.SongsPagingState())
+                    // 「播放全部」下传给 LibraryScreen 的歌曲集合：必须按**可见性**过滤（方案 §3.3 · S4 / V18）。
+                    // ⛔ 只过滤可见性，不改「播放全部」的其它口径（按 filteredAlbumIds 过滤等语义保持原样）。
+                    // ⛔ 不要换成 mergedSongsPaging.songs —— 那会改变既有口径（原来只播 NAS 段并按专辑过滤）。
+                    // ⚠️ remember 的键**必须**包含「可见集本身」：只写 remember(songsState) 会在开关翻转时
+                    //    命中缓存（_songs 是原始库存流，关源时按 §3.0 契约不清空）⇒ 与 v2 的 G1b 同类缺陷。
+                    val songList = remember(songsState, mergedSongsPaging) {
+                        (songsState.dataOrNull() ?: emptyList()).filter { viewModel.sourceVisibility.isVisible(it) }
                     }
                     // 合并 NAS 流派 + 本地歌曲流派（去重）
                     val mergedGenreList = remember(genreList, localSongsList) {

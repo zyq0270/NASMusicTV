@@ -31,7 +31,21 @@ class SmartRadioManager(
     /** F2-3 多源化：网络歌单 id 列表（与 provider 配套） */
     private val networkPlaylistIds: List<String> = emptyList(),
     /** F2-3 多源化：本地歌曲 provider（含下载歌曲） */
-    private val localSongsProvider: (suspend () -> List<Song>)? = null
+    private val localSongsProvider: (suspend () -> List<Song>)? = null,
+    /**
+     * ⭐ NAS 音乐源总开关的**实时读法**（同步 provider，方案 §3.2.1 第 19 项 / §3.2.4）。
+     *
+     * 与 `SearchAggregator.nasMusicEnabled` 同形：**构造期注入 lambda、调用时实时读**
+     * ⇒ 开关翻转后下一次生成批次立即生效。
+     * ⛔ 不要改成构造期快照：`SmartRadioManager` 在 `NasMusicApp.onCreate` 建一次，
+     * 快照会让开关永远停在启动时的值（`LocalMusicGateTest` 当初钉住的同一类缺陷）。
+     *
+     * 关掉后的语义：[loadLibrary] **完全不发 NAS 请求**（不取流派池、不分页拉全量）；
+     * 本地与 Meting 采样照旧（关掉 NAS ≠ 关掉整个电台）。
+     * ⚠️ 批次侧（生成结果里不该出现 NAS 歌）由调用方按 `song.sourceType` 过滤，
+     *    见 `MainViewModel.loadSmartRadioBatch` 的 `generateOnly` 回调（方案 §3.2.4）。
+     */
+    private val nasMusicEnabled: () -> Boolean = { true }
 ) {
     sealed interface State {
         data object Idle : State
@@ -53,6 +67,14 @@ class SmartRadioManager(
     @Volatile private var generateJob: Job? = null
     /** 曲库缓存（一次会话内复用；stop() 时清空） */
     @Volatile private var cachedLibrary: List<Song>? = null
+    /**
+     * 建立 [cachedLibrary] 时 NAS 源的可见态（null = 尚无缓存）。
+     *
+     * ⚠️ 开关翻转后缓存内容会过时：NAS 关时缓存里**没有** NAS 样本，重开后若还复用旧缓存，
+     * 电台就再也补不回 NAS 歌（这正是本次门控引入的副作用）⇒ 可见性一变即视为缓存失效，
+     * 重建一次。
+     */
+    @Volatile private var cachedLibraryNasVisible: Boolean? = null
 
     /**
      * F2-3 多源化：无种子启动（首页入口）——偏好加权随机（play_counts），不依赖当前播放。
@@ -225,6 +247,7 @@ class SmartRadioManager(
             currentBatchIds.clear()
         }
         cachedLibrary = null
+        cachedLibraryNasVisible = null
         currentSeed = null
         if (resetState) _state.value = State.Idle
     }
@@ -254,13 +277,22 @@ class SmartRadioManager(
 
     /**
      * 曲库加载（两级策略）：
-     * - 有缓存直接用
+     * - 有缓存直接用（**NAS 可见态未变**时才复用，见 [cachedLibraryNasVisible]）
      * - seed 有 genre 且曲库大：getSongsByGenre 先筛（流派内打分）
      * - 否则全量分页拉取（上限 [LIBRARY_HARD_CAP] 防大库拖垮）
+     *
+     * ⭐ NAS 音乐源总开关（方案 §3.2.1 第 19 项 / §3.2.4）：NAS 关 ⇒ **完全不发 NAS 请求**
+     * （既不取流派池，也不分页拉全量）；本地与 Meting 采样照旧。
      */
     private suspend fun loadLibrary(seed: Song?): List<Song> {
-        cachedLibrary?.let { return it }
-        val adapter = backendRegistry.getAdapter()
+        val nasVisible = nasMusicEnabled()
+        synchronized(stateLock) {
+            val cached = cachedLibrary
+            if (cached != null && cachedLibraryNasVisible == nasVisible) return cached
+        }
+        // NAS 关 ⇒ 视作「没有 adapter」⇒ 下面两条 NAS 请求路径（getSongsByGenre / getSongs 分页）
+        // 同时短路，关源时**一个 NAS 请求都不发**。分页循环内部逻辑保持原样。
+        val adapter = if (nasVisible) backendRegistry.getAdapter() else null
 
         val genreFiltered = if (adapter != null && seed != null) {
             seed.genre?.takeIf { it.isNotBlank() }?.let { g ->
@@ -293,7 +325,10 @@ class SmartRadioManager(
         val networkSongs = loadNetworkSamples()
         val combined = (nasLibrary + localSongs + networkSongs).distinctBy { it.id }
         AppLog.d(TAG, "loadLibrary multi-source: nas=${nasLibrary.size} local=${localSongs.size} net=${networkSongs.size} combined=${combined.size}")
-        synchronized(stateLock) { cachedLibrary = combined }
+        synchronized(stateLock) {
+            cachedLibrary = combined
+            cachedLibraryNasVisible = nasVisible
+        }
         return combined
     }
 

@@ -7,6 +7,7 @@ import coil.disk.DiskCache
 import coil.memory.MemoryCache
 import com.nasmusic.tv.backend.BackendRegistry
 import com.nasmusic.tv.backend.SearchAggregator
+import com.nasmusic.tv.backend.SourceVisibility
 import com.nasmusic.tv.backend.local.LocalMusicRepository
 import com.nasmusic.tv.backend.local.MusicScanner
 import com.nasmusic.tv.backend.local.StorageMonitor
@@ -57,8 +58,10 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import okhttp3.OkHttpClient
@@ -191,6 +194,72 @@ class NasMusicApp : Application(), ImageLoaderFactory {
     /** 跨源搜索聚合器（含本地音乐源） */
     lateinit var searchAggregator: SearchAggregator
         private set
+
+    /**
+     * 音乐源可见性判定（方案 §3.1 · 唯一真相源）。
+     *
+     * ⛔ 只回答「用户开没开」，不回答「它能不能用」—— 后者是 `backendRegistry` /
+     * `NetworkMusicManager.services` 的事，两者混在一起会让「NAS 未连接」被当成
+     * 「NAS 被关掉」（于是用户明明开着的源整片消失）。
+     *
+     * 依赖注入形态：**每源一个同步 lambda**（而不是 `settings: () -> AppSettings`）——
+     * `AppSettings` 只有 Flow、没有同步快照，构造期快照会让开关永远停在启动时的值。
+     * 每个 lambda 在**调用时实时读**同步镜像 ⇒ 开关翻转后下一次判定立即生效。
+     *
+     * ⚠️ 构造必须早于 [searchAggregator]：聚合器在构造期就持有本对象。
+     */
+    val sourceVisibility: SourceVisibility by lazy {
+        SourceVisibility(
+            // ⚠️ 四个总开关统一走 `AppPreferences.isSourceEnabledSync(key)`：
+            //   它按 **services map 的 key**（meting / nas / baidu / jamendo）分派到对应的
+            //   `get*EnabledSync()` 镜像，语义与直接调 getter **完全一致**；
+            //   ⛔ 但**不能**直接把 `MusicSourceType.name` 传进去
+            //   （`NETWORK_MUSIC` ≠ `meting`、`BAIDU_PAN` ≠ `baidu`，方案 §3.1 已警示）。
+            // NAS 源开关（v2.39.8）
+            nasEnabled = { appPreferences.isSourceEnabledSync(AppPreferences.SOURCE_NAS) },
+            // 本地音乐总开关：应用侧自持的运行期镜像（见 cachedLocalMusicEnabled）
+            localEnabled = { cachedLocalMusicEnabled },
+            // Meting（网络音乐）源开关
+            metingEnabled = { appPreferences.isSourceEnabledSync(NetworkSongId.METING_SOURCE) },
+            // 百度网盘：启用 **且** 已登录（= CloudDriveConfig.isActive）
+            baiduActive = { appPreferences.isSourceEnabledSync(AppPreferences.SOURCE_BAIDU) },
+            // Jamendo 源开关（clientId 非空由 SourceVisibility 自己判）
+            jamendoEnabled = { appPreferences.isSourceEnabledSync(AppPreferences.SOURCE_JAMENDO) },
+            jamendoClientId = { appPreferences.getJamendoClientIdSync() },
+        )
+    }
+
+    /**
+     * 本地音乐总开关（`settings.localMusicEnabled`）的**运行期同步镜像**。
+     *
+     * 为什么需要它：[SourceVisibility] 的 `LOCAL` 判据必须是**同步**读（大量消费点在
+     * 非挂起上下文，见方案 §3.1「为什么不用 suspend」），而 `AppSettings` 只有 Flow。
+     *
+     * ⛔ **不复用 `MainViewModel._localMusicEnabled`**：那是 ViewModel 私有的运行期镜像，
+     * 而 `SourceVisibility` 在 Application 层构造（聚合器也要用），拿不到 VM。
+     *
+     * ⚠️ **唯一写入者是 `MainViewModel` 的本地开关观察者**（见
+     * [setLocalMusicEnabledMirror]）：若这里另开一条 collector 写同一份值，两条
+     * collector 对同一次 DataStore 发射的**处理顺序不保证** ⇒ 两个镜像会短暂分叉
+     * （一个说「开」、一个说「关」）⇒ 派生流会按旧值算完且此后不再重算 ⇒ 本地歌
+     * 永久消失。故：**单一写入者**。
+     *
+     * 初值 = **实际默认值 `true`**（`local_music_enabled` 缺键时为 true）：
+     * ⚠️ 启动期的镜像可能还没收敛，若初值取「关」会让冷启动瞬间把本地曲库整片藏起来；
+     * 取实际默认值则最坏只是「多显示一会儿」。
+     */
+    @Volatile
+    private var cachedLocalMusicEnabled: Boolean = true
+
+    /**
+     * 同步本地音乐总开关的运行期镜像（由 `MainViewModel` 的本地开关观察者调用）。
+     *
+     * ⚠️ 必须在 VM 写自己的 `_localMusicEnabled` **之前**调用 ——
+     * 保证「VM 镜像」与「应用镜像」在同一瞬间翻转（见 [cachedLocalMusicEnabled] 的说明）。
+     */
+    internal fun setLocalMusicEnabledMirror(enabled: Boolean) {
+        cachedLocalMusicEnabled = enabled
+    }
 
     /** 本地音乐仓库（索引持久化 + 增量扫描 + 索引搜索） */
     lateinit var localMusicRepository: LocalMusicRepository
@@ -392,7 +461,11 @@ val baiduOAuthClient: BaiduOAuthClient by lazy { BaiduOAuthClient(this, baiduOkH
                 "60198", "377165088", "2211745987", "2884035"
             ),
             // F2-3 多源化：本地歌曲（localMusicRepository 254 行才初始化，延迟 lambda）
-            localSongsProvider = { localMusicRepository.loadFromCache() }
+            localSongsProvider = { localMusicRepository.loadFromCache() },
+            // ⭐ NAS 音乐源总开关的**实时读法**（方案 §3.2.4 / §3.2.1 第 19 项）。
+            // 与 SearchAggregator 的 nasMusicEnabled 同形：构造期注入 lambda、调用时实时读
+            // ⇒ 开关翻转后下一次生成批次立即生效（关 NAS ⇒ 电台完全不发 NAS 请求）。
+            nasMusicEnabled = { appPreferences.getNasMusicEnabledSync() }
         )
         // 模型下载管理器（HT-Demucs FT ONNX，与 APK 分离，设置页下载）
         modelDownloadManager = ModelDownloadManager(this) { appPreferences.getModelDownloadUrlSync() }
@@ -405,6 +478,10 @@ val baiduOAuthClient: BaiduOAuthClient by lazy { BaiduOAuthClient(this, baiduOkH
         //    会把用户已关掉的源错误地注册回来（症状：关了还在搜索里出现）。
         val bootSettings = runBlocking { appPreferences.appSettings.first() }
         val bootJamendoClientId = runBlocking { appPreferences.jamendoClientIdFlow.first() }
+        // 本地音乐总开关的运行期同步镜像（SourceVisibility 的 LOCAL 判据用）：
+        // 启动期**直接读 DataStore** 播种（同上，镜像此刻可能还是编译期默认值）。
+        // ⚠️ 运行期的写入者是 MainViewModel 的本地开关观察者（单一写入者，见 cachedLocalMusicEnabled）。
+        cachedLocalMusicEnabled = bootSettings.localMusicEnabled
         // ─────────────── 洛雪（LX）取链（方案 §5）───────────────
         // 增强层**始终挂上**、靠「可用脚本列表为空」表达未启用：MetingApiService 只构造一次，
         // 运行时开关不可能重建它（§7.7 第 6 条：洛雪不是 service，切它不触发任何注销）。
@@ -662,7 +739,10 @@ autoDownloadController = com.nasmusic.tv.backend.download.AutoDownloadController
             // M7（§5.2）：suspend provider，与同文件 appSettings.first() 既有写法一致
             localMusicEnabled = { appPreferences.appSettings.first().localMusicEnabled },
             // v2.39.8：NAS 源开关同样实时读（不传构造期快照）
-            nasMusicEnabled = { appPreferences.appSettings.first().nasMusicEnabled }
+            nasMusicEnabled = { appPreferences.appSettings.first().nasMusicEnabled },
+            // P1a（方案 §3.3 G2）：注入可见性判定器 —— 聚合器的百度 / Jamendo / 网络源分支
+            // 改为显式判「用户开没开」（此前只看实例非空 ⇒ 关源后照样返回结果，§5.2）。
+            sourceVisibility = sourceVisibility
         )
 
         // 启动时清理超过 30 天的搜索历史

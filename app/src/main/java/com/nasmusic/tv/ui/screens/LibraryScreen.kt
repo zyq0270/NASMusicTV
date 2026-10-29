@@ -714,7 +714,6 @@ fun LibraryScreen(
                         when (targetTab) {
                             LibraryTab.ALBUMS -> AlbumsTab(
                                 albums = filteredAlbums,
-                                songs = searchResults,
                                 onPlayAlbum = onPlayAlbum,
                                 onOpenAlbumDetail = onOpenAlbumDetail,
                                 listState = albumListState
@@ -770,7 +769,6 @@ fun LibraryScreen(
                             } else {
                                 AlbumsTab(
                                     albums = filteredAlbums,
-                                    songs = songs,
                                     onPlayAlbum = onPlayAlbum,
                                     onOpenAlbumDetail = onOpenAlbumDetail,
                                     listState = albumListState
