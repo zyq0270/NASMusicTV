@@ -18098,5 +18098,6 @@ class SourceVisibility(
 | `testDebugUnitTest --rerun-tasks` | ✅ **251 个测试类 / 2600 例 / 0 失败 / 0 跳过**（改动前 248 类 / 2574 例 ⇒ 本次新增 3 类 26 例：`SourceVisibilityTest` 13 + `SourceGatingGateTest` 9 + `SourceGatingContractTest` 4） |
 | `lintDebug` | ✅ 0 error（CI 为 blocking，不得引入新 error） |
 | 既有门禁回归 | ⚠️ 全量首跑 `2600 tests completed, 1 failed` ⇒ `LibrarySongsSourceWiringGateTest` 的 G2/G3 因合并点迁移而失效，**已按新链条改写**（不变量不变，见 §六 第 7 条），复跑全绿 |
+| 本地 release 出包（带 E51） | ✅ `assembleRelease "-Plofi.city=true"` → `app/build/outputs/apk/release/NASMusicTV-release-v2-39-9.apk`（**30.11 MB**）；`apksigner verify` V2 签名有效，证书 SHA-256 `24ed591a…b46dfe`（= `release-key.jks`，与既有 release 同钥）；`aapt2 dump badging` ⇒ `versionCode=194 / versionName=2.39.9`、`minSdk 22 / targetSdk 34`、三 ABI（arm64-v8a / armeabi-v7a / x86_64）；E51 覆盖层的各城市场景（Boston / Kyoto / Budapest / Hamburg / Chicago / BuenosAires / OldStateHouse / BostonGarden …）确认参与编译，dex 内可见 `LofiCityRenderer` / `CityRegistry` / 城市 id ⇒ **带真效果，非兜底假包**。⛔ 该包仅本机：E51 移植件不外发，不 push / 不 tag / 不发 release |
 
 ⚠️ **真机未跑**：方案 §7.3 的 V1–V19 需在电视（192.168.0.114）与手机上逐条复验，本轮只完成编译 + 单测 + lint 三项工程验证。

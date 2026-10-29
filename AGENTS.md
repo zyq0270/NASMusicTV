@@ -17,10 +17,17 @@ JDK comes from Android Studio's bundled JetBrains Runtime. Gradle wrapper points
 ```powershell
 $env:JAVA_HOME = "C:\Program Files\Android\Android Studio\jbr"
 
-./gradlew.bat assembleDebug      # debug APK
-./gradlew.bat assembleRelease    # needs ./keystore.properties (gitignored)
-./gradlew.bat test               # unit tests (Robolectric + JUnit4)
+./gradlew.bat assembleRelease "-Plofi.city=true"   # release APK — **default: WITH E51** (owner ruling 2026-10-29)
+./gradlew.bat assembleDebug   "-Plofi.city=true"   # debug APK   — **default: WITH E51**
+./gradlew.bat test            # unit tests (Robolectric + JUnit4)
 ```
+
+> ⭐ **Local builds default to WITH E51「像素城市」** (owner ruling, 2026-10-29) — always pass `-Plofi.city=true`.
+> The E51 sources are **not in the repo** (⛔ they are upstream translations with no license grant — see the E51 ruling below); they come from the out-of-repo overlay `D:/hxzhang/MyGithubSoftware/NASMusicTV-e51-local/src`, mounted by `~/.gradle/init.d/10-nasmusic-e51-local.gradle` (this init script exists only on this machine).
+> The guard in `app/build.gradle.kts` **fails the build** when the switch is on but neither the overlay nor the branch sources are present ⇒ a missing overlay fails loudly instead of silently producing a "theme present, effect is the generic fallback" fake package.
+> CI / public builds keep `lofi.city` off (no E51 byte ever reaches GitHub).
+> ⛔ A package built with E51 is **local-only**: never push / tag / release it.
+> Local release needs two keys in the gitignored `keystore.properties`: `cryptoPassphrase=` (must match the historical value, else the `packageRelease` guard fails the build) and `storeFile=release-key.jks` (project-root relative; without it the release signing config is never created and the APK comes out **unsigned**).
 
 **adb 不在 PATH** — 完整路径：`C:\Users\hxzha\AppData\Local\Android\Sdk\platform-tools\adb.exe`。安装到电视（无线连接）：
 
