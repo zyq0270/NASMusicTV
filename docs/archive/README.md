@@ -221,6 +221,29 @@
 
 ---
 
+## 第六轮（2026-10-29，1 个）—— v2.39.9 已实施并发布
+
+| 文档 | 判定依据 |
+|---|---|
+| `music-source-gating-plan.md` | ✅ **已落地并发布**：音乐源开关全覆盖。`backend/SourceVisibility.kt`（唯一真相源）已存在；`MainViewModel` 的 `visibleSongsPaging` 派生流 / `clearSourceScopedCaches` / 22 项采集期短路 / 双向刷新已落码；`SearchAggregator` 五个分支的可见性判据已补；`LibraryBranch` 的 UI 层合并已迁入 VM。门禁 `SourceGatingGateTest`（源码文本门，含负向自证）+ `SourceVisibilityTest`（五源矩阵与 `networkSource` 映射对拍）+ `SourceGatingContractTest`（组合契约）已落地。记录见 `technical-overview.md` §10.277；版本 `194 / "2.39.9"` |
+
+**归档时仍未关闭的遗留（⛔ 归档 ≠ 已解决，四条逐条留痕）**：
+
+1. ⛔ **P6 的「新建 fake `BackendAdapter` + `MainViewModel` 测试宿主」有意 descope** —— `MainViewModel`
+   构造依赖（Application / DataStore / Room / Robolectric）极重，工作量与回归风险高于收益。
+   替代覆盖：门禁测试钉形状 + 组合契约测试钉语义 + 真机复验 V1–V19。恢复方式见方案 §10.3。
+2. ⛔ **百度关源时的提示文案偏**：复用既有的「百度网盘未登录，请前往 设置 → 网盘 开启并登录」，
+   而实际场景是「已登录但关了源」。未新增翻译资源。
+3. ⛔ **关源瞬间停在专辑 / 艺术家详情页时**，`_albumSongsCache` / `_artistDetailSongsCache` 的旧内容
+   会短暂可见（这两个缓存不在方案 §3.3 的处置表内；设置页与详情页不同屏，触发概率极低）。
+4. ⛔ **`clearSourceScopedCaches` 只在 `setSourceEnabled` 这一个入口被调用** —— 将来若有代码绕过它
+   直接改 `appSettings.nasMusicEnabled`，清缓存不会发生。
+
+> 引用改写 **2 处**（`technical-overview.md` §10.277 ×1、`app/src/test/.../SourceGatingGateTest.kt`
+> 的 KDoc ×1）；裸文件名 0 处。死链 **0 新增**。
+
+---
+
 ## 未归档（仍留 `docs/` 根，2 个）—— 全部是活文档
 
 > 计数口径：⛔ **本节原先写「`docs/` 根只剩 2 篇 Markdown」——那已经过期**（`visualizer-effects-list.md`

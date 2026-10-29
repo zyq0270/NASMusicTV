@@ -17993,3 +17993,110 @@ base64 / hex）、`lx.request`（GET/POST、`Content-Type: application/json` 时
   ⛔ 本条不写「应该能跑」—— 老电视能否用只能用 `connectedDebugAndroidTest` 说话。
 - 文档：方案已归档；`CHANGELOG.md` v2.39.8 只记用户可感知变更。版本 `193 / "2.39.8"`。
 - 未推送、未 tag（E51 引用纪律不变）。
+
+### 10.277 v2.39.9 — 音乐源开关全覆盖：唯一真相源 + 采集/合成两阶段门控（2026-10-29）
+
+方案：`docs/archive/music-source-gating-plan.md`（v3，三轮审阅后定稿）。
+需求（用户 2026-10-28）：**「各个音乐源的开关应该覆盖所有的能够访问音乐的地方……只要关掉某个音乐来源，那么这些地方的音乐就不能列出这个音乐来源的内容。」**
+
+一句话定位：把「某个源此刻是否可见」从**散落各处的布尔判断**收敛成**一个只读判定对象**，再在**数据合成处**统一过滤 —— 关源后「列不出」与「不再请求」同时成立。
+
+#### 一、核心契约：原始流 = 库存，派生流 = 可见集
+
+| 类别 | 成员 | 关源时 | 谁读它 |
+|---|---|---|---|
+| 原始库存流 | `_albums` / `_songs` / `_songsPaging` / `_artists` | **永不清空** | 首页四项统计（S2：数字是存量，不随开关扣减） |
+| 单源无统计流 | `_genres` / `_years` / `_playlists` / `_favoriteSongs` / `_baiduIndexedSongs` | **按源置空** | 流派/年份 TAB、歌单管理、「我的」页收藏 |
+| 派生可见集 | `_mergedAlbums` / `_mergedArtists` / **`visibleSongsPaging`** / 首页区块 / 电台批次 / 卡片曲目数 | **在合成点过滤** | 一切 UI |
+
+⚠️ 这条契约是本版的**地基**：它同时解决了「统计不该缩水」与「关源必须立刻不显示」这对看似矛盾的要求 —— 统计读原始流（天然不变），列表读派生流（天然过滤）。
+⛔ 推论：**任何 UI 不得直接消费原始库存流当可见集**（「播放全部」/`AlbumsTab`/`artistSongsMap`/「我的」页收藏都曾踩这条）。
+
+#### 二、`SourceVisibility`：唯一真相源（`backend/SourceVisibility.kt`，新增）
+
+```kotlin
+class SourceVisibility(
+    private val nasEnabled: () -> Boolean,
+    private val localEnabled: () -> Boolean,
+    private val metingEnabled: () -> Boolean,
+    private val baiduActive: () -> Boolean,
+    private val jamendoEnabled: () -> Boolean,
+    private val jamendoClientId: () -> String,
+) {
+    fun isVisible(type: MusicSourceType): Boolean = when (type) { … }
+    fun isVisible(song: Song): Boolean = isVisible(song.sourceType)
+}
+```
+
+三条设计纪律：
+1. **只回答「用户开没开」，不回答「它能不能用」** —— 后者是 `backendRegistry`（NAS 是否已连接）与 `NetworkMusicManager.services`（service 是否注册）的事；混在一起会让「NAS 未连接」被当成「NAS 被关掉」，于是用户明明开着的源整片消失。
+2. **每源一个同步 lambda，而不是 `settings: () -> AppSettings`** —— `appSettings` 只有 Flow、**没有同步快照**，构造期快照会让开关永远停在启动时的值（`LocalMusicGateTest` 当初钉住的同一类缺陷）。同步 lambda 走 `AppPreferences` 已有的 `@Volatile` 镜像，零 IO。
+3. **归属判定复用 `Song.sourceType`，⛔ 不写第二套** —— 两套判定必然漂移，后果是「界面里有但播放解析失败」。
+
+⚠️ 已知边界：未知 `networkSource` 字符串会**静默**归入 `NETWORK_MUSIC`（`when` 对枚举穷尽 ⇒ 不编译报错）⇒ 未来新增独立网络源会莫名受 Meting 开关影响。已由 `SourceVisibilityTest` 的映射对拍用例钉住。
+
+#### 三、四个合成点，**全部在 VM 侧**（⛔ 没有任何 UI 层合成点）
+
+| 合成点 | 位置 | 门控内容 |
+|---|---|---|
+| G1 曲库合成 | `MainViewModel.updateMergedData()` + **`visibleSongsPaging`** | NAS 专辑/艺术家传空、百度索引不读传空；`visibleSongsPaging` 按可见性合并 NAS 分页 + 本地 + 百度 |
+| G1c 首页/电台 | `loadHomeDashboard()` 的轮播/收藏；`loadSmartRadioBatch` 的 `generateOnly` 回调 | 轮播与收藏置空；电台批次按 `sourceType` 过滤 |
+| G2 聚合搜索 | `backend/SearchAggregator.search()` | 补 BAIDU / JAMENDO / NETWORK_MUSIC 三分支的可见性判据 + 结果兜底过滤 |
+| G3 在线服务 | `NetworkMusicManager` | **保持 `registerService`/`unregisterService` 不变**（改成查询时过滤覆盖不到 `resolvePlayUrl` 的精确路由） |
+
+⭐ **「合成点全在 VM 侧」是本版的关键结构改动**：v2 方案把歌曲合并钉在 `LibraryBranch.kt` 的 `remember(songsPaging, localSongsList, baiduSongsList)` 上，而**开关翻转时这三个键都不变** ⇒ `remember` 永不重算 ⇒ NAS 段永远不会被置空。改为 VM 派生 `visibleSongsPaging` 后，UI 只做透传，该类缺陷从根上消失。
+
+⚠️ 可见性读的是 `@Volatile` **同步镜像**、**不是 Flow** ⇒ 开关翻转**不会**自动触发下游重算。故引入显式重算信号 `_sourceRevision` + `bumpSourceRevision()`；且镜像是 DataStore collector **异步**写的，`dataStore.edit{}` 返回时镜像未必已更新 ⇒ `setSourceEnabled` 里先 `awaitSourceMirror()`（有界 ≤1s 等镜像收敛）再 bump，否则派生流会拿旧可见性重算后**停在新值之外**（用户看到「开关没生效」）。
+
+#### 四、采集期短路：22 项（关掉的源**根本不发请求**）
+
+覆盖 `loadLibrary` / `loadArtists` / `loadYears` / `loadGenres` / `loadFavorites` / `loadPlaylists` / `loadSongsFirstPage` / `loadSongsNextPage` / `loadAllSongsBackground` / `loadRandomSongs` / `startShuffleRefill` / `loadAlbumSongs` / `playAlbumMultiSource` / `loadArtistSongs` / `RemoteCallbacks.search` / `loadJamendoHot` / `loadJamendoTag` / `searchJamendo` / `loadHomeDashboard` / `getSongsByGenre` / `getSongsByYearRange` / `selectPlaylist` / `playPlaylist` / `loadSmartRadioBatch` / `playAllNetdiskDir` / `collectAudioInDir`。
+
+⛔ **只「不请求」，绝不清空原始库存流** —— 清缓存是下一节的独立职责。
+⚠️ 在途请求要丢弃：`loadSongsNextPage` / `loadAllSongsBackground` 的**写回处再判一次**可见性，否则关源瞬间飞回来的结果会写进 `_songsPaging`。
+
+#### 五、关源清缓存与双向刷新（§3.2.2 / §3.5）
+
+`clearSourceScopedCaches(source)` 是**唯一**清理入口，由 `setSourceEnabled` 直接调用：
+- **NAS** ⇒ `_genres` / `_years` / `_playlists` / `_favoriteSongs` 置空；`_randomSongs` 按 `sourceType` 过滤掉 NAS 歌（**保留 Meting 段**，不整条清空）；`_favoriteIds` 同步清空；`artistSongsMap` 过滤掉 NAS 歌（只过滤结果，**不动增量构建逻辑**）
+- **百度** ⇒ `_baiduIndexedSongs` 置空
+- **Meting** ⇒ `_randomSongs` 过滤掉网络歌
+- **Jamendo** ⇒ 无独立流
+
+⚠️ **不能把清理寄托在「各 `load*` 的短路分支顺手清」** —— v2 方案就是这么写的，而那些 `load*` 在**开关翻转时根本没有调用者**（`loadGenres` 只在 `loadLibrary` 内被调、`loadYears`/`loadPlaylists` 只有 UI `retry` 触发）⇒ 那是死代码，「关源后歌单管理仍显示 NAS 歌单」「V6 随心听仍含网络歌」当场失败。
+
+**双向刷新**：
+- **关源** ⇒ `clearSourceScopedCaches` + `updateMergedData()` + `loadHomeDashboard()` + `loadRecentSongs()` + 电台批次过滤
+- **重开** ⇒ 按源显式重拉：NAS ⇒ `loadLibrary()` + `loadYears()` + `loadPlaylists()`（后两者是**独立入口**，`loadLibrary` 不触发）；Meting ⇒ `loadRandomSongs()`（恢复随心听的网络段）。⛔ **不能只靠 `registerService`** —— NAS 走 `backendRegistry`、Meting 走 services map，光恢复注册不会把已清空的流填回来。
+
+#### 六、实施中确认并修正的 6 处
+
+1. **`remember` 的键必须包含「可见集本身」**：`LibraryBranch` 里过滤「播放全部」用的 `remember(songsState)` 会命中缓存 —— `_songs` 是原始库存流、关源时**不清空** ⇒ 值不变 ⇒ 过滤结果仍是旧的 ⇒ V18/S4 依然违规。改为 `remember(songsState, mergedSongsPaging)`（`mergedSongsPaging` 来自 VM 的 `visibleSongsPaging`，开关翻转时必定发射新值）。
+2. **本地开关的本地段不走 `isVisible(LOCAL)`**：本地开关的既有语义是「关 = 只显示已下载」，按 `isVisible(LOCAL)` 门控会把已下载歌曲一起藏掉 ⇒ 本地段沿用 `visibleLocalSongsNow()`。
+3. **本地开关镜像放在 `NasMusicApp` 而非 `AppPreferences`**：`AppPreferences` 没有 `getLocalMusicEnabledSync()`，而新增一个会与 `ProviderMirrorWiringGateTest` G2 的约定（`get*EnabledSync()` + `startProviderMirrors` 内有 collector）冲突 ⇒ 改用应用级 `@Volatile` 镜像 + **单一写入者**（`MainViewModel` 的本地开关观察者），并按 `NasMusicApp` 既有惯例在启动期用 DataStore 直读播种（避开冷启动默认窗口）。两个独立 collector 处理同一次发射的**顺序未定义** ⇒ 镜像可能短暂分歧，故必须单一写入者。
+4. **`SmartRadioManager` 增加缓存可见态**：曲库缓存原本一次会话内永久复用；关 NAS 后缓存里没有 NAS 样本，若 NAS 重开仍复用旧缓存 ⇒ 电台永远补不回 NAS 歌。故新增 `cachedLibraryNasVisible`，可见态一变即视为缓存失效并重建一次。
+5. **`loadAlbumSongs` 与 `playAlbumMultiSource` 抽共用私有 helper**（`collectAlbumSongsMultiSource`）：保证两条路径的门控判据**逐字一致**，避免两套判定漂移。
+6. **Jamendo 三入口额外清空 `_jamendoState`**：只短路不清理的话，关 Jamendo 前的内容会继续显示（V9d 要求「不请求、**不显示**」）。
+7. **既有门禁 `LibrarySongsSourceWiringGateTest` 随链条迁移改写**：它钉的是「歌曲 Tab 必须含 NAS + 本地 + 百度三源」这条不变量，原断言点落在 `LibraryBranch` 的 `remember` 合并块上。合并迁入 VM 后该断言**必然失败**（全量单测实测：`2600 tests completed, 1 failed`）⇒ 把 G2/G3 改钉到新链条：`MainViewModel.visibleSongsPaging` 的三个输入（`_songsPaging` / `visibleLocalSongs` / `_baiduIndexedSongs`）+ `mergeLibrarySongs` 的三个实参 + `totalCount` 计入本地/百度 + `LibraryBranch` 消费 `viewModel.visibleSongsPaging` **且不得再出现第二处合并**。**被保护的不变量没有变**，只是断言点从 UI 层搬到 VM 合成层；六条负向自证全部保留并按新链条重写。
+
+#### 七、遗留（3 条）
+
+1. **百度关源时的提示文案偏**：复用既有的「百度网盘未登录，请前往 设置 → 网盘 开启并登录」，而实际场景是「已登录但关了源」。影响极小（该文案本身引导用户去设置页，方向不偏），未新增翻译资源。
+2. **关源瞬间停在专辑 / 艺术家详情页时**，`_albumSongsCache` / `_artistDetailSongsCache` 的旧内容会短暂可见（这两个缓存不在处置表内；设置页与详情页不同屏，实际触发概率极低）。
+3. **`clearSourceScopedCaches` 只在 `setSourceEnabled` 这一个入口被调用** —— 将来若有代码绕过它直接改 `appSettings.nasMusicEnabled`，清缓存不会发生。
+
+#### 八、文件清单
+
+- 新增：`app/src/main/java/com/nasmusic/tv/backend/SourceVisibility.kt`
+- 改：`NasMusicApp.kt`（可见性构造 + 本地镜像 + 两处注入）、`backend/SearchAggregator.kt`、`backend/radio/SmartRadioManager.kt`、`ui/viewmodel/MainViewModel.kt`、`ui/viewmodel/NetworkMusicViewModel.kt`、`ui/components/branches/LibraryBranch.kt`、`ui/screens/LibraryScreen.kt`、`ui/screens/library/browse/AlbumGrid.kt`、`app/build.gradle.kts`（`193/"2.39.8"` → `194/"2.39.9"`）、`README.md`、`CHANGELOG.md`
+
+#### 九、验证
+
+| 检查 | 结果 |
+|---|---|
+| `compileDebugKotlin` | ✅ 0 error |
+| `testDebugUnitTest --rerun-tasks` | ✅ **251 个测试类 / 2600 例 / 0 失败 / 0 跳过**（改动前 248 类 / 2574 例 ⇒ 本次新增 3 类 26 例：`SourceVisibilityTest` 13 + `SourceGatingGateTest` 9 + `SourceGatingContractTest` 4） |
+| `lintDebug` | ✅ 0 error（CI 为 blocking，不得引入新 error） |
+| 既有门禁回归 | ⚠️ 全量首跑 `2600 tests completed, 1 failed` ⇒ `LibrarySongsSourceWiringGateTest` 的 G2/G3 因合并点迁移而失效，**已按新链条改写**（不变量不变，见 §六 第 7 条），复跑全绿 |
+
+⚠️ **真机未跑**：方案 §7.3 的 V1–V19 需在电视（192.168.0.114）与手机上逐条复验，本轮只完成编译 + 单测 + lint 三项工程验证。
