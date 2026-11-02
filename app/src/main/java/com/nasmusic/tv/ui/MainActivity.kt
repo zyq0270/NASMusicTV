@@ -46,6 +46,7 @@ import androidx.tv.material3.Text
 import com.nasmusic.tv.NasMusicApp
 import com.nasmusic.tv.R
 import com.nasmusic.tv.player.PlaybackService
+import com.nasmusic.tv.player.startPlaybackServiceSafely
 import com.nasmusic.tv.ui.components.AppRoot
 import com.nasmusic.tv.ui.components.ConnectPromptDialog
 import com.nasmusic.tv.ui.components.DpadInputTracker
@@ -546,7 +547,11 @@ class MainActivity : ComponentActivity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
         // 启动播放服务
-        startService(Intent(this, PlaybackService::class.java))
+        // ⛔ Android 8+（API 26）起「后台启动 Service」受限：进程处于后台态时
+        //    `startService` 抛 `BackgroundServiceStartNotAllowedException`（`IllegalStateException`
+        //    的子类）⇒ 在 `onCreate` 里不捕获会**直接崩掉整个 Activity**。
+        //    触发路径不止 adb（通知栏动作 / 快捷方式 / MIUI 后台复活…）⇒ 走带降级的安全入口。
+        startPlaybackServiceSafely(this, Intent(this, PlaybackService::class.java))
 
         // F2-2 / L3：通知栏"播放模式"按钮接线——service 发出的事件转交 PlayerViewModel。
         // 切换动作必须由 UI 侧执行：playMode 的真相在 PlayerViewModel（B-13：不归

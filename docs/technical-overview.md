@@ -18109,3 +18109,91 @@ class SourceVisibility(
 | **追加轮次（chip 同步）的验证** | ✅ 在**干净 worktree**（基线 = `9bd35ec`，不含另一会话的在途代码）跑全量 `testDebugUnitTest --rerun-tasks` ⇒ **2603 例 / 0 失败**；⚠️ **`lintDebug` 本轮未取得结论** —— 主树被另一会话在途的 `visualizer/highway/**`（编译不过）打断，独立 worktree 的 lint 被中止（本会话主动终止构建）。release 构建中的 `lintVitalAnalyzeRelease`（fatal 级别子集）**通过**。⇒ 待另一会话的在途代码落地后补跑一次 `lintDebug` |
 
 ⚠️ **真机未跑**：方案 §7.3 的 V1–V19 需在电视（192.168.0.114）与手机上逐条复验，本轮只完成编译 + 单测 + lint 三项工程验证。
+
+### 10.278 v2.39.9 — 修「后台拉起应用 ⇒ 整个 Activity 崩掉」（API 26+ 后台启动 Service 限制）（2026-11-02）
+
+> ⛔ 这是一条**通用缺陷**（与任何视觉效果无关）⇒ 在 `main` 上单开一个提交。
+> （同样的修复已先落在私有分支 `feat/e51-private` 的 `792a46a`，两边代码逐字节一致。）
+
+#### 一、真机实测的崩溃
+
+手机（22081212C / Android 13）实测：
+
+```
+java.lang.RuntimeException: Unable to start activity ComponentInfo{com.nasmusic.tv/com.nasmusic.tv.ui.MainActivity}:
+  android.app.BackgroundServiceStartNotAllowedException:
+  Not allowed to start service Intent { cmp=com.nasmusic.tv/.player.PlaybackService }:
+  app is in background uid UidRecord{... TPSL bg:+221ms ...} caps=-------
+    at android.content.ContextWrapper.startService(ContextWrapper.java:843)
+    at com.nasmusic.tv.ui.MainActivity.onCreate(...:564)
+```
+
+#### 二、根因
+
+`MainActivity.onCreate` 里一句**裸的** `startService(Intent(this, PlaybackService::class.java))`：
+
+* Android 8.0（**API 26**）起有「**后台启动 Service 限制**」：进程处于后台态时
+  `startService` 抛 `BackgroundServiceStartNotAllowedException`
+  （它是 **`IllegalStateException`** 的子类）；
+* 异常在 `onCreate` 里**未捕获** ⇒ 一路冒泡 ⇒ **整个 Activity 崩掉、App 闪退**。
+
+⛔ **触发路径不止 adb**：通知栏动作 / 快捷方式 / 桌面小组件 / 从最近任务重开 /
+MIUI 等系统「后台复活」进程后再拉起界面 —— 都是**常见**路径。
+
+#### 三、修法：三级降级，**永不因这条限制抛异常**
+
+新增 `app/src/main/java/com/nasmusic/tv/player/PlaybackServiceStart.kt`：
+
+| 级 | 行为 |
+|---|---|
+| ① 普通路径 | `context.startService(intent)`（前台态 ⇒ 正常放行） |
+| ② 被系统拒绝 | 降级 `context.startForegroundService(intent)`（API 26+） |
+| ③ 再失败 | 只记日志（`AppLog.e`），**不崩** —— 播放服务晚点由前台交互再拉起 |
+
+⭐ **② 的前置条件已齐备**（逐条核过）：
+
+| 条件 | 现状 |
+|---|---|
+| `FOREGROUND_SERVICE` 权限 | ✅ manifest 已有 |
+| `FOREGROUND_SERVICE_MEDIA_PLAYBACK` 权限 | ✅ manifest 已有（API 34 要求） |
+| `android:foregroundServiceType="mediaPlayback"` | ✅ `PlaybackService` 已声明 |
+| 服务 5 秒内 `startForeground` | ✅ `onCreate` 里 `ensureMediaSessionActive()` 立刻建 MediaSession + `startForeground` |
+
+⛔ `stopService` **没有**这个限制 ⇒ 停止路径（`MainActivity` 的两处 `stopService`）**不动**。
+
+⭐ helper **故意收 `Intent` 而不引用 `PlaybackService` 类型** ⇒ 不把 Media3 的
+`@UnstableApi` opt-in 标记带进来（否则 lint 报 `UnsafeOptInUsageError`）。
+
+#### 四、门禁（`PlaybackServiceStartGuardTest`，3 例，**行为级**）
+
+用假 `Context`（`ContextWrapper` 覆写 `startService` / `startForegroundService`）精确模拟系统拒绝：
+
+| # | 用例 | 断言 |
+|---|---|---|
+| 1 | `普通路径成功时不降级` | `startService` 调 1 次、`startForegroundService` **0** 次 |
+| 2 | `后台启动被拒时降级为前台服务且不抛异常` | 抛 `BackgroundServiceStartNotAllowedException` ⇒ **不抛出去**；`startForegroundService` 调 1 次 |
+| 3 | `连前台服务都失败时也不抛异常` | 两种路径都抛 ⇒ **仍然不抛出去** |
+
+> ⚠️ 用例必须带 `@Config(sdk = [Build.VERSION_CODES.R])`（API 30）——
+> Robolectric 4.11.1 **默认**跑的 SDK 可能低于 26（缓存里只有 API 19/30/34），
+> 那时 `Build.VERSION.SDK_INT < O` ⇒ 走不到前台服务分支 ⇒ 断言会假红。
+
+#### 五、真机验证（2026-11-02，手机 22081212C）
+
+**用与崩溃完全同一条路径**复现：`am force-stop` ⇒ `am start` ⇒ 查 logcat：
+
+| 检查项 | 结果 |
+|---|---|
+| `BackgroundServiceStartNotAllowedException` | **0** ✅ |
+| `Unable to start activity` | **0** ✅ |
+| `FATAL EXCEPTION` | **0** ✅ |
+| 进程存活 | ✅ `com.nasmusic.tv` 在 |
+| 前台 Activity | ✅ `topResumedActivity = com.nasmusic.tv/.ui.MainActivity` |
+
+⇒ **同一个包、同一条触发路径 ⇒ 不再闪退。**
+
+#### 六、文件清单
+
+- 新增：`app/src/main/java/com/nasmusic/tv/player/PlaybackServiceStart.kt`（安全启动入口）
+- 改：`app/src/main/java/com/nasmusic/tv/ui/MainActivity.kt`（`onCreate` 改走安全入口 + 一条 import）
+- 新增：`app/src/test/java/com/nasmusic/tv/player/PlaybackServiceStartGuardTest.kt`（3 例）
