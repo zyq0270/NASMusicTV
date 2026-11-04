@@ -23,8 +23,8 @@ import java.io.File
  *
  * | 允许 | 是什么 |
  * |---|---|
- * | `assets/globe/**` | E41 地球仪的运行时资产（three.js 的 ES5 产物，§11 既有事实） |
- * | `assets/lx/**` | 洛雪自定义源宿主的 JS 垫片 —— **本项目自己写的**协议层（与 loficities.com 无关） |
+ * | `assets/globe/` | E41 地球仪的运行时资产（three.js 的 ES5 产物，§11 既有事实） |
+ * | `assets/lx/` | 洛雪自定义源宿主的 JS 垫片 —— **本项目自己写的**协议层（与 loficities.com 无关） |
  *
  * 其余一律判为「上游原件混入」⇒ **构建失败**。
  *
