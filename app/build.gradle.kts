@@ -58,6 +58,7 @@ val lofiCityEnabled: String = (readLocalProperty("lofi.city") ?: providers.gradl
 
 // E51「像素城市」源码存在性护栏（配合上面的发布隔离开关）：
 // `lofi.city=true` 的语义是"本次构建要含**真**的像素城市效果"，但 E51 移植件**不上传本仓库**
+// （公开仓库，代码不外发 —— 见方案 §2.6）。它们有两种可能的来源：
 // （公开仓库，代码不外发）。它们有两种可能的来源：
 //   ① 分支 `feat/e51-private` 里被跟踪的源码（app/src/main/java/.../visualizer/e51）；
 //   ② 本机 Gradle 初始化脚本挂进来的**仓库外覆盖层**（~/.gradle/init.d/10-nasmusic-e51-local.gradle，
@@ -76,6 +77,100 @@ if (lofiCityEnabled == "true") {
                 "    （~/.gradle/init.d/10-nasmusic-e51-local.gradle）挂上仓库外覆盖层。\n" +
                 "  · 在没有 E51 源码的分支上构建：请把 local.properties 的 lofi.city 设为 false，\n" +
                 "    否则会编出一个「主题可选、效果却是通用兜底」的假包。"
+        )
+    }
+}
+
+// E52「阔野公路」发布隔离开关（docs/archive/e52-highway-opengl-plan.md §八）：
+// 本机 local.properties 里写 `highway.enabled=true` 即把该效果编进包；CI 与公开构建缺省 false。
+// ⚠️ 与 E51 的 `lofi.city` 同理：开关只隔离 APK 可选性，不隔离源码（E52 移植件 ⛔ 不 push）。
+val highwayEnabled: String = (readLocalProperty("highway.enabled") ?: providers.gradleProperty("highway.enabled").orNull)
+    .toString().toBooleanStrictOrNull()?.toString() ?: "false"
+
+// E52「旷野公路」资产存在性护栏（配合上面的发布隔离开关）：
+// `highway.enabled=true` 的语义是"本次构建要含**真**的旷野公路效果"。E52 的 GLES 渲染器
+// 在运行时按固定路径从 `assets/e52_highway/` 读贴图与 .obj 模型，路径与体积登记在随资产
+// 一同提交的 `manifest.json` 里。
+//
+// 为什么必须显式失败：清单里的文件缺失或被截断时，**Gradle 不会报错**——assets 是原样打包的。
+// 于是一个"主题可选、贴图缺了一半"的假包会被静默编出来，症状要等到真机跑到那一步才炸
+// （纹理变白 / 模型不出现 / 尺寸不匹配），定位成本极高。故此处提前失败。
+//
+// ⛔ 只校验「存在 + 字节数」，**不**在 Gradle 里算 SHA-256：94 个文件共 8.4 MiB，
+// 逐位哈希会让每次**配置期**多花几百毫秒，而配置期在 CI 上会被放大成分钟级。
+// 逐位一致性交给独立的 JVM 单测：
+// `app/src/test/java/com/nasmusic/tv/visualizer/highway/HighwayAssetManifestTest.kt`
+// （它读同一个 manifest.json，对每个文件重算 SHA-256）。
+//
+// ⚠️ 缺省 false（CI 与公开构建）时本段**完全不执行**：不读 manifest、不 stat 任何文件 ⇒ 零开销。
+if (highwayEnabled == "true") {
+    val highwayAssetRoot = rootProject.file("app/src/main/assets/e52_highway")
+    val highwayManifestFile = File(highwayAssetRoot, "manifest.json")
+    if (!highwayManifestFile.isFile) {
+        throw GradleException(
+            "E52「旷野公路」：highway.enabled=true，但缺少资产清单 " +
+                "${highwayManifestFile.absolutePath}。\n" +
+                "  · 清单随资产一同提交，记录每个文件的字节数与 SHA-256（逐位校验的基准）。\n" +
+                "  · 没有清单就无法校验资产 ⇒ 请把整个 e52_highway/ 目录（含 manifest.json）一起带入。\n" +
+                "  · 在不带 E52 资产的分支上构建：请把 local.properties 的 highway.enabled 设为 false，\n" +
+                "    否则会编出一个「主题可选、贴图却缺失」的假包。"
+        )
+    }
+    val highwayManifest: Map<*, *> = try {
+        // ⚠️ JsonSlurper 在 Kotlin 侧没有 String 重载 ⇒ 传 Reader。
+        groovy.json.JsonSlurper().parse(highwayManifestFile.reader()) as? Map<*, *>
+            ?: throw GradleException(
+                "E52「旷野公路」：资产清单顶层不是 JSON 对象：${highwayManifestFile.absolutePath}"
+            )
+    } catch (e: GradleException) {
+        throw e
+    } catch (e: Exception) {
+        throw GradleException(
+            "E52「旷野公路」：资产清单无法解析：${highwayManifestFile.absolutePath}\n" +
+                "  · ${e.message}\n" +
+                "  · 清单必须是合法 JSON，且含非空的 assets 数组。"
+        )
+    }
+    @Suppress("UNCHECKED_CAST")
+    val highwayEntries: List<Map<String, Any?>> =
+        (highwayManifest["assets"] as? List<Map<String, Any?>>) ?: emptyList()
+    if (highwayEntries.isEmpty()) {
+        throw GradleException(
+            "E52「旷野公路」：资产清单里没有 assets 条目：${highwayManifestFile.absolutePath}\n" +
+                "  · 空清单意味着「什么都不要」——那就不该开 highway.enabled=true。"
+        )
+    }
+    val highwayProblems = mutableListOf<String>()
+    highwayEntries.forEachIndexed { index, entry ->
+        val assetName = entry["file"]?.toString()
+        val expectedBytes = (entry["bytes"] as? Number)?.toLong()
+        if (assetName.isNullOrBlank()) {
+            highwayProblems += "  · assets[$index] 缺少 file 字段"
+            return@forEachIndexed
+        }
+        if (expectedBytes == null) {
+            highwayProblems += "  · assets[$index] ($assetName) 缺少 bytes 字段"
+            return@forEachIndexed
+        }
+        val assetFile = File(highwayAssetRoot, assetName)
+        if (!assetFile.isFile) {
+            highwayProblems += "  · 缺失资产：$assetName —— 清单期望 $expectedBytes 字节，" +
+                "实际：文件不存在（${assetFile.absolutePath}）"
+            return@forEachIndexed
+        }
+        val actualBytes = assetFile.length()
+        if (actualBytes != expectedBytes) {
+            highwayProblems += "  · 字节数不符：$assetName —— 清单期望 $expectedBytes 字节，" +
+                "实际 $actualBytes 字节（${assetFile.absolutePath}）"
+        }
+    }
+    if (highwayProblems.isNotEmpty()) {
+        throw GradleException(
+            "E52「旷野公路」：资产校验失败（${highwayProblems.size} 项）—— highway.enabled=true " +
+                "表示本次构建要含真的旷野公路效果，\n但 assets/e52_highway/ 里的资产与清单对不上：\n" +
+                highwayProblems.joinToString("\n") + "\n" +
+                "  · 修法：按清单里的 sha256 从上游重新拷贝缺失/损坏的文件（清单是逐位校验的基准），\n" +
+                "    或把 local.properties 的 highway.enabled 设为 false。"
         )
     }
 }
@@ -107,6 +202,8 @@ android {
 
         // E51 像素城市：本机/公开双变体开关（读取处见文件顶部，口径见 docs/archive/e51-lofi-city-plan.md §2.5）
         buildConfigField("boolean", "LOFI_CITY_ENABLED", lofiCityEnabled)
+        // E52「阔野公路」：本机/公开双变体开关（读取处见文件顶部）
+        buildConfigField("boolean", "HIGHWAY_ENABLED", highwayEnabled)
     }
 
     // CI 的 Unit tests job 不生成 keystore.properties：无 release 签名配置时跳过创建，

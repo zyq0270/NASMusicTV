@@ -142,6 +142,26 @@ JAVA_HOME="C:/Program Files/Android/Android Studio/jbr" \
   知道 hash 的人仍可通过 API 拉取；`forks: 0`（无人复制出去），最新 Release 早于移植件提交。
   所有者 2026-10-23 决定**不**提交 GitHub 清缓存工单，此项按"接受残留"处理，**勿再主动重提**。
 
+- ⛔ **私有分支只保护「代码」；文档与其它文件一律公开**（所有者 2026-11-04 明示：「私有分支保护的只有代码，其他文档和其他文件都应该公开」）
+  - ⭐ **判据只有一条：是否含上游代码 / 是上游代码的翻译件或派生物。**
+    含 ⇒ **私有**；不含 ⇒ **公开**（两个分支保持一致）。
+  - **私有**（只在 `feat/e51-private`，⛔ 不 push）：
+    · E51 / E52 的 **Kotlin 源码与测试**（`app/src/main/java/com/nasmusic/tv/visualizer/{e51,highway}/`、
+      `app/src/test/java/com/nasmusic/tv/visualizer/{e51,highway}/`）
+    · **资产** `app/src/main/assets/e52_highway/`（上游 Slow Roads 贴图与模型）
+    · **debug 探针** `app/src/debug/**`（GL probe / E52 的 P0 探针）
+    · **移植件与其工具**（`scripts/lofi_*`、`scripts/e52/**`、`docs/archive/e51-lofi-city-plan.md`、
+      `docs/archive/verification/results/lofi_registry_*.json`）
+    · **两份 E52 原型 HTML**（`docs/archive/e52-highway-preview.html` / `docs/archive/e52-highway-webgl-preview.html`）
+      —— 它们**是文档**，但**内含上游移植件** ⇒ 按「代码」处理 ⇒ 私有。
+      同理 `docs/archive/verification/results/e52_golden_vectors.json`（上游数值向量）与
+      `docs/archive/verification/scripts/e52_highway_*.{mjs,js}`（依赖私有原型）。
+  - **公开**（两个分支保持一致）：`CHANGELOG.md`、`AGENTS.md`、`CLAUDE.md`、`app/build.gradle.kts`
+    （含 `highway.enabled` / `lofi.city` 双变体开关，**CI 与公开构建缺省关闭**，故公开无害）、
+    `docs/**` 里除上述以外的全部、`scripts/` 里项目级通用工具、`.gitignore` 等。
+  - ⛔ **不 push、不 tag、不发 release、不上传任何远端**；`feat/e51-private` **永远不随 `main` 推送**
+    （① 只做本地提交；② 不设 upstream；③ 备份用 `git bundle`，⛔ 不用推送代替备份）。
+
   ⚠️ **E51 覆盖层会掩蔽仓库同名文件**（`VisualizerRendererFactory.kt` / `VisualizerStage.kt` /
   `RenderContext.kt`）：本地构建实际用**覆盖层那份** ⇒ 改这三份**必须同时改仓库与覆盖层副本**
   （`python scripts/sync_e51_overlay.py` 同步；`--check` 必须 0 漂移），否则本地等于没改
