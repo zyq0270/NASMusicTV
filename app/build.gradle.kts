@@ -50,6 +50,23 @@ val baiduAppSecret = readKeystoreProperty("baiduAppSecret")
 val cryptoPassphrase = readKeystoreProperty("cryptoPassphrase")
     .ifBlank { System.getenv("CRYPTO_PASSPHRASE").orEmpty() }
 
+// ── 本机「私有覆盖层」（仓库外；CI 与别人的机器上不存在）────────────────────
+// 本机的 Gradle 初始化脚本（~/.gradle/init.d/10-nasmusic-e51-local.gradle）把**仓库外**的
+// 覆盖层挂成 app 模块 main 源集的额外源目录，并在 Kotlin 编译任务层排除仓库里那几份同名文件
+// ⇒ **本地构建实际编译的是覆盖层那份**。覆盖层的目录形态（与 init 脚本一一对应）：
+//     <overlay>/ovl/app/src/main/java/com/nasmusic/tv/...    ← Kotlin 源码
+//     <overlay>/ovl/app/src/main/assets/...                  ← 资产（E52 的 e52_highway/）
+// init 脚本把覆盖层根目录通过项目属性 `e51.overlay` 传进来 ⇒ 这里读同一个属性。
+//
+// ⭐ 这就是「**在 main 上本地编译也携带隐藏分支的效果**」的实现：
+//    隐藏分支（feat/e51-private）的 E51/E52 源码与资产经覆盖层进入本地构建；
+//    GitHub / CI 上没有 init 脚本 ⇒ 没有覆盖层 ⇒ 一行隐藏分支代码都不会被编译进公开包。
+val privateOverlayRoot: File? = (rootProject.findProperty("e51.overlay") as String?)
+    ?.let { File(it) }
+    ?.takeIf { it.isDirectory }
+val privateOverlayJava: File? = privateOverlayRoot?.resolve("ovl/app/src/main/java")
+val privateOverlayAssets: File? = privateOverlayRoot?.resolve("ovl/app/src/main/assets")
+
 // E51「像素城市」发布隔离开关（docs/archive/e51-lofi-city-plan.md §2.5）：
 // 本机 local.properties 里写 `lofi.city=true` 即把该效果编进包；CI 与公开构建缺省 false。
 // ⚠️ 该开关只隔离 APK，不隔离源码（本仓库是公开仓库，代码文本仍随仓库发布）。
@@ -59,22 +76,23 @@ val lofiCityEnabled: String = (readLocalProperty("lofi.city") ?: providers.gradl
 // E51「像素城市」源码存在性护栏（配合上面的发布隔离开关）：
 // `lofi.city=true` 的语义是"本次构建要含**真**的像素城市效果"，但 E51 移植件**不上传本仓库**
 // （公开仓库，代码不外发 —— 见方案 §2.6）。它们有两种可能的来源：
-// （公开仓库，代码不外发）。它们有两种可能的来源：
 //   ① 分支 `feat/e51-private` 里被跟踪的源码（app/src/main/java/.../visualizer/e51）；
 //   ② 本机 Gradle 初始化脚本挂进来的**仓库外覆盖层**（~/.gradle/init.d/10-nasmusic-e51-local.gradle，
 //      它把 `e51.overlay` 这个项目属性指到覆盖层目录）。
 // 两者都没有时带着这个开关构建，Gradle 不会报错：工厂会把 LOFI_CITY 映射到 `CircularRingRenderer()`
 // （穷尽性兜底），于是会**静默**编出一个"主题在、效果是通用圆环"的假包。故此处显式失败。
+//
+// ⚠️ 判定的是「**源码真的在**」（覆盖层里要有 visualizer/e51 目录），而不是「覆盖层目录存在」
+// —— 后者会在覆盖层不完整时放行 ⇒ 又变成假包。
 if (lofiCityEnabled == "true") {
     val e51Tracked = rootProject.file("app/src/main/java/com/nasmusic/tv/visualizer/e51")
-    val e51Overlay = (rootProject.findProperty("e51.overlay") as String?)
-        ?.let { File(it) }
-        ?.takeIf { it.isDirectory }
-    if (!e51Tracked.isDirectory && e51Overlay == null) {
+    val e51OverlaySources = privateOverlayJava?.resolve("com/nasmusic/tv/visualizer/e51")
+    if (!e51Tracked.isDirectory && e51OverlaySources?.isDirectory != true) {
         throw GradleException(
-            "E51「像素城市」：lofi.city=true，但既没有分支内的 E51 源码，也没有本机覆盖层。\n" +
+            "E51「像素城市」：lofi.city=true，但既没有分支内的 E51 源码，覆盖层里也没有。\n" +
                 "  · 要出**带真效果**的本地包：切到分支 feat/e51-private 构建，或让本机 Gradle 初始化脚本\n" +
-                "    （~/.gradle/init.d/10-nasmusic-e51-local.gradle）挂上仓库外覆盖层。\n" +
+                "    （~/.gradle/init.d/10-nasmusic-e51-local.gradle）挂上仓库外覆盖层，\n" +
+                "    并用 `python scripts/sync_private_overlay.py` 把覆盖层同步到该分支的 E51/E52 源码与资产。\n" +
                 "  · 在没有 E51 源码的分支上构建：请把 local.properties 的 lofi.city 设为 false，\n" +
                 "    否则会编出一个「主题可选、效果却是通用兜底」的假包。"
         )
@@ -104,14 +122,40 @@ val highwayEnabled: String = (readLocalProperty("highway.enabled") ?: providers.
 //
 // ⚠️ 缺省 false（CI 与公开构建）时本段**完全不执行**：不读 manifest、不 stat 任何文件 ⇒ 零开销。
 if (highwayEnabled == "true") {
-    val highwayAssetRoot = rootProject.file("app/src/main/assets/e52_highway")
+    // ⭐ 资产根的两种来源（顺序固定）：
+    //   ① 仓库内 `app/src/main/assets/e52_highway`（私有分支 feat/e51-private 上有）；
+    //   ② 本机覆盖层 `<overlay>/ovl/app/src/main/assets/e52_highway`（main 上靠它携带效果）。
+    // 两者都没有 ⇒ 下面的清单护栏会显式失败，不会编出「主题可选、贴图却缺失」的假包。
+    val repoHighwayAssets = rootProject.file("app/src/main/assets/e52_highway")
+    val overlayHighwayAssets = privateOverlayAssets?.resolve("e52_highway")
+    val highwayAssetRoot: File = when {
+        repoHighwayAssets.isDirectory -> repoHighwayAssets
+        overlayHighwayAssets?.isDirectory == true -> overlayHighwayAssets
+        else -> repoHighwayAssets
+    }
+
+    // E52 渲染器源码存在性护栏：资产齐了但源码不在（覆盖层不完整 / 分支上没带源码）
+    // ⇒ Kotlin 编译会以 "Unresolved reference 'HighwayRenderer'" 报错，信息难懂 ⇒ 这里提前失败。
+    val repoHighwaySources = rootProject.file("app/src/main/java/com/nasmusic/tv/visualizer/highway")
+    val overlayHighwaySources = privateOverlayJava?.resolve("com/nasmusic/tv/visualizer/highway")
+    if (!repoHighwaySources.isDirectory && overlayHighwaySources?.isDirectory != true) {
+        throw GradleException(
+            "E52「旷野公路」：highway.enabled=true，但既没有分支内的 E52 源码，覆盖层里也没有。\n" +
+                "  · 要出**带真效果**的本地包：切到分支 feat/e51-private 构建，或让本机 Gradle 初始化脚本\n" +
+                "    （~/.gradle/init.d/10-nasmusic-e51-local.gradle）挂上仓库外覆盖层，\n" +
+                "    并用 `python scripts/sync_private_overlay.py` 把覆盖层同步到该分支的 E52 源码与资产。\n" +
+                "  · 在没有 E52 源码的分支上构建：请把 local.properties 的 highway.enabled 设为 false。"
+        )
+    }
+
     val highwayManifestFile = File(highwayAssetRoot, "manifest.json")
     if (!highwayManifestFile.isFile) {
         throw GradleException(
             "E52「旷野公路」：highway.enabled=true，但缺少资产清单 " +
                 "${highwayManifestFile.absolutePath}。\n" +
                 "  · 清单随资产一同提交，记录每个文件的字节数与 SHA-256（逐位校验的基准）。\n" +
-                "  · 没有清单就无法校验资产 ⇒ 请把整个 e52_highway/ 目录（含 manifest.json）一起带入。\n" +
+                "  · 没有清单就无法校验资产 ⇒ 请把整个 e52_highway/ 目录（含 manifest.json）一起带入\n" +
+                "    （仓库内 app/src/main/assets/e52_highway/ 或覆盖层 ovl/app/src/main/assets/e52_highway/）。\n" +
                 "  · 在不带 E52 资产的分支上构建：请把 local.properties 的 highway.enabled 设为 false，\n" +
                 "    否则会编出一个「主题可选、贴图却缺失」的假包。"
         )

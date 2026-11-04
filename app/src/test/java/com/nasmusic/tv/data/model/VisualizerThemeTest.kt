@@ -28,6 +28,8 @@ class VisualizerThemeTest {
      * 枚举项照常声明（这正是 §2.5 里「数字门不受影响」那条的依据）。
      */
     private val lofiInList = if (BuildConfig.LOFI_CITY_ENABLED) 1 else 0
+    /** E52「阔野公路」同理：`BuildConfig.HIGHWAY_ENABLED`（`local.properties` 的 `highway.enabled`）。 */
+    private val highwayInList = if (BuildConfig.HIGHWAY_ENABLED) 1 else 0
 
     @Test
     fun `legacy enum names migrate to the new themes`() {
@@ -61,15 +63,15 @@ class VisualizerThemeTest {
 
     @Test
     fun `theme library is all concrete effects, no auto mode`() {
-        // 27 = 26 + LOFI_CITY。⛔ 与 lofi.city 开关无关：枚举恒声明，只有 selectable() 会过滤。
-        assertEquals(27, VisualizerTheme.entries.size)
+        // 28 = 27 + LOFI_CITY（一并来还有 E52 HIGHWAY）。⛔ 与 lofi.city 开关无关：枚举恒声明，只有 selectable() 会过滤。
+        assertEquals(28, VisualizerTheme.entries.size)
     }
 
     @Test
     fun `selectable list contains every theme when the photo wall is available`() {
         val selectable = VisualizerTheme.selectable(photoWallAvailable = true)
-        assertEquals(26 + lofiInList, selectable.size)
-        assertEquals(26 + lofiInList, selectable.distinct().size)
+        assertEquals(26 + lofiInList + highwayInList, selectable.size)
+        assertEquals(26 + lofiInList + highwayInList, selectable.distinct().size)
         assertTrue(selectable.contains(VisualizerTheme.PHOTO_WALL))
     }
 
@@ -100,21 +102,21 @@ class VisualizerThemeTest {
             listOf(VisualizerTheme.PHOTO_WALL),
             on.filter { it !in off.toSet() }
         )
-        assertEquals(25 + lofiInList, off.size)
-        assertEquals(26 + lofiInList, on.size)
+        assertEquals(25 + lofiInList + highwayInList, off.size)
+        assertEquals(26 + lofiInList + highwayInList, on.size)
     }
 
     @Test
     fun `ordinal labels are unique`() {
         val labels = VisualizerTheme.entries.map { it.ordinalLabel }
-        assertEquals(27, labels.distinct().size)
+        assertEquals(28, labels.distinct().size)
     }
 
     @Test
     fun `display names are non blank and unique`() {
         val names = VisualizerTheme.entries.map { it.displayName }
         assertTrue(names.none { it.isBlank() })
-        assertEquals(27, names.distinct().size)
+        assertEquals(28, names.distinct().size)
     }
 
     @Test

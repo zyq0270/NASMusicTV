@@ -57,6 +57,9 @@ object VisualizerRendererFactory {
         if (!BuildConfig.LOFI_CITY_ENABLED && theme == VisualizerTheme.LOFI_CITY) {
             // 回落 = 枚举声明的默认效果 [VisualizerTheme.Default] 对应的那个渲染器
             CircularRingRenderer()
+        } else if (!BuildConfig.HIGHWAY_ENABLED && theme == VisualizerTheme.HIGHWAY) {
+            // E52「旷野公路」同上：公开构建（CI 缺省 highway.enabled 未设 ⇒ false）里不渲染它
+            CircularRingRenderer()
         } else {
             createEnabled(theme, context)
         }
@@ -97,6 +100,11 @@ object VisualizerRendererFactory {
         // ⚠️ 分支必须留在 `when` 里：枚举项仍在（备份 JSON 按名反查会命中），删掉分支就不穷尽了。
         // 本机自用版与外部生产版都在 create() 外层先被拦下；这里只是穷尽性兜底，回落默认效果。
         VisualizerTheme.LOFI_CITY -> CircularRingRenderer()
+        // E52「旷野公路」：渲染器实现不随本仓库外发（来源不可外发）⇒ 此处无实现可创建。
+        // ⚠️ 同上：分支必须留着（枚举项恒声明），公开构建在 create() 外层就被拦下。
+        // ⛔ 本机自用版走的是**覆盖层**那份工厂（见 AGENTS.md「本地构建携带隐藏分支效果」），
+        //    那份才有真正的 `HighwayRenderer`。
+        VisualizerTheme.HIGHWAY -> CircularRingRenderer()
     }
 
     /**

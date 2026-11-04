@@ -162,11 +162,33 @@ JAVA_HOME="C:/Program Files/Android/Android Studio/jbr" \
   - ⛔ **不 push、不 tag、不发 release、不上传任何远端**；`feat/e51-private` **永远不随 `main` 推送**
     （① 只做本地提交；② 不设 upstream；③ 备份用 `git bundle`，⛔ 不用推送代替备份）。
 
-  ⚠️ **E51 覆盖层会掩蔽仓库同名文件**（`VisualizerRendererFactory.kt` / `VisualizerStage.kt` /
+  ⭐ **本地构建携带隐藏分支效果 / GitHub 构建不含**（所有者 2026-11-04 明示）
+    「**在 `main` 分支上本地编译时，也要携带隐藏分支的效果；推送到 GitHub 上编译时，不包含隐藏分支效果。**」
+    实现 = **仓库外覆盖层** + **仅本机的 Gradle 初始化脚本**（两者都不在版本库里，⛔ 不外泄）：
+    · 覆盖层：`D:/hxzhang/MyGithubSoftware/NASMusicTV-e51-local/src/ovl/app/src/{main/java,main/assets}/...`
+      （E51 源码 + E52 源码 + `e52_highway/` 资产），由 `python scripts/sync_private_overlay.py`
+      从本地分支 `feat/e51-private`（⛔ 从不推送）同步而来 ⇒ 覆盖层天然不外泄。
+    · 初始化脚本：`~/.gradle/init.d/10-nasmusic-e51-local.gradle`（**仅本机**）把覆盖层挂成
+      app 模块 main 源集的额外源目录（Kotlin 走 java 源目录、资产走 assets 源目录），
+      并在 **Kotlin 编译任务层**排除仓库里那几份同名文件（否则 Redeclaration）。
+    ⛔ **CI / 公开构建不含**：GitHub runner 上没有 init 脚本 ⇒ 没有覆盖层 ⇒ 一行隐藏分支代码都
+    不会被编译进公开包；两个开关（`lofi.city` / `highway.enabled`）在 CI 上缺省 false。
+    ⚠️ **改了隐藏分支的 E51/E52 代码 ⇒ 必须先同步覆盖层**：
+    `python scripts/sync_private_overlay.py`（在私有分支上跑，或在其它分支上由脚本从本地 ref 抽取），
+    否则本地包不含新代码而 CI 却能编过 ⇒ 本地与 CI 行为分叉；
+    `python scripts/sync_private_overlay.py --check` 退出码 1 = 有漂移。
+    ⚠️ **两处清单必须一一对应**：init 脚本的 `E51_TRACKED` ⇔ `scripts/sync_private_overlay.py`
+    的 `SHADOWED_JAVA`（⛔ 改一处就要改另一处）。
+    ⚠️ **排除只作用于 main 变体的编译任务**（`compileDebugKotlin` / `compileReleaseKotlin`）：
+    单测编译任务的源根是 `app/src/test/java`，同样排除会把 E51/E52 的**单测源码**也排掉
+    ⇒ 本地单测会静默少跑一批用例。
+
+  ⚠️ **覆盖层会掩蔽仓库同名文件**（`VisualizerRendererFactory.kt` / `VisualizerStage.kt` /
   `RenderContext.kt`）：本地构建实际用**覆盖层那份** ⇒ 改这三份**必须同时改仓库与覆盖层副本**
-  （`python scripts/sync_e51_overlay.py` 同步；`--check` 必须 0 漂移），否则本地等于没改
+  （`python scripts/sync_private_overlay.py` 同步；`--check` 必须 0 漂移），否则本地等于没改
   （CI / 公开构建没有覆盖层，反而能编过 ⇒ 本地与 CI 行为分叉）。
-  ⚠️ `app/build.gradle.kts` 里有一道 E52 资产校验护栏（清单不对就直接 `GradleException`）。
+  ⚠️ `app/build.gradle.kts` 里两道护栏：E51 源码存在性 + E52 源码/资产存在性与清单校验
+  （开关打开却没有真源码 ⇒ 直接 `GradleException`，不编「主题可选、效果是兜底」的假包）。
 
 ### Doc lifecycle (archive rule — user-mandated, 2026-09-20)
 

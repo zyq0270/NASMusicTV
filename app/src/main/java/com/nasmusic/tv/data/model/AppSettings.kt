@@ -440,6 +440,24 @@ enum class VisualizerTheme(
      * ⛔ 枚举项本身**必须照常声明**（`entries.size`、双语字符串门禁、预算门禁都按声明计数）。
      */
     LOFI_CITY(R.string.visualizer_theme_lofi_city, "像素城市", Tier.ADV, "51", needsParticleBudget = false),
+
+    /**
+     * E52「阔野公路」（方案 `docs/archive/e52-highway-opengl-plan.md`）
+     *
+     * 把 Slow Roads 的观感搬进频谱效果：CPU 核逐行移植（已逐位对账），
+     * 渲染走**原生 OpenGL ES**（自写 GL 管线 + 上游 GLSL 原样编译），
+     * ⛔ 不用 WebView / WebGL / AGSL。换歌即换环境（三阶段雾白过场）。
+     *
+     * ## 归 [Tier.ADV] + `needsParticleBudget = false`
+     * 场景自己按 renderScale / LOD 档降级，⛔ 不读 `ctx.quality.maxParticles`
+     * ⇒ LOW 档**照常提供**本效果（与 [LOFI_CITY] / [DESERT_SMOKE] 同构）。
+     *
+     * ## ⛔ 编译期双变体：与 [LOFI_CITY] 同规矩
+     * 受 `BuildConfig.HIGHWAY_ENABLED` 控制（`local.properties` 的 `highway.enabled=true`）。
+     * 枚举项本身**必须照常声明**（`entries.size`、双语字符串门禁、
+     * 预算门禁都按声明计数）。
+     */
+    HIGHWAY(R.string.visualizer_theme_highway, "旷野公路", Tier.ADV, "52", needsParticleBudget = false),
     ;
 
     /** 效果分级：决定画质档位可用性 */
@@ -515,8 +533,10 @@ private val LEGACY_MAP = mapOf(
          * [fromKey] 仍会按枚举名解析成功（开关不影响声明），所以
          * [com.nasmusic.tv.visualizer.VisualizerRendererFactory.create] 还有第二道回落。
          */
-        private fun publishable(list: List<VisualizerTheme>): List<VisualizerTheme> =
-            if (BuildConfig.LOFI_CITY_ENABLED) list else list.filterNot { it == LOFI_CITY }
+        private fun publishable(list: List<VisualizerTheme>): List<VisualizerTheme> {
+            val base = if (BuildConfig.LOFI_CITY_ENABLED) list else list.filterNot { it == LOFI_CITY }
+            return if (BuildConfig.HIGHWAY_ENABLED) base else base.filterNot { it == HIGHWAY }
+        }
 
         /** 全部效果（含 [PHOTO_WALL]）—— 预生成，避免每次调用重新 `filter` 分配 */
         private val ALL: List<VisualizerTheme> = publishable(entries)
