@@ -108,10 +108,45 @@ JAVA_HOME="C:/Program Files/Android/Android Studio/jbr" \
 - **Doc writing style (user-mandated, 2026-09-20)**: `README.md` lists **features only** — user-facing, concise, drop minor/implementation-level items. `CHANGELOG.md` entries state **what was done only** — one line each, **no root cause, no implementation detail, no source line numbers, no verification narrative**; all of that belongs in `docs/technical-overview.md` §10.N. Touch **only the current version's section** — never rewrite historical sections.
 - ⛔ **Never `reject()` in `MediaSession.Callback.onConnect`** (root cause of "car Bluetooth media buttons dead", §10.165). System-side controllers (Bluetooth AVRCP / SystemUI / car) arrive via the framework `MediaController` and Media3 routes them through `MediaSessionLegacyStub.tryGetController() → onConnect`; rejecting makes Media3 drop the command silently. Put the security boundary in `setAvailableSessionCommands` instead — and since that is **strict set membership** (not additive), only ever **add to** `DEFAULT_SESSION_AND_LIBRARY_COMMANDS`. Gate: `MediaSessionAccessPolicyTest`. ⚠️ Only reproducible in **release** builds.
 
-- ⛔ **E51「像素城市」移植件不得外发（所有者 2026-10-22 裁决，「不发布没有版权的代码」）**：`visualizer/pixel/**`、`visualizer/scenes/lofi/LofiCity*.kt`、生成表 `CityRegistry.kt`、`visualizer/renderers/LofiCityRenderer.kt`、`ui/components/LofiCityCard.kt`、`test/**/Lofi*Test.kt`、`scripts/lofi_city_registry_sync.py`、`docs/archive/e51-lofi-city-plan.md`、`docs/archive/verification/results/lofi_registry_*.json` 都是 loficities.com 上游代码的翻译件/派生物（上游无任何开源授权）⇒ **只存在于本机：⛔ 不 push、不 tag、不发 release、不上传任何远端**。本机 `main` 已含两个这样的提交（`494a25a` / `2b6d105`，且夹在其它功能提交中间），⛔ **直接 `git push` 就会把它们一起发出去**；要 push 其它功能必须先按 `docs/archive/e51-lofi-city-plan.md` §2.6 与 §10 D-m 处理（需所有者授权，⛔ 任何会话不得自行 rebase / reset / force-push，也⛔ 不得为了"能 push"而删掉移植件）。`BuildConfig.LOFI_CITY_ENABLED` 双变体开关只是第二道锁，**不能因为有它就认为可以 push**。每次 push 前跑一遍 §2.6 第 4 条的四步核对。
+- ⛔ **E51「像素城市」+ E52「旷野公路」：文档公开、代码私有**（所有者 2026-10-22 / 10-30 / **2026-11-04** 三次裁决）
+  - **文档公开**（两个分支都可访问）：`main` 上在 `docs/archive/`（`e51-lofi-city-plan.md` / `e52-highway-opengl-plan.md` /
+    `e52-progress.md`，2026-11-04 双双定稿后归档）；私有分支上另有两份 E52 原型 HTML
+    （`docs/archive/e52-highway-preview.html` / `docs/archive/e52-highway-webgl-preview.html`）——
+    它们**内含上游移植件 ⇒ 只在私有分支**，⛔ 不要为了消死链就把它们拷进 `main`。
+  - **代码 / 测试 / 资产私有**：⛔ **只存在于本地分支 `feat/e51-private`**（**本地专用分支：只做本地提交，永不推送**）：
+    E51 源码 `app/src/main/java/com/nasmusic/tv/visualizer/e51/`（`engine/` = 纯 JVM 引擎层，
+    `scenes/` = 场景与位图接缝）+ 测试 `app/src/test/java/com/nasmusic/tv/visualizer/e51/`；
+    E52 源码 `app/src/main/java/com/nasmusic/tv/visualizer/highway/` + 资产
+    `app/src/main/assets/e52_highway/`（上游 Slow Roads 贴图/模型）+ 测试
+    `app/src/test/java/com/nasmusic/tv/visualizer/highway/`。
+    ⛔ **`main` 上不存在 E51/E52 的任何源码、测试、资产** —— 这是剥离后的既定事实，不是"待处理"状态。
+    ⛔ **移植件路径清单**（loficities.com 上游代码的翻译件/派生物，**上游无任何开源授权**）：
+    `visualizer/pixel/**`、`visualizer/scenes/lofi/LofiCity*.kt`、生成表 `CityRegistry.kt`、
+    `visualizer/renderers/LofiCityRenderer.kt`、`ui/components/LofiCityCard.kt`、`test/**/Lofi*Test.kt`、
+    `scripts/lofi_city_registry_sync.py`、`docs/archive/e51-lofi-city-plan.md`、
+    `docs/archive/verification/results/lofi_registry_*.json`。
+  - ⛔ **不 push、不 tag、不发 release、不上传任何远端**。`feat/e51-private` **永远不随 `main` 推送**：
+    ① 日常开发只 `git commit` 到该分支；② 该分支**不设 upstream**；③ 需要备份用 `git bundle` 落盘，
+    ⛔ 不用推送代替备份；④ 仓库已是 **PUBLIC**，任何一次误推都会立刻公开。
+  - `BuildConfig.LOFI_CITY_ENABLED` / `HIGHWAY_ENABLED` 双变体开关**只是第二道锁**，
+    ⛔ 不能因为有它就认为可以 push。
+  - ⛔ **任何会话不得自行 rebase / reset / force-push**，⛔ 也不得为了"能 push"而删掉移植件。
 
-  ⚠️ **护栏已于 2026-10-23 被外部进程突破（事实记录，勿再假设"只在本机"）**：其它会话/进程把本地 `main` 整体推到了 `origin`，13 座城的移植件（`LofiCityCapeTown` … `LofiCityKyoto`）连同 `visualizer/pixel/**`、`LofiCityRenderer.kt`、`CityRegistry.kt` 已经进过 GitHub 公开仓库，`origin/main` 的 `ac2376b` 及之前全部提交都含这些文件。**`.gitignore` 从来没有挡住过移植件**——被忽略的只有上游原文（`app/src/lofi-upstream/`，`.gitignore:120`）与 `logs_temp/`（`:102`），移植件一直是正常跟踪的源码，唯一的屏障是"不 push"这条人工纪律。
-  止血（所有者 2026-10-23 授权执行）：仓库已 **转 private**（`gh repo edit --visibility private`，匿名 API 现返回 404）。历史剥离（`git filter-repo` + force-push + 向 GitHub 申请清缓存）**尚未执行，待所有者单独授权**；在那之前 ⛔ 任何会话不得自行改写历史。新增移植件的纪律不变：仍然 ⛔ 不主动 push。
+  ✅ **2026-10-23 历史剥离已完成**（取代此前"护栏被突破"的记录）：仓库已转 private；
+  `git filter-repo` 从全部历史删除 56 个移植件路径（被跟踪文件 1113 → 1057），改写后主干
+  `d744c5c` → `6a6af1d`（移除对被删类的 7 处引用、补 `LOFI_CITY` 的 `when` 穷尽性兜底），
+  已 `--force-with-lease` 推送到 `origin`；`main` 现为干净的公开基线。E51 的全部提交与源码
+  转移到本地分支 `feat/e51-private`（无 upstream）。2026-10-23 两次含移植件的 CI 构建
+  （`03:42` / `04:07`）已连同 artifact 删除。
+  ⚠️ **残留（已知并接受）**：force-push 只改了 ref，旧 commit 对象仍在 GitHub 对象库中，
+  知道 hash 的人仍可通过 API 拉取；`forks: 0`（无人复制出去），最新 Release 早于移植件提交。
+  所有者 2026-10-23 决定**不**提交 GitHub 清缓存工单，此项按"接受残留"处理，**勿再主动重提**。
+
+  ⚠️ **E51 覆盖层会掩蔽仓库同名文件**（`VisualizerRendererFactory.kt` / `VisualizerStage.kt` /
+  `RenderContext.kt`）：本地构建实际用**覆盖层那份** ⇒ 改这三份**必须同时改仓库与覆盖层副本**
+  （`python scripts/sync_e51_overlay.py` 同步；`--check` 必须 0 漂移），否则本地等于没改
+  （CI / 公开构建没有覆盖层，反而能编过 ⇒ 本地与 CI 行为分叉）。
+  ⚠️ `app/build.gradle.kts` 里有一道 E52 资产校验护栏（清单不对就直接 `GradleException`）。
 
 ### Doc lifecycle (archive rule — user-mandated, 2026-09-20)
 
