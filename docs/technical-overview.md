@@ -18280,3 +18280,100 @@ Windows + Edge parity harness 才能复现，因此**图片全删、数字全留
 - 新增：`scripts/repo_hygiene_clean.ps1`（默认空跑；`-Apply` 才删除）
 - 文档索引（仓库外，不入库）：`~/.config/opencode/skills/nasmusic-repo-hygiene/SKILL.md`（工作流 + 四问侦查 + 坑）、
   `~/memory/workflows/nasmusic-repo-hygiene.md`（索引）
+
+### 10.280 v2.39.10（未升版）｜「**main 分支的本地编译也携带隐藏分支（E51/E52）的效果**，而 GitHub 构建仍不含」（2026-11-04）
+
+#### 一、需求
+
+所有者 2026-11-04 明示：「在 main 分支上进行本地编译时，也应该携带隐藏分支的效果；
+推送到 github 上编译时，不包含隐藏分支效果。」
+
+⇒ 约束与解法：仓库里**一个字节的隐藏分支代码都不动**（`main` 上仍无 E51/E52 的源码/测试/资产），
+靠**仓库外的覆盖层** + **仅本机的 Gradle 初始化脚本**把效果带进本地构建；
+GitHub runner 上这两样都不存在 ⇒ 公开构建与 CI 完全不受影响。
+
+#### 二、三层机制
+
+1. **私有覆盖层**（仓库外，本机）
+   `D:/hxzhang/MyGithubSoftware/NASMusicTV-e51-local/src/ovl/app/src/{main/java,main/assets}/...`
+   · 内容 = 隐藏分支 `feat/e51-private` 的 E51 源码（80 文件）+ E52 源码（56 文件）
+     + `e52_highway/` 资产（108 文件 / 8.5 MiB）
+   · 由 `python scripts/sync_private_overlay.py` 同步（源 = 当前工作树，或本地分支 ref）
+     ⇒ 该分支 ⛔ 从不推送 ⇒ 覆盖层天然不外泄
+2. **本机 Gradle 初始化脚本**（`~/.gradle/init.d/10-nasmusic-e51-local.gradle`，⛔ 不进版本库）
+   · 把覆盖层挂成 app 模块 main 源集的额外源目录（Kotlin 走 java 源目录、资产走 assets 源目录）
+   · 在 **Kotlin 编译任务层**与仓库里那 7 条同名路径**二选一**地排除（否则 Redeclaration）：
+     仓库里有隐藏分支源码（在私有分支上）⇒ 用**仓库**那份（最新，不必先同步覆盖层）；
+     仓库里没有（在 `main` 上）⇒ 用**覆盖层**那份
+   · 资产只在**仓库里没有** `e52_highway/` 时才挂（私有分支自带，两边都挂会撞同名）
+   ⚠️ 排除**只作用于 main 变体**的编译任务（`compileDebugKotlin` / `compileReleaseKotlin`）：
+   单测编译任务的源根是 `app/src/test/java`，同样排除会把 E51/E52 的**单测源码**也排掉
+   ⇒ 本地单测会静默少跑一批用例（E51 的 18 个测试文件此前就没跑过）。
+3. **仓库内的两道护栏**（`app/build.gradle.kts`，两分支一致）
+   E51 源码存在性 + E52 源码/资产存在性与 `manifest.json` 逐条「存在 + 字节数」校验
+   ⇒ 「开关打开却没有真源码/资产」⇒ 直接 `GradleException`，
+   不编「主题可选、效果是通用兜底」的假包。
+
+#### 三、为此补齐的**公开**胶水层（不含任何上游代码）
+
+覆盖层里的 `VisualizerRendererFactory.kt` / `VisualizerStage.kt` 是「E51/E52 感知」版本
+⇒ 它们引用的 `VisualizerTheme.HIGHWAY` 与 `VisualizerRenderer` 的 4 个默认实现必须存在。
+这些是**我们自己**的胶水代码（上游只提供渲染器实现本身），故留在公开侧：
+
+| 文件 | 改动 |
+|---|---|
+| `data/model/AppSettings.kt` | 加 `VisualizerTheme.HIGHWAY` 枚举项 + `publishable()` 按 `BuildConfig.HIGHWAY_ENABLED` 过滤 |
+| `visualizer/VisualizerRenderer.kt` | 加 4 个默认实现：`renderFps()` / `currentEnvLabel()` / `requestEnvSwitch()` / `onFrame(frame, ctx)` |
+| `visualizer/VisualizerRendererFactory.kt` | `HIGHWAY` 的穷尽性兜底分支（公开构建回落默认效果） |
+| `res/values/strings.xml` | 错字：「厅野公路」→「旷野公路」 |
+
+效果条目数由 27 变 28（枚举项恒声明，与开关无关），2 处单测硬计数同步更新。
+
+#### 四、漂移门禁与被取代的旧件
+
+- 新 `scripts/sync_private_overlay.py`（带 E52 源码 + 资产；退出码 0 一致 / 1 漂移 / 2 无法比较）
+- 新 `PrivateOverlayDriftGateTest`（调用上面脚本；退出码 1 ⇒ 判红；2 ⇒ 跳过，CI 即如此）
+- 删除只带 E51 的 `scripts/sync_e51_overlay.py` 与 `E51OverlayDriftGateTest`
+
+#### 五、顺带修掉的两个「从未被运行过」的门禁
+
+把排除范围从「所有 Kotlin 编译任务」收窄到「main 变体的编译任务」之后，
+**E51 的 18 个单测文件第一次真的参与本地运行**（此前它们被旧 init 脚本连坐排除），
+于是暴露了两个从未被跑过的缺陷：
+
+1. **`LofiUpstreamHygieneTest` 的 H2 判据过宽**（私有分支）
+   「源码集里没有上游原件」扫 `app/src/main` 里的 `.js`/`.mjs`，
+   白名单只放行 `assets/globe/**`（E41 地球仪）⇒ 把**本项目自己写的**
+   `assets/lx/boot.js`（洛雪自定义源宿主的 JS 垫片，公开版一直在发）也判成了「上游原件」
+   ⇒ 私有分支的整轮单测直接红。修法：白名单加 `assets/lx/**`。
+2. **公开仓库其实没有「上游原件」的防线**（main）
+   2026-10-23 的历史剥离把 56 个移植件路径从全部历史里删掉了，但**没留门禁**
+   ⇒ 新增 `UpstreamOriginalsHygieneTest`（两分支都有）：
+   `app/src/main` 里的 `.js`/`.mjs` 只许 `assets/globe/**` 与 `assets/lx/**` 两类自有脚本，
+   其余 ⇒ 构建失败。私有分支上 E51 的原件基线在 gitignored 的 `app/src/lofi-upstream/`，
+   不在 `app/src/main` ⇒ 门禁在两个分支上都成立。
+
+#### 六、实测（2026-11-04，本机）
+
+- `main` + 覆盖层 + `lofi.city=true` / `highway.enabled=true` ⇒ `assembleDebug` **BUILD SUCCESSFUL**
+  （`NASMusicTV-debug-v2-39-10.apk`，62.8 MiB）
+- APK 内：`assets/e52_highway/` **108 个条目**；dex 内命中
+  `visualizer/highway/HighwayRenderer`、`visualizer/renderers/LofiCityRenderer`、`visualizer/e51/engine/LofiCity*`
+  ⇒ ⭐ **main 的本地构建确实带上了隐藏分支的效果**
+- ⛔ GitHub / CI：runner 上没有 init 脚本 ⇒ 没有覆盖层 ⇒ 一行隐藏分支代码都进不了公开包；
+  两个开关在 CI 上缺省 false ⇒ 公开版只多一个「会被过滤掉」的枚举项
+- 单测：**main 全量 2608 例 0 失败**（CI 代理；含新增的 `UpstreamOriginalsHygieneTest`
+  与 `PrivateOverlayDriftGateTest`），**私有分支全量 BUILD SUCCESSFUL**
+  （E51 的 18 个测试文件首次真的参与运行）
+
+#### 七、文件清单
+
+- 新增：`scripts/sync_private_overlay.py`、
+  `app/src/test/java/com/nasmusic/tv/visualizer/PrivateOverlayDriftGateTest.kt`、
+  `app/src/test/java/com/nasmusic/tv/visualizer/UpstreamOriginalsHygieneTest.kt`
+- 删除：`scripts/sync_e51_overlay.py`、`app/src/test/java/com/nasmusic/tv/visualizer/E51OverlayDriftGateTest.kt`
+- 改：`app/build.gradle.kts`、`AGENTS.md`、`data/model/AppSettings.kt`、`visualizer/VisualizerRenderer.kt`、
+  `visualizer/VisualizerRendererFactory.kt`、`res/values/strings.xml`、
+  `data/model/VisualizerThemeTest.kt`、`visualizer/renderers/StarrySkyTest.kt`
+- 仓库外（本机，不入库）：`~/.gradle/init.d/10-nasmusic-e51-local.gradle`、
+  `D:/hxzhang/MyGithubSoftware/NASMusicTV-e51-local/src/**`
