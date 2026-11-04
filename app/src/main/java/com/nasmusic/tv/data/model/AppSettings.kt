@@ -165,7 +165,7 @@ data class AppSettings(
  *
  * ⚠️ 其中 [LOFI_CITY] 受编译期开关 `BuildConfig.LOFI_CITY_ENABLED` 控制，
  * **枚举项恒在册**（`entries.size` 与本机/CI 无关），只有 [selectable] 出的列表会过滤它。
- * 方案见 `docs/e51-lofi-city-plan.md` §2.5。
+ * 方案见 `docs/archive/e51-lofi-city-plan.md` §2.5。
  *
  * [tier] 决定该效果在各画质档位下的可用性，见 [VisualQuality.supports]。
  *
@@ -423,7 +423,7 @@ enum class VisualizerTheme(
     DESERT_SMOKE(R.string.visualizer_theme_desert_smoke, "大漠孤烟", Tier.ADV, "48", needsParticleBudget = false),
 
     /**
-     * E51「像素城市」（方案 `docs/e51-lofi-city-plan.md`）
+     * E51「像素城市」（方案 `docs/archive/e51-lofi-city-plan.md`）
      *
      * 逐场景移植 loficities.com 的像素城市动画，跑在自建的低分辨率像素引擎上
      * （480×270 离屏画布 → 最近邻放大满屏，⛔ 不用 WebView/WebGL —— 电视上已证实不可用）。

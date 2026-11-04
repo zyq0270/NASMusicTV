@@ -1,7 +1,7 @@
 # E52「旷野公路」开发进度
 
 > 最后更新：2026-10-31
-> 📋 **E52 方案体系**：主方案 `docs/e52-highway-opengl-plan.md`（OpenGL ES 路线）| 进度跟踪本文 | WebGL 原型 `docs/e52-highway-webgl-preview.html`（⚠️ 私有分支）| Canvas 2D 原型 `docs/e52-highway-preview.html`（⚠️ 私有分支）| 已作废 Canvas 2D 路线 `docs/archive/e52-slow-roads-canvas-plan.md`
+> 📋 **E52 方案体系**：主方案 `docs/archive/e52-highway-opengl-plan.md`（OpenGL ES 路线）| 进度跟踪本文 | WebGL 原型 `docs/archive/e52-highway-webgl-preview.html`（⚠️ 私有分支）| Canvas 2D 原型 `docs/archive/e52-highway-preview.html`（⚠️ 私有分支）| 已作废 Canvas 2D 路线 `docs/archive/e52-slow-roads-canvas-plan.md`
 
 > 📌 **HTML 原型不在 main**：两个 `.html` 原型含上游源码，⛔ 留在私有分支 `feat/e51-private`。
 

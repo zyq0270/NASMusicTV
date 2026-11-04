@@ -50,7 +50,7 @@ val baiduAppSecret = readKeystoreProperty("baiduAppSecret")
 val cryptoPassphrase = readKeystoreProperty("cryptoPassphrase")
     .ifBlank { System.getenv("CRYPTO_PASSPHRASE").orEmpty() }
 
-// E51「像素城市」发布隔离开关（docs/e51-lofi-city-plan.md §2.5）：
+// E51「像素城市」发布隔离开关（docs/archive/e51-lofi-city-plan.md §2.5）：
 // 本机 local.properties 里写 `lofi.city=true` 即把该效果编进包；CI 与公开构建缺省 false。
 // ⚠️ 该开关只隔离 APK，不隔离源码（本仓库是公开仓库，代码文本仍随仓库发布）。
 val lofiCityEnabled: String = (readLocalProperty("lofi.city") ?: providers.gradleProperty("lofi.city").orNull)
@@ -105,7 +105,7 @@ android {
         // S1 修复（2026-09-13）：CryptoUtils AES-256 派生口令（运行时由 CryptoUtils 经 BuildConfig 读取）
         buildConfigField("String", "CRYPTO_PASSPHRASE", "\"$cryptoPassphrase\"")
 
-        // E51 像素城市：本机/公开双变体开关（读取处见文件顶部，口径见 docs/e51-lofi-city-plan.md §2.5）
+        // E51 像素城市：本机/公开双变体开关（读取处见文件顶部，口径见 docs/archive/e51-lofi-city-plan.md §2.5）
         buildConfigField("boolean", "LOFI_CITY_ENABLED", lofiCityEnabled)
     }
 

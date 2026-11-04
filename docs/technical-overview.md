@@ -17463,7 +17463,7 @@ K 歌并恢复导航栏。
 
 ### 10.270 v2.39.7 — E51「像素城市」全量落地：引擎 + 地球过场 + 四城直译（2026-10-22）
 
-**是什么**：新频谱效果主题 `LOFI_CITY`（显示名「像素城市」，`ordinalLabel = "51"`，`Tier.ADV`），逐行直译 loficities.com 的像素城市夜景。方案与全部裁决见 `docs/e51-lofi-city-plan.md`（§2 改判「允许逐行照搬」、§2.5 双变体、§12 双层城市名）；本节只记**落地事实**与**方案之外学到的东西**。规模：新增 `visualizer/pixel/` 20 个文件 + `scenes/lofi/` 6 个 + 渲染器/叠层卡/11 个测试类，共 23,563 行。
+**是什么**：新频谱效果主题 `LOFI_CITY`（显示名「像素城市」，`ordinalLabel = "51"`，`Tier.ADV`），逐行直译 loficities.com 的像素城市夜景。方案与全部裁决见 `docs/archive/e51-lofi-city-plan.md`（§2 改判「允许逐行照搬」、§2.5 双变体、§12 双层城市名）；本节只记**落地事实**与**方案之外学到的东西**。规模：新增 `visualizer/pixel/` 20 个文件 + `scenes/lofi/` 6 个 + 渲染器/叠层卡/11 个测试类，共 23,563 行。
 
 **四条不可协商的地基（引擎层）**：
 
@@ -17565,7 +17565,7 @@ return !FocusInputTracker.touchNavigating                   // 第一次 ACTION_
 按包再扩一轮 `--tests "com.nasmusic.tv.ui.*" --tests "com.nasmusic.tv.data.prefs.*"
 --tests "com.nasmusic.tv.util.*"` → **63 类 549 例，2 例失败**，两条都在
 `LofiCityCardWiringGateTest`（W4「渲染器没调用 publishCursor」），属**并发会话当时未完成的像素城市改动**
-（工作区同时有 `LofiCityRenderer.kt` 与 `docs/e51-lofi-city-plan.md` 的他人改动），与本轮焦点改动无关，
+（工作区同时有 `LofiCityRenderer.kt` 与 `docs/archive/e51-lofi-city-plan.md` 的他人改动），与本轮焦点改动无关，
 本轮未代为修复；本轮涉及的 `FocusIndicatorContractTest` / `SettingsGroupCoverageTest` /
 `LogsTabWiringGateTest` / `LogStoreTest` / `ProviderMirrorWiringGateTest` 全绿。
 `lintDebug` → **0 errors / 164 warnings**（与 §10.270 同数，无新增）。**版本号保持 192 / 2.39.7**（未发新版）。
@@ -17633,7 +17633,7 @@ Added 一行「设置 → 通用 新增「焦点高亮」开关（默认开）�
 合计 1455 条编译错误），全项目编译未过 ⇒ 只能做**单文件 0 错误**这一级验证。
 
 **未做 / 未验**：未推送、未 tag、未编 release APK（E51 移植件 ⛔ 不外发，见
-`docs/e51-lofi-city-plan.md` §2.6）；斯德哥尔摩真机观感未测。
+`docs/archive/e51-lofi-city-plan.md` §2.6）；斯德哥尔摩真机观感未测。
 
 ### 10.273 v2.39.7 — E51 其余六城落地：编译清零 + 接线 + 全量验证转绿（2026-10-23）
 

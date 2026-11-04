@@ -191,7 +191,7 @@ buildConfigField("boolean", "LOFI_CITY_ENABLED", lofiCity.toString())
 
 **3. 文档侧同样不外发**
 
-- 本方案文档（`docs/e51-lofi-city-plan.md`）含逐条移植台账与上游实现细节 ⇒ **它自己也是移植件的一部分**，⛔ 不得随含 E51 的提交 push。若必须 push `docs/`，先把本文件从待推历史里排除（同 §10 D-m 的手续）。
+- 本方案文档（`docs/archive/e51-lofi-city-plan.md`）含逐条移植台账与上游实现细节 ⇒ **它自己也是移植件的一部分**，⛔ 不得随含 E51 的提交 push。若必须 push `docs/`，先把本文件从待推历史里排除（同 §10 D-m 的手续）。
 - `docs/archive/verification/results/lofi_registry_*.json`（同步脚本写的快照）同理：含上游元数据。
 - `README.md` / `CHANGELOG.md` / `docs/technical-overview.md` 是公开文档：写"新增像素城市效果"这类**用户可见事实**没问题，⛔ 但不要写实现来源细节（照上面"连带裁决"第 2 条）。
 - ⚠️ **已实测到一处待处理**：`docs/technical-overview.md` §10.270 首句写着「逐行直译 loficities.com 的像素城市夜景」并链到本方案，由提交 `2b6d105` 引入（尚未推送）。⇒ 若 D-m 选 (a)（把两个 E51 提交摘出待推历史），这句随之不进远端，无需改写；若选 (b)/(c) 或将来单独 push `docs/`，**必须先改写这句并删掉指向本方案的链接**。`CHANGELOG.md` 的 4 行只写用户可见事实（"像素风城市夜景""切换时播放全屏地球过场"），已核对**不含来源信息，可以照常发布**。

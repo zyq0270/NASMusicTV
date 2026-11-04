@@ -14,10 +14,10 @@
 
 | 文档 | 角色 |
 |---|---|
-| `docs/e52-highway-opengl-plan.md`（本文） | ⭐ **主方案** — 当前路线：原生 OpenGL ES |
-| `docs/e52-progress.md` | 开发进度跟踪 |
-| `docs/e52-highway-webgl-preview.html` | WebGL 原型 M1（验证渲染管线用） |
-| `docs/e52-highway-preview.html` | Canvas 2D 原型（历史参考，本文 §4.6.3 仍引用其 cell 分配算法） |
+| `docs/archive/e52-highway-opengl-plan.md`（本文） | ⭐ **主方案** — 当前路线：原生 OpenGL ES |
+| `docs/archive/e52-progress.md` | 开发进度跟踪 |
+| `docs/archive/e52-highway-webgl-preview.html` | WebGL 原型 M1（验证渲染管线用） |
+| `docs/archive/e52-highway-preview.html` | Canvas 2D 原型（历史参考，本文 §4.6.3 仍引用其 cell 分配算法） |
 | `docs/archive/e52-slow-roads-canvas-plan.md` | ⛔ 已作废：Canvas 2D 路线（事实层被本文继承） |
 
 > ⚠️ 表中两个 `.html` 原型文件含上游源码（GLSL 原文 / Slow Roads CPU 核逐行照搬），⛔ **留在私有分支 `feat/e51-private`，不在 main 上**。
@@ -201,7 +201,7 @@ ro.opengles.version = 196609 = 0x00030001  ⇒  GLES 3.1
 
 > ⛔ **自造（沙丘/沙漠）不做**（所有者 2026-10-29）；`Peaks`（`:10028`）/ `Scene`（`:2119`）未注册 ⇒ 不做。
 
-### 1.5 ⭐⭐ WebGL 原型 M1 的结论（2026-10-29，`docs/e52-highway-webgl-preview.html`）
+### 1.5 ⭐⭐ WebGL 原型 M1 的结论（2026-10-29，`docs/archive/e52-highway-webgl-preview.html`）
 
 > **这份结论推翻了本文 v1.4 之前的一句断言**：v1.4 写「CPU 核已移植完成、逐位对账通过」。
 > **那句话夸大了** —— 门禁只覆盖 **6 个纯函数**，且跑在**合成的节点链 + 合成的 `preHeights` ctx** 上
@@ -860,7 +860,7 @@ deviceTier = f( GLES version, GL_RENDERER, MAX_TEXTURE_SIZE, MAX_VERTEX_TEXTURE_
 
 #### 4.6.1 ⚠️ 对账工具链的现状（**卡点**）
 
-- 现有对账工具（`scripts/e52/` 的 diff / 分区域 MAE / 轮廓对账）**量的是 WebGL 原型页**（`docs/e52-highway-webgl-preview.html`），**不是 Kotlin GL 场景**。
+- 现有对账工具（`scripts/e52/` 的 diff / 分区域 MAE / 轮廓对账）**量的是 WebGL 原型页**（`docs/archive/e52-highway-webgl-preview.html`），**不是 Kotlin GL 场景**。
 - ⇒ Kotlin 侧的改动不落到原型页，**SSIM 数字必然等于 P1 基线（0.674481）⇒ 零信息量**。
 - ⇒ **真机出图才能对号**。原型页的抓帧在 headless Edge + swiftshader 下 **6 分钟未出帧**（软渲染太慢）。
 
@@ -1022,7 +1022,7 @@ if(roadProx < -0.2) {
 - **下一步**（不在本次范围，两条都已定位到具体代码位置）：
   1. **让近/中景 LOD 罩住相机脚下** —— ②-b 已证明 n040 前景整片是**远景格**（`roadProx == 0.0`），
      于是既没有 `roadCol`、也没有碎石带，只剩草地/岩石。这是 `ensureCells()` 的行分配问题
-     （`docs/e52-highway-preview.html:1158-1213` 的 `k = 0..5` 近层 / `k = 6..19` 中层），
+     （`docs/archive/e52-highway-preview.html:1158-1213` 的 `k = 0..5` 近层 / `k = 6..19` 中层），
      **不是**着色器问题，⛔ 不要用调色或调 `roadProx` 语义去凑。
   2. **让 `steepness` 非 0** —— ②-c 已证明它恒 0（`webgl_proto.js:357-363` 用 10 单位中心差分，
      上游近景格是本格内差分 `chunk:1676-1731`）；只有坡度回来了，`D3430.glsl:105` 的草→岩混合
@@ -1244,4 +1244,4 @@ if(roadProx < -0.2) {
 | **v1.0** | **2026-10-29** | **初版**：路线改为原生 OpenGL ES（所有者裁决「原生 GLES 不在红线内」）；补创维真机实测（**PowerVR Rogue G6110 / GLES 3.1**）；Canvas 2D 路线定性封死（逐像素着色的表达上限）；D-GL-01~12 + D-new-01~04；移植清单与 P0–P8 阶段；门禁 G01–G30 |
 
 > ⛔ **E52 移植件与 E51 同纪律**：⛔ 不 push / 不 tag / 不发 release。
-> ✅ **Canvas 2D 路线已归档**：`docs/e52-slow-roads-canvas-plan.md` → `docs/archive/e52-slow-roads-canvas-plan.md`（2026-10-31，第十七轮）。原文档 §八 的 O5/O6/O7 均已在本方案 §八 裁决关闭，无挂起项。
+> ✅ **Canvas 2D 路线已归档**：`docs/archive/e52-slow-roads-canvas-plan.md` → `docs/archive/e52-slow-roads-canvas-plan.md`（2026-10-31，第十七轮）。原文档 §八 的 O5/O6/O7 均已在本方案 §八 裁决关闭，无挂起项。
