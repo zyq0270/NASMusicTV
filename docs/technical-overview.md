@@ -18197,3 +18197,86 @@ MIUI 等系统「后台复活」进程后再拉起界面 —— 都是**常见**
 - 新增：`app/src/main/java/com/nasmusic/tv/player/PlaybackServiceStart.kt`（安全启动入口）
 - 改：`app/src/main/java/com/nasmusic/tv/ui/MainActivity.kt`（`onCreate` 改走安全入口 + 一条 import）
 - 新增：`app/src/test/java/com/nasmusic/tv/player/PlaybackServiceStartGuardTest.kt`（3 例）
+
+### 10.279 仓库磁盘清理（12.70 GB → 0.94 GB）与可复用清理脚本（2026-11-04）
+
+> ⛔ **零 app 代码变更**：只删除 gitignored 的 scratch 目录 + 新增一个 `scripts/` 脚本
+> ⇒ **不升版本号**（仍 `versionCode 194 / versionName 2.39.9`），不动 `CHANGELOG.md`
+> （顶部为已发布的 `[v2.39.9]`，无 Unreleased 段，按约定不得改写历史段）。
+
+#### 一、起点与禁区
+
+清理前项目目录 **12.70 GB**。所有者裁定的**不动清单**（与下文脚本中硬编码的保护名单一致）：
+`.gradle/`、`.codegraph/`、`.opencode/node_modules/`、`docs/`，以及各 agent 状态目录
+（`.box-agent/`、`.cowork-temp/`、`.dumate/`、`.tmp/`、`.superpowers/`、`.ruff_cache/`）。
+
+> ⚠️ **`gitignored` ≠ 可删**：`output/` 与 `logs_temp/` 里存在**唯一副本**（源码草稿、数值证据），
+> 删除前必须先做保留动作，见 §三。
+
+#### 二、四轮清理与实测数字
+
+| 轮次 | 目标 | 释放 | 文件数 | 失败 |
+|---|---|---|---|---|
+| 1 | `logs_temp/*`（保留 `e53_*` 在途 12 个文件，392.6 KB） | **7.96 GB** | 39,431 | 0 |
+| — | 仓库根 `release_build.log` → 移入 `logs_temp/`（53.14 KB） | — | 1 | 0 |
+| 2 | `app/build/`（1,060.5 MB）＋ `output/e50_frames_profile`（690.1 MB）＋ `output/e52_frames_profile`（12.8 MB） | **1.72 GB** | 30,211 | 0 |
+| 3 | `output/` 媒体文件（47 项：对账帧 / 上游参考截图 / 散图 PNG） | **0.55 GB** | — | 0 |
+| 合计 | | **11.76 GB** | | **0** |
+
+`output/` 体积 605.9 MB → 57.8 MB；项目总计 12.70 GB → **0.94 GB**。
+全程 `git status` 为 **clean**（审计：`scripts/`、`app/src/main`、`app/src/test` 下无任何代码在运行期读 `logs_temp` 或 `output/`，
+约 14 处 grep 命中全为 KDoc 注释 ⇒ 删除不影响编译与测试）。
+
+#### 三、三处「删之前必须先保住」的东西
+
+| 类型 | 处置 | 实测结果 |
+|---|---|---|
+| **release APK** | 删 `app/build` 前把最新 `NASMusicTV-release-*.apk` 复制到 `output/apk/` | `NASMusicTV-release-v2-39-10.apk` 38.78 MB（构建于 2026-11-04 10:02），SHA-256 `6C1A1794431C0F24E1BEDFBDC4E72F9DBC99EEFEEFD29A62D79AB9916834FCE1`，846 个 zip 条目 + `AndroidManifest.xml` 存在 |
+| **源码草稿** | 打包为 `output/_KEEP_e51_e52_e53_drafts_20261104.zip` | **562 条目 / 5.22 MB**，逐条目可读，0 损坏 |
+| **数值证据** | 打包 `output/` 下**全部非媒体文件**（json/csv/txt/md/py）为 `output/_KEEP_dev_evidence_data_20261104.zip` | **437 条目 / 0.50 MB**，0 损坏；含 `e52_golden/manifest.json`、`compare_vs_device.json`、`compare_vs_real_device.json`、`slowroads_bake/distance_samples.csv`、`report.json`、`1080p/metrics.json` |
+
+⭐ **帧可以重拍，数字不能**：`e52_golden/*`、`slowroads_bake/*` 的对账数字需重跑整套
+Windows + Edge parity harness 才能复现，因此**图片全删、数字全留**（只 0.5 MB）。
+
+⚠️ **刻意保留在途工作**：`output/e53-screenshots/`（10 个文件 / 13.3 MB）与 `logs_temp/e53_*`（12 个文件）
+在清理当日仍在进行 E53 调研 ⇒ 属活工作，不是 scratch。
+
+#### 四、可复用脚本 `scripts/repo_hygiene_clean.ps1`（259 行 / 12.2 KB）
+
+提交 `bbf4be8 chore: 新增可复用的仓库清理脚本…`。设计要点：
+
+| 要点 | 实现 |
+|---|---|
+| **默认空跑** | 不带 `-Apply` 只打印计划，任何东西都不删（本仓所有危险操作脚本的既有约定） |
+| 分阶段可关 | `-NoLogsTemp` / `-NoBuild` / `-NoOutput` / `-NoRootLogs` |
+| **保护在途工作** | `-KeepPattern 'e53*'`（默认值），支持逗号列表 |
+| **保护名单硬编码** | `.git` `.gradle` `.codegraph` `.opencode` `.kotlin` `.idea` `.obsidian` `docs` `scripts` `app/src` `app/schemas` `gradle` 及全部 agent 状态目录、`keystore.properties` / `release-key.jks` / `local.properties` —— **不可被参数覆盖** |
+| 顺序保证 | 「先保后删」：复制 APK 成功后才删 `app/build`；证据 zip 生成后才删媒体 |
+| 失败语义 | 退出码 `2` 并提示 `./gradlew.bat --stop`（不要 `rm` 锁文件，见 AGENTS.md） |
+
+#### 五、四个真踩到的坑
+
+1. ⛔ **PowerShell 5.1 按 ANSI/CP936 解析 `.ps1`**：一个全角 `）` 会**吞掉紧随的换行**，
+   把下一条语句变成注释的一部分。当时生成草稿 zip 时中文注释吞掉了一次 `Get-ChildItem` 调用 ⇒
+   脚本「成功」但 zip 只有 **553/562** 个文件、**E53 数据文件全缺**（已重建并逐条目校验）。
+   ⇒ **所有 `.ps1` 必须纯 ASCII**（可用「无字节 > 127」验证）；批量改源码同样禁用
+   `(Get-Content -Raw) -replace … | Set-Content`。
+2. ⛔ **名为 `*_profile` 的目录不一定是「渲染帧」**：`output/e50_frames_profile`（690 MB）内是
+   **Chromium 用户数据**（`BrowserMetrics-spare.pma`、`CrashpadMetrics-active.pma`、`Breadcrumbs`、
+   `Local State`、`component_crx_cache`、`ProvenanceData`）。判断浏览器垃圾要看这些标记文件，**不能靠目录名**。
+3. ⚠️ **`@('a', 'b' + $x + '.zip')` 不会拼接**：PowerShell 逗号优先级更高，会得到三个独立元素
+   （其中两个是垃圾字符串），该 bug 会让 keep 名单失效并**误删保留项**。须写成 `@('a', ('b' + $x + '.zip'))`。
+   已在脚本里修复，并给 keep 名单加 `Select-Object -Unique`（它同时由常量与目录扫描两路拼装）。
+4. ⚠️ **Gradle 守护进程存活时删 `app/build` 会失败**（长路径 / 文件锁）：先 `./gradlew.bat --stop`。
+
+#### 六、已知残留（有意接受）
+
+`docs/technical-overview.md` 内有约 60 处 `logs_temp/*.log` 路径引用（作为历史验证证据的出处）。
+对应文件已删 ⇒ **这些引用成为死链，但不再修改本文档**：结论已完整写入正文，
+补记「文件已删除」只会污染 §10 的可读性。同理 `CHANGELOG.md` 不补记本次清理。
+
+#### 七、文件清单
+
+- 新增：`scripts/repo_hygiene_clean.ps1`（默认空跑；`-Apply` 才删除）
+- 文档索引（仓库外，不入库）：`~/.config/opencode/skills/nasmusic-repo-hygiene/SKILL.md`（工作流 + 四问侦查 + 坑）、
+  `~/memory/workflows/nasmusic-repo-hygiene.md`（索引）
