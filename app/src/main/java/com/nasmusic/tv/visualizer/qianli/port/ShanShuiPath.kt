@@ -8,6 +8,8 @@
  * [divide] 照抄上游 `:627-651`（折线等分）。
  * [fillPath] / [strokePath] / [polyToPath] 是 `poly()` 的 Kotlin 化改造
  * （上游 `:485-510` 返回 SVG 字符串 → port 包返回 `List<Point>`；渲染器侧再转 `android.graphics.Path`）。
+ * ⚠️ **这三个函数是死代码**（改造-⑤ 之后轮廓自带 fill/stroke/width ⇒ 渲染器直接用
+ * [ShanShuiContour] 的点列画路径，不再经过它们）⇒ 保留只为留档，本轮不改其行为。
  *
  * ⛔ port 包零 Android 依赖 ⇒ 本对象**不出现** `android.graphics.Path`。
  */
@@ -117,7 +119,14 @@ object ShanShuiPath {
         floatArrayOf((it[0] + xof).toFloat(), (it[1] + yof).toFloat())
     }
 
-    /** 中点（上游 `PolyTools.midPt` `:208-222` 的内联版）。 */
+    /**
+     * 中点（上游 `PolyTools.midPt` `:208-222` 的**两点**内联版）。
+     *
+     * ⚠️ **只服务本对象内部的 `bezmh`**（上游 `:448`/`:458`/`:464` 的 `midPt(P[0], P[1])`
+     *   —— 传两个实参 ⇒ 上游 `Array.apply(null, arguments)` ⇒ 长度 2 ⇒ 除以 2 ⇒ 与本函数等价）。
+     * ⛔ **不得**改成本文件的 n 点版：上游 `PolyTools.triangulate` 的 `midPt(T[k])` 是 **3 点**，
+     *   两点版不够用 ⇒ n 点版已单独移植到 [ShanShuiPoly.midPt] / [ShanShuiPoly.midPtExact]。
+     */
     private fun midPt(a: Point, b: Point): Point =
         floatArrayOf((a[0] + b[0]) / 2, (a[1] + b[1]) / 2)
 }

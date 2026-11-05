@@ -8,6 +8,7 @@ import com.nasmusic.tv.visualizer.qianli.port.ShanShuiContour
 import com.nasmusic.tv.visualizer.qianli.port.ShanShuiNoise
 import com.nasmusic.tv.visualizer.qianli.port.ShanShuiPath
 import com.nasmusic.tv.visualizer.qianli.port.ShanShuiPlanner
+import com.nasmusic.tv.visualizer.qianli.port.ShanShuiPoly
 import com.nasmusic.tv.visualizer.qianli.port.ShanShuiPrng
 import com.nasmusic.tv.visualizer.qianli.port.ShanShuiTree
 import org.junit.Assert.assertEquals
@@ -33,6 +34,8 @@ import java.math.BigInteger
  * | G-PORT-6 | planner | chadd 最小间距 ≥ 10；chunks 按 y 升序 |
  * | G-PORT-7 | 负向自证 | Long 累加 / 漏预热 / Horner 三变体各自必红 |
  * | G-PORT-8 | 结构性保真 | 无 NaN；坐标 \|x\|,\|y\| < 1e5；点数 > 2；同种子两次逐位相等 |
+ * | G-PORT-9 | **PRNG 抽取次数与上游一致** | tree01 = 63 次 / 11 条；tree03 = 504 次 / 73 条；皴线颜色逐条随机 |
+ * | G-PORT-10 | **远山三角剖分与上游一致** | 轮廓 504 条 = 10 块填色 + 494 三角形；逐块条数 [37,44,44,44,44,52,60,84,60,25]；坐标摘要 0xea8cbf2d27b1bcf6 逐位相等；退化楔形恰好 1 个（block 0 / 第 25 个）；颜色 = getCol(中点)；PRNG 抽取 = 0 |
  *
  * ## 负向自证规矩
  *
@@ -154,6 +157,39 @@ class ShanShuiPortGateTest {
         }
     }
 
+    /**
+     * G-PORT-1（**Double 种子**变体）：上游 `Prng.seed(31337.0)` 走 `JSON.stringify(31337.0)`，
+     * 而 JS 的数值**没有整数/浮点之分** ⇒ 字符串是 `"31337"`（**不是** `"31337.0"`）。
+     *
+     * 口径来源：node 实跑上游 `shan-shui-inf/index.html` 的原始 JS：
+     * `sAfterSeed = 750549835631`，
+     * 前 4 输出 `0.19014934171710193 / 0.013262523316151293 / 0.782311991800403 / 0.20656032925176954`。
+     *
+     * ⚠️ 这条就是 **D16** 的守门：若 [ShanShuiPrng] 的 `jsonStringify` 退回 `Double.toString()`
+     * （得到 `"31337.0"`）⇒ Base64 不同 ⇒ 整条流错位 ⇒ 必红。
+     */
+    @Test
+    fun gPort1_prngGoldenVectorWithDoubleSeed() {
+        val prng = ShanShuiPrng()
+        prng.seed(31337.0)
+        assertEquals(
+            "Double 种子的 seed 之后 s 必须与上游逐位相等",
+            750549835631.0,
+            prng.s,
+            0.0,
+        )
+        assertEquals(
+            "Double 种子的前 4 个输出必须与上游逐位相等",
+            listOf(
+                0.19014934171710193,
+                0.013262523316151293,
+                0.782311991800403,
+                0.20656032925176954,
+            ),
+            List(4) { prng.next() },
+        )
+    }
+
     /** 黄金向量断言（G-PORT-1 的唯一判据口径，正向与负向共用）。 */
     private fun assertGoldenVector(sAfterSeed: Double, outs: List<Double>) {
         assertEquals(
@@ -271,7 +307,7 @@ class ShanShuiPortGateTest {
     fun gPort4_cunReturnsNestedPointLists() {
         val ptlist = mountainPtlist()
         resetPortGlobals()
-        val texlist = ShanShuiBrush.cun(ptlist, 20.0, 0.0, ShanShuiColor.default)
+        val texlist = ShanShuiBrush.cun(ptlist, 20.0, 0.0)
         assertCunShape(texlist)
     }
 
@@ -280,7 +316,7 @@ class ShanShuiPortGateTest {
     fun gPort4_negative_degenerateInputBreaksCunGate() {
         val thin = List(10) { listOf(floatArrayOf(0f, 0f)) }
         resetPortGlobals()
-        val texlist = ShanShuiBrush.cun(thin, 20.0, 0.0, ShanShuiColor.default)
+        val texlist = ShanShuiBrush.cun(thin, 20.0, 0.0)
         gateMustCatch("退化输入的 cun 必须被判据咬住") {
             assertCunShape(texlist)
         }
@@ -540,6 +576,97 @@ class ShanShuiPortGateTest {
         }
     }
 
+    // ══════════════════════ G-PORT-9 PRNG 抽取次数与上游一致 ══════════════════════
+
+    /**
+     * G-PORT-9：树与皴线的 **PRNG 抽取次数 / 轮廓条数**必须与上游逐条对齐。
+     *
+     * 口径来源：把上游 `shan-shui-inf/index.html` 的原始 JS 喂进 node，用 `Prng.next`
+     * 计数实测（上游 `Math.random` 被全局覆写成 `Prng.next`）：
+     * - `Tree.tree01(0, 0, {})` ⇒ **63** 次抽取 / **11** 条 poly
+     *   （9 个叶簇 blob + line1 + line2；每个 blob 恒抽 7 次 ⇒ 9×7 = 63）；
+     * - `Tree.tree03(0, 0, {})` ⇒ **504** 次抽取 / **73** 条 poly
+     *   （72 个叶簇 blob + 1 条树干；72×7 = 504）。
+     *
+     * ⚠️ 这两个数字**与随机值无关**（叶簇个数与每次 blob 的抽取次数都是常量）⇒ 是稳定的门禁值。
+     * ⚠️ 测量窗口之外必须先让 perlin 表就绪（上游首次 `Noise.noise` 要用 4096 个 PRNG 值建表；
+     *    port 的 [ShanShuiNoise.noiseSeed] 用 LCG 建表 ⇒ 不消耗 PRNG ⇒ 窗口内干净）。
+     */
+    @Test
+    fun gPort9_treePrngDrawCountMatchesUpstream() {
+        resetPortGlobals()
+        // 预热：确保 perlin 表已就绪（若尚未初始化，那 4096 次抽取不计入测量窗口）
+        ShanShuiNoise.noise(0.0)
+
+        val before1 = ShanShuiPrng.global.draws
+        val c1 = ShanShuiTree.kind1(0.0, 0.0, 50.0, 3.0, ShanShuiColor.default, 0.5)
+        val d1 = ShanShuiPrng.global.draws - before1
+        assertTreeDrawCount("tree01", 63L, d1, 11, c1.size)
+
+        val before3 = ShanShuiPrng.global.draws
+        val c3 = ShanShuiTree.kind3(
+            0.0, 0.0, 50.0, 5.0, { x -> Math.pow(x * 0.1, 1.0) },
+            ShanShuiColor.default, 0.5,
+        )
+        val d3 = ShanShuiPrng.global.draws - before3
+        assertTreeDrawCount("tree03", 504L, d3, 73, c3.size)
+    }
+
+    /**
+     * G-PORT-9（皴线）：上游 `texture` 的**默认 col 是函数**（`:668-673`）⇒ 每条皴线抽 1 次随机，
+     * alpha = `rnd*0.3`（`.toFixed(3)`）。
+     */
+    @Test
+    fun gPort9_cunColorIsPerLineRandom() {
+        resetPortGlobals()
+        val before = ShanShuiPrng.global.draws
+        val cols = List(5) { ShanShuiBrush.defaultCunCol() }
+        val d = ShanShuiPrng.global.draws - before
+        assertEquals("默认皴线颜色函数每次调用必须抽 1 次随机", 5L, d)
+        assertTrue(
+            "皴线 alpha 必须逐条随机（不得是固定色）",
+            cols.map { it.a }.distinct().size > 1,
+        )
+        assertTrue(
+            "皴线 alpha 必须落在上游的 [0, 0.3] 区间（实测 ${cols.map { it.a }}）",
+            cols.all { it.a >= 0.0 && it.a <= 0.3 },
+        )
+    }
+
+    /**
+     * G-PORT-9 负向自证：**改造前**的口径（没有叶簇 ⇒ 0 次抽取、1~2 条轮廓）
+     * 喂给正向用例用的同一份断言 ⇒ 必须抛 AssertionError。
+     */
+    @Test
+    fun gPort9_negative_missingLeafClustersBreaksGate() {
+        gateMustCatch("tree01 无叶簇的旧口径必须被判据咬住") {
+            assertTreeDrawCount("tree01", 63L, 0L, 11, 2)
+        }
+        gateMustCatch("tree03 无叶簇的旧口径必须被判据咬住") {
+            assertTreeDrawCount("tree03", 504L, 0L, 73, 1)
+        }
+    }
+
+    /** G-PORT-9 的唯一判据口径（正向与负向共用）。 */
+    private fun assertTreeDrawCount(
+        name: String,
+        expectedDraws: Long,
+        actualDraws: Long,
+        expectedContours: Int,
+        actualContours: Int,
+    ) {
+        assertEquals(
+            "$name 的 PRNG 抽取次数必须与上游一致",
+            expectedDraws,
+            actualDraws,
+        )
+        assertEquals(
+            "$name 的轮廓条数必须与上游一致",
+            expectedContours,
+            actualContours,
+        )
+    }
+
     // ══════════════════════ G-PORT-8 结构性保真 ══════════════════════
 
     /**
@@ -631,7 +758,7 @@ class ShanShuiPortGateTest {
             val ptlist = mountainPtlist()
             // ⚠️ 点阵的构造本身吃掉 10 个 PRNG 值 ⇒ 皴线之前必须复位（否则随机流错位）。
             resetPortGlobals()
-            ShanShuiBrush.cun(ptlist, 20.0, 0.0, ShanShuiColor.default)
+            ShanShuiBrush.cun(ptlist, 20.0, 0.0)
         },
         PointCase("foot") {
             val ptlist = mountainPtlist()
@@ -749,4 +876,376 @@ class ShanShuiPortGateTest {
         }
         return sb.toString()
     }
+
+    // ══════════════════════ G-PORT-10 distMount 三角剖分 ══════════════════════
+
+    /**
+     * G-PORT-10：远山的**三角剖分**必须与上游 `PolyTools.triangulate` 逐条一致。
+     *
+     * ## 夹具（与 node 探针逐字一致）
+     * `distMount(xoff=0, yoff=0, seed=7, hei=150, len=500, seg=5)`
+     * ⇒ `len/span/seg = 500/10/5 = 10` 块，每块 = 1 条「块多边形填色」+ N 条「三角形」。
+     *
+     * ## 上游实测值（node **实跑**上游原始 JS，⛔ 非手抄）
+     * 探针：`C:\Users\hxzha\AppData\Local\Temp\opencode\probe_distmount_tri.js`
+     * （把上游 `index.html` 的 `<script>` 块原样喂进 node，调用**上游原版**
+     * `Mount.distMount` 与 `PolyTools.triangulate`）。
+     * - 上游 SVG 的 `<polyline>` 总数 = **504** = 10 块填色 + **494** 个三角形；
+     * - 逐块三角形条数 = **[37, 44, 44, 44, 44, 52, 60, 84, 60, 25]**；
+     * - 三角形坐标摘要（FNV-1a 64，对 Float32 的原始位；顺序 = 块序 → 三角形序 → 顶点序）
+     *   = **0xea8cbf2d27b1bcf6**；
+     * - **退化楔形**（面积为 0 的三角形）**恰好 1 个**：第 0 块的第 **25** 个，
+     *   顶点 = `[50, -46.9] [0, 0] [0, 0]`（后两点重合）——上游 SVG 原文
+     *   `50.0,-46.9 0.0,0.0 0.0,0.0`。⛔ 这是**上游的怪癖**，不许「顺手修正」。
+     *
+     * ⚠️ 上游坐标是 Float64、port 的是 Float32（D14 既有偏差）⇒ 摘要比对的是
+     *   「**上游算法在 Float32 输入上**的输出」（探针用 `Math.fround` 量化后再喂给
+     *   上游原版 `PolyTools.triangulate`）⇒ 应当逐位相等。
+     *   探针同时验证：Float32 参考与上游 SVG 在 0.1 文本精度上 **0 处**坐标失配、
+     *   **0 处**色阶失配 ⇒ 量化在本夹具下**没有**改变任何可见结果。
+     */
+    @Test
+    fun gPort10_distMountTriangleCountAndShapeMatchUpstream() {
+        resetPortGlobals()
+        assertDistMountTriangles(distMountContours())
+    }
+
+    /**
+     * G-PORT-10（坐标）：三角形坐标摘要必须与上游**逐位**相等（全局 + 逐块）。
+     */
+    @Test
+    fun gPort10_distMountTriangleGeometryMatchesUpstreamBitwise() {
+        resetPortGlobals()
+        val contours = distMountContours()
+        val triangles = contours.filter { it.stroke != null }
+        assertEquals(
+            "三角形坐标摘要必须与上游逐位相等",
+            upstreamTriangleDigest,
+            fnv1a64(triangles),
+        )
+        // 逐块摘要（node 实跑，⛔ 非手抄）
+        val perBlock = ArrayList<Long>()
+        var current = ArrayList<ShanShuiContour>()
+        for (c in contours) {
+            if (c.stroke == null) {
+                if (current.isNotEmpty()) {
+                    perBlock.add(fnv1a64(current))
+                    current = ArrayList()
+                }
+            } else {
+                current.add(c)
+            }
+        }
+        if (current.isNotEmpty()) perBlock.add(fnv1a64(current))
+        assertEquals(
+            "逐块三角形坐标摘要必须与上游逐位相等",
+            upstreamPerBlockDigests,
+            perBlock,
+        )
+    }
+
+    /**
+     * G-PORT-10（颜色）：每个三角形的颜色必须**重算**一遍 `getCol(中点)` 并逐位相等。
+     *
+     * ⚠️ `getCol` 的 `yoff` 是 **distMount 的入参 yoff**（上游 `:2409-2412` 的闭包捕获），
+     *   **不是** chunk 的 y ⇒ 重算时用同一个 yoff。
+     */
+    @Test
+    fun gPort10_distMountTriangleColorEqualsGetColOfMidPoint() {
+        resetPortGlobals()
+        assertTriangleColors(distMountContours(), distYoff)
+    }
+
+    /**
+     * G-PORT-10（PRNG）：`distMount` 的 **PRNG 抽取次数必须是 0**（移植前后一致）。
+     *
+     * ⚠️ 上游的 `PolyTools.triangulate` 是**纯几何**（不碰 `Math.random`）⇒ 移植后
+     *   抽取次数必须仍是 **0**。
+     */
+    @Test
+    fun gPort10_distMountConsumesNoPrngDraws() {
+        resetPortGlobals()
+        val before = ShanShuiPrng.global.draws
+        val contours = distMountContours()
+        assertDistMountDrawCount(0L, ShanShuiPrng.global.draws - before)
+        assertEquals("distMount 必须仍然产出轮廓", upstreamContourCount, contours.size)
+    }
+
+    /**
+     * G-PORT-10 负向自证：把**故意坏值**喂给正向用例用的**同一份断言** ⇒ 必须抛 AssertionError。
+     *
+     * 覆盖 5 个坏值：
+     * ① **移植前的口径**（10 条块填色、没有三角形）⇒ 条数 / 摘要 / 颜色三道断言都要红；
+     * ② 三角形只有 2 个点（退化）⇒ 形状断言要红；
+     * ③ 三角形 3 点但**共线**（面积为 0）⇒ 形状断言要红；
+     * ④ 三角形的颜色不等于 `getCol(中点)` ⇒ 颜色断言要红；
+     * ⑤ 「triangulate 偷抽随机数」的变体（在测量窗口内插一次抽取）⇒ 抽取次数断言要红。
+     */
+    @Test
+    fun gPort10_negative_brokenValuesBreakGates() {
+        // ① 移植前的口径：10 条块填色、0 条三角形
+        val legacy = List(10) {
+            ShanShuiContour(
+                List(10) { i -> floatArrayOf(i * 10f, i * 2f) },
+                ShanShuiColor(200, 200, 200, 1.0), null, 1.0,
+            )
+        }
+        gateMustCatch("没有三角形的旧口径必须被条数判据咬住") {
+            assertDistMountTriangles(legacy)
+        }
+        gateMustCatch("没有三角形的旧口径必须被摘要判据咬住") {
+            assertEquals(
+                "三角形坐标摘要必须与上游逐位相等",
+                upstreamTriangleDigest,
+                fnv1a64(legacy),
+            )
+        }
+        gateMustCatch("没有三角形的旧口径必须被颜色判据咬住") {
+            assertTriangleColors(legacy, distYoff)
+        }
+        // ② 2 点的退化三角形
+        val twoPoints = ShanShuiContour(
+            listOf(floatArrayOf(0f, 0f), floatArrayOf(10f, 10f)),
+            ShanShuiColor(200, 200, 200, 1.0),
+            ShanShuiColor(200, 200, 200, 1.0),
+            1.0,
+        )
+        gateMustCatch("2 点的退化三角形必须被形状判据咬住") {
+            assertTriangleShape("坏三角形", twoPoints)
+        }
+        // ③ 3 点但**全部重合**（空壳三角形）
+        val allSame = ShanShuiContour(
+            listOf(floatArrayOf(3f, 4f), floatArrayOf(3f, 4f), floatArrayOf(3f, 4f)),
+            ShanShuiColor(200, 200, 200, 1.0),
+            ShanShuiColor(200, 200, 200, 1.0),
+            1.0,
+        )
+        gateMustCatch("三点全重合的空壳三角形必须被形状判据咬住") {
+            assertTriangleShape("坏三角形", allSame)
+        }
+        // ③' 退化楔形的个数/位置判据：移植前的口径（没有三角形 ⇒ 0 个退化）必须判红
+        gateMustCatch("没有三角形的旧口径必须被退化楔形判据咬住") {
+            assertEquals(
+                "退化三角形（面积为 0）的个数与位置必须与上游一致",
+                listOf("block=0 tri=25"),
+                degenerateTriangleList(legacy),
+            )
+        }
+        // ③'' 多出一个退化楔形 ⇒ 必须判红
+        val extraDegenerate = legacy + ShanShuiContour(
+            listOf(floatArrayOf(0f, 0f), floatArrayOf(10f, 0f), floatArrayOf(20f, 0f)),
+            ShanShuiColor(200, 200, 200, 1.0),
+            ShanShuiColor(200, 200, 200, 1.0),
+            1.0,
+        )
+        gateMustCatch("多一个退化楔形必须被退化楔形判据咬住") {
+            assertEquals(
+                "退化三角形（面积为 0）的个数与位置必须与上游一致",
+                listOf("block=0 tri=25"),
+                degenerateTriangleList(extraDegenerate),
+            )
+        }
+        // ④ 颜色不等于 getCol(中点)
+        val wrongColor = ShanShuiContour(
+            listOf(floatArrayOf(0f, 0f), floatArrayOf(10f, 20f), floatArrayOf(20f, 0f)),
+            ShanShuiColor(1, 2, 3, 1.0),
+            ShanShuiColor(1, 2, 3, 1.0),
+            1.0,
+        )
+        gateMustCatch("颜色不等于 getCol(中点) 必须被颜色判据咬住") {
+            assertTriangleColors(listOf(wrongColor), 0.0)
+        }
+        // ⑤ 「triangulate 偷抽随机数」的变体
+        gateMustCatch("triangulate 若消耗随机数 ⇒ 抽取次数判据必须判红") {
+            val before = ShanShuiPrng.global.draws
+            ShanShuiPrng.global.rnd() // 模拟「triangulate 偷抽随机数」
+            assertDistMountDrawCount(0L, ShanShuiPrng.global.draws - before)
+        }
+    }
+
+    // ── G-PORT-10 的夹具与断言（正向与负向共用） ───────────────
+
+    /** 上游实测的逐块三角形条数（node 实跑，⛔ 非手抄）。 */
+    private val upstreamTriangleCounts = intArrayOf(37, 44, 44, 44, 44, 52, 60, 84, 60, 25)
+
+    /** 上游实测的轮廓总数（10 块填色 + 494 个三角形）。 */
+    private val upstreamContourCount = 504
+
+    /** 上游实测的三角形坐标摘要（FNV-1a 64，对 Float32 原始位）。 */
+    private val upstreamTriangleDigest = 0xea8cbf2d27b1bcf6uL.toLong()
+
+    /** 上游实测的**逐块**三角形坐标摘要（node 实跑，⛔ 非手抄）。 */
+    private val upstreamPerBlockDigests = listOf(
+        0x6be6be0d7a25f419uL.toLong(),
+        0x206aa3ebf3356ea5uL.toLong(),
+        0x4d90e271c8d6fdd4uL.toLong(),
+        0x65fde21e4ff011a8uL.toLong(),
+        0x4bdcb13bfd2062cbuL.toLong(),
+        0xd07a3d099d157c71uL.toLong(),
+        0x23dd4acd0abb5e0cuL.toLong(),
+        0x9759dca43bf4d149uL.toLong(),
+        0x298955949b184861uL.toLong(),
+        0x102c60ba40a1c6b9uL.toLong(),
+    )
+
+    /** G-PORT-10 夹具的入参（与 node 探针逐字一致）。 */
+    private val distXoff = 0.0
+    private val distYoff = 0.0
+    private val distSeed = 7.0
+    private val distHei = 150.0
+    private val distLen = 500.0
+    private val distSeg = 5.0
+
+    private fun distMountContours(): List<ShanShuiContour> =
+        ShanShui.distMount(distXoff, distYoff, distSeed, distHei, distLen, distSeg)
+
+    /**
+     * G-PORT-10 的「块结构 + 逐块三角形条数 + 三角形形状」判据（正向与负向共用）。
+     *
+     * 按上游的发射顺序切块：**块填色轮廓**（`stroke == null`，上游 `str: "none"`）
+     * 之后紧跟该块的**三角形轮廓**（`stroke != null`，上游 `str: co`）。
+     */
+    private fun assertDistMountTriangles(contours: List<ShanShuiContour>) {
+        assertEquals("轮廓总数必须与上游一致", upstreamContourCount, contours.size)
+        var block = 0
+        var triInBlock = 0
+        for (c in contours) {
+            if (c.stroke == null) {
+                // 块填色轮廓（上游 `:2413-2417`）
+                assertEquals("第 $block 块的填色轮廓必须 10 点", 10, c.pts.size)
+                assertTrue("第 $block 块的填色轮廓必须有填充色", c.fill != null)
+                if (block > 0) {
+                    assertEquals(
+                        "第 ${block - 1} 块的三角形条数必须与上游一致",
+                        upstreamTriangleCounts[block - 1],
+                        triInBlock,
+                    )
+                }
+                triInBlock = 0
+                block++
+            } else {
+                triInBlock++
+                assertTriangleShape("第 ${block - 1} 块第 $triInBlock 个三角形", c)
+            }
+        }
+        assertEquals("块数必须与上游一致", upstreamTriangleCounts.size, block)
+        assertEquals(
+            "最后一块的三角形条数必须与上游一致",
+            upstreamTriangleCounts[block - 1],
+            triInBlock,
+        )
+    }
+
+    /** G-PORT-10 的「三角形形状」判据（正向与负向共用）。 */
+    private fun assertTriangleShape(label: String, tri: ShanShuiContour) {
+        assertEquals("$label 必须有 3 个点（上游 poly(T[k]) 就是 3 点）", 3, tri.pts.size)
+        assertTrue("$label 必须有填充色（上游 fil: co）", tri.fill != null)
+        assertEquals(
+            "$label 的描边色必须与填充色相同（上游 fil = str = co）",
+            tri.fill,
+            tri.stroke,
+        )
+        assertEquals("$label 的描边宽度必须是 1（上游 wid: 1）", 1.0, tri.width, 0.0)
+        // 闭合：3 点围成的三角形必须**非空**（三点不得全部重合 ⇒ 不能是空壳）
+        val a = tri.pts[0]
+        val b = tri.pts[1]
+        val c = tri.pts[2]
+        val allSame = a[0] == b[0] && a[1] == b[1] &&
+            b[0] == c[0] && b[1] == c[1]
+        assertTrue("$label 不得是三点全重合的空三角形", !allSame)
+    }
+
+    /**
+     * G-PORT-10（退化楔形）：**退化三角形（面积为 0）的个数与位置必须与上游一致**。
+     *
+     * ⚠️ 上游的 `shatter` 会切出**退化**楔形：切分点 `mid` 取 `[ind, nind]` 的中点
+     *   （上游 `:362`），若 `mid` 恰好落在 `[ind, lind]` 上 ⇒ 面积 = 0。
+     *   本夹具下上游**恰好 1 个**退化三角形：**第 0 块的第 25 个**（1 基），
+     *   顶点 = `[50, -46.9] [0, 0] [0, 0]`（后两点重合）
+     *   （上游 SVG 原文：`50.0,-46.9 0.0,0.0 0.0,0.0`）。
+     * ⛔ 这是**上游的怪癖**，**不许**「顺手修正」⇒ port 必须原样复现。
+     */
+    @Test
+    fun gPort10_degenerateTriangleCountMatchesUpstream() {
+        resetPortGlobals()
+        assertEquals(
+            "退化三角形（面积为 0）的个数与位置必须与上游一致",
+            listOf("block=0 tri=25"),
+            degenerateTriangleList(distMountContours()),
+        )
+    }
+
+    /**
+     * 退化三角形清单（块序 → 三角形序，**1 基**）—— 正向与负向共用。
+     */
+    private fun degenerateTriangleList(contours: List<ShanShuiContour>): List<String> {
+        val degenerate = ArrayList<String>()
+        var block = 0
+        var idx = 0
+        for (c in contours) {
+            if (c.stroke == null) {
+                block++
+                idx = 0
+                continue
+            }
+            idx++
+            val a = c.pts[0]
+            val b = c.pts[1]
+            val d = c.pts[2]
+            val cross = (b[0].toDouble() - a[0].toDouble()) * (d[1].toDouble() - a[1].toDouble()) -
+                (d[0].toDouble() - a[0].toDouble()) * (b[1].toDouble() - a[1].toDouble())
+            if (cross == 0.0) degenerate.add("block=${block - 1} tri=$idx")
+        }
+        return degenerate
+    }
+
+    /** G-PORT-10 的「颜色 = getCol(中点)」判据（正向与负向共用）。 */
+    private fun assertTriangleColors(contours: List<ShanShuiContour>, yoff: Double) {
+        var n = 0
+        for (c in contours) {
+            if (c.stroke == null) continue
+            n++
+            assertTriangleColor("第 $n 个三角形", c, yoff)
+        }
+        assertTrue("必须产出三角形（实测 $n 条）", n > 0)
+    }
+
+    /** 单个三角形的颜色重算（上游 `:2409-2412` + `:2425-2427`）。 */
+    private fun assertTriangleColor(label: String, tri: ShanShuiContour, yoff: Double) {
+        val m = ShanShuiPoly.midPtExact(tri.pts)
+        val c = (ShanShuiNoise.noise(m[0] * 0.02, m[1] * 0.02, yoff) * 55 + 200).toInt()
+        assertEquals(
+            "$label 的颜色必须是 getCol(中点) 的结果",
+            ShanShuiColor(c, c, c, 1.0),
+            tri.fill,
+        )
+    }
+
+    /** G-PORT-10 的「PRNG 抽取次数」判据（正向与负向共用）。 */
+    private fun assertDistMountDrawCount(expected: Long, actual: Long) {
+        assertEquals(
+            "distMount 的 PRNG 抽取次数必须是 0（triangulate 是纯几何，不碰随机流）",
+            expected,
+            actual,
+        )
+    }
+
+    /**
+     * FNV-1a 64（对 Float32 的**原始位**）—— 与 node 探针的 `Digest` 逐位同构。
+     *
+     * ⚠️ 只喂**三角形**轮廓（块填色轮廓不参与）⇒ 与探针的哈希范围一致。
+     */
+    private fun fnv1a64(contours: List<ShanShuiContour>): Long {
+        var h = -3750763034362895579L // 0xcbf29ce484222325
+        for (c in contours) {
+            for (p in c.pts) {
+                h = fnvStep(h, java.lang.Float.floatToRawIntBits(p[0]))
+                h = fnvStep(h, java.lang.Float.floatToRawIntBits(p[1]))
+            }
+        }
+        return h
+    }
+
+    private fun fnvStep(h: Long, v: Int): Long =
+        (h xor (v.toLong() and 0xFFFFFFFFL)) * 1099511628211L
 }

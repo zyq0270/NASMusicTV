@@ -12,8 +12,13 @@
  *
  * `seed(x)` 末尾**预热 10 次 `next()`**（上游 `:30-32`）⇒ 漏掉则整条序列错位。
  *
- * 上游 `:54-56` 全局覆写 `Math.random = () => Prng.next()` ⇒ 全文 155 处
+ * 上游 `:54-56` 全局覆写 `Math.random = () => Prng.next()` ⇒ 全文 154 处
  * `Math.random()` 调用点全部走种子流 —— 我们只需提供 [rnd]。
+ *
+ * ⚠️ **数值必须按 JS 的 `Number::toString` 序列化**（[jsonStringify]）：JS 没有「整数/浮点」
+ * 之分 ⇒ `JSON.stringify(1234)` 与 `JSON.stringify(1234.0)` **都是 `"1234"`**；
+ * Kotlin 的 `Double.toString()` 会给出 `"1234.0"` ⇒ Base64 不同 ⇒ 整条流错位
+ * （`QianliSeal` 的 `seed(31337.0)` 正是这种情况）。
  *
  * 黄金向量（seed=1234，数值型）：
  * `sAfterSeed = 334869857393`，
@@ -78,9 +83,19 @@ class ShanShuiPrng {
      * ⚠️ `s²` 可达 1e24，溢出 2^53 ⇒ 必须用 Double。
      */
     fun next(): Double {
+        draws++
         s = (s * s) % m
         return s / m
     }
+
+    /**
+     * 诊断计数器 —— [next] 的累计调用次数（= 上游 `Math.random()` 的**实际**调用次数）。
+     *
+     * ⚠️ 仅供门禁测试断言「PRNG 抽取次数与上游逐一对上」用（上游 `Math.random()` 全文 154 处调用点）；
+     * ⛔ 不参与任何计算，也不影响随机流。
+     */
+    var draws: Long = 0L
+        private set
 
     /** 上游 `Math.random()` 的替代 —— 全局覆写后的调用点全部走这里。 */
     fun rnd(): Double = next()
@@ -90,15 +105,38 @@ class ShanShuiPrng {
     /**
      * 模拟 `JSON.stringify(x)` —— 仅处理 Number / String / Boolean / null。
      * 上游用 `JSON.stringify` 把 seed 转为字符串再 Base64 编码。
+     *
+     * ⚠️ **Number 必须走 [jsNumberToString]**：JS 的数值没有「整数/浮点」之分，
+     * `JSON.stringify(1234.0)` 是 `"1234"`（不是 `"1234.0"`）⇒ 整数值的 Double 必须去小数点，
+     * 否则 hash 与上游不同 ⇒ 整条随机流错位。
      */
     private fun jsonStringify(x: Any?): String {
         return when (x) {
             null -> "null"
             is String -> "\"$x\""
-            is Number -> x.toString()
+            is Double -> jsNumberToString(x)
+            is Float -> jsNumberToString(x.toDouble())
+            is Number -> x.toString() // Int / Long / Short / Byte —— 与 JS 的 Number::toString 一致
             is Boolean -> x.toString()
             else -> x.toString()
         }
+    }
+
+    /**
+     * JS `Number::toString` 的数值等价（`JSON.stringify` 的数值分支）。
+     *
+     * - 整数值（|v| < 1e21）⇒ **不带小数点**（`1234.0` → `"1234"`），与 JS 一致；
+     * - 非整数值 ⇒ 保留最短往返表示（Kotlin `Double.toString()`，与 JS 同样是最短往返）。
+     * - ⚠️ 已知偏差：|v| ≥ 1e21 的科学计数法（JS `"1e+21"` vs Kotlin `"1.0E21"`）未对齐
+     *   （本仓的 seed 均为小整数，实际不触发）。
+     */
+    private fun jsNumberToString(v: Double): String {
+        if (v.isNaN() || v.isInfinite()) return v.toString() // JS: "NaN" / "Infinity"
+        if (v == Math.floor(v) && Math.abs(v) < 1e21) {
+            // 整数值 ⇒ 用十进制整数串（BigDecimal(double) 是精确值 ⇒ 无舍入误差）
+            return java.math.BigDecimal(v).toBigInteger().toString()
+        }
+        return v.toString()
     }
 
     /**

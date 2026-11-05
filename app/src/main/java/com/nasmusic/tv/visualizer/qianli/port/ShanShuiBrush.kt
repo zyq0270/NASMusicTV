@@ -7,14 +7,21 @@
  * [ribbon] 照抄上游 [stroke]（`:516-576`）：变宽笔触，逐点法线偏移 + 噪声干湿变化。
  *   上游默认值：wid=2, col="rgba(200,200,200,0.9)", noi=0.5, out=1, fun=Math.sin(x*PI)。
  *   ⚠️ 上游参数名 `fun` 是 Kotlin 关键字 ⇒ port 改名为 [strokeFun]。
+ *   ⚠️ 上游的 `out` 形参（poly 的线宽，缺省 **1**）**已删** ⇒ port 恒为上游默认值 1
+ *   （由调用方写进轮廓的 `width`）。
  *
  * [dab] 照抄上游 [blob]（`:578-625`）：纺锤形笔触点/叶簇。
  *   上游默认值：len=20, wid=5, ang=0, col="rgba(200,200,200,0.9)", noi=0.5, ret=0, fun=分段 sqrt(sin)。reso=20。
+ *   ⚠️ 上游的 `ret` 形参（缺省 **0** ⇒ 返回 poly 字符串）**已删** ⇒ port 恒返回点列，
+ *   语义恒为上游默认值（几何与上游 ret=0 的 poly 完全一致）。
  *
  * [cun] 照抄上游 [texture]（`:653-741`）：皴。
  *   上游默认值：tex=400, wid=1.5, len=0.2, sha=0, ret=0, noi=30/x, col=rgba(100,100,100,rand*0.3), dis=三分分布。
  *   ⚠️ ret≠0 时返回 texlist（List<List<Point>>）而不是 Path 列表。
  *   ⚠️ port 包内 [cun] 恒返回 texlist（纯数据点列），渲染器侧画 stroke。
+ *   ⚠️ 上游的 `col` 是**函数**（每条皴线求值一次 ⇒ 每条抽 1 次随机）与 `dis` 也是函数；
+ *   port 把 `dis` 收进 [cun]（它决定点的横向位置），`col` 留给**调用方**逐条求值
+ *   （上游也是在 `texture` 的 TEXTURE 循环里求值，见 [defaultCunCol]）。
  *
  * [foot] 照抄上游 [foot]（`:1728-1802`）：山脚收笔。
  *   上游默认值：xof=0, yof=0, ret=0。ret≠0 时返回 ftlist。
@@ -122,14 +129,18 @@ object ShanShuiBrush {
      * 在山体点阵上采样 tex 条水平线，每条线在噪声偏移后的坐标上等距插值。
      * port 包内恒返回 texlist（List<List<Point>>），渲染器侧画 stroke。
      *
-     * ⚠️ col 参数用固定 ShanShuiColor（方案签名简化），所有纹理线同色；
-     * 渲染器侧可自行决定每条线的颜色渐变。
+     * @param dis 上游 `texture` 的 `dis` 参数（`:674-683`）—— 逐条皴线求值一次，
+     *            返回该条皴线**横向位置比例**（0..1）。
+     *            上游默认是三分分布（[cunDis]）；`flatMount` 传 0.1/0.9 两端分布、
+     *            `rock` 传 0.15/0.85 两端分布（见上游 `:2148-2154` / `:2509-2515`）。
+     * @param sha 上游 `texture` 的 `sha` 形参（缺省 0）—— **port 内未使用**
+     *            （上游的 SHADE / TEXTURE 两轮发射由调用方做，见 [ShanShui]）。
      */
     fun cun(
         ptlist: List<List<ShanShuiPath.Point>>,
         tex: Double,
         sha: Double,
-        col: ShanShuiColor,
+        dis: () -> Double = { cunDis() },
     ): List<List<ShanShuiPath.Point>> {
         val texi = tex.toInt()
         val reso0 = ptlist.size
@@ -137,7 +148,7 @@ object ShanShuiBrush {
         val texlist = ArrayList<List<ShanShuiPath.Point>>(texi)
 
         for (i in 0 until texi) {
-            val mid = (cunDis() * reso1).toInt()
+            val mid = (dis() * reso1).toInt()
             val hlen = Math.floor(ShanShuiPrng.global.rnd() * (reso1 * 0.2)).toInt()
             var start = mid - hlen
             var end = mid + hlen
@@ -183,8 +194,12 @@ object ShanShuiBrush {
 
                 ftlist.add(ArrayList<ShanShuiPath.Point>())
                 ftlist.add(ArrayList<ShanShuiPath.Point>())
-                val subLen = Math.min(ptlist[i].size / 8, 10)
-                for (j in 0 until subLen) {
+                // 上游 :1743：`Math.min(ptlist[i].length / 8, 10)` 是**浮点**除法
+                //   （50/8 = 6.25 ⇒ `j < 6.25` ⇒ j = 0..6 ⇒ **7 次**）。
+                // ⛔ Int 除法会得 6 ⇒ 每段山脚左右各少 1 个点（与上游不符）。
+                val subLen = Math.min(ptlist[i].size / 8.0, 10.0)
+                val subCount = Math.ceil(subLen).toInt()
+                for (j in 0 until subCount) {
                     ftlist[ftlist.size - 2].add(
                         floatArrayOf(
                             (ptlist[i][j][0] + ShanShuiNoise.noise(j * 0.1, i.toDouble()) * 10).toFloat(),
@@ -220,6 +235,18 @@ object ShanShuiBrush {
     }
 
     // ─── 内部辅助 ──────────────────────────────────────────────
+
+    /**
+     * 上游 [texture] 的**默认 `col` 函数**（`:668-673`）：
+     * `function(x){ return "rgba(100,100,100," + (Math.random() * 0.3).toFixed(3) + ")"; }`
+     *
+     * ⚠️ **每调用一次抽 1 次随机**（上游在 TEXTURE 循环里逐条求值 ⇒ 每条皴线抽 1 次）。
+     * ⚠️ 上游用 `.toFixed(3)` 定点串 ⇒ port 用 [ShanShuiUtil.toFixed] 复现同一次舍入。
+     *
+     * @param x 上游传入的是 `j / texlist.length`（比例）；上游的默认实现**忽略**该参数。
+     */
+    fun defaultCunCol(x: Double = 0.0): ShanShuiColor =
+        ShanShuiColor.rgba(100, 100, 100, ShanShuiUtil.toFixed(ShanShuiPrng.global.rnd() * 0.3, 3))
 
     /** 上游 [blob] 默认 fun：分段 sqrt(sin)（`:589-593`）。 */
     private fun dabFun(x: Double): Double =

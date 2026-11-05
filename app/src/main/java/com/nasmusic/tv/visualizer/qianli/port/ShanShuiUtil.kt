@@ -83,4 +83,22 @@ object ShanShuiUtil {
     fun randGaussian(): Double {
         return wtrand { x -> Math.pow(Math.E, -24.0 * Math.pow(x - 0.5, 2.0)) } * 2.0 - 1.0
     }
+
+    /**
+     * JS `Number.prototype.toFixed(digits)` 的**数值**等价 —— 返回该定点字符串被解析回数值的结果。
+     *
+     * ⛔ 不是移植（上游的 Util 段 `:386-443` 无此函数）：上游把 alpha 拼成
+     * `"rgba(100,100,100," + (Math.random() * 0.3).toFixed(3) + ")"`，
+     * 定点串再被 SVG 解析回数值 ⇒ port 的纯数据颜色（改造-④）必须自己复现这一步舍入，
+     * 否则 alpha 与上游有 ≤ 5e-4 的偏差。
+     *
+     * ⚠️ JS 的 `toFixed` 是「四舍五入（远离零）」，Kotlin 的 [Math.round] 是「四舍五入（+∞ 方向）」；
+     * 本仓只用**非负**值 ⇒ 两者一致。
+     */
+    fun toFixed(value: Double, digits: Int): Double {
+        if (value.isNaN() || value.isInfinite()) return value
+        var factor = 1.0
+        for (i in 0 until digits) factor *= 10.0
+        return Math.round(value * factor) / factor
+    }
 }

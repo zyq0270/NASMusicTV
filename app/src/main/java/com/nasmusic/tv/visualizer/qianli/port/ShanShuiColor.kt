@@ -13,7 +13,12 @@ package com.nasmusic.tv.visualizer.qianli.port
 data class ShanShuiColor(val r: Int, val g: Int, val b: Int, val a: Double) {
 
     companion object {
-        /** 从 `rgba(r,g,b,a)` / `rgb(r,g,b)` 字符串解析。上游大量使用此格式。 */
+        /**
+         * 从 `rgba(r,g,b,a)` / `rgb(r,g,b)` 字符串解析。上游大量使用此格式。
+         *
+         * ⚠️ **死代码**：port 包的颜色一律是纯数据（改造-④），上游的 CSS 字符串在本包内
+         * 从不被解析 ⇒ 本函数无调用方；保留只为留档「上游的颜色是怎么写的」。
+         */
         fun parseRgba(s: String): ShanShuiColor {
             val m = Regex("rgba?\\(([^)]+)\\)").find(s)
             if (m != null) {

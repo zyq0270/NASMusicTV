@@ -6,26 +6,31 @@
  *
  * [mountain] 照抄上游 [Mount.mountain] `:1804-2081`（山体，10 行 × 50 点，reso=[10,50]）。
  *   上游默认值：hei=100+rand*400, wid=400+rand*200, tex=200, veg=true, ret=0, col=undefined。
- *   ⚠️ 内部 [vegetate]（上游 `:1832-1846` 闭包）共 8 次调用：RIM/TOP/MIDDLE/BOTTOM/BOTT_ARCH/TOP_ARCH/TRANSM/BOTT_ROCK；
+ *   ⚠️ 内部 [vegetate]（上游 `:1838-1852` 闭包）共 8 次调用：RIM/TOP/MIDDLE/BOTTOM/BOTT_ARCH/TOP_ARCH/TRANSM/BOTT_ROCK；
  *   ⚠️ 上游 TRANSM（transmissionTower01）未移植 ⇒ 该次调用整体移除（growthRule 不消耗 rnd，无副作用）；
  *   ⚠️ 上游 [Arch.arch02]/[arch03]/[arch04] 未移植 ⇒ 替换为 [ShanShuiArch.kind2]（改造-③，参数映射见下）；
  *   ⚠️ ret≠0 时上游返回 `[ptlist]`（二维），port 适配为扁平化 [ptlist.flatten]（改造-①）。
+ *   ⚠️ **实参求值序**：上游的 JS 对象字面量是**左到右**求值 ⇒ arch02/arch03/arch04/rock 的
+ *     实参顺序与 port 的 Kotlin 调用顺序必须逐项对齐（见各处注释里的上游行号）。
  *
  * [flatMount] 照抄上游 [Mount.flatMount] `:2083-2232`（平山）。
  *   上游默认值：hei=40+rand*400, wid=400+rand*200, tex=80, cho=0.5, ret=0；reso=[5,50]。
- *   ⚠️ 上游 `ret` 声明后从未使用 ⇒ port 保留形参但忽略（照抄）。
+ *   ⚠️ 上游 `ret` 声明后从未使用 ⇒ port **已删**该形参（改造-⑤）。
  *
  * [flatDec] 照抄上游 [Mount.flatDec] `:2234-2367`（山脚装饰）。
  *   ⚠️ 内部 tree04/05/08 未移植 ⇒ 替换为 [ShanShuiTree.kind1]/[kind2]/[kind3]（改造-③）。
  *
  * [distMount] 照抄上游 [Mount.distMount] `:2369-2431`（远山）。
  *   上游默认值：hei=300, len=2000, seg=5。
- *   ⚠️ 内部 [PolyTools.triangulate]（`:2419-2428`）未移植 ⇒ 该块整体移除，
- *     改为直接 poly() 填色（渲染器侧画填充多边形，无描边/描摹，改造-③）。
+ *   ✅ 内部 [PolyTools.triangulate]（`:2419-2428`）**已移植**（见 [ShanShuiPoly]）：
+ *   每块先发 1 条「块多边形填色」（`:2413-2417`），再对同一块做三角剖分
+ *   （`area: 100, convex: true, optimize: false`），并为**每个**三角形发 1 条独立轮廓
+ *   （`fil = str = getCol(中点)`、`wid: 1` ⇒ fill = stroke = 该灰、width = 1）。
+ *   ⚠️ `triangulate` 是纯几何 ⇒ **不消耗随机数**（移植前后抽取次数不变 = 0）。
  *
  * [rock] 照抄上游 [Mount.rock] `:2433-2522`（石）。
  *   上游默认值：hei=80, wid=100, tex=40, ret=0, sha=10；reso=[10,50]。
- *   ⚠️ 上游 `ret` 声明后从未使用 ⇒ port 保留形参但忽略（照抄）。
+ *   ⚠️ 上游 `ret` 声明后从未使用 ⇒ port **已删**该形参（改造-⑤）。
  *
  * [water] 照抄上游 [water] `:3667-3704`（水波，仅 38 行）。
  *   上游默认值：hei=2, len=800, clu=10。
@@ -48,6 +53,19 @@
  *   ⚠️ `stroke` 的**笔宽**（`wid` 形参，如 3 / 1.5 / `sha`）已烘进 ribbon 几何，不是轮廓的 `width`。
  * - 上游 `blob(x, y, {col, …})` 内部等价 `poly(plist, {fil: col, str: col, wid: 0})`
  *   ⇒ `fill` = `stroke` = `col`、`width` = `0`。
+ *
+ * ## 已知偏差（接受，不修）
+ * - **D14：坐标精度** —— `Point = FloatArray` ⇒ 坐标是 **Float32**，上游是 Float64。
+ * - **D15：`MEM.planmtx` 的全局性** —— 见 [ShanShuiPlanner] 的文件头（plan 用局部数组代替全局数组）。
+ * - **TRANSM 未移植**（上游 `:2041-2057`）：上游的 TRANSM 植被规则极罕见（阈值 0.002），
+ *   命中时会在该处消耗随机数 ⇒ port 与上游的随机流在**极端情况下**会分叉。
+ * - **tree04/05/08 未移植**（上游 `:2255` / `:2283` / `:2305` / `:2325` / `:2337`）：
+ *   `flatDec` 用 kind1/kind2/kind3 顶替（改造-③）⇒ 树形与上游不同，但**抽取次数对齐**。
+ * - **[PolyTools.triangulate] 已移植**（上游 `:2419-2428`）：远山现在有「晶面层次」的三角化填色
+ *   （见 [ShanShuiPoly]；移植前远景是一条平涂的锯齿带）。
+ * - **[ShanShuiArch] 是简化实现**：上游 arch01/02/03/04 内部的 `stroke`/`rail`/`pagroof`/`Man.man`
+ *   每次调用要抽几十到上千次随机，port 的 kind1/kind2 **一次都不抽** ⇒
+ *   **调用点之后的随机流会与上游分叉**（详见 [ShanShuiArch] 的文件头）。
  */
 
 package com.nasmusic.tv.visualizer.qianli.port
@@ -90,7 +108,7 @@ object ShanShui {
         // 上游 `:1817-1836`：ptlist（10 行 × 50 点）—— 抽成 [mountainPtlist]（改造-⑤）
         val ptlist = mountainPtlist(yoff, seed, hei, wid)
         val h = hei
-        // 上游 `:1832-1846`：vegetate 闭包（捕获 ptlist/canv）→ port 为局部函数
+        // 上游 `:1838-1852`：vegetate 闭包（捕获 ptlist/canv）→ port 为局部函数
         fun vegetate(
             treeFunc: (Double, Double) -> List<ShanShuiContour>,
             growthRule: (Int, Int) -> Boolean,
@@ -110,12 +128,24 @@ object ShanShui {
                 }
             }
         }
-        // RIM
+        // RIM（上游 `:1853-1873`）
         vegetate(
             { x, y ->
+                // 上游 `:1858-1860`：col 的 alpha 由 Noise.noise(0.01x, 0.01y) 调制
+                //   （noise ∈ [0,1] ⇒ alpha ∈ [0.35, 0.65]；上游 `.toFixed(3)`）
+                //   ⚠️ 用**未偏移**的植被坐标 x,y（上游 treeFunc 的入参就是未偏移值）
+                val rimCol = ShanShuiColor.rgba(
+                    100,
+                    100,
+                    100,
+                    ShanShuiUtil.toFixed(
+                        ShanShuiNoise.noise(0.01 * x, 0.01 * y) * 0.5 * 0.3 + 0.5,
+                        3,
+                    ),
+                )
                 ShanShuiTree.kind2(
                     x + xoff, y + yoff - 5.0,
-                    16.0, 8.0, 2.0, ShanShuiColor.default, 0.5,
+                    16.0, 8.0, 2.0, rimCol, 0.5,
                 )
             },
             { i, j ->
@@ -156,10 +186,18 @@ object ShanShui {
                 )
             )
         }
-        // TEXTURE（皴，上游 `:1891-1897`：texture(ptlist, {tex, sha: randChoice([0,0,0,0,5]), col})）
+        // TEXTURE（皴，上游 `:1891-1897`：texture(ptlist, {xof, yof, tex, sha: randChoice([0,0,0,0,5]), col})）
+        //   ⚠️ 上游 mountain 的 `col` 缺省是 `undefined` ⇒ texture 用**默认 col 函数**
+        //   （`:668-673`：每条皴线抽 1 次随机，alpha = rnd*0.3）⇒ 每座山少抽 tex 次会明显偏黑。
+        //   ⚠️ 上游的非 null `col` 会被 texture 当**函数**调用（必抛错）⇒ port 退化为「所有皴线同色」。
         val sha = ShanShuiUtil.randChoice(listOf(0, 0, 0, 0, 5)).toDouble()
-        val texCol = col ?: ShanShuiColor.default
-        val texlist = ShanShuiBrush.cun(ptlist, tex, sha, texCol)
+        val texColFn: (Double) -> ShanShuiColor = if (col == null) {
+            { _ -> ShanShuiBrush.defaultCunCol() }
+        } else {
+            val fixed = col
+            { _ -> fixed }
+        }
+        val texlist = ShanShuiBrush.cun(ptlist, tex, sha)
         // SHADE（上游 `:720-730`：sha 非 0 时 stride=2，stroke(..., {col:"rgba(100,100,100,0.1)", wid:sha})）
         // ⇒ fill=str=灰0.1 / poly 宽 = out = 1（笔宽 sha 已烘进 ribbon 几何）
         if (sha != 0.0) {
@@ -177,24 +215,37 @@ object ShanShui {
             }
         }
         // TEXTURE（上游 `:731-739`：起点=sha、stride=1+sha，stroke(..., {col, wid:1.5})）
-        // ⇒ fill=str=texCol / poly 宽 = out = 1（笔宽 1.5 已烘进 ribbon 几何）
+        // ⇒ fill=str=该条的 col / poly 宽 = out = 1（笔宽 1.5 已烘进 ribbon 几何）
+        // ⚠️ 上游的 `col` 是**逐条求值**的函数（`col(j / texlist.length)`）⇒ 每条抽 1 次随机，
+        //   且**先于** stroke 内部的 n0 抽取（stroke 的实参先求值）。
         for (j in sha.toInt() until texlist.size step (1 + sha.toInt())) {
+            val lineCol = texColFn(j.toDouble() / texlist.size)
             canv.add(
                 ShanShuiContour(
                     ShanShuiBrush.ribbon(
                         offList(texlist[j], xoff, yoff),
-                        1.5, ::strokeFun, 0.5, texCol,
+                        1.5, ::strokeFun, 0.5, lineCol,
                     ),
-                    texCol, texCol, 1.0,
+                    lineCol, lineCol, 1.0,
                 )
             )
         }
-        // TOP
+        // TOP（上游 `:1899-1916`）
         vegetate(
             { x, y ->
+                // 上游 `:1903-1906`：alpha 由 Noise.noise(0.01x, 0.01y) 调制（0.35~0.65）
+                val topCol = ShanShuiColor.rgba(
+                    100,
+                    100,
+                    100,
+                    ShanShuiUtil.toFixed(
+                        ShanShuiNoise.noise(0.01 * x, 0.01 * y) * 0.5 * 0.3 + 0.5,
+                        3,
+                    ),
+                )
                 ShanShuiTree.kind2(
                     x + xoff, y + yoff,
-                    16.0, 8.0, 5.0, ShanShuiColor.default, 0.5,
+                    16.0, 8.0, 5.0, topCol, 0.5,
                 )
             },
             { i, j ->
@@ -209,10 +260,20 @@ object ShanShui {
                 { x, y ->
                     var ht = ((h + y) / h) * 70.0
                     ht = ht * 0.3 + ShanShuiPrng.global.rnd() * ht * 0.7
+                    // 上游 `:1928-1930`：alpha 由 Noise.noise(0.01x, 0.01y) 调制（0.15~0.45）
+                    val midCol = ShanShuiColor.rgba(
+                        100,
+                        100,
+                        100,
+                        ShanShuiUtil.toFixed(
+                            ShanShuiNoise.noise(0.01 * x, 0.01 * y) * 0.5 * 0.3 + 0.3,
+                            3,
+                        ),
+                    )
                     ShanShuiTree.kind1(
                         x + xoff, y + yoff,
                         ht, ShanShuiPrng.global.rnd() * 3.0 + 1.0,
-                        ShanShuiColor.default, 0.5,
+                        midCol, 0.5,
                     )
                 },
                 { i, j ->
@@ -250,10 +311,20 @@ object ShanShui {
                 ht = ht * 0.5 + ShanShuiPrng.global.rnd() * ht * 0.5
                 val bc = ShanShuiPrng.global.rnd() * 0.1
                 val bp = 1.0
+                // 上游 `:1973-1975`：alpha 由 Noise.noise(0.01x, 0.01y) 调制（0.15~0.45）
+                val botCol = ShanShuiColor.rgba(
+                    100,
+                    100,
+                    100,
+                    ShanShuiUtil.toFixed(
+                        ShanShuiNoise.noise(0.01 * x, 0.01 * y) * 0.5 * 0.3 + 0.3,
+                        3,
+                    ),
+                )
                 ShanShuiTree.kind3(
                     x + xoff, y + yoff,
                     ht, 5.0, { xv -> Math.pow(xv * bc, bp) },
-                    ShanShuiColor.default, 0.5,
+                    botCol, 0.5,
                 )
             },
             { i, j ->
@@ -262,24 +333,33 @@ object ShanShui {
             },
             { _, _ -> true },
         )
-        // BOTT ARCH
+        // BOTT ARCH（上游 `:1990-2020`）
         vegetate(
             { x, y ->
+                // 上游 `:1993`：tt（1 次抽取）
                 val tt = ShanShuiUtil.randChoice(listOf(0, 0, 1, 1, 1, 2))
                 when (tt) {
-                    1 -> ShanShuiArch.kind2(
-                        x + xoff, y + yoff, ShanShuiPrng.global.rnd(),
-                        10.0, ShanShuiUtil.normRand(40.0, 70.0), ShanShuiPrng.global.rnd(), 5.0,
-                        ShanShuiUtil.randChoice(listOf(1, 2, 2, 3)).toDouble(),
-                        ShanShuiUtil.randChoice(listOf(1, 2, 3)).toDouble(),
-                        false,
-                    )
-                    2 -> ShanShuiArch.kind2(
-                        x + xoff, y + yoff, ShanShuiPrng.global.rnd(),
-                        15.0, 30.0, 0.7, 5.0,
-                        ShanShuiUtil.randChoice(listOf(1, 1, 1, 2, 2)).toDouble(),
-                        1.0, false,
-                    )
+                    1 -> {
+                        // 上游 `:1995-2000`：Arch.arch02(x + xoff, y + yoff, seed, {wid, sto, rot, sty})
+                        //   ⚠️ 第 3 实参是 mountain 自己的 `seed`（**不抽随机**）
+                        //   ⚠️ 对象字面量的求值序 = wid → sto → rot → sty（JS 左到右）
+                        val awid = ShanShuiUtil.normRand(40.0, 70.0) // :1996
+                        val asto = ShanShuiUtil.randChoice(listOf(1, 2, 2, 3)).toDouble() // :1997
+                        val arot = ShanShuiPrng.global.rnd() // :1998
+                        val asty = ShanShuiUtil.randChoice(listOf(1, 2, 3)).toDouble() // :1999
+                        ShanShuiArch.kind2(
+                            x + xoff, y + yoff, seed,
+                            10.0, awid, arot, 5.0, asto, asty, false,
+                        )
+                    }
+                    2 -> {
+                        // 上游 `:2002-2004`：Arch.arch04(x + xoff, y + yoff, seed, {sto})
+                        val asto = ShanShuiUtil.randChoice(listOf(1, 1, 1, 2, 2)).toDouble() // :2003
+                        ShanShuiArch.kind2(
+                            x + xoff, y + yoff, seed,
+                            15.0, 30.0, 0.7, 5.0, asto, 1.0, false,
+                        )
+                    }
                     else -> emptyList()
                 }
             },
@@ -291,13 +371,17 @@ object ShanShui {
             },
             { _, _ -> true },
         )
-        // TOP ARCH
+        // TOP ARCH（上游 `:2021-2039`）
         vegetate(
             { x, y ->
+                // 上游 `:2024-2027`：Arch.arch03(x + xoff, y + yoff, seed, {sto, wid})
+                //   ⚠️ 第 3 实参是 mountain 自己的 `seed`（**不抽随机**）
+                //   ⚠️ 对象字面量的求值序 = sto → wid（JS 左到右）
+                val asto = ShanShuiUtil.randChoice(listOf(5, 7)).toDouble() // :2025
+                val awid = 40.0 + ShanShuiPrng.global.rnd() * 20.0 // :2026
                 ShanShuiArch.kind2(
-                    x + xoff, y + yoff, ShanShuiPrng.global.rnd(),
-                    10.0, 40.0 + ShanShuiPrng.global.rnd() * 20.0, 0.7, 5.0,
-                    ShanShuiUtil.randChoice(listOf(5, 7)).toDouble(), 1.0, false,
+                    x + xoff, y + yoff, seed,
+                    10.0, awid, 0.7, 5.0, asto, 1.0, false,
                 )
             },
             { i, j ->
@@ -308,13 +392,15 @@ object ShanShui {
             { _, _ -> true },
         )
         // TRANSM — 上游 transmissionTower01 未移植 ⇒ 整块移除（growthRule 不消耗 rnd）
-        // BOTT ROCK
+        // BOTT ROCK（上游 `:2059-2074`）
         vegetate(
             { x, y ->
-                val rs = ShanShuiPrng.global.rnd()
-                val rwid = 20.0 + ShanShuiPrng.global.rnd() * 20.0
-                val rhei = 20.0 + ShanShuiPrng.global.rnd() * 20.0
-                rock(x + xoff, y + yoff, rs, rhei, rwid, 40.0, 2.0)
+                // 上游 `:2062-2066`：Mount.rock(x + xoff, y + yoff, seed, {wid, hei, sha})
+                //   ⚠️ 第 3 实参是 mountain 自己的 `seed`（**不抽随机**）
+                //   ⚠️ 对象字面量的求值序 = wid → hei（JS 左到右）
+                val rwid = 20.0 + ShanShuiPrng.global.rnd() * 20.0 // :2063
+                val rhei = 20.0 + ShanShuiPrng.global.rnd() * 20.0 // :2064
+                rock(x + xoff, y + yoff, seed, rhei, rwid, 40.0, 2.0)
             },
             { i, j ->
                 (j == 0 || j == ptlist[i].size - 1) && ShanShuiPrng.global.rnd() < 0.1
@@ -455,17 +541,21 @@ object ShanShui {
                 ShanShuiColor.outline, ShanShuiColor.outline, 1.0,
             )
         )
-        // TEXTURE（上游 `:2143-2155`：texture(ptlist, {tex, wid: 2})）
-        // ⇒ stroke(texlist[j], {col, wid:2}) ⇒ fill=str=灰 / poly 宽 = out = 1（笔宽 2 已烘进 ribbon 几何）
-        val texlist = ShanShuiBrush.cun(ptlist, tex, 0.0, ShanShuiColor.default)
+        // TEXTURE（上游 `:2143-2155`：texture(ptlist, {xof, yof, tex, wid: 2, dis: 自定义})）
+        // ⇒ stroke(texlist[j], {col, wid:2}) ⇒ fill=str=该条的 col / poly 宽 = out = 1（笔宽 2 已烘进 ribbon 几何）
+        // ⚠️ 上游**不传 col** ⇒ 用默认 col 函数（每条皴线抽 1 次随机，alpha = rnd*0.3）
+        // ⚠️ 上游**传了自定义 dis**（0.1 / 0.9 两端分布）⇒ 皴线贴着两端，不是默认的三分分布
+        val texlist = ShanShuiBrush.cun(ptlist, tex, 0.0, ::flatMountDis)
         for (j in 0 until texlist.size) {
+            // 上游 `:731-739`（sha=0 ⇒ 从 j=0 起、步长 1）：col 逐条求值（每条抽 1 次随机）
+            val lineCol = ShanShuiBrush.defaultCunCol(j.toDouble() / texlist.size)
             canv.add(
                 ShanShuiContour(
                     ShanShuiBrush.ribbon(
                         offList(texlist[j], xoff, yoff),
-                        2.0, ::strokeFun, 0.5, ShanShuiColor.default,
+                        2.0, ::strokeFun, 0.5, lineCol,
                     ),
-                    ShanShuiColor.default, ShanShuiColor.default, 1.0,
+                    lineCol, lineCol, 1.0,
                 )
             )
         }
@@ -521,7 +611,11 @@ object ShanShui {
         val grlist = ArrayList<ShanShuiPath.Point>(grlist1d.size + grlist2d.size + 1)
         grlist.addAll(grlist1d.reversed())
         grlist.addAll(grlist2d)
-        grlist.add(grlist1d[0])
+        // 上游 `:2186`：`grlist1.reverse().concat(grlist2.concat([grlist1[0]]))`
+        //   ⚠️ JS 的 `reverse()` **原地改写** grlist1 ⇒ 此时的 `grlist1[0]` 是**原末点**（不是原首点）。
+        //   ⇒ 闭合点取 grlist1d 的**最后一个**点；取原首点会让平山的白色填充多边形不闭合，
+        //     并在描边里多出一条从右下到左上的长斜线（横贯平山底部）。
+        grlist.add(grlist1d.last())
         // v-噪声横移（上游 `:2186-2190`）
         for (i in 0 until grlist.size) {
             val v = (1.0 - Math.abs((i % d) - d / 2.0) / (d / 2.0)) * 0.12
@@ -583,19 +677,16 @@ object ShanShui {
     ): List<ShanShuiContour> {
         val canv = ArrayList<ShanShuiContour>()
         val tt = ShanShuiUtil.randChoice(listOf(0, 0, 1, 2, 3, 4))
-        // 底部小石（上游 `:2237-2249`）
+        // 底部小石（上游 `:2239-2250`）
         var j = 0
         while (j < ShanShuiPrng.global.rnd() * 5.0) {
+            // 上游 `:2240-2249`：实参求值序 = x(normRand) → y(normRand) → seed(rnd*100) → wid → hei
+            val rx = xoff + ShanShuiUtil.normRand(grbd.xmin, grbd.xmax)
+            val ry = yoff + (grbd.ymin + grbd.ymax) / 2 + ShanShuiUtil.normRand(-10.0, 10.0) + 10.0
             val rs = ShanShuiPrng.global.rnd() * 100.0
             val rwid = 10.0 + ShanShuiPrng.global.rnd() * 20.0
             val rhei = 10.0 + ShanShuiPrng.global.rnd() * 20.0
-            canv.addAll(
-                rock(
-                    xoff + ShanShuiUtil.normRand(grbd.xmin, grbd.xmax),
-                    yoff + (grbd.ymin + grbd.ymax) / 2 + ShanShuiUtil.normRand(-10.0, 10.0) + 10.0,
-                    rs, rhei, rwid, 40.0, 2.0,
-                )
-            )
+            canv.addAll(rock(rx, ry, rs, rhei, rwid, 40.0, 2.0))
             j++
         }
         // tree08 组（上游 `:2251-2263`）
@@ -618,19 +709,16 @@ object ShanShui {
             j++
         }
         if (tt == 0) {
-            // 大石（上游 `:2265-2278`）
+            // 大石（上游 `:2263-2276`）
             j = 0
             while (j < ShanShuiPrng.global.rnd() * 3.0) {
+                // 上游 `:2265-2274`：实参求值序 = x(normRand) → y(normRand) → seed(rnd*100) → wid → hei
+                val rx = xoff + ShanShuiUtil.normRand(grbd.xmin, grbd.xmax)
+                val ry = yoff + (grbd.ymin + grbd.ymax) / 2 + ShanShuiUtil.normRand(-5.0, 5.0) + 20.0
                 val rs = ShanShuiPrng.global.rnd() * 100.0
                 val rwid = 50.0 + ShanShuiPrng.global.rnd() * 20.0
                 val rhei = 40.0 + ShanShuiPrng.global.rnd() * 20.0
-                canv.addAll(
-                    rock(
-                        xoff + ShanShuiUtil.normRand(grbd.xmin, grbd.xmax),
-                        yoff + (grbd.ymin + grbd.ymax) / 2 + ShanShuiUtil.normRand(-5.0, 5.0) + 20.0,
-                        rs, rhei, rwid, 40.0, 5.0,
-                    )
-                )
+                canv.addAll(rock(rx, ry, rs, rhei, rwid, 40.0, 5.0))
                 j++
             }
         }
@@ -654,16 +742,13 @@ object ShanShui {
             }
             j = 0
             while (j < ShanShuiPrng.global.rnd() * 4.0) {
+                // 上游 `:2290-2299`：实参求值序 = x(normRand) → y(normRand) → seed(rnd*100) → wid → hei
+                val rx = xoff + ShanShuiUtil.normRand(grbd.xmin, grbd.xmax)
+                val ry = yoff + (grbd.ymin + grbd.ymax) / 2 + ShanShuiUtil.normRand(-5.0, 5.0) + 20.0
                 val rs = ShanShuiPrng.global.rnd() * 100.0
                 val rwid = 50.0 + ShanShuiPrng.global.rnd() * 20.0
                 val rhei = 40.0 + ShanShuiPrng.global.rnd() * 20.0
-                canv.addAll(
-                    rock(
-                        xoff + ShanShuiUtil.normRand(grbd.xmin, grbd.xmax),
-                        yoff + (grbd.ymin + grbd.ymax) / 2 + ShanShuiUtil.normRand(-5.0, 5.0) + 20.0,
-                        rs, rhei, rwid, 40.0, 5.0,
-                    )
-                )
+                canv.addAll(rock(rx, ry, rs, rhei, rwid, 40.0, 5.0))
                 j++
             }
         } else if (tt == 2) {
@@ -680,19 +765,16 @@ object ShanShui {
                 )
                 j = 0
                 while (j < ShanShuiPrng.global.rnd() * 2.0) {
+                    // 上游 `:2307-2320`：实参求值序 = x(normRand) → y(normRand) → seed(j*i*rnd*100) → wid → hei
+                    val rx = xoff + Math.max(
+                        grbd.xmin,
+                        Math.min(grbd.xmax, xr + ShanShuiUtil.normRand(-50.0, 50.0)),
+                    )
+                    val ry = yoff + yr + ShanShuiUtil.normRand(-5.0, 5.0) + 20.0
                     val rs = j.toDouble() * i.toDouble() * ShanShuiPrng.global.rnd() * 100.0
                     val rwid = 50.0 + ShanShuiPrng.global.rnd() * 20.0
                     val rhei = 40.0 + ShanShuiPrng.global.rnd() * 20.0
-                    canv.addAll(
-                        rock(
-                            xoff + Math.max(
-                                grbd.xmin,
-                                Math.min(grbd.xmax, xr + ShanShuiUtil.normRand(-50.0, 50.0)),
-                            ),
-                            yoff + yr + ShanShuiUtil.normRand(-5.0, 5.0) + 20.0,
-                            rs, rhei, rwid, 40.0, 5.0,
-                        )
-                    )
+                    canv.addAll(rock(rx, ry, rs, rhei, rwid, 40.0, 5.0))
                     j++
                 }
             }
@@ -740,18 +822,22 @@ object ShanShui {
             )
             i2++
         }
-        // arch01（上游 `:2364-2366`）
+        // arch01（上游 `:2352-2364`）
         val ts = ShanShuiUtil.randChoice(listOf(0, 0, 0, 0, 1))
         if (ts == 1 && tt != 4) {
+            // 上游 `:2354-2363`：Arch.arch01(x, y, Math.random(), {wid, hei, per})
+            //   ⚠️ 实参求值序 = x(normRand) → y(无随机) → seed(rnd) → wid(normRand) → hei(normRand) → per(rnd)
+            //   ⚠️ 对象字面量里的顺序是 **wid → hei → per**（JS 左到右）
+            val ax = xoff + ShanShuiUtil.normRand(grbd.xmin, grbd.xmax)
+            val ay = yoff + (grbd.ymin + grbd.ymax) / 2 + 20.0
+            val asd = ShanShuiPrng.global.rnd()
+            val awid = ShanShuiUtil.normRand(160.0, 200.0)
+            val ahei = ShanShuiUtil.normRand(80.0, 100.0)
+            val aper = ShanShuiPrng.global.rnd()
             canv.addAll(
                 ShanShuiArch.kind1(
-                    xoff + ShanShuiUtil.normRand(grbd.xmin, grbd.xmax),
-                    yoff + (grbd.ymin + grbd.ymax) / 2 + 20.0,
-                    ShanShuiPrng.global.rnd(),
-                    ShanShuiUtil.normRand(80.0, 100.0),
-                    ShanShuiUtil.normRand(160.0, 200.0),
-                    0.7,
-                    ShanShuiPrng.global.rnd(),
+                    ax, ay, asd,
+                    ahei, awid, 0.7, aper,
                 )
             )
         }
@@ -761,12 +847,24 @@ object ShanShui {
     /**
      * 照抄上游 [Mount.distMount]（`:2369-2431`）：远山。
      * 上游默认值：hei=300, len=2000, seg=5。
-     * 移植状态：**照抄**（改造-③：移除 [PolyTools.triangulate] 块；改造-⑤：返回轮廓列表）。
+     * 移植状态：**照抄**（改造-⑤：返回轮廓列表）。
      *
      * 构建 len/span/seg 列远山点阵（span=10）：每列先按正弦包络 + 噪声生成
      * seg+1 个山脊点，再在头部插入 seg/2+1 个谷底点。
-     * ⚠️ 上游 `:2419-2428` 的 triangulate 子三角化未移植 ⇒ 整块移除，
-     *     仅保留直接 poly() 填色（填充多边形，无描边）。
+     *
+     * ## 发射（与上游逐条对应）
+     * 1. **块多边形填色**（上游 `:2413-2417`）：`poly(ptlist[i], {fil: getCol(行末点), str:"none", wid:1})`
+     *    ⇒ 一条轮廓：fill = 该灰、stroke = null（"none"）、width = 1。
+     * 2. **三角剖分 + 逐三角形填色并描边**（上游 `:2419-2428`）：
+     *    `PolyTools.triangulate(ptlist[i], {area:100, convex:true, optimize:false})`，
+     *    每个三角形取中点 `m` ⇒ `getCol(m[0], m[1])` ⇒
+     *    `poly(T[k], {fil: co, str: co, wid: 1})`
+     *    ⇒ **每个三角形一条独立轮廓**：fill = stroke = 该灰、width = 1。
+     *
+     * ⛔ **PRNG 抽取次数 = 0**（上游的 `triangulate` 是纯几何，不碰 `Math.random`）——
+     *   移植前后**不变**（门禁 G-PORT-10 断言）。
+     * ⚠️ 上游的 `getCol` 闭包（`:2409-2412`）里的 `yoff` 是 **distMount 的入参**
+     *   （所有块共用），**不是** chunk 的 y。
      */
     fun distMount(
         xoff: Double,
@@ -791,8 +889,12 @@ object ShanShui {
                     )
                 )
             }
-            for (j in 0 until (seg / 2.0 + 1.0).toInt()) {
-                val k = (i * seg + j * 2).toDouble()
+            // 上游 `:2395` 的 `for (var j = 0; j < seg / 2 + 1; j++)` —— ⚠️ 条件是**浮点比较**
+            //   （seg=5 ⇒ 3.5 ⇒ j=0,1,2,3 共 **4** 次；上游实测 block 0 = 4 底点 + 6 脊点 = 10 点）。
+            //   ⛔ 写成 `0 until (seg/2+1).toInt()` 会截成 3 ⇒ 少一个底点（点序与上游不符）。
+            var jb = 0
+            while (jb < seg / 2.0 + 1.0) {
+                val k = (i * seg + jb * 2).toDouble()
                 row.add(
                     0,
                     floatArrayOf(
@@ -801,11 +903,12 @@ object ShanShui {
                             Math.pow(Math.sin(Math.PI * k / (len / span)), 1.0)).toFloat(),
                     )
                 )
+                jb++
             }
             ptlist.add(row)
         }
         for (row in ptlist) {
-            // poly 填色（上游 `:2413-2417`：poly(ptlist[i], {fil: getCol(行末点), str:"none", wid:1})）
+            // ① 块多边形填色（上游 `:2413-2417`：poly(ptlist[i], {fil: getCol(行末点), str: "none", wid: 1})）
             // ⚠️ 改造-① 的「颜色计算省略」在改造-⑤ 后**不再需要** —— 轮廓自带 fill ⇒ 照抄上游 getCol
             val last = row[row.size - 1]
             val c = (ShanShuiNoise.noise(
@@ -814,6 +917,31 @@ object ShanShui {
                 yoff,
             ) * 55 + 200).toInt()
             canv.add(ShanShuiContour(row, ShanShuiColor(c, c, c, 1.0), null, 1.0))
+            // ② 三角剖分 + 逐三角形填色并描边（上游 `:2419-2428`）
+            //   上游：var T = PolyTools.triangulate(ptlist[i], {area: 100, convex: true, optimize: false});
+            //         for (var k = 0; k < T.length; k++) {
+            //           var m = PolyTools.midPt(T[k]);
+            //           var co = getCol(m[0], m[1]);
+            //           canv += poly(T[k], { fil: co, str: co, wid: 1 });
+            //         }
+            //   ⇒ port 侧每个三角形发**一条独立轮廓**：fill = str = co、width = 1（上游 wid: 1）。
+            // ⚠️ `getCol` 的 `yoff` 是 **distMount 的入参 yoff**（上游 `:2409-2412` 的闭包捕获），
+            //   **不是** chunk 的 y，也不是该块自己的偏移（所有块共用同一个 yoff）。
+            // ⚠️ `triangulate` 是**纯几何** ⇒ **不消耗随机数**（抽取次数与移植前一致 = 0）。
+            // ⚠️ `m` 用 [ShanShuiPoly.midPtExact]（Double 精度）⇒ 与上游的 Float64 中点一致；
+            //   顶点坐标本身是 Float32（port 的 D14 既有约定）。
+            val tris = ShanShuiPoly.triangulate(
+                row,
+                area = 100.0,
+                convex = true,
+                optimize = false,
+            )
+            for (tri in tris) {
+                val m = ShanShuiPoly.midPtExact(tri)
+                val tc = (ShanShuiNoise.noise(m[0] * 0.02, m[1] * 0.02, yoff) * 55 + 200).toInt()
+                val co = ShanShuiColor(tc, tc, tc, 1.0)
+                canv.add(ShanShuiContour(tri, co, co, 1.0))
+            }
         }
         return canv
     }
@@ -878,9 +1006,9 @@ object ShanShui {
                 ShanShuiColor.outline, ShanShuiColor.outline, 1.0,
             )
         )
-        // TEXTURE（上游 `:2498-2516`：texture(ptlist, {tex, wid: 3, sha, col: rgba(180,180,180,0.3+rnd*0.3)})）
-        val texCol = ShanShuiColor.rgba(180, 180, 180, 0.5)
-        val texlist = ShanShuiBrush.cun(ptlist, tex, sha, texCol)
+        // TEXTURE（上游 `:2498-2516`：texture(ptlist, {tex, wid: 3, sha, col: rgba(180,180,180,0.3+rnd*0.3), dis: 0.15/0.85 两端分布})）
+        // ⚠️ 上游传了**自定义 dis** 与 **自定义 col**（每条皴线抽 1 次随机）
+        val texlist = ShanShuiBrush.cun(ptlist, tex, sha, ::rockDis)
         // SHADE（上游 `:720-730`：sha 非 0 时 stride=2，stroke(..., {col:"rgba(100,100,100,0.1)", wid:sha})）
         // ⇒ fill=str=灰0.1 / poly 宽 = out = 1（笔宽 sha 已烘进 ribbon 几何）
         if (sha != 0.0) {
@@ -898,15 +1026,17 @@ object ShanShui {
             }
         }
         // TEXTURE（上游 `:731-739`：起点=sha、stride=1+sha，stroke(..., {col, wid:3})）
-        // ⇒ fill=str=texCol / poly 宽 = out = 1（笔宽 3 已烘进 ribbon 几何）
+        // ⇒ fill=str=该条的 col / poly 宽 = out = 1（笔宽 3 已烘进 ribbon 几何）
         for (j in sha.toInt() until texlist.size step (1 + sha.toInt())) {
+            // 上游 `:2504-2508`：col 逐条求值（每条抽 1 次随机，alpha = 0.3 + rnd*0.3）
+            val lineCol = rockTexCol()
             canv.add(
                 ShanShuiContour(
                     ShanShuiBrush.ribbon(
                         offList(texlist[j], xoff, yoff),
-                        3.0, ::strokeFun, 0.5, texCol,
+                        3.0, ::strokeFun, 0.5, lineCol,
                     ),
-                    texCol, texCol, 1.0,
+                    lineCol, lineCol, 1.0,
                 )
             )
         }
@@ -967,6 +1097,46 @@ object ShanShui {
     }
 
     // ─── private 辅助 ──────────────────────────────────────────
+
+    /**
+     * 上游 `flatMount` 的 `texture` **自定义 dis**（`:2148-2154`）：
+     * `if (Math.random() > 0.5) return 0.1 + 0.4 * Math.random(); else return 0.9 - 0.4 * Math.random();`
+     *
+     * ⇒ 每次调用抽 **2** 次随机（比较 1 次 + 取值 1 次）；分布是 0.1..0.5 / 0.5..0.9 两端。
+     */
+    private fun flatMountDis(): Double =
+        if (ShanShuiPrng.global.rnd() > 0.5) {
+            0.1 + 0.4 * ShanShuiPrng.global.rnd()
+        } else {
+            0.9 - 0.4 * ShanShuiPrng.global.rnd()
+        }
+
+    /**
+     * 上游 `rock` 的 `texture` **自定义 dis**（`:2509-2515`）：
+     * `if (Math.random() > 0.5) return 0.15 + 0.15 * Math.random(); else return 0.85 - 0.15 * Math.random();`
+     *
+     * ⇒ 每次调用抽 **2** 次随机；分布是 0.15..0.3 / 0.7..0.85 两端。
+     */
+    private fun rockDis(): Double =
+        if (ShanShuiPrng.global.rnd() > 0.5) {
+            0.15 + 0.15 * ShanShuiPrng.global.rnd()
+        } else {
+            0.85 - 0.15 * ShanShuiPrng.global.rnd()
+        }
+
+    /**
+     * 上游 `rock` 的 `texture` **自定义 col**（`:2504-2508`）：
+     * `"rgba(180,180,180," + (0.3 + Math.random() * 0.3).toFixed(3) + ")"`
+     *
+     * ⇒ 每次调用抽 **1** 次随机（上游在 TEXTURE 循环里逐条求值 ⇒ 每条皴线抽 1 次）。
+     */
+    private fun rockTexCol(): ShanShuiColor =
+        ShanShuiColor.rgba(
+            180,
+            180,
+            180,
+            ShanShuiUtil.toFixed(0.3 + ShanShuiPrng.global.rnd() * 0.3, 3),
+        )
 
     /**
      * 上游 `fil: "white"` 对应的白色填充（上游多处 WHITE BG 发射用）。
