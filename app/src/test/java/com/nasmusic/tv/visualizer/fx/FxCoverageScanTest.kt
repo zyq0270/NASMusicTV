@@ -86,6 +86,17 @@ class FxCoverageScanTest {
         // 零实例化死代码）已整文件删除归档；本条目随之从豁免名单移除（stale 判据
         // 会在文件存在而名单缺失时报错，删除后名单必须同步，见 :266-267 的 stale 门禁）。
         "PhotoRenderer" to "E39 照片墙：§八 G7 原始口径即豁免 PHOTO_WALL（照片优先，暗角/颗粒降到 0.34 / 0.018）",
+        // ⭐ 2026-11-06 新增：E50 的**第二条**渲染路径 `QianliUpstreamRenderer`
+        //   （忠于上游 shan-shui-inf 的绢白线描版）。
+        //   ⛔ 它**按设计**不做任何后处理：上游整幅 SVG 没有暗角 / 颗粒 / 扫描线 / 做旧 / 光尘 / 印章
+        //   ⇒ `postFx` 恒 `PostFx.NONE`（真·零绘制）⇒ 属「按设计不适用」的豁免。
+        //   ⚠️ 副作用（如实记录）：`PostFx.NONE` 让 `hasFullScreenPass()` 恒假
+        //   ⇒ `RendererFx.needsDamageCoalescer` 在 LITE/FULL 也为真
+        //   ⇒ 每帧补一次整画布 `drawRect`（肉眼不可见；该效果每帧头一笔就是全屏纸底 `drawRect`
+        //   ⇒ 脏区早已并成一整块 ⇒ 这次补画零收益）。
+        //   ⛔ 刻意**不**照抄 E46/E47/E48/E49/E50 的三段式（字面量 + vignetteOverride 恒 0）：
+        //   那样等于给上游画面加一道上游没有的暗角 ⇒ 偏离上游。
+        "QianliUpstreamRenderer" to "E50 上游绢白线描版：忠于上游 shan-shui-inf ⇒ 上游无暗角/颗粒/扫描线 ⇒ postFx 恒 PostFx.NONE（按设计不适用）",
         // ⭐ 2026-10-14 真机帧率返工：E47「雪松」已从豁免名单移入 `covered`（见该名单内的登记与
         //    类内 `postFx`/`vignetteOverride` 的 KDoc）。第一版把它写进豁免的理由——「暗角+颗粒
         //    烘进 grade 位图 ⇒ postFx 恒 NONE ⇒ 真·零绘制」——⛔ **只算对了 `applyPostFx`**：

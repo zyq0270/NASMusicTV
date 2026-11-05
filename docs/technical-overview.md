@@ -18702,6 +18702,284 @@ python scripts/e50_edge_check.py bottom output/e50_layer_mid.png   # 山体下�
 > ⚠️⚠️ **预览不按层带裁剪**（它把多边形直接画到整幅画布）⇒ **预览从来显示不出「被带底裁断」那条直边**
 > ⇒ 判「那条直边」只能靠真机截图 + G-BODY-4（映射后不出带底）。
 
+##### 7.11 上游逐行对照：**我们的层带架构与上游根本不同**（2026-11-06 第六轮）
+
+所有者判读：「默认先改成**不上颜色**的版本，背景全用 `shan-shui-inf` 的绢白色……是不是现在的
+近景-中景-远景的结构，也是与 `shan-shui-inf` 不相同？」
+
+> ⇒ **是，不相同。** 本节是上游原文（`index.html` 行号）与本仓实现的逐条对照。
+
+###### 7.11.1 上游的真实架构（全部有行号凭据）
+
+| # | 事实 | 上游凭据 |
+|---|---|---|
+| ① | **单一世界空间**，没有「近景带/中景带/远景带」。全部图元在同一坐标系（世界 x 无界、y ∈ [0, 800]） | `:3816-3827` `MEM` |
+| ② | **深度 = 世界 y 排序**：chunk 按 `y` **升序**插入（`:3852-3870`），`chunkrender` 按数组序拼接（`:3981`）⇒ y 小的先画 = 更靠后 | `:3846-3984` |
+| ③ | **只有一个缩放**：viewBox 的 `zoom = 1.142`，x/y **同一个** zoom；可视世界 y ∈ [0, 700.525] | `:3995-3998` |
+| ④ | **只有一个滚动速度**：`MEM.cursx += v`（`:4060`），`autoxcroll` 每 2000 ms 走 `INC_STEP=200` ⇒ **100 世界 px/s**，**无视差** | `:4059-4074`、`:4211` |
+| ⑤ | **白填充 = 「擦除露纸」**：整幅 `<svg>` 带 `mix-blend-mode:multiply`（`:4028`）⇒ 纯白 × 纸底 = 纸底 ⇒ 17 处 `fil:"white"` 的多边形**在纸底上完全隐形** | `:4024-4037` + 全部发射点 |
+| ⑥ | **纸底是运行时生成的 512×512 纸纹贴图**（不是纯色）：`c = 245 + Noise.noise(i*0.1,j*0.1)*10 − rand*20`，`rgb(c, c*0.95, c*0.85)`，四象限对称平铺 ⇒ 均值 ≈ **`rgb(240,228,204)` = `#F0E4CC`**（暖米黄绢色） | `:4336-4359` |
+| ⑦ | **水**与山**同 x、同基线**，但排序键被 hack 成 `y − 10000` ⇒ 水**永远垫底（最靠后）**、却**画在山脚线上** ⇒ 「水在山后/山两侧露出」 | `:3897-3902`、`:3693` |
+| ⑧ | **远山是浅灰实心块**：`rgb(c,c,c)`，c ∈ [200,251]，外加 Delaunay 三角剖分的网格线 | `:2409-2427` |
+| ⑨ | 上游**没有**：飞鸟、日/月圆盘、倒影、雾、烟、云、中文题跋、印章（`bird|sun|moon|cloud|fog|smoke|reflect` 全库 0 命中）。唯一的「题字」是彩蛋：屋顶招牌 `"Pizza Hut"`（`:3105`） | 全库 grep |
+| ⑩ | `MEM.planmtx` **不是分层矩阵**，而是「这一列有没有高山」的**空间排斥计数器**（索引 `floor(x/5)`，值 = ±200 px 内主山体数）⇒ 用它避免同列撞车 | `:3751-3770`、`:3786` |
+
+###### 7.11.2 我们（`QianliScrollRenderer`）与上游的**结构性差异**
+
+| # | 上游 | 我们 | 后果 |
+|---|---|---|---|
+| ① | 单一世界空间 | **四条层带**（`FAR/MID/NEAR/WATER`）+ 各自的 y 区间 | 同一世界 y 被拆到不同带 ⇒ 水与山脚对不齐 |
+| ② | 一个 zoom | 每带一个 `heightScale`（`FAR 0.47` / `MID 0.643` / `NEAR 1.31`） | 同一座山在带里被拉扁/放大 ⇒ 比例失真 |
+| ③ | 一个速度 | **5 档速度**（`SPEED_FAR 4 / MID 10 / WATER 14 / NEAR 22`）+ 能量增益 | 视差是**我们加的**，上游没有 |
+| ④ | 全局 y 排序画家序 | 先画全部中景、再画全部近景 | 跨 tag 的前后关系与上游不同 |
+| ⑤ | 水与山**同源同基线** | 水做成**独立世界**（`TAG_MOUNT` 但另一个 `ScrollWorld`） | 「水挂山脚」靠排序键实现，我们没有对应机制 |
+| ⑥ | 纸纹绢底（`#F0E4CC`） | 深色天空渐变（`SKY_TOP=0x4C5A5E`…`SKY_BOTTOM=0x5D603E`） | 底色模型完全不同 ⇒ 白填充不能沿用纯白 |
+| ⑦ | 无装饰层 | `NEAR_FOG` / `DUST` / `AGING` / `QianliSeal`（印章）/ 轮廓光 / 水高光 / 呼吸缩放 **全是自创** | 上游无对应物 |
+| ⑧ | 白 = 纸（multiply） | 白 = `SILK_WHITE #E8DCC3`（α×0.85） | 近似而非等价 ⇒ 深底上露出**米白半圆** |
+
+> ⭐ **最关键的一条**：**移植层本来就是忠于上游的** ——
+> `qianli/port/ShanShuiPlanner.kt` 就是上游 `mountplanner`(`:3706-3814`) +
+> `chunkloader`(`:3845-3971`) + `chunkrender`(`:3973-3984`) 的照抄，
+> `load()` 里的插入排序**就是**上游的全局 y 升序画家序。
+> ⇒ **偏差全在渲染器**：它绕开规划器、自造了层带。
+> ⇒ 修法不是「继续调层带参数」，而是**让渲染器直接用 `ShanShuiPlanner`**（见 7.11.3）。
+
+###### 7.11.3 新增「忠于上游」渲染路径（`QianliUpstreamRenderer`）
+
+| 项 | 做法 |
+|---|---|
+| **世界** | 直接用 `ShanShuiPlanner.State` + `load()` + `render()` ⇒ 拿到**上游的全局 y 升序画家序** |
+| **变换** | `scale = h / 700.525`（上游 `windy/zoom`）；`screenX = (worldX − cursx)·scale`、`screenY = worldY·scale` ⇒ **x/y 同一个 scale**（上游 zoom 是均匀的） |
+| **滚动** | **单一** `cursxWorld`、单一速度（上游 100 世界 px/s 量级） |
+| **底色** | 照抄 `:4336-4356` 烘 512×512 纸纹 tile，四象限对称，`BitmapShader(REPEAT)` 铺满 |
+| **白填充** | 画成**纸色（不透明）** ⇒ 等价于上游 multiply 的「擦除露纸」：遮住下方线条、自身与纸底同色 ⇒ **白色半圆与山脚硬边同时消失** |
+| **其余填充/描边** | 一律用轮廓**自带**的颜色与 α；⛔ **不用色表**（`QianliColorTable`）、⛔ 不按行号改色 |
+| **自创装饰** | 全部关闭：暗角/颗粒、做旧罩纱、光尘、近景雾、轮廓光、水高光、呼吸缩放、音频 α 调制、能量调速。⭐ **印章例外：保留**（所有者 2026-11-06 裁定；上游本身没有印章，它的落款是屋顶招牌上的 `"Pizza Hut"` 彩蛋 ⇒ 印章是我们唯一的自创保留项，与设色路径同一枚印、同一个尺寸系数 `0.09`） |
+| **块池** | **一个** `QianliBlockPool`（整屏高），`gen` = 「规划 + 按上游画家序烘进位图」 |
+
+> ⛔ **白填充的等价性**：上游 `multiply` 下「白 × 纸纹 = 纸纹」⇒ 白填充区**保留纸纹**；
+> 我们用**纸色均值**填 ⇒ 该区域是**平色**而非纸纹（差 ±15 的噪声级别，肉眼几乎不可辨）。
+> 这是**已知近似**，在门禁与文档里都要写明，⛔ 不许写成「完全等价」。
+
+##### 7.12 所有者的两条裁定（2026-11-06）
+
+> 背景：7.11 的对照暴露出「上游有我们没有」与「我们自创上游没有」两类内容。所有者就此裁定。
+
+**裁定一｜缺口**：上游有、我们没有的内容，**除 `transmissionTower01`（输电塔）外全部补移植**。
+
+| 项 | 裁定 | 理由（所有者原话） |
+|---|---|---|
+| `arch02` / `arch03` / `arch04`（多层楼阁 / 塔 / 拱桥） | ✅ **补移植** | 上游参考图里山腰的楼阁是画面焦点，简化成一道弧差别最大 |
+| `tree04` ~ `tree08`（五种专属树形） | ✅ **补移植** | 近景荒坡现在全是 3 种通用树 |
+| `Arch.boat01`（扁舟） | ✅ **补移植** | 上游参考图中央有舟；且船是山脚水面的构图锚点 |
+| `Man.man`（人物：渔人 / 亭中人） | ✅ **补移植** | 与扁舟配套；上游 MIT 授权，无授权障碍 |
+| `Arch.transmissionTower01`（输电塔） | ❌ **不移植** | 「明显是现代造物」 |
+
+**裁定二｜自创内容**：**印章保留**，**其余自创内容暂时全部关掉**（等看到效果再定）。
+
+| 自创项 | 裁定 |
+|---|---|
+| 印章（`QianliSeal`「扫地老师」） | ✅ **保留** |
+| 光尘（L5） | ⛔ 暂关 |
+| 做旧罩纱（L0 aging） | ⛔ 暂关 |
+| 近景雾（L3） | ⛔ 暂关 |
+| 轮廓光（L2′） | ⛔ 暂关 |
+| 江水高光丝（L4′） | ⛔ 暂关 |
+| 整体呼吸缩放（1.000–1.030） | ⛔ 暂关 |
+| 音频 α 调制 + 能量调速 | ⛔ 暂关（上游无音频交互） |
+| 三版设色色表（`QianliColorTable`） | ⛔ 暂关（上游只有灰阶） |
+| 深色天幕（`SKY_TOP 0x4C5A5E`…） | ⛔ 暂关（换上游纸纹绢底 `#F0E4CC`） |
+
+> ⇒ 「忠于上游」模式 = **上游线稿 + 绢白纸底 + 印章**（印章是唯一的自创保留项）。
+> ⇒ 染色版（INK）**不删**，保留为可切回的另一条路径，等效果定案后再决定去留。
+
+**呈现路径的单一真源**：`visualizer/qianli/QianliRenderStyle.UPSTREAM_DEFAULT`
+
+| 读它的三处 | 作用 |
+|---|---|
+| `VisualizerRendererFactory` | 决定实例化 `QianliUpstreamRenderer`（上游路径）还是 `QianliScrollRenderer`（设色路径） |
+| `VisualizerStage.applyQianliColorVersion` | 「忠于上游」路径**没有设色版**（上游只有灰阶）⇒ **关闭** V-A/V-B/V-C 切换，否则按上下键会弹 Toast 却毫无画面变化 |
+| 门禁 / 文档 | 断言「默认走哪条」 |
+
+> ⚠️ 守卫放在**舞台层**（`applyQianliColorVersion`）而**不是** `nextQianliColorVersion`（纯逻辑）——
+> 后者有单测（`QianliColorVersionSwitchTest` 的上/下循环断言），在里面加守卫会把那些断言全打红。
+
+##### 7.13 上游画面的**量化基线**（判据不靠目测，2026-11-06）
+
+上游参考图 `output/e50_upstream_ref.png`（3000×800，上游网页实跑截图）用
+`scripts/e50_upstream_metrics.py` 量出来的指标 ⇒ **新版本必须对上这组数**，而不是「看着像」。
+
+| 指标 | 上游实测 | 我们当前（染色版预览） | 判读 |
+|---|---|---|---|
+| 纸底基准色 | **(245, 232, 208)** | (76, 90, 94) | 上游算法算出来就是 `rgb(c, c*0.95, c*0.85)`，c≈245 ⇒ **完全吻合** |
+| 纸底占比 | **0.731** | 0.817 | 上游是**线描为主**，不是色块 |
+| 墨占比 | **0.269** | 0.183 | |
+| 墨平均灰度 | **165.1** | 220.6 | 上游墨是 `rgba(100,100,100,α)` ⇒ 偏浅灰，⛔ 不是黑 |
+| 彩色像素占比 | **0.0074** | 0.0000 | 上游**纯灰阶**（预览不上色 ⇒ 也是 0，但生产版 V-C 会飙高） |
+| 顶部 0–0.1 墨占比 | **0.0025** | **0.0000** | 上游顶部几乎全纸 |
+| 0.1–0.2 | **0.0246** | **0.0000** | |
+| 0.2–0.3 | **0.3131** | **0.0000** | |
+| 0.3–0.4（最密） | **0.5411** | 0.0377 | 上游的墨从 fracY 0.1 就开始，0.3–0.4 最密 |
+| 0.7–0.8 | **0.4291** | 0.1471 | 近景岸的横向密纹 |
+
+> ⭐ **纵向构图整体错位**：染色版的顶部 **30% 全空**，上游从 0.1 就有墨 ⇒
+> 这不是「颜色不对」，是**分层带架构把整幅构图压到了下半屏**（见 7.11.2）。
+> ⇒ 「忠于上游」模式必须让**顶部也要有山**（世界 y ∈ [0, 700.5] 全域映射到屏幕）。
+
+**基线文件**：`app/src/test/resources/qianli/shan_shui_upstream_look_baseline.json`
+（由 `python scripts/e50_upstream_metrics.py output/e50_upstream_ref.png --json=<该路径>` 生成，
+⛔ **期望值不许写在测试源码里**）。
+
+```bash
+python scripts/e50_upstream_metrics.py output/e50_upstream_ref.png output/e50_upstream_mode.png
+```
+
+##### 7.14 接线清单（补移植落地后由编排层执行）
+
+**上游调用点 → 移植层函数**（全部有上游行号）：
+
+| 上游 | 行号 | 现状 | 改后 |
+|---|---|---|---|
+| `Arch.arch02` | `:1995-2000` | `ShanShuiArch.kind2` | `ShanShuiArch.arch02` |
+| `Arch.arch04` | `:2002-2004` | `ShanShuiArch.kind2` | `ShanShuiArch.arch04` |
+| `Arch.arch03` | `:2024-2027` | `ShanShuiArch.kind2` | `ShanShuiArch.arch03` |
+| `Tree.tree08` | `:2255-2259` | `ShanShuiTree.kind2` | `ShanShuiTree.tree08` |
+| `Tree.tree05` | `:2283-2287` | `ShanShuiTree.kind1` | `ShanShuiTree.tree05` |
+| `Tree.tree04` | `:2305` | `ShanShuiTree.kind3` | `ShanShuiTree.tree04` |
+| `Tree.tree06` | `:2325-2329` | `ShanShuiTree.kind3` | `ShanShuiTree.tree06` |
+| `Tree.tree07` | `:2337-2341` | `ShanShuiTree.kind1` | `ShanShuiTree.tree07` |
+| `Tree.tree02` | `:2346-2349` | `ShanShuiTree.kind2` | ✅ **已是忠实的 tree02，保持不动** |
+| `Arch.arch01` | `:2354-2363` | `ShanShuiArch.kind1` | ✅ 保持（已有黄金基线） |
+| `Arch.boat01` | `:3934-3937` | ⛔ 未接 | 新增（`ShanShuiBoat.boat01`） |
+
+> ⚠️ **实参求值顺序**（决定 PRNG 流，必须逐字照抄）：
+> `arch02` 的对象字面量顺序是 `wid → sto → rot → sty`（`:1996-1999`）⇒ 抽随机顺序
+> `normRand(40,70)` → `randChoice([1,2,2,3])` → `Math.random()` → `randChoice([1,2,3])`；
+> `arch03` 是 `sto → wid`（`:2025-2026`）；`arch04` 只有 `sto`（`:2003`）。
+
+**规划器接线**（上游 `mountplanner` 的舟段 `:3806-3811`）：
+
+```js
+for (var i = xmin; i < xmax; i += xstep) {
+  if (Math.random() < 0.2) {
+    var r = { tag: "boat", x: i, y: 300 + Math.random() * 390 };
+    chadd(r, 400);            // ⛔ mind = 400（与别处默认的 10 不同）
+  }
+}
+```
+
+> ⚠️ 接线后**必须同步改门禁**：`ShanShuiPortGateTest` 的 G-PORT-12 现在用
+> `repeat(fixture.results[0].boatDraws) { rnd() }` **人工补抽**上游舟分支消耗的随机
+> （因为端口没有舟）⇒ 端口自己生成舟之后，这段补偿必须**删掉**，且断言要改成把端口的舟条目
+> 与黄金基线里的 `plan.*.boatEntries` 分开比对（黄金基线里已经有这个字段）。
+
+##### 7.15 补移植落地（2026-11-06）：上游有我们没有的图元，全部补齐
+
+> 所有者裁定（§7.12）：除 `transmissionTower01`（输电塔）外**全部补移植**。
+> 三条移植 lane 并行，各自**逐行**照抄上游，并用 **node 探针跑上游原函数 → 黄金 JSON → Kotlin 侧逐位对账**。
+
+| 上游图元 | 上游行号 | 移植到 | 落地要点 |
+|---|---|---|---|
+| `Arch.arch02`（多层楼阁） | `:3061-3119` | `ShanShuiArch.kind2`（**原地重写**） | `sto`=层数 / `sty`=立面样式 / `rai`=叠栏杆 / `rot`=屋面镜像，**五个哑参数全部按上游语义生效**；上游的 `<text>` 题字表达成带 `SHANSHUI_TAG_ARCH_TEXT` 标记的轮廓 |
+| `Arch.arch03`（塔） | `:3120-3163` | `ShanShuiArch.kind3`（新增） | `box`+`rail(seg=5)`+`pagroof(hei×1.5)`，层间 `hoff += hei*1.5` |
+| `Arch.arch04`（拱桥） | `:3164-3207` | `ShanShuiArch.kind4`（新增） | `box(tra:true)`+`rail(seg=3)`+`pagroof(hei×1)`，层间 `hoff += hei*1.2`；`rail` 不传 `fro` ⇒ 走缺省 true ⇒ 抽 1 次「随机开口」 |
+| `Tree.tree04` | `:1191-1278` | `ShanShuiTree.kind4`（新增） | `branch` 骨架复用；侧枝条件 `i%3==0 && rnd()>p` **每次判定都抽 1 次** |
+| `Tree.tree05` | `:1279-1373` | `ShanShuiTree.kind5`（新增） | |
+| `Tree.tree06` | `:1374-1489` | `ShanShuiTree.kind6`（新增） | |
+| `Tree.tree07` | `:1490-1581` | `ShanShuiTree.kind7`（新增） | 10 步骨架 + 7 个 `blob`；**`col` 缺省是 `rgba(100,100,100,1)`**（α=1，与其它树不同） |
+| `Tree.tree08` | `:1582-1702` | `ShanShuiTree.kind8`（新增） | 分形树；`branch` 骨架递归 |
+| `Arch.boat01`（扁舟） | `:3209-3248` | `ShanShuiBoat.boat01`（新增文件） | 渔人（`Man.man`，19 次抽取 / 15 条轮廓）+ 船身白底（48 点）+ 描边（95 点）⇒ 合计 20 次 / 17 条 / 802 点 |
+| `Man.man` / `hat01` / `hat02` / `stick01` / `cloth` | `:3522-3664` / `:3406-3449` / `:3450-3521` / `:3487-3513` / `:3607-3624` | `ShanShuiBoat.man` / `hat01` / `hat02` / `stick01` / `cloth` | 衣袖/身体/头用贝塞尔 `cloth` 展开；渔人**真的画出来**了（此前是「只抽随机不渲染」） |
+
+**上游缺省值对照**（接线时必须逐字照抄，⛔ 不能用我们自己的近似值）：
+
+| 图元 | hei | wid | col | noi | ben |
+|---|---|---|---|---|---|
+| `arch02` | 10 | 50 | — | — | — |
+| `arch03` | 10 | 50 | — | — | — |
+| `arch04` | 15 | 30 | — | — | — |
+| `tree04` | 300 | 6 | `rgba(100,100,100,0.5)` | 0.5 | — |
+| `tree05` | 300 | 5 | `rgba(100,100,100,0.5)` | 0.5 | — |
+| `tree06` | 100 | 6 | `rgba(100,100,100,0.5)` | 0.5 | — |
+| `tree07` | 60 | 4 | `rgba(100,100,100,**1**)` | 0.5 | `sqrt(x)*0.2` |
+| `tree08` | 80 | 1 | `rgba(100,100,100,0.5)` | 0.5 | — |
+
+**接线（编排层执行，`ShanShui.kt` / `ShanShuiPlanner.kt`）**：
+
+| 位置 | 改后 |
+|---|---|
+| `mountain` 的 BOTT_ARCH `tt==1` | `ShanShuiArch.kind2`（= arch02），hei=10 / per=5 / rai=false |
+| `mountain` 的 BOTT_ARCH `tt==2` | `ShanShuiArch.kind4`（= arch04），hei=15 / wid=30 / rot=0.7 / per=5 |
+| `mountain` 的 TOP_ARCH | `ShanShuiArch.kind3`（= arch03），hei=10 / rot=0.7 / per=5 |
+| `flatDec` 的 tree08 / tree05 / tree04 / tree06 / tree07 | `kind8` / `kind5` / `kind4` / `kind6` / `kind7`（参数按上表） |
+| `flatDec` 的 tree02 | ✅ 一直是忠实的 `kind2`，不动 |
+| `ShanShuiPlanner.plan` | 补上游的**舟生成段**（`:3806-3811`）：`rnd()<0.2` ⇒ `300+rnd()*390`，`chadd(r, **400**)`（⛔ mind=400，不是默认的 10） |
+| `ShanShuiPlanner.load` | 补上游的**舟渲染分支**（`:3929-3938`）：`boat01(x, y, rnd(), 120, y/800, randChoice([true,false]))`（PRNG 顺序：种子先、对象字面量后） |
+
+**门禁同步（G-PORT-12）**：端口自己生成舟之后 ⇒
+
+| 项 | 改前 | 改后 |
+|---|---|---|
+| 抽取次数断言 | `draws − boatDraws`（端口没有舟 ⇒ 扣掉） | **`draws`（含舟段）** ⇒ 端口自己消耗掉了那部分随机 |
+| 人工补抽 | `repeat(boatDraws) { rnd() }` | ⛔ **删掉** |
+| 条目比对 | 整表 vs `entries` | **舟/非舟分开**：`entries`（非舟）+ `boatEntries`（舟） |
+| 负向自证 | 喂 `localEntries` vs 整表 | 喂 `localEntries` vs **非舟子集** ⇒ 否则会「因为舟多了一条」而失败 ⇒ **判据失效** |
+
+**规划器语义修正**：`ShanShuiPlanner.plan()` 开头原有的 `planmtx.clear() // TEMP-TEETH-EXPERIMENT` **已删除**
+⇒ 上游 `MEM.planmtx` 是**模块级全局、跨调用累积**（`:3826`/`:3753`/`:3769`/`:3786`），
+上一段落下的山体会把 ±200 世界单位（`mwid`）内的列标记为「已占位」⇒ **跨段生效**。
+证据：黄金基线 `plan.mountResults[1]` 的**全局口径 2 个条目 vs 局部口径 0 个条目** ⇒ 这条差异**有区分力**，不是观感问题。
+
+**黄金基线（全部由 node 探针跑上游实跑生成，⛔ 期望值不写在测试源码里）**：
+
+| 夹具 | 文件 | 探针 |
+|---|---|---|
+| arch02/03/04 | `shan_shui_arch02_golden.json` | `scripts/e50_arch02_upstream_probe.js` |
+| tree04–08 | `shan_shui_tree45678_golden.json` | `scripts/e50_tree45678_upstream_probe.js` |
+| boat01 + man/hat01/hat02/stick01 | `shan_shui_boat_man_golden.json` | `scripts/e50_boat_man_upstream_probe.js` |
+| arch01 + hut（既有） | `shan_shui_arch01_golden.json` | `scripts/e50_arch01_upstream_probe.js` |
+| 规划器（既有） | `shan_shui_upstream_golden.json` | `scripts/shan_shui_upstream_ref.js` |
+
+> ✅ 五个探针的 `--check` 全部 **exit=0 且基线文件未被改写**（hash 不变）⇒ 基线确实来自上游实跑、且可复现。
+
+##### 7.16 本轮验证结果（2026-11-06）
+
+###### 7.16.1 量化对标：上游参考图 vs「忠于上游」模式
+
+`python scripts/e50_upstream_metrics.py output/e50_upstream_ref.png output/e50_upstream_mode.png`
+
+| 指标 | 上游参考图（3000×800） | 本仓上游模式（1920×1080） | 判读 |
+|---|---|---|---|
+| 纸底基准色 | (245, 232, 208) | **(239, 227, 203)** | ✓ 吻合（上游是参考图实测纸色，我们的是纸纹 tile 均值） |
+| 纸底占比 | 0.731 | **0.692** | ✓ 接近 |
+| 墨占比 | 0.269 | **0.308** | ✓ 接近 |
+| 墨平均灰度 | 165.1 | 189.3 | 我们的墨偏浅（上游的皴线更密） |
+| 彩色像素占比 | 0.0074 | 0.0200 | ✓ 都是暖调纸底造成的，不是染色 |
+
+> ⓘ **纵向分布的差异来自画幅比**，不是移植缺陷：
+> 上游参考图是 **3000×800（3.75:1）**，本仓是 **16:9 全屏**（世界 y ∈ [0, 700.5] 铺满屏高）
+> ⇒ 纵向被放大 **1.35×** ⇒ 上部（远山）墨更多、底部（近景岸）更重。
+> ⇒ 若要逐格复刻上游参考图，须用同比例画幅；全屏适配则是另一种（也更合理的）构图。
+
+###### 7.16.2 移植过程中抓到的**四个真 bug**（都由黄金基线对账抓出）
+
+| # | 症状 | 根因 | 修法 |
+|---|---|---|---|
+| ① | arch02/arch03 的坐标摘要与上游**逐位不符**（G-PORT-14 红） | `ShanShuiArch.box` 的 `surf = (rot < 0.5) * 2 - 1` —— JS 里 `(rot<0.5)` 是**布尔** ⇒ `true*2-1 = **+1**`；本移植层写成了 `if (rot < 0.5) -1.0 else 1.0` ⇒ **整个 `deco`（楼身立面装饰）被左右镜像** | 改成 `if (rot < 0.5) 1.0 else -1.0` |
+| ② | 网格摘要「上游自己算」也对不上黄金基线 | 探针的**摘要**用上游 Float64 坐标算，而 **dump 的坐标是 `Math.fround`（Float32）** ⇒ 两侧精度不同 ⇒ 哈希必不同（端口存的就是 Float32） | 探针的 `roundedDigestOf` 先 `Math.fround` 再取整 ⇒ 两侧同精度 ⇒ 精确相等，且判据仍有牙 |
+| ③ | `ShanShuiPortGateTest` 的 G-PORT-12 抛 NPE | 上游的 **boat 条目没有 `h` 字段**（`{tag,x,y}`）⇒ `o.get("h")` 返回 null | `parsePlanEntries` 容错（缺省 0.0，与端口 `Chunk("boat",…,0.0,…)` 一致） |
+| ④ | `QianliContentRangeGateTest` 报「L4 必须有已规划 chunk」（近景层空） | 恢复上游 `MEM.planmtx` 的**跨调用累积**语义后，设色路径的**四个独立世界**共用同一个全局 planmtx ⇒ 中景世界先把列标记成「已有山」⇒ 近景世界再跑时 `planmtx[i]==0` 恒假 ⇒ **一个 flatmount 都不产** | `ShanShuiPlanner.plan(…, isolatePlanmtx = true)`：设色路径按层隔离；**「忠于上游」路径走默认值（累积）**，与上游一致 |
+
+###### 7.16.3 门禁判据的两次修正（U-GATE-3 / U-GATE-5）
+
+| # | 原判据 | 问题 | 改后 |
+|---|---|---|---|
+| U-GATE-3 | 光栅后**纯白像素数 == 0** | 测试光栅器是**未预乘 alpha** 的 source-over 混合（底色 = 透明黑）⇒ 半覆盖边缘会存下未预乘 RGB ⇒ 3 个假阳性 | 允许**≤ 0.01%** 的着色像素；真正的判据是上面那条**逐项**检查「每个白填充项的颜色 == 纸色且不透明」 |
+| U-GATE-5 | 「既不是灰阶、也不在灰×纸底的混合线上」 | 那是**代理判据** ⇒ 抗锯齿的合法混色会被误判成「彩色」（实测 13 个假阳性） | 改为**与意图直接对应**的判据：「场景里不得出现**色表色**」⇒ 按 **RGB 欧氏距离 ≤ 30** 判定是否接近 12 个色表锚点；负向自证改为「喂进锚点 ⇒ 必须被判命中 ⇒ 『命中数必须为 0』必须抛」 |
+
+> ⛔ **教训**：像素级代理判据容易误伤**抗锯齿混色** ⇒ 判据要直接对应**意图**，
+> 并且**负向自证要用同一份判据**（否则自证方向写反 ⇒ 恒红或恒绿）。
+
 #### 八、文件清单
 
 - 新增：`app/src/main/java/com/nasmusic/tv/visualizer/qianli/`（含 `port/`）、
@@ -18733,5 +19011,31 @@ python scripts/e50_edge_check.py bottom output/e50_layer_mid.png   # 山体下�
   `app/src/test/java/com/nasmusic/tv/visualizer/qianli/QianliContentRangeGateTest.kt`（**新建**，内容范围门禁）、
   `app/src/test/java/com/nasmusic/tv/visualizer/qianli/QianliScenePreviewTest.kt`（层序与映射跟随生产）、
   `app/src/test/java/com/nasmusic/tv/visualizer/qianli/ShanShuiPortGateTest.kt`（追加 arch01 / planmtx 断言）
+- 第六轮改（2026-11-06，「忠于上游」路径 + 补移植）：
+  - **新增** `app/src/main/java/com/nasmusic/tv/visualizer/renderers/QianliUpstreamRenderer.kt`（上游路径渲染器：
+    单一世界空间 / 均匀缩放 / 恒速 / 绢白纸纹 / 白填充⇒纸色 / 印章）
+  - **新增** `app/src/main/java/com/nasmusic/tv/visualizer/qianli/QianliRenderStyle.kt`（**呈现路径单一真源**）
+  - **新增** `app/src/main/java/com/nasmusic/tv/visualizer/qianli/port/ShanShuiBoat.kt`（**补移植** `boat01` / `man` / `hat01` / `hat02` / `stick01` / `cloth`）
+  - **新增** `app/src/test/java/com/nasmusic/tv/visualizer/qianli/QianliUpstreamGateTest.kt`（U-GATE-1~6，**新建**）、
+    `QianliUpstreamPreviewTest.kt`（上游路径离线预览 + 软件光栅器，**新建**）、
+    `ShanShuiArch23GateTest.kt`（G-PORT-14，**新建**）、
+    `ShanShuiTree45678GateTest.kt`（**新建**）、
+    `ShanShuiBoatManGateTest.kt`（**新建**）、
+    `ShanShuiPortDumpTest.kt`（移植层轮廓导出**工具**，非门禁）
+  - **新增** `app/src/test/resources/qianli/shan_shui_{arch02,tree45678,boat_man,upstream_look}_golden|baseline.json`（黄金基线）
+  - **新增** `scripts/e50_{arch02,tree45678,boat_man}_upstream_probe.js`（node 探针，跑上游原函数出基线）、
+    `scripts/e50_upstream_metrics.py`（画面量化）、
+    `scripts/e50_phone_look_check.py`（真机截图 ⇒ 对标上游基线）、
+    `scripts/e50_arch_{diff,round_diff,digest_check}.py`（逐点/网格/摘要对账）、
+    `scripts/kotlin_comment_balance.py`（Kotlin 块注释配对**编译前**检查器）
+  - **改** `port/ShanShuiArch.kt`（**补移植** `arch02/03/04` + `box/deco/rail/roof/pagroof` 改忠实版；`surf` 符号修正）、
+    `port/ShanShuiTree.kt`（**补移植** `tree04`~`tree08`）、
+    `port/ShanShui.kt`（接线：新楼阁/新树/新舟；`flatDec` 改用忠实树形）、
+    `port/ShanShuiPlanner.kt`（`planmtx` 恢复上游的**跨调用累积**；补**舟**的生成段与渲染分支；新增 `isolatePlanmtx`）、
+    `renderers/QianliScrollRenderer.kt`（设色路径的 planmtx 按层隔离）、
+    `renderers/VisualizerRendererFactory.kt`（按 `QianliRenderStyle` 选路径）、
+    `ui/components/VisualizerStage.kt`（上游路径下关闭设色切换）、
+    `ShanShuiPortGateTest.kt`（G-PORT-12 适配舟条目）、`FxCoverageScanTest.kt`（渲染器登记）、
+    `app/build.gradle.kts`（版本号 197 / 2.39.12）
 - 文档：`CHANGELOG.md`、`docs/technical-overview.md`（本节）、
   `docs/visualizer-effects-list.md`（效果清单）

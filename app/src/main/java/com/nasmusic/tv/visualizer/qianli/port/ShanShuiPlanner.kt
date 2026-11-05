@@ -144,8 +144,31 @@ object ShanShuiPlanner {
      *   标 `@Synchronized`（对象监视器）⇒ 多线程调用不会交错。
      */
     @Synchronized
-    fun plan(xmin: Double, xmax: Double): List<Chunk> {
-        planmtx.clear() // TEMP-TEETH-EXPERIMENT
+    fun plan(xmin: Double, xmax: Double, isolatePlanmtx: Boolean = false): List<Chunk> {
+        // ⛔⛔ **不再无条件清空 planmtx**（2026-11-06 删除 `planmtx.clear() // TEMP-TEETH-EXPERIMENT`）。
+        //
+        // 上游 `MEM.planmtx`（`:3826`）是**模块级全局**，`mountplanner` 被反复调用时**继续累积**
+        // （上游 `:3753` 初始化 / `:3769` 计数 / `:3786` 读取）⇒ 上一段落下的山体会把
+        // ±200 世界单位（`mwid`）内的列标记为「已占位」⇒ **跨段生效**。
+        //
+        // ⚠️ 但**设色（INK）渲染器不能用这个口径**：它有**四个彼此独立的世界**（远/中/近/水），
+        // 每个世界**各自**调 [plan] ⇒ 共用同一个全局 planmtx 时，中景世界先把列标记成「已有山」
+        // ⇒ 近景世界再跑时 `planmtx[i] == 0` 恒假 ⇒ **一个 flatmount 都不产** ⇒ 近景层空
+        // （2026-11-06 真踩到：`QianliContentRangeGateTest` 报「L4 必须有已规划 chunk」）。
+        // ⇒ 该路径必须显式传 `isolatePlanmtx = true`（= 旧的「每次调用清零」口径）。
+        //
+        // ⛔ 「忠于上游」渲染路径（`QianliUpstreamRenderer`）**必须走默认值**（累积）：
+        //   它直接用上游的 `chunkloader`/`chunkrender`，只有**一条**规划流 ⇒ 语义与上游一致。
+        //
+        // ⚠️ 注意上游的初始化是 `MEM.planmtx[i1] = MEM.planmtx[i1] || 0`（`:3753`）
+        // ⇒ 已计数（>0）的槽位**保持不变**，只有未初始化/undefined/NaN 的才归 0。
+        // 本移植层的对应实现见下面「初始化 planmtx」段。
+        //
+        // ⛔ **不要**在这里无条件加 `planmtx.clear()`：那会把「跨调用累积」这个上游语义整个抹掉。
+        // 测试隔离请用 [resetPlanmtx]。
+        if (isolatePlanmtx) {
+            planmtx.clear()
+        }
         // ── locmax — 照抄上游 `:3707-3720` ──
         fun locmax(
             x: Double,
@@ -268,6 +291,25 @@ object ShanShuiPlanner {
                         j++
                     }
                 }
+            }
+            i += xstep
+        }
+
+        // boat — 照抄上游 `:3806-3811`
+        //   ⚠️ PRNG 顺序：先 `Math.random() < 0.2`（if 条件），再 `300 + Math.random() * 390`（块内）。
+        //   ⚠️ `chadd(r, 400)` 的 mind = 400（⛔ 不是别处默认的 10）⇒ 舟间距 ≥ 400 世界单位。
+        //   ⚠️ 上游的 boat 条目没有 `h` 字段 ⇒ 这里填 0.0（`h` 在上游从不被读）。
+        i = xmin
+        while (i < xmax) {
+            if (ShanShuiPrng.global.rnd() < 0.2) {
+                val r = Chunk(
+                    "boat",
+                    i,
+                    300.0 + ShanShuiPrng.global.rnd() * 390.0,
+                    0.0,
+                    emptyList(),
+                )
+                chadd(r, 400.0)
             }
             i += xstep
         }
@@ -422,7 +464,26 @@ object ShanShuiPlanner {
                             ),
                         ))
                     }
-                    // ⚠️ "boat" — 照抄上游 `:3929-3938` — **已裁剪**（Arch.boat01 不移植，O7 未裁）
+                    "boat" -> {
+                        // 扁舟 — 照抄上游 `:3929-3938`
+                        //   ⚠️ PRNG 顺序：第 3 实参的 `Math.random()`（种子）先求值，
+                        //      再对象字面量 `{sca, fli}` 的 `randChoice` 后求值。
+                        //   ⚠️ `sca = plan.y / 800`（上游 `MEM.windy = 800`）。
+                        add(Chunk(
+                            "boat",
+                            pl[idx].x,
+                            pl[idx].y,
+                            pl[idx].h,
+                            ShanShuiBoat.boat01(
+                                pl[idx].x,
+                                pl[idx].y,
+                                ShanShuiPrng.global.rnd(),
+                                120.0,
+                                pl[idx].y / 800.0,
+                                ShanShuiUtil.randChoice(listOf(true, false)),
+                            ),
+                        ))
+                    }
                     // ⚠️ "redcirc"/"greencirc" — 照抄上游 `:3939-3963` — **已裁剪**（调试标记，非山体）
                 }
             }

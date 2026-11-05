@@ -1,0 +1,135 @@
+{
+ "meta": {
+  "generator": "scripts/e50_boat_man_upstream_probe.js",
+  "upstream": "D:\\hxzhang\\MyGithubSoftware\\NasAudio\\shan-shui-inf-main\\index.html",
+  "upstreamBytes": 126559,
+  "patch": "① perlin 表初始化：Math.random() → __perlinLcg[]（LCG 种子 20250101）；② this.boat01 / this.man / this.hat01 / this.hat02 / this.stick01 行内链式追加 this.__xxx（同函数引用，行号不变）",
+  "seed": 157,
+  "noiseSeed": 20250101
+ },
+ "boat01": {
+  "call": {
+   "xoff": 0,
+   "yoff": 0,
+   "seed": 3,
+   "len": 120,
+   "sca": 1,
+   "fli": false
+  },
+  "draws": 20,
+  "contourCount": 17,
+  "manContourCount": 15,
+  "pointCount": 802,
+  "digest": "0x13ffa2da4616ed54",
+  "structureDigest": "0x915b9396a8c53c4f",
+  "roundedDigest10": "0xf3ea92a4bd944c89",
+  "roundedDigest100": "0x9f1a42b5a1178e29",
+  "roundedDigest10Raw": "0xf3ea92a4bd944c89",
+  "roundedDigest100Raw": "0xe41e0ad712fd7a3a"
+ },
+ "man": {
+  "call": {
+   "xoff": 0,
+   "yoff": 0,
+   "sca": 0.5,
+   "fli": true
+  },
+  "draws": 18,
+  "contourCount": 15,
+  "manContourCount": 15,
+  "pointCount": 654,
+  "digest": "0x1c01a8ef447f8b99",
+  "structureDigest": "0x6aac0537df724b10",
+  "roundedDigest10": "0xde4623eccc7518f9",
+  "roundedDigest100": "0x1ecfcd77795200fa",
+  "roundedDigest10Raw": "0xde4623eccc7518f9",
+  "roundedDigest100Raw": "0x1ecfcd77795200fa"
+ },
+ "manBoat": {
+  "call": {
+   "xoff": 0,
+   "yoff": 0,
+   "sca": 0.5,
+   "fli": true
+  },
+  "draws": 19,
+  "contourCount": 15,
+  "manContourCount": 15,
+  "pointCount": 659,
+  "digest": "0x11374b83d35db1ec",
+  "structureDigest": "0xaff00ded217fa4da",
+  "roundedDigest10": "0x92ce05769fd025ca",
+  "roundedDigest100": "0x4e56afa13990b7f9",
+  "roundedDigest10Raw": "0x92ce05769fd025ca",
+  "roundedDigest100Raw": "0xbbf81f53cdb2292a"
+ },
+ "hat01": {
+  "call": {
+   "p0": [
+    0,
+    0
+   ],
+   "p1": [
+    0,
+    -20
+   ],
+   "fli": false
+  },
+  "draws": 1,
+  "contourCount": 2,
+  "manContourCount": 0,
+  "pointCount": 17,
+  "digest": "0xbc51b49910d09561",
+  "structureDigest": "0x74f9b6db4e91b83b",
+  "roundedDigest10": "0x1d5e965003487e59",
+  "roundedDigest100": "0x2ef529d8b16a7b53",
+  "roundedDigest10Raw": "0x1d5e965003487e59",
+  "roundedDigest100Raw": "0x2ef529d8b16a7b53"
+ },
+ "hat02": {
+  "call": {
+   "p0": [
+    0,
+    0
+   ],
+   "p1": [
+    0,
+    -20
+   ],
+   "fli": false
+  },
+  "draws": 1,
+  "contourCount": 1,
+  "manContourCount": 0,
+  "pointCount": 10,
+  "digest": "0x638564c7dfb6394d",
+  "structureDigest": "0xf51333d6cb7357bd",
+  "roundedDigest10": "0xf8fabde3ddae6d61",
+  "roundedDigest100": "0x9ba50b54b9617f95",
+  "roundedDigest10Raw": "0xf8fabde3ddae6d61",
+  "roundedDigest100Raw": "0x9ba50b54b9617f95"
+ },
+ "stick01": {
+  "call": {
+   "p0": [
+    0,
+    0
+   ],
+   "p1": [
+    0,
+    -20
+   ],
+   "fli": false
+  },
+  "draws": 1,
+  "contourCount": 1,
+  "manContourCount": 0,
+  "pointCount": 12,
+  "digest": "0xbaefc4232923a72e",
+  "structureDigest": "0xbef8a307c42f747d",
+  "roundedDigest10": "0xf8e59ba37d5bc381",
+  "roundedDigest100": "0x0cee522d9437ec96",
+  "roundedDigest10Raw": "0xf8e59ba37d5bc381",
+  "roundedDigest100Raw": "0x0cee522d9437ec96"
+ }
+}

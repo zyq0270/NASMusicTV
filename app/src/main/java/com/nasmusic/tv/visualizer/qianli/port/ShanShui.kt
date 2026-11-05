@@ -2,13 +2,18 @@
  * 山石图元层 —— 山、平山、山脚装饰、远山、石、水。
  *
  * 移植自 LingDong-/shan-shui-inf（MIT，Copyright 2018 Lingdong Huang）。感谢作者开源。
- * [mountain]/[flatMount]/[distMount]/[rock]/[water] 移植状态：**照抄**；[flatDec] 移植状态：**改造-③**（内部 tree04/05/08 未移植 ⇒ 替换为 [ShanShuiTree.kind1]/[kind2]/[kind3] 简化版）。
+ * [mountain]/[flatMount]/[distMount]/[rock]/[water] 移植状态：**照抄**；[flatDec] 移植状态：**照抄**
+ * （内部的 tree04/05/06/07/08 已于 2026-11-06 **逐行移植** ⇒ 不再用 kind1/2/3 顶替）。
  *
  * [mountain] 照抄上游 [Mount.mountain] `:1804-2081`（山体，10 行 × 50 点，reso=[10,50]）。
  *   上游默认值：hei=100+rand*400, wid=400+rand*200, tex=200, veg=true, ret=0, col=undefined。
  *   ⚠️ 内部 [vegetate]（上游 `:1838-1852` 闭包）共 8 次调用：RIM/TOP/MIDDLE/BOTTOM/BOTT_ARCH/TOP_ARCH/TRANSM/BOTT_ROCK；
  *   ⚠️ 上游 TRANSM（transmissionTower01）未移植 ⇒ 该次调用整体移除（growthRule 不消耗 rnd，无副作用）；
- *   ⚠️ 上游 [Arch.arch02]/[arch03]/[arch04] 未移植 ⇒ 替换为 [ShanShuiArch.kind2]（改造-③，参数映射见下）；
+ *   ⚠️ 上游 [Arch.arch02]/[arch03]/[arch04] 已于 2026-11-06 **逐行移植**
+ *     ⇒ BOTT_ARCH 的 tt==1 → [ShanShuiArch.kind2]（= 上游 arch02）、
+ *       tt==2 → [ShanShuiArch.kind4]（= 上游 arch04）、TOP_ARCH → [ShanShuiArch.kind3]（= 上游 arch03）；
+ *       上游未传的参数一律取**上游的缺省值**（arch02: hei=10/per=5/rai=false；
+ *       arch03: hei=10/rot=0.7/per=5；arch04: hei=15/wid=30/rot=0.7/per=5）；
  *   ⚠️ ret≠0 时上游返回 `[ptlist]`（二维），port 适配为扁平化 [ptlist.flatten]（改造-①）。
  *   ⚠️ **实参求值序**：上游的 JS 对象字面量是**左到右**求值 ⇒ arch02/arch03/arch04/rock 的
  *     实参顺序与 port 的 Kotlin 调用顺序必须逐项对齐（见各处注释里的上游行号）。
@@ -18,7 +23,7 @@
  *   ⚠️ 上游 `ret` 声明后从未使用 ⇒ port **已删**该形参（改造-⑤）。
  *
  * [flatDec] 照抄上游 [Mount.flatDec] `:2234-2367`（山脚装饰）。
- *   ⚠️ 内部 tree04/05/08 未移植 ⇒ 替换为 [ShanShuiTree.kind1]/[kind2]/[kind3]（改造-③）。
+ *   ✅ 内部 tree04/05/06/07/08 已于 2026-11-06 **逐行移植**（`ShanShuiTree.kind4`…`kind8`）⇒ ⛔ 不再用 kind1/2/3 顶替。
  *
  * [distMount] 照抄上游 [Mount.distMount] `:2369-2431`（远山）。
  *   上游默认值：hei=300, len=2000, seg=5。
@@ -77,8 +82,9 @@ object ShanShui {
     /**
      * 照抄上游 [Mount.mountain]（`:1804-2081`）：山体。
      * 上游默认值：hei=100+rand*400, wid=400+rand*200, tex=200, veg=true, ret=0, col=undefined。
-     * 移植状态：**照抄**（改造-①：SVG 字符串 → 轮廓列表；改造-③：TRANSM 调用移除、arch02/03/04 → [ShanShuiArch.kind2]；
+     * 移植状态：**照抄**（改造-①：SVG 字符串 → 轮廓列表；改造-③：TRANSM 调用移除；
      * 改造-⑤：返回 [List]<[ShanShuiContour]> 而非扁平点列）。
+     * ✅ arch02/03/04 已于 2026-11-06 **逐行移植**（`ShanShuiArch.kind2/3/4`）。
      *
      * 构建 10 行 × 50 点的山脊点阵（余弦包络 × 噪声），自下而上逐行收窄。
      * 发射顺序（与上游一致）：RIM 树 → 白色背景 → 描边 → 山脚 → 皴 → TOP 树 → MIDDLE/BOTTOM 树 → 建筑 → 石。
@@ -91,9 +97,9 @@ object ShanShui {
      * - RIM/TOP（tree02）→ [ShanShuiTree.kind2]（clu=2 / 5）
      * - MIDDLE（tree01）→ [ShanShuiTree.kind1]（ht=((h+y)/h)*70 后 ht*0.3+rnd*ht*0.7）
      * - BOTTOM（tree03）→ [ShanShuiTree.kind3]（ht=((h+y)/h)*120 后 ht*0.5+rnd*ht*0.5，ben={pow(x*bc,bp)}）
-     * - BOTT_ARCH（arch02/04）→ [ShanShuiArch.kind2]（tt==1：hei=10, wid=normRand(40,70), sto/sty=randChoice）
-     *   （tt==2：hei=15, wid=30, rot=0.7）
-     * - TOP_ARCH（arch03）→ [ShanShuiArch.kind2]（hei=10, wid=40+rnd*20, sto=randChoice([5,7])）
+     * - BOTT_ARCH（arch02/04）→ [ShanShuiArch.kind2]=arch02（tt==1：hei=10, wid=normRand(40,70), sto/sty=randChoice）
+     *   或 [ShanShuiArch.kind4]=arch04（tt==2：hei=15, wid=30, rot=0.7）
+     * - TOP_ARCH（arch03）→ [ShanShuiArch.kind3]（hei=10, wid=40+rnd*20, sto=randChoice([5,7])）
      * - BOTT_ROCK → 本对象 [rock]（hei/wid=20+rnd*20, sha=2）
      */
     fun mountain(
@@ -362,10 +368,13 @@ object ShanShui {
                     }
                     2 -> {
                         // 上游 `:2002-2004`：Arch.arch04(x + xoff, y + yoff, seed, {sto})
+                        //   ⇒ 只传 `sto`；hei/wid/rot/per 走上游 arch04 的**缺省值**
+                        //      （`index.html:3166-3170`：hei=15 / wid=30 / rot=0.7 / per=5）。
+                        // ⚠️ 走 [ShanShuiArch.kind4]（= 上游 arch04）⇒ ⛔ 不是 kind2（= 上游 arch02）。
                         val asto = ShanShuiUtil.randChoice(listOf(1, 1, 1, 2, 2)).toDouble() // :2003
-                        ShanShuiArch.kind2(
+                        ShanShuiArch.kind4(
                             x + xoff, y + yoff, seed,
-                            15.0, 30.0, 0.7, 5.0, asto, 1.0, false,
+                            15.0, 30.0, 0.7, 5.0, asto,
                         )
                     }
                     else -> emptyList()
@@ -385,11 +394,14 @@ object ShanShui {
                 // 上游 `:2024-2027`：Arch.arch03(x + xoff, y + yoff, seed, {sto, wid})
                 //   ⚠️ 第 3 实参是 mountain 自己的 `seed`（**不抽随机**）
                 //   ⚠️ 对象字面量的求值序 = sto → wid（JS 左到右）
+                //   ⇒ hei/rot/per 走上游 arch03 的**缺省值**（`index.html:3122-3126`：
+                //      hei=10 / rot=0.7 / per=5）。
+                // ⚠️ 走 [ShanShuiArch.kind3]（= 上游 arch03）⇒ ⛔ 不是 kind2（= 上游 arch02）。
                 val asto = ShanShuiUtil.randChoice(listOf(5, 7)).toDouble() // :2025
                 val awid = 40.0 + ShanShuiPrng.global.rnd() * 20.0 // :2026
-                ShanShuiArch.kind2(
+                ShanShuiArch.kind3(
                     x + xoff, y + yoff, seed,
-                    10.0, awid, 0.7, 5.0, asto, 1.0, false,
+                    10.0, awid, 0.7, 5.0, asto,
                 )
             },
             { i, j ->
@@ -664,18 +676,20 @@ object ShanShui {
 
     /**
      * 照抄上游 [Mount.flatDec]（`:2234-2367`）：山脚装饰。
-     * 移植状态：**改造-③**（tree04/05/08 未移植 ⇒ 替换为 [ShanShuiTree.kind1]/[kind2]/[kind3]）；**改造-⑤**（返回轮廓列表）。
+     * 移植状态：**照抄**（改造-⑤：返回轮廓列表）。
      *
      * 在 grbd 边界内随机撒石/树/拱桥。分支 tt=0..4：
      * 0=大石；1=横向树列 + 大石；2=单树 + 大石；3=塔形树列；4=横向树列。
      * 末尾固定撒 tree02 散点（50*rnd 棵）与 arch01（ts==1 且 tt!=4 时）。
      *
-     * 树映射（改造-③）：tree08→[ShanShuiTree.kind2]（hei=60+rnd*40, clu=5）；
-     * tree05→[ShanShuiTree.kind1]（hei=100+rnd*200）；
-     * tree04→[ShanShuiTree.kind3]（hei=50, ben={0.0}）；
-     * tree06→[ShanShuiTree.kind3]（hei=60+rnd*60）；
-     * tree07→[ShanShuiTree.kind1]（hei=normRand(40,80)）；
-     * tree02→[ShanShuiTree.kind2]（默认）；
+     * 树映射（2026-11-06 起 tree04–08 **逐行移植**，⛔ 不再用 kind1/2/3 顶替）：
+     * tree08→[ShanShuiTree.kind8]（hei=60+rnd*40, **wid=1**）；
+     * tree05→[ShanShuiTree.kind5]（hei=100+rnd*200, **wid=5**）；
+     * tree04→[ShanShuiTree.kind4]（**hei=300, wid=6** ⇒ 上游 `:2305` 传的是空参 `{}` ⇒ 全用缺省值）；
+     * tree06→[ShanShuiTree.kind6]（hei=60+rnd*60, **wid=6**）；
+     * tree07→[ShanShuiTree.kind7]（hei=normRand(40,80), **wid=4, ben=sqrt(x)*0.2,
+     *   col=rgba(100,100,100,**1**)** ⇒ 上游 tree07 的 col 与其它树不同）；
+     * tree02→[ShanShuiTree.kind2]（默认，✅ 一直是忠实的）；
      * arch01→[ShanShuiArch.kind1]（hei=normRand(80,100), wid=normRand(160,200), rot=0.7）。
      */
     fun flatDec(
@@ -705,10 +719,10 @@ object ShanShui {
             var k = 0
             while (k < 2.0 + ShanShuiPrng.global.rnd() * 3.0) {
                 canv.addAll(
-                    ShanShuiTree.kind2(
+                    ShanShuiTree.kind8(
                         xr + Math.min(Math.max(ShanShuiUtil.normRand(-30.0, 30.0), grbd.xmin), grbd.xmax),
                         yr,
-                        60.0 + ShanShuiPrng.global.rnd() * 40.0, 8.0, 5.0,
+                        60.0 + ShanShuiPrng.global.rnd() * 40.0, 1.0,
                         ShanShuiColor.default, 0.5,
                     )
                 )
@@ -739,10 +753,10 @@ object ShanShui {
             var i = xmin
             while (i < xmax) {
                 canv.addAll(
-                    ShanShuiTree.kind1(
+                    ShanShuiTree.kind5(
                         xoff + i + 20.0 * ShanShuiUtil.normRand(-1.0, 1.0),
                         yoff + (grbd.ymin + grbd.ymax) / 2 + 20.0,
-                        100.0 + ShanShuiPrng.global.rnd() * 200.0, 3.0,
+                        100.0 + ShanShuiPrng.global.rnd() * 200.0, 5.0,
                         ShanShuiColor.default, 0.5,
                     )
                 )
@@ -765,9 +779,9 @@ object ShanShui {
                 val xr = ShanShuiUtil.normRand(grbd.xmin, grbd.xmax)
                 val yr = (grbd.ymin + grbd.ymax) / 2
                 canv.addAll(
-                    ShanShuiTree.kind3(
+                    ShanShuiTree.kind4(
                         xoff + xr, yoff + yr + 20.0,
-                        50.0, 5.0, { _ -> 0.0 },
+                        300.0, 6.0,
                         ShanShuiColor.default, 0.5,
                     )
                 )
@@ -790,10 +804,10 @@ object ShanShui {
             // 塔形树列（tree06，上游 `:2330-2341`）
             for (i in 0 until ShanShuiUtil.randChoice(listOf(1, 1, 1, 1, 2, 2, 3))) {
                 canv.addAll(
-                    ShanShuiTree.kind3(
+                    ShanShuiTree.kind6(
                         xoff + ShanShuiUtil.normRand(grbd.xmin, grbd.xmax),
                         yoff + (grbd.ymin + grbd.ymax) / 2,
-                        60.0 + ShanShuiPrng.global.rnd() * 60.0, 5.0, { _ -> 0.0 },
+                        60.0 + ShanShuiPrng.global.rnd() * 60.0, 6.0,
                         ShanShuiColor.default, 0.5,
                     )
                 )
@@ -807,11 +821,12 @@ object ShanShui {
             var i = xmin
             while (i < xmax) {
                 canv.addAll(
-                    ShanShuiTree.kind1(
+                    ShanShuiTree.kind7(
                         xoff + i + 20.0 * ShanShuiUtil.normRand(-1.0, 1.0),
                         yoff + (grbd.ymin + grbd.ymax) / 2 + ShanShuiUtil.normRand(-1.0, 1.0),
-                        ShanShuiUtil.normRand(40.0, 80.0), 3.0,
-                        ShanShuiColor.default, 0.5,
+                        ShanShuiUtil.normRand(40.0, 80.0), 4.0,
+                        { xv -> Math.sqrt(xv) * 0.2 },
+                        ShanShuiColor(100, 100, 100, 1.0), 0.5,
                     )
                 )
                 i += 20.0

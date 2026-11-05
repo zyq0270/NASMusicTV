@@ -31,6 +31,8 @@ import com.nasmusic.tv.visualizer.renderers.StarrySkyRenderer
 import com.nasmusic.tv.visualizer.renderers.TripodFogRenderer
 import com.nasmusic.tv.visualizer.renderers.WorldGlobeRenderer
 import com.nasmusic.tv.visualizer.photo.PhotoRenderer
+import com.nasmusic.tv.visualizer.qianli.QianliRenderStyle
+import com.nasmusic.tv.visualizer.renderers.QianliUpstreamRenderer
 
 /**
  * 渲染器工厂 —— 主题枚举 → 渲染器实现。
@@ -106,8 +108,13 @@ object VisualizerRendererFactory {
         // ⛔ 本机自用版走的是**覆盖层**那份工厂（见 AGENTS.md「本地构建携带隐藏分支效果」），
         //    那份才有真正的 `HighwayRenderer`。
         VisualizerTheme.HIGHWAY -> CircularRingRenderer()
-        // E50「千里江山」零外部资产（8 层位图全在首帧 boot 程序化烘焙）⇒ ⛔ 不收 Context。
-        VisualizerTheme.QIANLI_SCROLL -> QianliScrollRenderer()
+        // E50「千里江山」**两条互斥的呈现路径**（所有者 2026-11-06 裁定：默认「忠于上游」）：
+        //   ① `QianliUpstreamRenderer` —— 绢白纸底 + 上游线描 + 单一世界空间 + 恒速 + 无自创装饰；
+        //   ② `QianliScrollRenderer`   —— 分层带 + 三版设色色表 + 自创装饰（保留，等效果定案）。
+        // ⛔ 切换**只**改 [QianliRenderStyle.UPSTREAM_DEFAULT] 这一个常量（单一真源）。
+        //    ⚠️ 两条路径共用同一套移植层（`qianli/port/` 下的 port 包，忠于上游），分叉只在渲染器。
+        VisualizerTheme.QIANLI_SCROLL ->
+            if (QianliRenderStyle.UPSTREAM_DEFAULT) QianliUpstreamRenderer() else QianliScrollRenderer()
     }
 
     /**

@@ -80,6 +80,7 @@ import com.nasmusic.tv.visualizer.RenderContext
 import com.nasmusic.tv.visualizer.RendererSwapper
 import com.nasmusic.tv.visualizer.VisualizerRenderer
 import com.nasmusic.tv.visualizer.VisualizerRendererFactory
+import com.nasmusic.tv.visualizer.qianli.QianliRenderStyle
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
@@ -313,6 +314,13 @@ fun VisualizerStage(
      * @return 是否真的切了；**非「千里江山」主题返回 false** ⇒ 调用方保持原语义。
      */
     fun applyQianliColorVersion(delta: Int): Boolean {
+        // ⛔ 「忠于上游」路径**没有设色版**（上游 `shan-shui-inf` 只有灰阶，见 §7.11）
+        //    ⇒ 必须在这里**关掉**这个开关：否则按上下键会弹一条「设色 V-B」的 Toast，
+        //    画面却毫无变化 ⇒ 用户以为坏了。
+        // ⛔ 放在**这里**（舞台层）而不是 [nextQianliColorVersion]（纯逻辑）：
+        //    后者有单测（`QianliColorVersionSwitchTest` 的上/下循环断言），
+        //    在里面加守卫会把那些断言全部打红。
+        if (QianliRenderStyle.UPSTREAM_DEFAULT) return false
         val next = nextQianliColorVersion(theme, qianliColorVersion, delta) ?: return false
         colorVersionTouched[0] = true
         qianliColorVersion = next

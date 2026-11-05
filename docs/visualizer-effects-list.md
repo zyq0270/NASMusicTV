@@ -1,6 +1,6 @@
 # 可视化效果列表
 
-> **版本**：v2.39.11（versionCode 196）
+> **版本**：v2.39.12（versionCode 197）
 > **更新日期**：2026-11-05
 > **来源**：`app/src/main/java/com/nasmusic/tv/data/model/AppSettings.kt` — `VisualizerTheme` 枚举
 
@@ -48,7 +48,8 @@
 | E49 | BIRDS_FLOCK | 鸟群 |
 | E50 | QIANLI_SCROLL | 千里江山 |
 
-> `E50 千里江山` 归 ADV：分块运行时生成 + 8 层位图合成，确实「比 BASIC 重」，但渲染器
+> `E50 千里江山` 归 ADV：分块运行时生成（默认走**忠于上游**路径 = 绢白纸底 + 单块场景位图；
+> 设色路径 = 8 层位图合成），确实「比 BASIC 重」，但渲染器
 > ⛔ **不读** `ctx.quality.maxParticles`（数量只按 `fx.level` 三档表调）⇒ `needsParticleBudget = false`
 > ⇒ **三档画质全部可选（含 LOW）**。编号取 `"50"`（E51 像素城市占 `"51"`、E52 旷野公路占 `"52"`），
 > 与 BASIC 档的 `E43 海边` 不重号（§10.281）。

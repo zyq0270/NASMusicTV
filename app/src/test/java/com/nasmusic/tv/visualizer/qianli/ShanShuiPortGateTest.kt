@@ -811,7 +811,8 @@ class ShanShuiPortGateTest {
             ShanShuiArch.kind1(0.0, 0.0, 3.0, 40.0, 160.0, 0.7, 8.0).map { it.pts }
         },
         PointCase("archKind2", allowEmptyLists = true) {
-            ShanShuiArch.kind2(0.0, 0.0, 3.0, 40.0, 160.0, 0.7, 8.0, 0.0, 1.0, false).map { it.pts }
+            // ⚠️ `sto` = 上游的**层数**（`for (i = 0; i < sto; i++)`）⇒ 必须 ≥ 1 才有几何。
+            ShanShuiArch.kind2(0.0, 0.0, 3.0, 40.0, 160.0, 0.7, 8.0, 2.0, 1.0, false).map { it.pts }
         },
     )
 
@@ -1381,24 +1382,43 @@ class ShanShuiPortGateTest {
             val before0 = ShanShuiPrng.global.draws
             val seg0 = ShanShuiPlanner.plan(fixture.segments[0][0], fixture.segments[0][1])
             val draws0 = ShanShuiPrng.global.draws - before0
+            // ⚠️ 2026-11-06：**不再扣掉 boatDraws** —— 端口现在**自己生成舟**
+            //   （上游 `mountplanner` 的舟段 `:3806-3811` 已移植）⇒ 舟的那部分随机
+            //   **已经在 plan() 内部消耗掉了** ⇒ 总抽取次数必须与上游的 `draws` **逐次相等**。
             assertEquals(
-                "${fixture.label} 第 1 段的 PRNG 抽取次数必须与上游一致",
-                fixture.results[0].draws - fixture.results[0].boatDraws,
+                "${fixture.label} 第 1 段的 PRNG 抽取次数必须与上游一致（含舟段）",
+                fixture.results[0].draws,
                 draws0,
             )
-            assertPlanSegment("${fixture.label} 第 1 段", fixture.results[0].entries, seg0)
-            // 补抽上游 boat 分支消耗的随机（端口无 boat ⇒ 已接受偏差 O7）⇒ 对齐随机流
-            repeat(fixture.results[0].boatDraws.toInt()) { ShanShuiPrng.global.rnd() }
+            assertPlanSegment(
+                "${fixture.label} 第 1 段（非舟）",
+                fixture.results[0].entries,
+                seg0.filter { it.tag != "boat" },
+            )
+            assertPlanSegment(
+                "${fixture.label} 第 1 段（舟）",
+                fixture.results[0].boatEntries,
+                seg0.filter { it.tag == "boat" },
+            )
             // 第二段
             val before1 = ShanShuiPrng.global.draws
             val seg1 = ShanShuiPlanner.plan(fixture.segments[1][0], fixture.segments[1][1])
             val draws1 = ShanShuiPrng.global.draws - before1
             assertEquals(
-                "${fixture.label} 第 2 段的 PRNG 抽取次数必须与上游一致",
-                fixture.results[1].draws - fixture.results[1].boatDraws,
+                "${fixture.label} 第 2 段的 PRNG 抽取次数必须与上游一致（含舟段）",
+                fixture.results[1].draws,
                 draws1,
             )
-            assertPlanSegment("${fixture.label} 第 2 段", fixture.results[1].entries, seg1)
+            assertPlanSegment(
+                "${fixture.label} 第 2 段（非舟）",
+                fixture.results[1].entries,
+                seg1.filter { it.tag != "boat" },
+            )
+            assertPlanSegment(
+                "${fixture.label} 第 2 段（舟）",
+                fixture.results[1].boatEntries,
+                seg1.filter { it.tag == "boat" },
+            )
         }
     }
 
@@ -1420,24 +1440,35 @@ class ShanShuiPortGateTest {
         // 端口（全局口径）必须落在上游的**全局**口径上
         resetPortGlobals()
         ShanShuiPlanner.plan(fixture.segments[0][0], fixture.segments[0][1])
-        repeat(fixture.results[0].boatDraws.toInt()) { ShanShuiPrng.global.rnd() }
         val seg1 = ShanShuiPlanner.plan(fixture.segments[1][0], fixture.segments[1][1])
-        assertPlanSegment("mount 第 2 段", fixture.results[1].entries, seg1)
+        assertPlanSegment(
+            "mount 第 2 段（非舟）",
+            fixture.results[1].entries,
+            seg1.filter { it.tag != "boat" },
+        )
     }
 
     /**
      * G-PORT-12 负向自证：把**局部 planmtx 口径**的上游结果喂给正向用例用的**同一份断言**
      * ⇒ 必须抛 AssertionError（⇒ 端口若退回局部数组，这条判据必红）。
+     *
+     * ⚠️ 只喂**非舟**子集：舟条目与 planmtx 无关 ⇒ 若把舟也喂进去，
+     *    断言会因为「舟多了一条」而失败 ⇒ 判据就**因为错误的原因**变红（失效）。
      */
     @Test
     fun gPort12_negative_localPlanmtxBreaksGate() {
         val fixture = planFixtures().first { it.label == "mount" }
         resetPortGlobals()
         ShanShuiPlanner.plan(fixture.segments[0][0], fixture.segments[0][1])
-        repeat(fixture.results[0].boatDraws.toInt()) { ShanShuiPrng.global.rnd() }
         val seg1 = ShanShuiPlanner.plan(fixture.segments[1][0], fixture.segments[1][1])
+        val seg1NonBoat = seg1.filter { it.tag != "boat" }
+        // 负向自证的前提：喂进去的「局部口径」必须与端口的**全局口径**确实不同
+        assertTrue(
+            "负向自证的前提：局部口径的条目必须与全局口径不同（否则判据无牙）",
+            fixture.results[1].localEntries != fixture.results[1].entries,
+        )
         gateMustCatch("局部 planmtx 的口径必须被判据咬住") {
-            assertPlanSegment("mount 第 2 段（局部口径）", fixture.results[1].localEntries, seg1)
+            assertPlanSegment("mount 第 2 段（局部口径）", fixture.results[1].localEntries, seg1NonBoat)
         }
     }
 
@@ -1455,6 +1486,7 @@ class ShanShuiPortGateTest {
         val draws: Long,
         val boatDraws: Long,
         val entries: List<PlanEntry>,
+        val boatEntries: List<PlanEntry>,
         val localEntries: List<PlanEntry>,
     )
 
@@ -1480,6 +1512,7 @@ class ShanShuiPortGateTest {
                     draws = o.get("draws").asLong,
                     boatDraws = o.get("boatDraws").asLong,
                     entries = parsePlanEntries(o.getAsJsonArray("entries")),
+                    boatEntries = parsePlanEntries(o.getAsJsonArray("boatEntries")),
                     localEntries = parsePlanEntries(o.getAsJsonArray("localEntries")),
                 )
             }
@@ -1494,7 +1527,15 @@ class ShanShuiPortGateTest {
     private fun parsePlanEntries(arr: JsonArray): List<PlanEntry> =
         arr.map { e ->
             val o = e.asJsonObject
-            PlanEntry(o.get("tag").asString, o.get("x").asDouble, o.get("y").asDouble, o.get("h").asDouble)
+            // ⚠️ **上游的 boat 条目没有 `h` 字段**（`{tag,x,y}`）⇒ 必须容错，
+            //    否则 `o.get("h")` 返回 null ⇒ `NullPointerException`（2026-11-06 真踩了）。
+            //    缺省 0.0 与端口的 `Chunk("boat", …, 0.0, …)` 一致（上游的 `h` 从不被读）。
+            PlanEntry(
+                o.get("tag").asString,
+                o.get("x").asDouble,
+                o.get("y").asDouble,
+                if (o.has("h")) o.get("h").asDouble else 0.0,
+            )
         }
 
     /** rock 的 WHITE BG 样式断言（上游 `:2484-2490`：`fil:"white", str:"none"`）。 */

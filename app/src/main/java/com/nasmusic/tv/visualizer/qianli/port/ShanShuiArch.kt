@@ -1,51 +1,48 @@
 /**
- * 建筑图元层 —— 草屋、楼阁、屋顶、栏杆、拱桥等。
+ * 建筑图元层 —— 草屋、楼阁、塔、拱桥、屋顶、栏杆等。
  *
  * 移植自 LingDong-/shan-shui-inf（MIT，Copyright 2018 Lingdong Huang）。感谢作者开源。
  *
- * ## 移植状态一览
- * | 函数 | 上游 | port | 说明 |
+ * ## 移植状态一览（2026-11-06 本轮：多层楼阁 / 塔 / 拱桥的逐行移植）
+ *
+ * | 上游函数 | 上游行号 | port | 说明 |
  * |---|---|---|---|
- * | [kind1] | `Arch.arch01`（`:3002-3059`） | **照抄**（改造-① SVG→轮廓、④ 字符串→纯数据、⑤ 轮廓样式、② 去人物**但保留随机抽取**） | 草屋 + 桥身 + 栏杆×2 |
- * | [hut] | `hut`（`:2542-2607`） | **照抄**（同上） | 10×10 网格 + 一轮皴 |
- * | [kind2] | `Arch.arch02/03/04`（`:3061-3207`） | **改造-③：简化实现**（一条闭合轮廓） | ⛔ 仍未与上游视觉等价 |
+ * | `Arch.arch01` | `:3002-3059` | [kind1] | **照抄**（改造-① SVG→轮廓、④ 字符串→纯数据、⑤ 轮廓样式、② 去人物**但保留随机抽取**） |
+ * | `hut` | `:2542-2607` | [hut] | **照抄**（⛔ 本轮**未改动**，黄金基线 `shan_shui_arch01_golden.json` 仍成立） |
+ * | `Arch.arch02` | `:3061-3119` | [kind2] | **照抄**（多层楼阁） |
+ * | `Arch.arch03` | `:3120-3163` | [kind3] | **照抄**（塔） |
+ * | `Arch.arch04` | `:3164-3207` | [kind4] | **照抄**（拱桥） |
+ * | `box` | `:2609-2687` | `box` | **照抄**（通用件：`rot`/`tra`/`bot`/`wei`/`dec` 全部透传） |
+ * | `deco` | `:2689-2751` | `deco` | **照抄**（立面装饰：窗/门图案） |
+ * | `rail` | `:2753-2838` | `rail` | **照抄**（通用件：`rot`/`wei` 透传） |
+ * | `roof` | `:2840-2956` | `roof` | **照抄**（含唯一的 `<text>` 题字「Pizza Hut」彩蛋） |
+ * | `pagroof` | `:2958-3000` | `pagroof` | **照抄**（攒尖顶） |
  *
- * ## 上游 `Arch.arch01` 的逐层结构（`:3002-3059`）
+ * ## 上游 `Arch.arch02` 的逐层结构（`:3061-3119`）
  * ```
- * arch01(xoff, yoff, seed, {hei, wid, per})
- *   ├─ p  = 0.4 + rnd*0.2            （1 次抽取）→ h0 = hei*p（草屋高）、h1 = hei*(1-p)（桥身高）
- *   ├─ hut(xoff, yoff-hei, {hei:h0, wid})        ⇒ 最多 303 条轮廓（白底 1 + 两侧描边 2 + 皴 300）
- *   │                                               ⛔ 零长度的皴线**不发射**（上游 stroke() 对空点列返回 ""）
- *   │                                               ⇒ 实测（夹具见下）只有 **182** 条
- *   ├─ box(xoff, yoff, {hei:h1, wid:wid*2/3, per, bot:false}) ⇒ 4 条轮廓（桥身 4 根线）
- *   ├─ rail(xoff, yoff, seed, {tra:true, fro:false, hei:10, wid, per:per*2, seg}) ⇒ 竖栏 + 桥栏
- *   ├─ mcnt = randChoice([0,1,1,2]) + Man.man ×(0~2)（渔人）⇒ **本仓不渲染，但保留全部随机抽取**
- *   └─ rail(xoff, yoff, seed, {tra:false, fro:true, hei:10, wid, per:per*2, seg}) ⇒ 桥面栏
+ * arch02(xoff, yoff, seed, {hei, wid, rot, per, sto, sty, rai})
+ *   └─ for (i = 0; i < sto; i++)            （`sto` = **层数**）
+ *      ├─ hoff = 0（首层）；层间 `hoff += hei * 1.5`
+ *      ├─ box(xoff, yoff-hoff, {tra:false, hei, wid:wid*0.85^i, rot, wei:1.5, per,
+ *      │        dec: a => deco(sty, {...a, hsp:[[],[1,5],[1,5],[1,4]][sty],
+ *      │                                      vsp:[[],[1,2],[1,2],[1,3]][sty]})})
+ *      ├─ rai ? rail(xoff, yoff-hoff, i*0.2, {wid:wid*0.85^i*1.1, hei:hei/2, per,
+ *      │        rot, wei:0.5, tra:false}) : []      （`seg` 缺省 4、`fro` 缺省 true）
+ *      ├─ pla = (sto == 1 && rnd() < 1/3) ? [1, "Pizza Hut"] : undefined   ← **1 次抽取**
+ *      └─ roof(xoff, yoff-hoff-hei, {hei, wid:wid*0.9^i, rot, wei:1.5, per, pla})
  * ```
  *
- * ## ⛔ 上游 `arch01` 的 `rot` **从不被使用**
- * 上游 `:3006` 读了 `rot` 之后再没用过它：`box`/`rail` 收到的 `rot` 是**它们自己的默认值 0.7**
- * （arch01 只传 `hei`/`wid`/`per`/`bot`/`tra`/`fro`/`seg`）⇒ port 的 [kind1] 同样**忽略** `rot`。
- * （旧版 KDoc 写「rot 传给 box」是**记录错误**，本版更正。）
+ * ## ⚠️ `Arch.arch02/03/04` 的 `seed` **从不被使用**
+ * 上游 `:3071` / `:3128` / `:3172` 读了 `seed` 之后再没用过它：`rail` 收到的第三实参是
+ * **`i * 0.2`**（`:3094` / `:3144` / `:3188`），不是 `seed` ⇒ port 同样只把 `seed` 收下不用。
  *
- * ## ⚠️ PRNG 抽取次数：port 与上游**完全一致**（差值 = 0）
- * 上游 `arch01` 一次调用抽 **2534** 次（node 实跑上游原始 JS；
- * 夹具：PRNG 种子 157 + `arch01(0, 0, 3, {hei:90, wid:180, per:0.5})`），
- * 其中渔人（`Man.man`）占 **20** 次/个（`normRand` 1 + `randChoice(fli)` 1 + `Man.man` 内部 18；
- * `mcnt == 2` 时上游两个渔人的 `fli` 是**常量** ⇒ 各 19 次）。
- * 本仓**不渲染**渔人（改造-②「去人物」），但**消耗与上游完全相同的抽取**
- * ⇒ **抽取次数差值 = 0（常量）** ⇒ 调用点之后的随机流与上游**完全对齐**。
- * ⚠️ 若改成「少抽」，则 arch01 之后的所有元素（树、山脚、水纹…）的位置/形状都会与上游分叉。
- * ⚠️ **2534 这个数不是常量**：皴线的 `dis` 是 `wtrand(a=>a*a)`（拒绝采样）⇒ 每条线的
- *   抽取次数随随机流变化 ⇒ 门禁**只在固定夹具**下断言它（`G-PORT-13`，黄金基线由
- *   `scripts/e50_arch01_upstream_probe.js` 生成）。
- *
- * ## 门禁（G-PORT-13）
- * `ShanShuiPortGateTest.gPort13_*`：轮廓条数 / 总点数 / 结构摘要（填充·描边·线宽·点数）/
- * 0.1 网格坐标摘要 / 0.01 网格坐标摘要 / PRNG 抽取次数，全部与上游实跑结果**逐位相等**
- * （期望值在 `app/src/test/resources/qianli/shan_shui_arch01_golden.json`，⛔ 不在测试源码里）。
- * ⚠️ 坐标**不能**逐位比 Float32：V8 与 JVM 的 `Math.cos/sin/atan2` 最多差 1 ULP
- *   ⇒ 量化成 Float32 后偶尔差 1 个 ULP（实测 951 点里 115 点、最大 7.63e-6）⇒ 改比量化网格。
+ * ## ⛔ 本轮对 `kind1`（上游 `arch01`）的影响：**零**
+ * `box` / `rail` 改成了「通用件」（多了 `rot`/`wei`/`dec`/`tra`/`bot` 形参），
+ * 但上游 `arch01` 给它们的实参与**改前完全一致**：
+ * - `box`：`{hei, wid, per, bot:false}` ⇒ `rot` 用 box 自己的缺省 **0.7**、`tra` 缺省 **true**、
+ *   `wei` 缺省 **3**、`dec` 缺省（返回 `[]`）⇒ **发射与改前逐条相同**；
+ * - `rail`：`{tra, fro, hei:10, wid, per:per*2, seg}` ⇒ `rot` 缺省 **0.7**、`wei` 缺省 **1**
+ *   ⇒ **发射与改前逐条相同**。
  *
  * ⛔ port 包零 Android 依赖 ⇒ 本对象**不出现** `android.graphics.Path` / `Canvas`。
  * 所有 `Math.random()` → [ShanShuiPrng.global.rnd()]；所有 `Noise.noise()` → [ShanShuiNoise.noise]。
@@ -55,6 +52,27 @@
  */
 
 package com.nasmusic.tv.visualizer.qianli.port
+
+/**
+ * **屋顶题字**的轮廓标记（上游 `roof` 的 `<text>` 元素，`:2929-2954`）。
+ *
+ * ⛔ **上游没有「图元」这个概念** —— 上游 `roof` 直接往 SVG 字符串里拼一段 `<text>`：
+ * `font-size = hei*0.6`、`style='fill:rgba(100,100,100,0.9)'`、`text-anchor='middle'`、
+ * `transform='translate(mp[0]+xoff, mp[1]+yoff) rotate(adeg)'`，内容是 **「Pizza Hut」**。
+ *
+ * port 的轮廓模型只有「点列 + 填充 + 描边 + 线宽」⇒ 只能表达其中一部分：
+ * | 上游 `<text>` 属性 | port 的表达 |
+ * |---|---|
+ * | `translate(x, y)` | 轮廓的**唯一那个点** = 题字锚点 |
+ * | `fill:rgba(100,100,100,0.9)` | 轮廓的 `fill` |
+ * | `font-size = hei*0.6` | 轮廓的 `width`（上游没有别的「字号」位置可放） |
+ * | `rotate(adeg)` | ⛔ **无处安放**（见 [ShanShuiArch.roof] 的说明） |
+ * | 文本内容「Pizza Hut」 | ⛔ **无处安放**（轮廓模型没有「文本」字段） |
+ *
+ * ⇒ 渲染器侧**看不到**这段题字（它只会把这条轮廓当成一个 1 点的退化路径画），
+ * 但「题字存在 / 在哪 / 多大 / 什么颜色」全部保留下来，且**可与上游逐位对账**。
+ */
+const val SHANSHUI_TAG_ARCH_TEXT = "archText"
 
 object ShanShuiArch {
 
@@ -71,6 +89,7 @@ object ShanShuiArch {
      * 2. [hut]（`:3016`）：`hut(xoff, yoff - hei, {hei: h0, wid: wid})`。
      *    ⚠️ 上游 **不传 `tex`** ⇒ 取上游默认 **300**（皴线数）。
      * 3. [box]（`:3017-3022`）：`box(xoff, yoff, {hei: h1, wid: wid*2/3, per: per, bot: false})`。
+     *    ⚠️ 上游**不传** `rot`/`tra`/`wei`/`dec` ⇒ 走 box 自己的缺省（0.7 / true / 3 / 返回 `[]`）。
      * 4. [rail]（`:3024-3031`）：`tra:true, fro:false`（后栏），`seg = (3 + rnd*3)|0`。
      * 5. 渔人（`:3033-3048`）：`mcnt = randChoice([0,1,1,2])` + 0~2 个 `Man.man`。
      *    ⚠️ **只消耗随机、不渲染**（见 [burnMan]）。
@@ -99,10 +118,23 @@ object ShanShuiArch {
         canv.addAll(hut(xoff, yoff - hei, h0, wid, HUT_TEX))
 
         // 上游 :3017-3022
-        canv.addAll(box(xoff, yoff, h1, (wid * 2) / 3, per, false))
+        //   ⚠️ 上游**不传** `rot` / `tra` / `wei` / `dec`
+        //      ⇒ `rot` = box 自己的缺省 0.7、`tra` = true、`wei` = 3、`dec` = 返回 `[]`
+        canv.addAll(
+            box(
+                xoff, yoff, h1, (wid * 2) / 3, BOX_ROT, per,
+                tra = true, bot = false, wei = BOX_WEI,
+                dec = { _: DecArgs -> emptyList() },
+            )
+        )
 
         // 上游 :3024-3031（seg 的抽取发生在实参求值时 ⇒ 必须在调用 rail 之前抽）
-        canv.addAll(rail(xoff, yoff, seed, RAIL_HEI, wid, per * 2, true, false, railSeg()))
+        canv.addAll(
+            rail(
+                xoff, yoff, seed, RAIL_HEI, wid, RAIL_ROT, per * 2, railSeg(), RAIL_WEI,
+                tra = true, fro = false,
+            )
+        )
 
         // 上游 :3033-3048（渔人：只消耗随机，不渲染）
         val mcnt = ShanShuiUtil.randChoice(listOf(0, 1, 1, 2))
@@ -118,7 +150,12 @@ object ShanShuiArch {
         }
 
         // 上游 :3049-3056
-        canv.addAll(rail(xoff, yoff, seed, RAIL_HEI, wid, per * 2, false, true, railSeg()))
+        canv.addAll(
+            rail(
+                xoff, yoff, seed, RAIL_HEI, wid, RAIL_ROT, per * 2, railSeg(), RAIL_WEI,
+                tra = false, fro = true,
+            )
+        )
 
         return canv
     }
@@ -192,69 +229,252 @@ object ShanShuiArch {
         return canv
     }
 
-    // ─── kind2（arch02/03/04）：仍是简化实现 ───────────────────
+    // ─── 上游 arch02 / arch03 / arch04（照抄） ───────────────────
 
     /**
-     * 上游 [arch02]（`:3061-3119`）/ [arch03]（`:3120-3163`）/ [arch04]（`:3164-3207`）：拱桥（类型 2/3/4）。
+     * 上游 [Arch.arch02]（`:3061-3119`）：**多层楼阁**。
      *
-     * 移植状态：**改造-③：简化实现，与上游无视觉等价关系**（另加改造-①、改造-⑤）。
+     * 移植状态：**照抄**（改造-①/④/⑤）。
      *
-     * ## 与上游的差异（本轮**未动**）
-     * - 上游 arch02/03/04 是 `box` + `rail` + `roof`/`pagroof` 的**多层组合体**
-     *   （`for (i = 0; i < sto; i++)` 逐层叠楼，每层发 4~6 条 poly/stroke）；
-     *   port 只发**一条**闭合轮廓（半圆拱 + 桥面 + 可选一段矩形栏杆）。
-     * - ⚠️ **被收下但从不使用的参数**：
-     *   - `rot`：上游传给 `box`/`roof`/`rail`/`pagroof`；port **忽略**。
-     *   - `sto`：上游是**层数**（`for (i = 0; i < sto; i++)`）；port 只用它给噪声加偏移
-     *     ⇒ **语义不同**，层数不生效。
-     *   - `sty`：上游是立面装饰样式（`deco(sty, …)` 的窗/门图案）；port **忽略**。
-     *   - `rai`：上游控制是否叠 `rail`；port 在 `rai=true` 时追加一段矩形栏杆 ⇒ 形状不同。
-     *   - `per`：上游是屋檐细分；port 用固定的 8 段半圆 ⇒ **忽略**。
-     * - ⚠️ **PRNG 抽取次数与上游不一致**：port 一次都不抽 ⇒ 调用点之后的随机流会与上游分叉。
-     *   ⛔ 这是 E50 arch02/03/04 的**遗留偏差**，与本轮的 arch01 修复无关（见 [kind1]）。
+     * ## 逐层结构
+     * ```
+     * hoff = 0
+     * for (i = 0; i < sto; i++) {                 // sto = 层数
+     *   box(xoff, yoff-hoff, {tra:false, hei, wid:wid*0.85^i, rot, wei:1.5, per,
+     *        dec: a => deco(sty, {...a, hsp:HSP[sty], vsp:VSP[sty]})})
+     *   rai ? rail(xoff, yoff-hoff, i*0.2, {wid:wid*0.85^i*1.1, hei:hei/2, per, rot,
+     *        wei:0.5, tra:false}) : []
+     *   pla = (sto == 1 && rnd() < 1/3) ? [1, "Pizza Hut"] : undefined   // 1 次抽取
+     *   roof(xoff, yoff-hoff-hei, {hei, wid:wid*0.9^i, rot, wei:1.5, per, pla})
+     *   hoff += hei * 1.5
+     * }
+     * ```
+     *
+     * ## 与上游的差异
+     * - `seed` **收下但不用**（上游也不用；`rail` 拿到的是 `i*0.2`，见文件头说明）。
+     * - `rot` / `per` / `sto` / `sty` / `rai` 全部**按上游语义生效**：
+     *   `rot` 决定屋面的镜像（`rot < 0.5` ⇒ 上游 `flip`）、`sto` 是层数、
+     *   `sty` 是立面装饰样式、`rai` 决定是否叠栏杆。
+     * - 上游的 `<text>` 题字被表达成一条带 [SHANSHUI_TAG_ARCH_TEXT] 标记的轮廓
+     *   （见该常量的说明）。
+     *
+     * @param sto 上游的**层数**（缺省 3）。
+     * @param sty 上游的立面装饰样式（1 / 2 / 3；缺省 1）。
+     * @param rai 上游是否叠栏杆（缺省 false）。
      */
     fun kind2(
         xoff: Double, yoff: Double, seed: Double,
         hei: Double, wid: Double, rot: Double, per: Double,
         sto: Double, sty: Double, rai: Boolean,
     ): List<ShanShuiContour> {
-        val plist = ArrayList<ShanShuiPath.Point>()
-        val n = Math.max(per.toInt(), 8)
-        val r = wid / 2
-        val bridgeY = yoff
+        val canv = ArrayList<ShanShuiContour>()
+        var hoff = 0.0
+        var i = 0
+        while (i < sto) {
+            val wi = wid * Math.pow(0.85, i.toDouble())
 
-        // 桥面左端
-        plist.add(floatArrayOf((xoff - wid / 2).toFloat(), bridgeY.toFloat()))
+            // 上游 :3076-3092
+            canv.addAll(
+                box(
+                    xoff, yoff - hoff, hei, wi, rot, per,
+                    tra = false, bot = true, wei = 1.5,
+                    dec = { a ->
+                        deco(
+                            sty.toInt(), a,
+                            hsp = decoHsp(sty.toInt()), vsp = decoVsp(sty.toInt()),
+                        )
+                    },
+                )
+            )
 
-        // 半圆拱（从左到右）
-        for (i in 0..n) {
-            val angle = Math.PI * (1.0 - i.toDouble() / n)
-            val cx = xoff + r * Math.cos(angle)
-            val stoneNoise = ShanShuiNoise.noise(i * 0.2 + sto + seed, xoff) * hei * 0.08
-            val cy = bridgeY - r * Math.sin(angle) + stoneNoise
-            plist.add(floatArrayOf(cx.toFloat(), cy.toFloat()))
+            // 上游 :3093-3102
+            if (rai) {
+                canv.addAll(
+                    rail(
+                        xoff, yoff - hoff, i * 0.2,
+                        hei = hei / 2, wid = wi * 1.1, rot = rot, per = per,
+                        seg = RAIL_SEG_DEFAULT, wei = 0.5,
+                        tra = false, fro = true,
+                    )
+                )
+            }
+
+            // 上游 :3103-3106 —— **1 次抽取**（`sto == 1` 时才抽）
+            var pla: Pair<Int, String>? = null
+            if (sto == 1.0 && ShanShuiPrng.global.rnd() < 1.0 / 3.0) {
+                pla = 1 to "Pizza Hut"
+            }
+
+            // 上游 :3107-3114
+            canv.addAll(
+                roof(
+                    xoff, yoff - hoff - hei, hei, wid * Math.pow(0.9, i.toDouble()),
+                    rot = rot, per = per, cor = ROOF_COR_DEFAULT, wei = 1.5, pla = pla,
+                )
+            )
+
+            // 上游 :3116
+            hoff += hei * 1.5
+            i++
         }
+        return canv
+    }
 
-        // 桥面右端
-        plist.add(floatArrayOf((xoff + wid / 2).toFloat(), bridgeY.toFloat()))
+    /**
+     * 上游 [Arch.arch03]（`:3120-3163`）：**塔**。
+     *
+     * 移植状态：**照抄**（改造-①/④/⑤）。
+     *
+     * ## 逐层结构
+     * ```
+     * hoff = 0
+     * for (i = 0; i < sto; i++) {                 // sto = 层数（缺省 7）
+     *   box(xoff, yoff-hoff, {tra:false, hei, wid:wid*0.85^i, rot, wei:1.5, per:per/2,
+     *        dec: a => deco(1, {...a, hsp:[1,4], vsp:[1,2]})})
+     *   rail(xoff, yoff-hoff, i*0.2, {seg:5, wid:wid*0.85^i*1.1, hei:hei/2, per:per/2,
+     *        rot, wei:0.5, tra:false})
+     *   pagroof(xoff, yoff-hoff-hei, {hei:hei*1.5, wid:wid*0.9^i, rot, wei:1.5, per})
+     *   hoff += hei * 1.5
+     * }
+     * ```
+     *
+     * ## 与上游的差异
+     * - `seed` **收下但不用**（上游也不用）。
+     * - 上游 `pagroof` 的 `rot` 是**死参数**（上游 `pagroof` 读了但从不用）⇒ port 同样不用。
+     */
+    fun kind3(
+        xoff: Double, yoff: Double, seed: Double,
+        hei: Double, wid: Double, rot: Double, per: Double, sto: Double,
+    ): List<ShanShuiContour> {
+        val canv = ArrayList<ShanShuiContour>()
+        var hoff = 0.0
+        var i = 0
+        while (i < sto) {
+            val wi = wid * Math.pow(0.85, i.toDouble())
 
-        // 栏杆（rai=true 时在拱顶添加栏杆轮廓）
-        if (rai) {
-            val railH = hei * 0.15
-            val railTop = archTopY(yoff, hei) - railH
-            plist.add(floatArrayOf((xoff - r * 0.3).toFloat(), railTop.toFloat()))
-            plist.add(floatArrayOf((xoff + r * 0.3).toFloat(), railTop.toFloat()))
-            plist.add(floatArrayOf((xoff + r * 0.3).toFloat(), (railTop + railH).toFloat()))
-            plist.add(floatArrayOf((xoff - r * 0.3).toFloat(), (railTop + railH).toFloat()))
+            // 上游 :3133-3143
+            canv.addAll(
+                box(
+                    xoff, yoff - hoff, hei, wi, rot, per / 2,
+                    tra = false, bot = true, wei = 1.5,
+                    dec = { a -> deco(1, a, hsp = intArrayOf(1, 4), vsp = intArrayOf(1, 2)) },
+                )
+            )
+
+            // 上游 :3144-3152
+            canv.addAll(
+                rail(
+                    xoff, yoff - hoff, i * 0.2,
+                    hei = hei / 2, wid = wi * 1.1, rot = rot, per = per / 2,
+                    seg = 5, wei = 0.5,
+                    tra = false, fro = true,
+                )
+            )
+
+            // 上游 :3153-3159
+            canv.addAll(
+                pagroof(
+                    xoff, yoff - hoff - hei, hei * 1.5, wid * Math.pow(0.9, i.toDouble()),
+                    rot = rot, per = per, cor = PAGROOF_COR_DEFAULT, sid = PAGROOF_SID_DEFAULT,
+                    wei = 1.5,
+                )
+            )
+
+            // 上游 :3160
+            hoff += hei * 1.5
+            i++
         }
+        return canv
+    }
 
-        return listOf(ShanShuiContour(plist, whiteFill, archStroke, 1.5))
+    /**
+     * 上游 [Arch.arch04]（`:3164-3207`）：**拱桥**（塔式，带斜撑）。
+     *
+     * 移植状态：**照抄**（改造-①/④/⑤）。
+     *
+     * ## 逐层结构
+     * ```
+     * hoff = 0
+     * for (i = 0; i < sto; i++) {                 // sto = 层数（缺省 2）
+     *   box(xoff, yoff-hoff, {tra:true, hei, wid:wid*0.85^i, rot, wei:1.5, per:per/2,
+     *        dec: a => []})
+     *   rail(xoff, yoff-hoff, i*0.2, {seg:3, wid:wid*0.85^i*1.2, hei:hei/3, per:per/2,
+     *        rot, wei:0.5, tra:true})
+     *   pagroof(xoff, yoff-hoff-hei, {hei:hei*1, wid:wid*0.9^i, rot, wei:1.5, per})
+     *   hoff += hei * 1.2
+     * }
+     * ```
+     *
+     * ## 与上游的差异
+     * - `seed` **收下但不用**（上游也不用）。
+     * - 上游 `arch04` 的 `rail` **不传 `fro`** ⇒ 走 rail 自己的缺省 **true**
+     *   ⇒ 点列 4 条、且 `tra == true` ⇒ 会抽 **1 次**「随机开口」的随机数。
+     */
+    fun kind4(
+        xoff: Double, yoff: Double, seed: Double,
+        hei: Double, wid: Double, rot: Double, per: Double, sto: Double,
+    ): List<ShanShuiContour> {
+        val canv = ArrayList<ShanShuiContour>()
+        var hoff = 0.0
+        var i = 0
+        while (i < sto) {
+            val wi = wid * Math.pow(0.85, i.toDouble())
+
+            // 上游 :3177-3187
+            canv.addAll(
+                box(
+                    xoff, yoff - hoff, hei, wi, rot, per / 2,
+                    tra = true, bot = true, wei = 1.5,
+                    dec = { _: DecArgs -> emptyList() },
+                )
+            )
+
+            // 上游 :3188-3196
+            canv.addAll(
+                rail(
+                    xoff, yoff - hoff, i * 0.2,
+                    hei = hei / 3, wid = wi * 1.2, rot = rot, per = per / 2,
+                    seg = 3, wei = 0.5,
+                    tra = true, fro = true,
+                )
+            )
+
+            // 上游 :3197-3203
+            canv.addAll(
+                pagroof(
+                    xoff, yoff - hoff - hei, hei * 1.0, wid * Math.pow(0.9, i.toDouble()),
+                    rot = rot, per = per, cor = PAGROOF_COR_DEFAULT, sid = PAGROOF_SID_DEFAULT,
+                    wei = 1.5,
+                )
+            )
+
+            // 上游 :3204
+            hoff += hei * 1.2
+            i++
+        }
+        return canv
     }
 
     // ─── private 辅助（上游组合体的零件） ───────────────────────
 
     /**
-     * 上游 [box]（`:2609-2687`）：桥身。
+     * 上游 [box] 的 `dec` 回调实参（上游 `:2644-2651`）。
+     *
+     * 上游的 `dec` 收到的是一个对象字面量：
+     * `{pul: [surf*wid*0.5, -hei], pur: [mid, -hei+per], pdl: [surf*wid*0.5, 0], pdr: [mid, per]}`。
+     *
+     * ⛔ 上游 `arch02` 的 `dec` 回调会再 `Object.assign` 上 `hsp`/`vsp`（`:3083-3091`）
+     * ⇒ 本移植层把 `hsp`/`vsp` 单独传给 [deco]（等价，且不用再造一个对象）。
+     */
+    internal class DecArgs(
+        val pul: DoubleArray,
+        val pur: DoubleArray,
+        val pdl: DoubleArray,
+        val pdr: DoubleArray,
+    )
+
+    /**
+     * 上游 [box]（`:2609-2687`）：**楼身**（通用件）。
      *
      * 移植状态：**照抄**（改造-①/④/⑤）。
      *
@@ -264,20 +484,29 @@ object ShanShuiArch {
      * +（`tra` 时）两条反斜边 + 反斜中柱（5 等分）。
      *
      * ## 发射（与上游逐条对应）
-     * - `tra = true` ⇒ **不发**白底多边形（上游 `:2662-2669` 的 `if (!tra)`）。
-     * - 每条点列发一次 `stroke(..., {col:"rgba(100,100,100,0.4)", noi:1, wid:wei(3), fun:()=>1})`
-     *   ⇒ 4 条轮廓（`fill = stroke = rgba(100,100,100,0.4)`、`width = 1`）。
-     * - `dec` 回调缺省返回 `[]` ⇒ 桥身**没有**立面装饰。
+     * - `tra = false` ⇒ **发**白底多边形（上游 `:2662-2669` 的 `if (!tra)`）⇒ 5 点。
+     * - 每条点列发一次 `stroke(..., {col:"rgba(100,100,100,0.4)", noi:1, wid:wei, fun:()=>1})`
+     *   ⇒ 轮廓的 `fill = stroke = rgba(100,100,100,0.4)`、`width = 1`（上游 `stroke` 的
+     *   `out` 缺省 1）。
+     * - `dec` 回调的返回值**追加进点列**（上游 `:2644-2651` 的 `ptlist.concat(dec(...))`）
+     *   ⇒ 每条追加的点列也各发一条 stroke 轮廓。
      *
-     * ⚠️ 上游 `arch01` **不向 box 传 `rot`** ⇒ 这里用的是 **box 自己的默认值 0.7**。
+     * ⚠️ **本函数是通用件**：`arch01` 用的是缺省（`rot=0.7`/`tra=true`/`bot=false`/`wei=3`/
+     *   `dec` 返回 `[]`），`arch02`/`arch03` 用 `tra=false` + `deco`，`arch04` 用 `tra=true`。
      */
-    private fun box(
+    internal fun box(
         xoff: Double, yoff: Double,
-        hei: Double, wid: Double, per: Double, bot: Boolean,
+        hei: Double, wid: Double, rot: Double, per: Double,
+        tra: Boolean, bot: Boolean, wei: Double,
+        dec: (DecArgs) -> List<MutableList<DoubleArray>>,
     ): List<ShanShuiContour> {
-        val mid = -wid * 0.5 + wid * BOX_ROT
-        val bmid = -wid * 0.5 + wid * (1 - BOX_ROT)
-        val ptlist = ArrayList<MutableList<DPoint>>()
+        val canv = ArrayList<ShanShuiContour>()
+
+        // 上游 :2625-2626
+        val mid = -wid * 0.5 + wid * rot
+        val bmid = -wid * 0.5 + wid * (1 - rot)
+
+        val ptlist = ArrayList<MutableList<DoubleArray>>()
 
         // 上游 :2628-2629
         ptlist.add(div(listOf(dpoint(-wid * 0.5, -hei), dpoint(-wid * 0.5, 0.0)), 5))
@@ -289,25 +518,147 @@ object ShanShuiArch {
         }
         // 上游 :2634
         ptlist.add(div(listOf(dpoint(mid, -hei), dpoint(mid, per)), 5))
-        // 上游 :2635-2641（tra 恒为 true）
-        if (bot) {
-            ptlist.add(div(listOf(dpoint(-wid * 0.5, 0.0), dpoint(bmid, -per)), 5))
-            ptlist.add(div(listOf(dpoint(wid * 0.5, 0.0), dpoint(bmid, -per)), 5))
+        // 上游 :2635-2641
+        if (tra) {
+            if (bot) {
+                ptlist.add(div(listOf(dpoint(-wid * 0.5, 0.0), dpoint(bmid, -per)), 5))
+                ptlist.add(div(listOf(dpoint(wid * 0.5, 0.0), dpoint(bmid, -per)), 5))
+            }
+            ptlist.add(div(listOf(dpoint(bmid, -hei), dpoint(bmid, -per)), 5))
         }
-        ptlist.add(div(listOf(dpoint(bmid, -hei), dpoint(bmid, -per)), 5))
-        // 上游 :2643-2651：dec 缺省返回 [] ⇒ 无追加
 
-        val canv = ArrayList<ShanShuiContour>(ptlist.size)
+        // 上游 :2643 —— `var surf = (rot < 0.5) * 2 - 1;`
+        //   ⚠️⚠️ **JS 里 `(rot < 0.5)` 是布尔** ⇒ `true * 2 - 1 = +1`、`false * 2 - 1 = -1`
+        //   ⇒ **rot < 0.5 ⇒ surf = +1**（⛔ 不是 −1！本移植层此前写反了）。
+        //   后果：整个 `deco`（楼身立面装饰）被**左右镜像** ⇒ 与上游的坐标逐点不符
+        //   （真机对账抓到：上游 x=+18、端口 x=−22；`arch04` 因上游 `dec` 返回空数组而无此差异）。
+        val surf = if (rot < 0.5) 1.0 else -1.0
+        ptlist.addAll(
+            dec(
+                DecArgs(
+                    dpoint(surf * wid * 0.5, -hei),
+                    dpoint(mid, -hei + per),
+                    dpoint(surf * wid * 0.5, 0.0),
+                    dpoint(mid, per),
+                )
+            )
+        )
+
+        // 上游 :2653-2659
+        val polist = listOf(
+            dpoint(-wid * 0.5, -hei),
+            dpoint(wid * 0.5, -hei),
+            dpoint(wid * 0.5, 0.0),
+            dpoint(mid, per),
+            dpoint(-wid * 0.5, 0.0),
+        )
+
+        // 上游 :2661-2669 —— `if (!tra)` 才发白底
+        if (!tra) {
+            canv.add(ShanShuiContour(polist.map { off(it, xoff, yoff) }, whiteFill, null, 0.0))
+        }
+
+        // 上游 :2671-2685
         for (pts in ptlist) {
-            val c = archStroke
-            val ribbon = ShanShuiBrush.ribbon(pts.map { off(it, xoff, yoff) }, BOX_WEI, { 1.0 }, 1.0, c)
-            canv.add(ShanShuiContour(ribbon, c, c, 1.0))
+            val ribbon = ShanShuiBrush.ribbon(
+                pts.map { off(it, xoff, yoff) }, wei, { 1.0 }, 1.0, archStroke,
+            )
+            // ⚠️ 上游 `stroke()` 对空点列返回 ""（不发 poly）⇒ 这里也不发轮廓
+            if (ribbon.isEmpty()) continue
+            canv.add(ShanShuiContour(ribbon, archStroke, archStroke, 1.0))
         }
         return canv
     }
 
     /**
-     * 上游 [rail]（`:2753-2838`）：栏杆。
+     * 上游 [deco]（`:2689-2751`）：**立面装饰**（窗/门图案）。
+     *
+     * 移植状态：**照抄**（改造-④/⑤：返回点列的列表，不返回 SVG）。
+     *
+     * ## 三种样式（上游 `:2704-2749`）
+     * | `style` | 形状 | 说明 |
+     * |---|---|---|
+     * | 1 | `-\| \|-` | 两侧各一列竖棂（`mml→ml`、`mmr→mr`）+ 中间两根竖柱 |
+     * | 2 | `\|\|\|\|` | `du`/`dd` 之间逐列连横（`mu→md`） |
+     * | 3 | `\|##\|` | 两侧竖棂 + 中间两根横梁（`mml→mmr`、`mmu→mmd`） |
+     *
+     * ## 抽样的四根边界（上游 `:2699-2702`）
+     * `dl = div([pul,pdl], vsp[1])`、`dr = div([pur,pdr], vsp[1])`、
+     * `du = div([pul,pur], hsp[1])`、`dd = div([pdl,pdr], hsp[1])`。
+     *
+     * ⛔ 上游的怪癖照抄：`mrd` 取的是 **`dd[du.length-1-hsp[0]]`**（用的是 `du.length`，
+     *   不是 `dd.length`）——本移植层保持一致（两者长度相同 ⇒ 无实际差别，但语义照抄）。
+     */
+    internal fun deco(
+        style: Int,
+        args: DecArgs,
+        hsp: IntArray,
+        vsp: IntArray,
+    ): List<MutableList<DoubleArray>> {
+        val plist = ArrayList<MutableList<DoubleArray>>()
+
+        // 上游 :2699-2702
+        val dl = div(listOf(args.pul, args.pdl), vsp[1])
+        val dr = div(listOf(args.pur, args.pdr), vsp[1])
+        val du = div(listOf(args.pul, args.pur), hsp[1])
+        val dd = div(listOf(args.pdl, args.pdr), hsp[1])
+
+        if (style == 1) {
+            // 上游 :2705-2720
+            val mlu = du[hsp[0]]
+            val mru = du[du.size - 1 - hsp[0]]
+            val mld = dd[hsp[0]]
+            val mrd = dd[du.size - 1 - hsp[0]]
+
+            var i = vsp[0]
+            while (i < dl.size - vsp[0]) {
+                val mml = div(listOf(mlu, mld), vsp[1])[i]
+                val mmr = div(listOf(mru, mrd), vsp[1])[i]
+                val ml = dl[i]
+                val mr = dr[i]
+                plist.add(div(listOf(mml, ml), 5))
+                plist.add(div(listOf(mmr, mr), 5))
+                i += vsp[0]
+            }
+            plist.add(div(listOf(mlu, mld), 5))
+            plist.add(div(listOf(mru, mrd), 5))
+        } else if (style == 2) {
+            // 上游 :2722-2728
+            var i = hsp[0]
+            while (i < du.size - hsp[0]) {
+                val mu = du[i]
+                val md = dd[i]
+                plist.add(div(listOf(mu, md), 5))
+                i += hsp[0]
+            }
+        } else if (style == 3) {
+            // 上游 :2730-2748
+            val mlu = du[hsp[0]]
+            val mru = du[du.size - 1 - hsp[0]]
+            val mld = dd[hsp[0]]
+            val mrd = dd[du.size - 1 - hsp[0]]
+
+            var i = vsp[0]
+            while (i < dl.size - vsp[0]) {
+                val mml = div(listOf(mlu, mld), vsp[1])[i]
+                val mmr = div(listOf(mru, mrd), vsp[1])[i]
+                val mmu = div(listOf(mlu, mru), vsp[1])[i]
+                val mmd = div(listOf(mld, mrd), vsp[1])[i]
+
+                val ml = dl[i]
+                val mr = dr[i]
+                plist.add(div(listOf(mml, mmr), 5))
+                plist.add(div(listOf(mmu, mmd), 5))
+                i += vsp[0]
+            }
+            plist.add(div(listOf(mlu, mld), 5))
+            plist.add(div(listOf(mru, mrd), 5))
+        }
+        return plist
+    }
+
+    /**
+     * 上游 [rail]（`:2753-2838`）：**栏杆**（通用件）。
      *
      * 移植状态：**照抄**（改造-①/④/⑤）。
      *
@@ -318,22 +669,25 @@ object ShanShuiArch {
      * **抽 1 次随机**）。
      *
      * ## 发射（与上游逐条对应）
-     * 1. **竖栏**（`:2795-2820`）：`ptlist[i][j]` 与 `ptlist[对侧][j]` 连成 3 点短线
+     * 1. **竖栏**（`:2795-2820`）：`ptlist[i][j]` 与 `ptlist[对侧][j % 对侧长度]` 连成 3 点短线
      *    （`poly(..., {fil:"none", str:"rgba(100,100,100,0.5)", wid:2})`），
      *    两端各按 `Noise.noise` 上下抖动 `hei`，短线首点再随机横移（**每条抽 1 次随机**）。
      * 2. **栏身**（`:2822-2836`）：每条点列发一次
-     *    `stroke(..., {col:"rgba(100,100,100,0.5)", noi:0.5, wid:wei(1), fun:()=>1})` ⇒ 4 条轮廓。
+     *    `stroke(..., {col:"rgba(100,100,100,0.5)", noi:0.5, wid:wei, fun:()=>1})`。
      *
-     * ⚠️ 上游 `arch01` **不向 rail 传 `rot`** ⇒ 这里用的是 **rail 自己的默认值 0.7**。
+     * ## ⛔ 上游的怪癖照抄：「随机开口」**切两次**
+     * 上游 `:2789-2791` 的 `(open + ptlist.length) % ptlist.length` **恒等于 `open`**
+     * ⇒ 同一条点列被 `slice(0,-1)` **两次** ⇒ 少 **2** 个点（不是 1 个）。
      */
-    private fun rail(
+    internal fun rail(
         xoff: Double, yoff: Double, seed: Double,
-        hei: Double, wid: Double, per: Double,
-        tra: Boolean, fro: Boolean, seg: Int,
+        hei: Double, wid: Double, rot: Double, per: Double, seg: Int, wei: Double,
+        tra: Boolean, fro: Boolean,
     ): List<ShanShuiContour> {
-        val mid = -wid * 0.5 + wid * RAIL_ROT
-        val bmid = -wid * 0.5 + wid * (1 - RAIL_ROT)
-        val ptlist = ArrayList<MutableList<DPoint>>()
+        // 上游 :2766-2767
+        val mid = -wid * 0.5 + wid * rot
+        val bmid = -wid * 0.5 + wid * (1 - rot)
+        val ptlist = ArrayList<MutableList<DoubleArray>>()
 
         // 上游 :2770-2773
         if (fro) {
@@ -380,9 +734,217 @@ object ShanShuiArch {
 
         // 上游 :2822-2836 —— 栏身（stroke）
         for (pts in ptlist) {
-            val c = railStroke
-            val ribbon = ShanShuiBrush.ribbon(pts.map { off(it, xoff, yoff) }, RAIL_WEI, { 1.0 }, 0.5, c)
-            canv.add(ShanShuiContour(ribbon, c, c, 1.0))
+            val ribbon = ShanShuiBrush.ribbon(
+                pts.map { off(it, xoff, yoff) }, wei, { 1.0 }, 0.5, railStroke,
+            )
+            if (ribbon.isEmpty()) continue
+            canv.add(ShanShuiContour(ribbon, railStroke, railStroke, 1.0))
+        }
+        return canv
+    }
+
+    /**
+     * 上游 [roof]（`:2840-2956`）：**中式曲面屋顶**（通用件）。
+     *
+     * 移植状态：**照抄**（改造-①/④/⑤）。
+     *
+     * ## 几何（上游 `:2850-2900`）
+     * - `opf(ptlist)`：`rot < 0.5` ⇒ 调上游的 `flip`（`:2526-2540`）**把每个点的 x 取反**
+     *   （`axis = 0` ⇒ `x' = 0 - (x - 0) = -x`）；否则原样返回。
+     * - `rrot = rot < 0.5 ? 1 - rot : rot`；
+     *   `mid = -wid*0.5 + wid*rrot`、`bmid = -wid*0.5 + wid*(1-rrot)`（⛔ **上游算了但从不用**）、
+     *   `quat = (mid + wid*0.5)*0.5 - mid`。
+     * - 6 条点列（各 `div(..., 5)`）+ 1 个 5 点白底多边形。
+     *
+     * ## 发射（与上游逐条对应）
+     * 1. **白底**（`:2911`）：`poly(polist, {str:"none", fil:"white"})` ⇒ 5 点。
+     * 2. **6 条描边**（`:2913-2927`）：`stroke(..., {col:"rgba(100,100,100,0.4)", noi:1,
+     *    wid:wei, fun:()=>1})`。
+     * 3. **题字**（`:2929-2954`，仅当 `pla[0] == 1`）：上游拼一段 `<text>`（见
+     *    [SHANSHUI_TAG_ARCH_TEXT]）。⚠️ 上游的 `rotate(adeg)`（题字角度）在 port 的
+     *    轮廓数据模型里**无处安放** ⇒ 只保留「锚点 + 字号 + 颜色」。
+     */
+    internal fun roof(
+        xoff: Double, yoff: Double,
+        hei: Double, wid: Double, rot: Double, per: Double, cor: Double, wei: Double,
+        pla: Pair<Int, String>?,
+    ): List<ShanShuiContour> {
+        val canv = ArrayList<ShanShuiContour>()
+
+        // 上游 :2850-2857
+        val flip = rot < 0.5
+        val rrot = if (rot < 0.5) 1 - rot else rot
+
+        // 上游 :2859-2861
+        val mid = -wid * 0.5 + wid * rrot
+        // ⛔ 上游 `:2860` 的 `bmid` 算了但**从不被使用** ⇒ 这里也不保留
+        val quat = (mid + wid * 0.5) * 0.5 - mid
+
+        /** 上游 `opf`（`:2850-2856`）：`rot < 0.5` ⇒ `flip`（把每个点的 x 取反）。 */
+        fun opf(pts: List<DoubleArray>): List<DoubleArray> =
+            if (flip) pts.map { doubleArrayOf(-it[0], it[1]) } else pts
+
+        val ptlist = ArrayList<MutableList<DoubleArray>>()
+
+        // 上游 :2864-2873
+        ptlist.add(
+            div(
+                opf(
+                    listOf(
+                        dpoint(-wid * 0.5 + quat, -hei - per / 2),
+                        dpoint(-wid * 0.5 + quat * 0.5, -hei / 2 - per / 4),
+                        dpoint(-wid * 0.5 - cor, 0.0),
+                    )
+                ),
+                5,
+            )
+        )
+        // 上游 :2874-2883
+        ptlist.add(
+            div(
+                opf(
+                    listOf(
+                        dpoint(mid + quat, -hei),
+                        dpoint((mid + quat + wid * 0.5) / 2, -hei / 2),
+                        dpoint(wid * 0.5 + cor, 0.0),
+                    )
+                ),
+                5,
+            )
+        )
+        // 上游 :2884-2893
+        ptlist.add(
+            div(
+                opf(
+                    listOf(
+                        dpoint(mid + quat, -hei),
+                        dpoint(mid + quat / 2, -hei / 2 + per / 2),
+                        dpoint(mid + cor, per),
+                    )
+                ),
+                5,
+            )
+        )
+        // 上游 :2895-2896
+        ptlist.add(div(opf(listOf(dpoint(-wid * 0.5 - cor, 0.0), dpoint(mid + cor, per))), 5))
+        ptlist.add(div(opf(listOf(dpoint(wid * 0.5 + cor, 0.0), dpoint(mid + cor, per))), 5))
+        // 上游 :2898-2900
+        ptlist.add(
+            div(opf(listOf(dpoint(-wid * 0.5 + quat, -hei - per / 2), dpoint(mid + quat, -hei))), 5)
+        )
+
+        // 上游 :2902-2911 —— 白底
+        val polist = opf(
+            listOf(
+                dpoint(-wid * 0.5, 0.0),
+                dpoint(-wid * 0.5 + quat, -hei - per / 2),
+                dpoint(mid + quat, -hei),
+                dpoint(wid * 0.5, 0.0),
+                dpoint(mid, per),
+            )
+        )
+        canv.add(ShanShuiContour(polist.map { off(it, xoff, yoff) }, whiteFill, null, 0.0))
+
+        // 上游 :2913-2927 —— 6 条描边
+        for (pts in ptlist) {
+            val ribbon = ShanShuiBrush.ribbon(
+                pts.map { off(it, xoff, yoff) }, wei, { 1.0 }, 1.0, archStroke,
+            )
+            if (ribbon.isEmpty()) continue
+            canv.add(ShanShuiContour(ribbon, archStroke, archStroke, 1.0))
+        }
+
+        // 上游 :2929-2954 —— 题字（仅 `pla[0] == 1`）
+        if (pla != null && pla.first == 1) {
+            var pp = opf(
+                listOf(
+                    dpoint(mid + quat / 2, -hei / 2 + per / 2),
+                    dpoint(-wid * 0.5 + quat * 0.5, -hei / 2 - per / 4),
+                )
+            )
+            // 上游 :2934-2936
+            if (pp[0][0] > pp[1][0]) {
+                pp = listOf(pp[1], pp[0])
+            }
+            // 上游 :2937 —— PolyTools.midPt(pp)
+            val mp = midPtD(pp)
+            // 上游 :2938-2939 —— 角度（⛔ port 的轮廓模型无处安放 ⇒ 只算不用）
+            @Suppress("UNUSED_VARIABLE")
+            val adeg = (Math.atan2(pp[1][1] - pp[0][1], pp[1][0] - pp[0][0]) * 180) / Math.PI
+            // 上游 :2940-2953 的 <text> ⇒ port 的等价表达（见 SHANSHUI_TAG_ARCH_TEXT）
+            canv.add(
+                ShanShuiContour(
+                    listOf(floatArrayOf((mp[0] + xoff).toFloat(), (mp[1] + yoff).toFloat())),
+                    archTextFill,
+                    null,
+                    hei * 0.6,
+                    SHANSHUI_TAG_ARCH_TEXT,
+                )
+            )
+        }
+        return canv
+    }
+
+    /**
+     * 上游 [pagroof]（`:2958-3000`）：**攒尖顶**（通用件）。
+     *
+     * 移植状态：**照抄**（改造-①/④/⑤）。
+     *
+     * ## 几何（上游 `:2968-2980`）
+     * `sid` 根椽子（缺省 4）；`fx = wid*((i/(sid-1)) - 0.5)`、
+     * `fy = per*(1 - |i/(sid-1) - 0.5|*2)`、`fxx = (wid+cor)*((i/(sid-1)) - 0.5)`。
+     * 点列 = 每两根椽子之间一条「连接线」（2 点）+ 每根椽子本身（3 点）⇒ 共 `2*sid-1` 条。
+     *
+     * ## 发射（与上游逐条对应）
+     * 1. **白底**（`:2982`）：`poly(polist, {str:"none", fil:"white"})` ⇒ `1 + sid` 点。
+     * 2. **每条点列一条描边**（`:2983-2997`）：`stroke(div(ptlist[i], 5).map(...), {...})`。
+     *
+     * ⛔ 上游 `pagroof` 的 `rot` 是**死参数**（读了但从不用）⇒ port 同样不用。
+     */
+    internal fun pagroof(
+        xoff: Double, yoff: Double,
+        hei: Double, wid: Double, rot: Double, per: Double, cor: Double, sid: Int, wei: Double,
+    ): List<ShanShuiContour> {
+        val canv = ArrayList<ShanShuiContour>()
+        val ptlist = ArrayList<MutableList<DoubleArray>>()
+        // 上游 :2969
+        val polist = ArrayList<DoubleArray>()
+        polist.add(dpoint(0.0, -hei))
+
+        // 上游 :2971-2980
+        for (i in 0 until sid) {
+            val fx = wid * ((i * 1.0) / (sid - 1) - 0.5)
+            val fy = per * (1 - Math.abs((i * 1.0) / (sid - 1) - 0.5) * 2)
+            val fxx = (wid + cor) * ((i * 1.0) / (sid - 1) - 0.5)
+            if (i > 0) {
+                // ⚠️ 上游 `ptlist[ptlist.length-1][2]` 是**同一个点对象**（不是副本）
+                ptlist.add(
+                    mutableListOf(
+                        ptlist[ptlist.size - 1][2],
+                        dpoint(fxx, fy),
+                    )
+                )
+            }
+            ptlist.add(
+                mutableListOf(
+                    dpoint(0.0, -hei),
+                    dpoint(fx * 0.5, (-hei + fy) * 0.5),
+                    dpoint(fxx, fy),
+                )
+            )
+            polist.add(dpoint(fxx, fy))
+        }
+
+        // 上游 :2982 —— 白底
+        canv.add(ShanShuiContour(polist.map { off(it, xoff, yoff) }, whiteFill, null, 0.0))
+
+        // 上游 :2983-2997
+        for (pts in ptlist) {
+            val ribbon = ShanShuiBrush.ribbon(
+                div(pts, 5).map { off(it, xoff, yoff) }, wei, { 1.0 }, 1.0, archStroke,
+            )
+            if (ribbon.isEmpty()) continue
+            canv.add(ShanShuiContour(ribbon, archStroke, archStroke, 1.0))
         }
         return canv
     }
@@ -488,16 +1050,28 @@ object ShanShuiArch {
     private const val HUT_TEX = 300.0
 
     /** 上游 `box` 的默认 `rot`（`:2613`）——`arch01` 不给 box 传 rot ⇒ 用它自己的默认值。 */
-    private const val BOX_ROT = 0.7
+    internal const val BOX_ROT = 0.7
 
     /** 上游 `box` 的默认 `wei`（`:2617`）。 */
-    private const val BOX_WEI = 3.0
+    internal const val BOX_WEI = 3.0
 
     /** 上游 `rail` 的默认 `rot`（`:2757`）——`arch01` 不给 rail 传 rot ⇒ 用它自己的默认值。 */
-    private const val RAIL_ROT = 0.7
+    internal const val RAIL_ROT = 0.7
 
     /** 上游 `rail` 的默认 `wei`（`:2760`）。 */
-    private const val RAIL_WEI = 1.0
+    internal const val RAIL_WEI = 1.0
+
+    /** 上游 `rail` 的默认 `seg`（`:2759`）——`arch02` 不给 rail 传 seg ⇒ 用它自己的默认值。 */
+    internal const val RAIL_SEG_DEFAULT = 4
+
+    /** 上游 `roof` 的默认 `cor`（`:2846`）——`arch02` 不给 roof 传 cor ⇒ 用它自己的默认值。 */
+    internal const val ROOF_COR_DEFAULT = 5.0
+
+    /** 上游 `pagroof` 的默认 `cor`（`:2964`）。 */
+    internal const val PAGROOF_COR_DEFAULT = 10.0
+
+    /** 上游 `pagroof` 的默认 `sid`（`:2965`）。 */
+    internal const val PAGROOF_SID_DEFAULT = 4
 
     /** 上游 `arch01` 给两条 rail 的 `hei`（`:3027` / `:3052`）。 */
     private const val RAIL_HEI = 10.0
@@ -506,9 +1080,9 @@ object ShanShuiArch {
     private const val MAN_DRAWS = 18
 
     /**
-     * 上游 `fil: "white"` 对应的白色填充（上游 hut/box 的白底发射用）。
+     * 上游 `fil: "white"` 对应的白色填充（上游 hut/box/roof/pagroof 的白底发射用）。
      *
-     * 移植来源：上游 `:2566` / `:2667`。移植状态：**照抄**（改造-④：字符串 → 纯数据）。
+     * 移植来源：上游 `:2566` / `:2667` / `:2911` / `:2982`。移植状态：**照抄**（改造-④：字符串 → 纯数据）。
      */
     private val whiteFill: ShanShuiColor = ShanShuiColor(255, 255, 255, 1.0)
 
@@ -520,9 +1094,10 @@ object ShanShuiArch {
     private val archOutline: ShanShuiColor = ShanShuiColor.rgba(100, 100, 100, 0.3)
 
     /**
-     * 建筑体描边灰 —— 上游 box 的 `stroke(..., {col:"rgba(100,100,100,0.4)", ...})`（`:2677`）。
+     * 建筑体描边灰 —— 上游 box/roof/pagroof 的
+     * `stroke(..., {col:"rgba(100,100,100,0.4)", ...})`（`:2677` / `:2919` / `:2989`）。
      *
-     * 移植来源：上游 `:2677`。移植状态：**照抄**（改造-④：字符串 → 纯数据）。
+     * 移植来源：上游 `:2677` / `:2919` / `:2989`。移植状态：**照抄**（改造-④：字符串 → 纯数据）。
      */
     private val archStroke: ShanShuiColor = ShanShuiColor.rgba(100, 100, 100, 0.4)
 
@@ -533,6 +1108,36 @@ object ShanShuiArch {
      * 移植来源：上游 `:2816` / `:2828`。移植状态：**照抄**（改造-④：字符串 → 纯数据）。
      */
     private val railStroke: ShanShuiColor = ShanShuiColor.rgba(100, 100, 100, 0.5)
+
+    /**
+     * 屋顶题字色 —— 上游 `roof` 的 `<text ... style='fill:rgba(100,100,100,0.9)'>`（`:2944`）。
+     *
+     * 移植来源：上游 `:2944`。移植状态：**照抄**（改造-④：字符串 → 纯数据）。
+     */
+    private val archTextFill: ShanShuiColor = ShanShuiColor.rgba(100, 100, 100, 0.9)
+
+    /**
+     * 上游 `arch02` 的 `dec` 回调里的 `hsp`（上游 `:3087`：`[[], [1,5], [1,5], [1,4]][sty]`）。
+     *
+     * ⚠️ 上游的**下标 0 是 `[]`**（`sty == 0` 会让 `hsp[0]`/`hsp[1]` 越界 ⇒ 上游自己会崩）
+     * ⇒ port 只在 `sty ∈ {1,2,3}` 时被调用（上游的 `randChoice([1,2,3])` 保证）。
+     */
+    internal fun decoHsp(sty: Int): IntArray = when (sty) {
+        1 -> intArrayOf(1, 5)
+        2 -> intArrayOf(1, 5)
+        3 -> intArrayOf(1, 4)
+        else -> intArrayOf(1, 5)
+    }
+
+    /**
+     * 上游 `arch02` 的 `dec` 回调里的 `vsp`（上游 `:3088`：`[[], [1,2], [1,2], [1,3]][sty]`）。
+     */
+    internal fun decoVsp(sty: Int): IntArray = when (sty) {
+        1 -> intArrayOf(1, 2)
+        2 -> intArrayOf(1, 2)
+        3 -> intArrayOf(1, 3)
+        else -> intArrayOf(1, 2)
+    }
 
     /**
      * 上游 `rail` 的 `seg`（上游 `:3030` / `:3055`：`seg = (3 + Math.random() * 3) | 0`）。
@@ -581,117 +1186,19 @@ object ShanShuiArch {
         return out
     }
 
-    /** 拱顶 Y 坐标（供 [kind2] 栏杆使用）。 */
-    private fun archTopY(yoff: Double, hei: Double): Double = yoff - hei
-
     /**
-     * 上游 [deco]（`:2689-2751`）：建筑立面装饰（窗/门图案）。
+     * 上游 [PolyTools.midPt]（`:208-222`）的 **Float64** 复刻（n 点中点）。
      *
-     * 移植状态：**改造-③：简化实现，与上游无视觉等价关系**。
-     * ⚠️ **死代码**：private 且**从未被调用**（上游由 `box` 的 `dec` 回调驱动，
-     *   而 `arch01` 的 box 用的是**缺省 `dec`** ⇒ 返回 `[]` ⇒ 没有立面装饰）。
-     * 保留只为留档「上游组合体里有什么」。
+     * ⚠️ **先除后加**的 reduce 顺序（上游 `:218`：`v[0] / plist.length + acc[0]`）必须照抄。
      */
-    private fun deco(xoff: Double, yoff: Double, hei: Double, wid: Double, seed: Double): List<ShanShuiPath.Point> {
-        val plist = ArrayList<ShanShuiPath.Point>()
-        val winW = wid * 0.2
-        val winH = hei * 0.3
-        val cols = 2
-        val rows = 1
-        val gapX = wid * 0.1
-        val gapY = hei * 0.15
-
-        for (r in 0 until rows) {
-            for (c in 0 until cols) {
-                val wx = xoff - (cols - 1) * (winW + gapX) / 2 + c * (winW + gapX)
-                val wy = yoff - hei * 0.3 - r * (winH + gapY) - winH / 2
-                val wNoise = ShanShuiNoise.noise(wx + seed, wy) * 0.05
-                // 窗框四角
-                plist.add(floatArrayOf((wx - winW / 2 * (1 + wNoise)).toFloat(), wy.toFloat()))
-                plist.add(floatArrayOf((wx - winW / 2 * (1 - wNoise)).toFloat(), (wy - winH).toFloat()))
-                plist.add(floatArrayOf((wx + winW / 2 * (1 + wNoise)).toFloat(), (wy - winH).toFloat()))
-                plist.add(floatArrayOf((wx + winW / 2 * (1 - wNoise)).toFloat(), wy.toFloat()))
-            }
+    private fun midPtD(plist: List<DPoint>): DPoint {
+        val n = plist.size
+        var ax = 0.0
+        var ay = 0.0
+        for (v in plist) {
+            ax = v[0] / n + ax
+            ay = v[1] / n + ay
         }
-
-        return plist
-    }
-
-    /**
-     * 上游 [roof]（`:2840-2956`）：传统中式曲面屋顶。
-     *
-     * 移植状态：**改造-③：简化实现，与上游无视觉等价关系**。
-     * ⚠️ **死代码**：private 且**从未被调用**（上游由 arch02/03/04 组合调用，
-     *   而本文件的 kind2 仍是简化实现）。
-     */
-    private fun roof(xoff: Double, yoff: Double, hei: Double, wid: Double, tex: Double): List<ShanShuiPath.Point> {
-        val plist = ArrayList<ShanShuiPath.Point>()
-        val n = Math.max(tex.toInt(), 8)
-        val eaveW = wid / 2
-        val upturn = hei * 0.15
-        val outward = wid * 0.08
-
-        // 左翘檐尖
-        val leftTipX = xoff - eaveW - outward
-        val leftTipY = yoff + upturn
-        plist.add(floatArrayOf(leftTipX.toFloat(), leftTipY.toFloat()))
-
-        // 左屋面：从左翘檐到屋脊
-        for (i in 0..n) {
-            val p = i.toDouble() / n
-            val x = ShanShuiUtil.mapval(p, 0.0, 1.0, leftTipX, xoff)
-            val y = leftTipY - (leftTipY - (yoff - hei)) * Math.pow(p, 0.7) +
-                ShanShuiNoise.noise(p * 2, xoff) * hei * 0.05
-            plist.add(floatArrayOf(x.toFloat(), y.toFloat()))
-        }
-
-        // 右屋面：从屋脊到右翘檐
-        for (i in 1..n) {
-            val p = i.toDouble() / n
-            val x = ShanShuiUtil.mapval(p, 0.0, 1.0, xoff, xoff + eaveW + outward)
-            val y = (yoff - hei) + (leftTipY - (yoff - hei)) * Math.pow(p, 0.7) -
-                ShanShuiNoise.noise(p * 2 + 1, xoff) * hei * 0.05
-            plist.add(floatArrayOf(x.toFloat(), y.toFloat()))
-        }
-
-        return plist
-    }
-
-    /**
-     * 上游 [pagroof]（`:2958-3000`）：宝塔顶。
-     *
-     * 移植状态：**改造-③：简化实现，与上游无视觉等价关系**。
-     * ⚠️ **死代码**：private 且**从未被调用**（上游由 arch03/04 组合调用，
-     *   而本文件的 kind2 仍是简化实现）。
-     */
-    private fun pagroof(xoff: Double, yoff: Double, hei: Double, wid: Double): List<ShanShuiPath.Point> {
-        val plist = ArrayList<ShanShuiPath.Point>()
-        val tiers = 3
-        val tierH = hei / tiers
-        val tierW = wid / tiers
-
-        for (t in 0 until tiers) {
-            var pts = ArrayList<ShanShuiPath.Point>()
-            val curW = wid - t * tierW
-            val curY = yoff - t * tierH
-            val nextW = wid - (t + 1) * tierW
-            val nextY = yoff - (t + 1) * tierH
-            val n = 8
-
-            // 左下 → 左上 → 右上 → 右下
-            pts.add(floatArrayOf((xoff - curW / 2).toFloat(), curY.toFloat()))
-            pts.add(floatArrayOf((xoff - nextW / 2).toFloat(), nextY.toFloat()))
-            pts.add(floatArrayOf((xoff + nextW / 2).toFloat(), nextY.toFloat()))
-            pts.add(floatArrayOf((xoff + curW / 2).toFloat(), curY.toFloat()))
-
-            // 用 bezmh 平滑
-            val smoothed = ShanShuiPath.bezmh(pts, 1.0)
-            plist.addAll(smoothed)
-        }
-
-        // 顶尖
-        plist.add(floatArrayOf(xoff.toFloat(), (yoff - hei - wid * 0.1).toFloat()))
-
-        return plist
+        return doubleArrayOf(ax, ay)
     }
 }

@@ -1,0 +1,81 @@
+{
+ "meta": {
+  "generator": "scripts/e50_tree45678_upstream_probe.js",
+  "upstream": "D:\\hxzhang\\MyGithubSoftware\\NasAudio\\shan-shui-inf-main\\index.html",
+  "upstreamBytes": 126559,
+  "patch": "① perlin 表初始化：Math.random() → __perlinLcg[]（LCG 种子 20250101）；② this.treeNN 行内追加 this.__treeNN = …（行号不变）",
+  "order": "canvas（上游 SVG 拼接序，由 poly 返回值里的唯一标记还原）",
+  "seed": 157,
+  "noiseSeed": 20250101
+ },
+ "tree04": {
+  "call": {
+   "x": 0,
+   "y": 0,
+   "args": {}
+  },
+  "draws": 8793,
+  "contourCount": 767,
+  "pointCount": 18469,
+  "digest": "0xa2c5c4ce74522f38",
+  "structureDigest": "0xaadfbbc93a087f71",
+  "roundedDigest10": "0x980972d1f7215657",
+  "roundedDigest100": "0xa7b680d7eac7203b"
+ },
+ "tree05": {
+  "call": {
+   "x": 0,
+   "y": 0,
+   "args": {}
+  },
+  "draws": 2079,
+  "contourCount": 266,
+  "pointCount": 7931,
+  "digest": "0xfe2bcd54b7817e1b",
+  "structureDigest": "0x45c7a064fef31ef3",
+  "roundedDigest10": "0x532fb3217f2d62b4",
+  "roundedDigest100": "0x1d1967ea81e1a1de"
+ },
+ "tree06": {
+  "call": {
+   "x": 0,
+   "y": 0,
+   "args": {}
+  },
+  "draws": 16771,
+  "contourCount": 873,
+  "pointCount": 21546,
+  "digest": "0x80d08fc81eefac33",
+  "structureDigest": "0xb4fee1826dd3955c",
+  "roundedDigest10": "0x6e3a5ff4a6469344",
+  "roundedDigest100": "0x39319c20cfcf1560"
+ },
+ "tree07": {
+  "call": {
+   "x": 0,
+   "y": 0,
+   "args": {}
+  },
+  "draws": 42,
+  "contourCount": 165,
+  "pointCount": 495,
+  "digest": "0x48b71ebda0e260a4",
+  "structureDigest": "0x1bf18e7f84abb70e",
+  "roundedDigest10": "0x1e676056233f5ed1",
+  "roundedDigest100": "0x2669ff0af089e07b"
+ },
+ "tree08": {
+  "call": {
+   "x": 0,
+   "y": 0,
+   "args": {}
+  },
+  "draws": 201,
+  "contourCount": 31,
+  "pointCount": 680,
+  "digest": "0xae7e9af8b54c4164",
+  "structureDigest": "0x1b96d578d96b6106",
+  "roundedDigest10": "0x5bca02873ad0b4fd",
+  "roundedDigest100": "0xe4ec3a51bdfb2e31"
+ }
+}

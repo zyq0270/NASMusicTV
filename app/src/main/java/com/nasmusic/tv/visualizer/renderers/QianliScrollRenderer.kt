@@ -1604,7 +1604,15 @@ class QianliScrollRenderer : RendererFx() {
         fun ensure(x0: Double) {
             val target = x0 + planAhead
             while (cursor < target) {
-                val batch = ShanShuiPlanner.plan(cursor, cursor + PLAN_STEP)
+                // ⚠️⚠️ **必须 `isolatePlanmtx = true`**（2026-11-06）：
+                //   本渲染器有**四个彼此独立的世界**（远/中/近/水），每个世界各自调 [ShanShuiPlanner.plan]。
+                //   而上游的 `MEM.planmtx` 是**模块级全局、跨调用累积** ⇒ 共用时中景世界先把列
+                //   标记成「已有山」⇒ 近景世界再跑时 `planmtx[i] == 0` 恒假
+                //   ⇒ **一个 flatmount 都不产** ⇒ 近景层空（真踩到：`QianliContentRangeGateTest` 报
+                //   「L4 必须有已规划 chunk」）。
+                // ⇒ 设色路径按层**隔离** planmtx；「忠于上游」路径（`QianliUpstreamRenderer`）
+                //   直接用上游的 chunkloader，只有**一条**规划流 ⇒ 那里必须保持**累积**。
+                val batch = ShanShuiPlanner.plan(cursor, cursor + PLAN_STEP, isolatePlanmtx = true)
                 for (i in batch.indices) {
                     val c = batch[i]
                     val spec = ChunkSpec(c.tag, c.x, c.y, c.h, i)
