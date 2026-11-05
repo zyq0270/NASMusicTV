@@ -1,5 +1,8 @@
 package com.nasmusic.tv.visualizer.qianli
 
+import com.google.gson.JsonArray
+import com.google.gson.JsonObject
+import com.google.gson.JsonParser
 import com.nasmusic.tv.visualizer.qianli.port.ShanShui
 import com.nasmusic.tv.visualizer.qianli.port.ShanShuiArch
 import com.nasmusic.tv.visualizer.qianli.port.ShanShuiBrush
@@ -36,6 +39,8 @@ import java.math.BigInteger
  * | G-PORT-8 | 结构性保真 | 无 NaN；坐标 \|x\|,\|y\| < 1e5；点数 > 2；同种子两次逐位相等 |
  * | G-PORT-9 | **PRNG 抽取次数与上游一致** | tree01 = 63 次 / 11 条；tree03 = 504 次 / 73 条；皴线颜色逐条随机 |
  * | G-PORT-10 | **远山三角剖分与上游一致** | 轮廓 504 条 = 10 块填色 + 494 三角形；逐块条数 [37,44,44,44,44,52,60,84,60,25]；坐标摘要 0xea8cbf2d27b1bcf6 逐位相等；退化楔形恰好 1 个（block 0 / 第 25 个）；颜色 = getCol(中点)；PRNG 抽取 = 0 |
+ * | G-PORT-11 | **rock 几何与上游逐位一致** | 4 个夹具的 WHITE BG 轮廓 51 点逐位相等（Float32 原始位）；样式 = 白填充/无描边/线宽 0；OUTLINE = 灰 0.3 + 线宽 1 |
+ * | G-PORT-12 | **plan 与上游逐条一致 + planmtx 全局性** | 三组夹具（不重叠 / 有 mount / 重叠）的两段规划逐条一致；PRNG 抽取次数 = 上游扣掉 boat 后的次数；「局部 planmtx」口径必须与上游不同（判据有牙） |
  *
  * ## 负向自证规矩
  *
@@ -45,17 +50,20 @@ import java.math.BigInteger
  *
  * ## 关于「与上游逐位一致」
  *
- * 本仓**没有**可直接跑上游 JS 的 harness（上游 index.html 是浏览器 HTML，且在本仓之外）。
- * 按方案 §三.3-② 的论断：**PRNG 黄金向量逐位相等（G-PORT-1）+ 调用点次序逐行照抄**
- * 就是与上游对账的机制（上游把 Math.random 全局覆写成 Prng.next ⇒ 随机流完全由 Prng 决定）。
- * ⇒ G-PORT-8 实现为「结构断言 + 同种子可复现性断言」，
- * **不伪造**「已与上游逐位对账」的断言。
+ * G-PORT-1 / G-PORT-9 / G-PORT-10 用**黄金向量**（PRNG / 抽取次数 / 摘要）对账；
+ * **G-PORT-11 / G-PORT-12 则直接跑上游**：node 把上游 `shan-shui-inf/index.html` 的原始 JS
+ * 喂进 node（只读），实跑 `Mount.rock` 与 `mountplanner`，产出黄金基线
+ * `app/src/test/resources/qianli/shan_shui_upstream_golden.json`
+ * （生成器 `scripts/qianli_upstream_ref.js`；`--check` 可校验是否漂移）。
+ * ⇒ 这两条判据的**期望值不在测试源码里**（⛔ 不许手抄上游数字），
+ * 测试只**读**基线文件并逐位比对。
  *
  * ## 全局状态的钉扎
  *
- * port 包的两个全局单例（[ShanShuiPrng.global] 的随机流、[ShanShuiNoise] 的 perlin 表）
- * 会被各函数按调用次序消耗 ⇒ 任何「同种子两次调用」的判据都必须先把它们**复位**，
- * 否则第二次调用拿到的是不同的流。复位方式见 [resetPortGlobals]。
+ * port 包有三个全局单例（[ShanShuiPrng.global] 的随机流、[ShanShuiNoise] 的 perlin 表、
+ * [ShanShuiPlanner] 的**全局 planmtx**）会被各函数按调用次序消耗
+ * ⇒ 任何「同种子两次调用」的判据都必须先把它们**复位**，否则第二次调用拿到的是不同的流。
+ * 复位方式见 [resetPortGlobals]。
  */
 class ShanShuiPortGateTest {
 
@@ -111,6 +119,10 @@ class ShanShuiPortGateTest {
     private fun resetPortGlobals() {
         ShanShuiPrng.global.seed(portSeed)
         ShanShuiNoise.noiseSeed(noiseSeedValue)
+        // ⚠️ `MEM.planmtx` 在上游是**模块级全局**（跨 mountplanner 调用累积）⇒
+        //    移植层也改成全局 ⇒ 必须一起复位，否则「同种子两次调用」不成立
+        //    （上游等价物 = 刷新页面 ⇒ 整个 MEM 都是新的）。
+        ShanShuiPlanner.resetPlanmtx()
     }
 
     /** 跑一段断言，断言它**必须**抛 AssertionError（负向自证的标准动作）。 */
@@ -1248,4 +1260,583 @@ class ShanShuiPortGateTest {
 
     private fun fnvStep(h: Long, v: Int): Long =
         (h xor (v.toLong() and 0xFFFFFFFFL)) * 1099511628211L
+
+    // ══════════════════════ G-PORT-11 / G-PORT-12 上游逐位对账 ══════════════════════
+    //
+    // 这两条判据的期望值**不写在测试里** ⇒ 全部来自 node 实跑上游 `shan-shui-inf` 生成的
+    // 黄金基线 `app/src/test/resources/qianli/shan_shui_upstream_golden.json`
+    // （生成器：`scripts/qianli_upstream_ref.js`；`node scripts/qianli_upstream_ref.js --check`
+    //  可校验基线是否与上游实跑结果漂移）。
+    //
+    // ⚠️ 对齐口径（与生成器逐字一致）：
+    //   · PRNG：上游 `Math.random` 被全局覆写成 `Prng.next` ⇒ 种子 = 157（= [portSeed]）。
+    //   · perlin 表：用上游**自带**的 `Noise.noiseSeed(20250101)`（上游 `:177-202` 的 LCG 建表）
+    //     ⇒ 与 [ShanShuiNoise.noiseSeed] 逐字一致，且**不消耗 PRNG**。
+    //   · 上游的 boat 分支（`:3806-3811`）本仓**未移植**（已接受偏差 O7）⇒
+    //     端口不抽那几次随机 ⇒ 测试在两段规划之间**补抽同样次数**（黄金基线里的 boatDraws）
+    //     把两端的随机流重新对齐。
+
+    /** 黄金基线（懒加载 + 缓存）。 */
+    private val golden: JsonObject by lazy {
+        val stream = javaClass.getResourceAsStream(GOLDEN_RESOURCE)
+            ?: throw AssertionError(
+                "缺少上游黄金基线：app/src/test/resources$GOLDEN_RESOURCE" +
+                    "（由 `node scripts/qianli_upstream_ref.js` 生成）",
+            )
+        stream.use { JsonParser.parseReader(it.reader(Charsets.UTF_8)).asJsonObject }
+    }
+
+    /**
+     * G-PORT-11：`Mount.rock` 的 **WHITE BG 轮廓点列**必须与上游**逐位相等**。
+     *
+     * 口径：上游 `rock`（`:2484-2490`）发的是
+     * `poly(ptlist[0].concat([[0, 0]]), {xof, yof, fil:"white", str:"none"})`
+     * ⇒ 51 点（`ptlist[0]` 的 50 点 + 追加的 `[0,0]`；`poly` 再把 (xof,yof) 加上去）。
+     * 端口侧对应 [ShanShui.rock] 的**第 1 条轮廓**（fill=白 / stroke=null / width=0）。
+     *
+     * ⚠️ 比对用 **Float32 的原始位**（上游是 Float64，端口是 Float32 —— D14 既有偏差）：
+     *   把上游的 Float64 量化成 Float32 后逐位比较（等价于 `Math.fround`）。
+     * ⚠️ xoff/yoff 取 0 ⇒ 端口不引入「先量化再平移」的二次舍入。
+     */
+    @Test
+    fun gPort11_rockWhiteBgMatchesUpstreamBitwise() {
+        resetPortGlobals()
+        for (f in golden.getAsJsonArray("rock")) {
+            val o = f.asJsonObject
+            val name = o.get("name").asString
+            val contours = ShanShui.rock(
+                0.0,
+                0.0,
+                o.get("seed").asDouble,
+                o.get("hei").asDouble,
+                o.get("wid").asDouble,
+                o.get("tex").asDouble,
+                o.get("sha").asDouble,
+            )
+            assertTrue("rock[$name] 必须产出轮廓", contours.isNotEmpty())
+            val whiteBg = contours[0]
+            assertRockWhiteBgStyle("rock[$name]", whiteBg)
+            val expected = o.getAsJsonArray("whiteBg").map { it.asJsonArray }
+            assertRockWhiteBgPoints("rock[$name]", expected, whiteBg)
+        }
+    }
+
+    /**
+     * G-PORT-11（轮廓样式）：WHITE BG 必须是「白填充 / 无描边 / 线宽 0」，
+     * OUTLINE 必须是「灰 0.3 填充 + 同色描边 / 线宽 1」（上游 `stroke` 的 `out` 缺省 1）。
+     */
+    @Test
+    fun gPort11_rockContourStylesMatchUpstream() {
+        resetPortGlobals()
+        val contours = ShanShui.rock(0.0, 0.0, 7.0, 80.0, 100.0, 40.0, 10.0)
+        assertTrue("rock 必须产出轮廓", contours.size >= 2)
+        assertRockWhiteBgStyle("rock", contours[0])
+        val outline = contours[1]
+        assertEquals("OUTLINE 的填充色必须是灰 0.3", ShanShuiColor.outline, outline.fill)
+        assertEquals("OUTLINE 的描边色必须与填充色相同", ShanShuiColor.outline, outline.stroke)
+        assertEquals("OUTLINE 的线宽必须是上游 stroke 的 out=1", 1.0, outline.width, 0.0)
+    }
+
+    /**
+     * G-PORT-11 负向自证：把**故意改坏**的期望点喂给正向用例用的**同一份断言**
+     * ⇒ 必须抛 AssertionError。
+     */
+    @Test
+    fun gPort11_negative_perturbedPointsBreakGate() {
+        resetPortGlobals()
+        val o = golden.getAsJsonArray("rock").first().asJsonObject
+        val contours = ShanShui.rock(
+            0.0, 0.0,
+            o.get("seed").asDouble, o.get("hei").asDouble, o.get("wid").asDouble,
+            o.get("tex").asDouble, o.get("sha").asDouble,
+        )
+        // 改动第 7 个点的 x（1e-4 ⇒ 远大于 Float32 的 1 ULP ⇒ 必被咬住）
+        val expected = o.getAsJsonArray("whiteBg").map { it.asJsonArray }.toMutableList()
+        val p7 = expected[7].map { it.asDouble }.toMutableList()
+        p7[0] = p7[0] + 1e-4
+        expected[7] = JsonArray().apply { add(p7[0]); add(p7[1]) }
+        gateMustCatch("被改动的点必须被判据咬住") {
+            assertRockWhiteBgPoints("rock(坏值)", expected, contours[0])
+        }
+    }
+
+    /**
+     * G-PORT-12：`plan` 的输出必须与上游 `mountplanner` **逐条一致**，
+     * 且**跨调用**保持一致（`MEM.planmtx` 是全局累积的）。
+     *
+     * 三组夹具（黄金基线里的 `plan.segments` / `plan.mountSegments` / `plan.overlapSegments`）：
+     * - `segments`：任务书指定的 `[0,500)` + `[500,1000)`；
+     * - `mountSegments`：`[2000,2500)` + `[2500,3000)` —— 该区间**会产出 mount**
+     *   ⇒ `planmtx` 真的被标记过 ⇒ 第二段的 flatmount 判定受「跨调用累积」影响
+     *   （**有区分力**：局部数组口径会得到完全不同的结果）；
+     * - `overlapSegments`：`[2000,2500)` 连调两次。
+     *
+     * 额外断言：端口 `plan()` 的 **PRNG 抽取次数**必须等于上游该次调用扣除 boat 后的抽取数。
+     */
+    @Test
+    fun gPort12_planMatchesUpstreamAcrossCalls() {
+        for (fixture in planFixtures()) {
+            resetPortGlobals()
+            // 第一段
+            val before0 = ShanShuiPrng.global.draws
+            val seg0 = ShanShuiPlanner.plan(fixture.segments[0][0], fixture.segments[0][1])
+            val draws0 = ShanShuiPrng.global.draws - before0
+            assertEquals(
+                "${fixture.label} 第 1 段的 PRNG 抽取次数必须与上游一致",
+                fixture.results[0].draws - fixture.results[0].boatDraws,
+                draws0,
+            )
+            assertPlanSegment("${fixture.label} 第 1 段", fixture.results[0].entries, seg0)
+            // 补抽上游 boat 分支消耗的随机（端口无 boat ⇒ 已接受偏差 O7）⇒ 对齐随机流
+            repeat(fixture.results[0].boatDraws.toInt()) { ShanShuiPrng.global.rnd() }
+            // 第二段
+            val before1 = ShanShuiPrng.global.draws
+            val seg1 = ShanShuiPlanner.plan(fixture.segments[1][0], fixture.segments[1][1])
+            val draws1 = ShanShuiPrng.global.draws - before1
+            assertEquals(
+                "${fixture.label} 第 2 段的 PRNG 抽取次数必须与上游一致",
+                fixture.results[1].draws - fixture.results[1].boatDraws,
+                draws1,
+            )
+            assertPlanSegment("${fixture.label} 第 2 段", fixture.results[1].entries, seg1)
+        }
+    }
+
+    /**
+     * G-PORT-12（**全局性有牙**）：上游的 `MEM.planmtx` 是模块级全局 ⇒ 跨调用累积。
+     * 本仓移植层**修改前**用「每次调用新建的局部数组」⇒ 结果与上游不同。
+     *
+     * 黄金基线里的 `localEntries` 就是「每次调用清空 planmtx」口径下的上游实跑结果
+     * ⇒ 它必须**不等于**端口（全局口径）的结果 ⇒ 否则这条判据没有区分力。
+     */
+    @Test
+    fun gPort12_localPlanmtxWouldDifferFromUpstream() {
+        val fixture = planFixtures().first { it.label == "mount" }
+        // 上游：全局口径 ≠ 局部口径（该夹具有区分力）
+        assertTrue(
+            "「mount」夹具必须能区分全局/局部 planmtx（否则判据无牙）",
+            fixture.results[1].entries != fixture.results[1].localEntries,
+        )
+        // 端口（全局口径）必须落在上游的**全局**口径上
+        resetPortGlobals()
+        ShanShuiPlanner.plan(fixture.segments[0][0], fixture.segments[0][1])
+        repeat(fixture.results[0].boatDraws.toInt()) { ShanShuiPrng.global.rnd() }
+        val seg1 = ShanShuiPlanner.plan(fixture.segments[1][0], fixture.segments[1][1])
+        assertPlanSegment("mount 第 2 段", fixture.results[1].entries, seg1)
+    }
+
+    /**
+     * G-PORT-12 负向自证：把**局部 planmtx 口径**的上游结果喂给正向用例用的**同一份断言**
+     * ⇒ 必须抛 AssertionError（⇒ 端口若退回局部数组，这条判据必红）。
+     */
+    @Test
+    fun gPort12_negative_localPlanmtxBreaksGate() {
+        val fixture = planFixtures().first { it.label == "mount" }
+        resetPortGlobals()
+        ShanShuiPlanner.plan(fixture.segments[0][0], fixture.segments[0][1])
+        repeat(fixture.results[0].boatDraws.toInt()) { ShanShuiPrng.global.rnd() }
+        val seg1 = ShanShuiPlanner.plan(fixture.segments[1][0], fixture.segments[1][1])
+        gateMustCatch("局部 planmtx 的口径必须被判据咬住") {
+            assertPlanSegment("mount 第 2 段（局部口径）", fixture.results[1].localEntries, seg1)
+        }
+    }
+
+    // ── G-PORT-11 / G-PORT-12 的夹具与断言（正向与负向共用） ───────────
+
+    /** 黄金基线里的规划夹具。 */
+    private data class PlanFixture(
+        val label: String,
+        val segments: List<DoubleArray>,
+        val results: List<PlanCallResult>,
+    )
+
+    /** 黄金基线里的一次 `mountplanner` 调用结果。 */
+    private data class PlanCallResult(
+        val draws: Long,
+        val boatDraws: Long,
+        val entries: List<PlanEntry>,
+        val localEntries: List<PlanEntry>,
+    )
+
+    /** 黄金基线里的一条规划项。 */
+    private data class PlanEntry(
+        val tag: String,
+        val x: Double,
+        val y: Double,
+        val h: Double,
+    )
+
+    private fun planFixtures(): List<PlanFixture> {
+        val plan = golden.getAsJsonObject("plan")
+        val out = ArrayList<PlanFixture>()
+        fun add(label: String, segKey: String, resKey: String) {
+            val segments = plan.getAsJsonArray(segKey).map { s ->
+                val o = s.asJsonObject
+                doubleArrayOf(o.get("xmin").asDouble, o.get("xmax").asDouble)
+            }
+            val results = plan.getAsJsonArray(resKey).map { r ->
+                val o = r.asJsonObject
+                PlanCallResult(
+                    draws = o.get("draws").asLong,
+                    boatDraws = o.get("boatDraws").asLong,
+                    entries = parsePlanEntries(o.getAsJsonArray("entries")),
+                    localEntries = parsePlanEntries(o.getAsJsonArray("localEntries")),
+                )
+            }
+            out.add(PlanFixture(label, segments, results))
+        }
+        add("segments", "segments", "results")
+        add("mount", "mountSegments", "mountResults")
+        add("overlap", "overlapSegments", "overlapResults")
+        return out
+    }
+
+    private fun parsePlanEntries(arr: JsonArray): List<PlanEntry> =
+        arr.map { e ->
+            val o = e.asJsonObject
+            PlanEntry(o.get("tag").asString, o.get("x").asDouble, o.get("y").asDouble, o.get("h").asDouble)
+        }
+
+    /** rock 的 WHITE BG 样式断言（上游 `:2484-2490`：`fil:"white", str:"none"`）。 */
+    private fun assertRockWhiteBgStyle(label: String, contour: ShanShuiContour) {
+        assertEquals("$label 的 WHITE BG 必须是白填充", ShanShuiColor(255, 255, 255, 1.0), contour.fill)
+        assertEquals("$label 的 WHITE BG 必须无描边（上游 str:\"none\"）", null, contour.stroke)
+        assertEquals("$label 的 WHITE BG 线宽必须是 0（上游未给 wid）", 0.0, contour.width, 0.0)
+    }
+
+    /**
+     * rock 的 WHITE BG **点列**断言（正向与负向共用）。
+     *
+     * @param expected 黄金基线里的上游点列（Float64）
+     */
+    private fun assertRockWhiteBgPoints(
+        label: String,
+        expected: List<JsonArray>,
+        contour: ShanShuiContour,
+    ) {
+        assertEquals("$label 的 WHITE BG 必须是 51 点（50 + 追加的 [0,0]）", 51, contour.pts.size)
+        assertEquals("$label 的期望点列长度必须一致", 51, expected.size)
+        for (i in expected.indices) {
+            val e = expected[i].asJsonArray
+            val ex = e[0].asDouble.toFloat()
+            val ey = e[1].asDouble.toFloat()
+            assertEquals(
+                "$label 第 $i 点的 x 必须与上游逐位相等",
+                java.lang.Float.floatToRawIntBits(ex),
+                java.lang.Float.floatToRawIntBits(contour.pts[i][0]),
+            )
+            assertEquals(
+                "$label 第 $i 点的 y 必须与上游逐位相等",
+                java.lang.Float.floatToRawIntBits(ey),
+                java.lang.Float.floatToRawIntBits(contour.pts[i][1]),
+            )
+        }
+    }
+
+    /**
+     * 规划项的逐条比对断言（正向与负向共用）。
+     *
+     * ⚠️ `x`/`y` 必须**逐位相等**（纯算术，无三角函数）。
+     * ⚠️ `h` 是噪声值（上游 `ns(i,j)`）⇒ Java 的 `Math.cos` 与 V8 的 `Math.cos`
+     *   可能差 1 ULP（实测 64 个采样点里 3 个）⇒ `h` 用 **1e-9 的绝对容差**。
+     */
+    private fun assertPlanSegment(
+        label: String,
+        expected: List<PlanEntry>,
+        actual: List<ShanShuiPlanner.Chunk>,
+    ) {
+        assertEquals("$label 的条目数必须与上游一致", expected.size, actual.size)
+        for (i in expected.indices) {
+            val e = expected[i]
+            val a = actual[i]
+            assertEquals("$label 第 $i 条的 tag 必须与上游一致", e.tag, a.tag)
+            assertEquals(
+                "$label 第 $i 条的 x 必须与上游逐位相等",
+                java.lang.Double.doubleToRawLongBits(e.x),
+                java.lang.Double.doubleToRawLongBits(a.x),
+            )
+            assertEquals(
+                "$label 第 $i 条的 y 必须与上游逐位相等",
+                java.lang.Double.doubleToRawLongBits(e.y),
+                java.lang.Double.doubleToRawLongBits(a.y),
+            )
+            assertTrue(
+                "$label 第 $i 条的 h 必须与上游一致（实测 ${a.h} vs ${e.h}）",
+                Math.abs(a.h - e.h) <= 1e-9,
+            )
+        }
+    }
+
+    // ══════════════════════ G-PORT-13 arch01 / hut 逐位对照上游 ══════════════════════
+
+    /**
+     * G-PORT-13：E50 的 `Arch.arch01`（草屋 hut + 桥身 box + 栏杆 rail×2 + 渔人 `Man.man`）
+     * 与上游**逐位**一致。
+     *
+     * ## 口径
+     * - 黄金基线：`app/src/test/resources/qianli/shan_shui_arch01_golden.json`
+     *   （由 `node scripts/e50_arch01_upstream_probe.js` 实跑上游原始 JS 生成；
+     *   `--check` 可校验是否漂移）。⛔ **期望值不在测试源码里**。
+     * - PRNG 种子 157（= [portSeed]）；perlin 表用 LCG 种子 20250101（= [noiseSeedValue]）
+     *   ⇒ 与 port 的 [ShanShuiNoise.noiseSeed] 逐字一致、**不消耗 PRNG**。
+     * - 上游的渔人（`Man.man`）**本仓不渲染**（改造-②），但**抽取次数照上游消耗**
+     *   ⇒ 抽取次数差值 = **0**（已知且被记录的常量）。
+     *
+     * ## 为什么坐标用「量化网格摘要」而不是逐位比 Float32
+     * V8 与 JVM 的 `Math.cos/sin/atan2` **最多差 1 ULP** ⇒ 同一个浮点式在两侧量化成
+     * Float32 后偶尔差 1 个 ULP（实测 951 点里 115 点、最大 7.63e-6 = 1 个 Float32 ULP）。
+     * ⇒ 坐标改比「`Math.round(v * scale)` 后的整数」：
+     * - `scale = 10` ⇒ **0.1 网格 = 上游 `poly()` 自己的输出精度**（上游写进 SVG 的就是它）
+     *   ⇒ 「port 的点落在上游的同一个 0.1 网格上」；
+     * - `scale = 100` ⇒ 0.01 网格（更紧的指纹）。
+     * 两个 scale 在本夹具下**都是零失配**（node 侧逐点核对过 951×2 个坐标）。
+     */
+    @Test
+    fun gPort13_arch01GeometryMatchesUpstreamBitwise() {
+        resetPortGlobals()
+        val g = archGolden("arch01")
+        val before = ShanShuiPrng.global.draws
+        val contours = ShanShuiArch.kind1(
+            g.xoff, g.yoff, g.seed, g.hei, g.wid, archRotUnusedByUpstream, g.per,
+        )
+        val draws = ShanShuiPrng.global.draws - before
+        assertArchMatchesUpstream("arch01", g, contours)
+        assertArchDrawCount("arch01", g.draws, draws)
+    }
+
+    /**
+     * G-PORT-13（草屋）：上游 `hut`（`:2542-2607`）的 10×10 网格 + 一轮皴必须逐位一致。
+     *
+     * ⚠️ `tex` 的语义是上游的**皴线数**（⛔ 不是「弧顶采样段数」）
+     * ⇒ 实测 10 条皴线里只有 7 条长度非零（上游 `stroke()` 对空点列返回 `""`）
+     * ⇒ 上游发 3 + 7 = **10** 条轮廓。
+     */
+    @Test
+    fun gPort13_hutGeometryMatchesUpstreamBitwise() {
+        resetPortGlobals()
+        val g = archGolden("hut")
+        val before = ShanShuiPrng.global.draws
+        val contours = ShanShuiArch.hut(g.xoff, g.yoff, g.hei, g.wid, g.tex)
+        val draws = ShanShuiPrng.global.draws - before
+        assertArchMatchesUpstream("hut", g, contours)
+        assertArchDrawCount("hut", g.draws, draws)
+    }
+
+    /**
+     * G-PORT-13 负向自证：把**故意写错**的实现喂给正向用例用的**同一份断言** ⇒ 必须抛 AssertionError。
+     *
+     * 覆盖 5 种坏值：
+     * ① **移植前的旧实现**（一条闭合的半圆拱轮廓）⇒ 条数/摘要/坐标三道断言都要红；
+     * ② 坐标被挪动 0.5 ⇒ 坐标摘要要红；
+     * ③ 少一条轮廓 ⇒ 条数要红；
+     * ④ 白底被改成透明 ⇒ 结构摘要要红；
+     * ⑤ 抽取次数少了 121 次（= 漏掉「零长度皴线也要抽的那一次颜色随机」）⇒ 抽取次数要红。
+     */
+    @Test
+    fun gPort13_negative_brokenArch01BreaksGate() {
+        resetPortGlobals()
+        val g = archGolden("arch01")
+        val good = ShanShuiArch.kind1(
+            g.xoff, g.yoff, g.seed, g.hei, g.wid, archRotUnusedByUpstream, g.per,
+        )
+        // ① 移植前的旧实现（一条闭合轮廓）
+        val legacy = listOf(
+            ShanShuiContour(
+                (0..16).map { i -> floatArrayOf(i * 10f, i * 3f - 40f) },
+                ShanShuiColor(255, 255, 255, 1.0),
+                ShanShuiColor.rgba(100, 100, 100, 0.4),
+                1.5,
+            ),
+        )
+        gateMustCatch("移植前的旧实现必须被判据咬住") { assertArchMatchesUpstream("arch01", g, legacy) }
+        // ② 坐标被挪动 0.5
+        val moved = good.mapIndexed { i, c ->
+            if (i == 7) {
+                ShanShuiContour(
+                    c.pts.map { floatArrayOf(it[0] + 0.5f, it[1]) }, c.fill, c.stroke, c.width,
+                )
+            } else {
+                c
+            }
+        }
+        gateMustCatch("坐标被挪动的实现必须被判据咬住") { assertArchMatchesUpstream("arch01", g, moved) }
+        // ③ 少一条轮廓
+        gateMustCatch("少一条轮廓的实现必须被判据咬住") {
+            assertArchMatchesUpstream("arch01", g, good.dropLast(1))
+        }
+        // ④ 白底被改成透明
+        val recolored = good.mapIndexed { i, c ->
+            if (i == 0) ShanShuiContour(c.pts, null, c.stroke, c.width) else c
+        }
+        gateMustCatch("白底被改色的实现必须被判据咬住") {
+            assertArchMatchesUpstream("arch01", g, recolored)
+        }
+        // ⑤ 抽取次数少 121 次（漏掉「零长度皴线也要抽的那一次颜色随机」）
+        gateMustCatch("抽取次数不符的实现必须被判据咬住") {
+            assertArchDrawCount("arch01", g.draws, g.draws - 121L)
+        }
+    }
+
+    /** G-PORT-13 负向自证（草屋）：`hut` 的旧简化实现（一条闭合弧顶）必须判红。 */
+    @Test
+    fun gPort13_negative_brokenHutBreaksGate() {
+        resetPortGlobals()
+        val g = archGolden("hut")
+        val legacyHut = listOf(
+            ShanShuiContour(
+                (0..12).map { i -> floatArrayOf(i * 5f, 20f - i * 2f) },
+                ShanShuiColor(255, 255, 255, 1.0),
+                ShanShuiColor.rgba(100, 100, 100, 0.4),
+                1.5,
+            ),
+        )
+        gateMustCatch("hut 的旧简化实现必须被判据咬住") {
+            assertArchMatchesUpstream("hut", g, legacyHut)
+        }
+    }
+
+    // ── G-PORT-13 的夹具与断言（正向与负向共用） ───────────────
+
+    /** 黄金基线里的一个测量项（arch01 或 hut）。 */
+    private data class ArchGoldenEntry(
+        val xoff: Double,
+        val yoff: Double,
+        val seed: Double,
+        val hei: Double,
+        val wid: Double,
+        val per: Double,
+        val tex: Double,
+        val draws: Long,
+        val contourCount: Int,
+        val pointCount: Int,
+        val structureDigest: Long,
+        val rounded10: Long,
+        val rounded100: Long,
+    )
+
+    /** 上游 `arch01` 的 `rot` **从不被使用**（见 [ShanShuiArch] 的文件头说明）⇒ 门禁里也传 0.7。 */
+    private val archRotUnusedByUpstream = 0.7
+
+    /** 黄金基线里的 arch01 / hut 测量项。 */
+    private fun archGolden(key: String): ArchGoldenEntry {
+        val o = archGoldenJson.getAsJsonObject(key)
+        val call = o.getAsJsonObject("call")
+        return ArchGoldenEntry(
+            xoff = call.get("xoff").asDouble,
+            yoff = call.get("yoff").asDouble,
+            seed = if (call.has("archSeed")) call.get("archSeed").asDouble else 0.0,
+            hei = call.get("hei").asDouble,
+            wid = call.get("wid").asDouble,
+            per = if (call.has("per")) call.get("per").asDouble else 0.0,
+            tex = if (call.has("tex")) call.get("tex").asDouble else 0.0,
+            draws = o.get("draws").asLong,
+            contourCount = o.get("contourCount").asInt,
+            pointCount = o.get("pointCount").asInt,
+            structureDigest = hexToLong(o.get("structureDigest").asString),
+            rounded10 = hexToLong(o.get("roundedDigest10").asString),
+            rounded100 = hexToLong(o.get("roundedDigest100").asString),
+        )
+    }
+
+    /** `0x...` 十六进制串 → Long（按位解释，不做符号转换）。 */
+    private fun hexToLong(s: String): Long =
+        java.lang.Long.parseUnsignedLong(s.removePrefix("0x"), 16)
+
+    /** G-PORT-13 的黄金基线（懒加载 + 缓存）。 */
+    private val archGoldenJson: com.google.gson.JsonObject by lazy {
+        val stream = javaClass.getResourceAsStream(ARCH_GOLDEN_RESOURCE)
+            ?: throw AssertionError(
+                "缺少上游黄金基线：app/src/test/resources$ARCH_GOLDEN_RESOURCE" +
+                    "（由 `node scripts/e50_arch01_upstream_probe.js` 生成）",
+            )
+        stream.use {
+            com.google.gson.JsonParser.parseReader(it.reader(Charsets.UTF_8)).asJsonObject
+        }
+    }
+
+    /** G-PORT-13 的「与上游一致」判据（正向与负向共用）。 */
+    private fun assertArchMatchesUpstream(
+        label: String,
+        g: ArchGoldenEntry,
+        contours: List<ShanShuiContour>,
+    ) {
+        assertEquals("$label 的轮廓条数必须与上游一致", g.contourCount, contours.size)
+        assertEquals(
+            "$label 的总点数必须与上游一致",
+            g.pointCount,
+            contours.sumOf { it.pts.size },
+        )
+        assertEquals(
+            "$label 的结构摘要（填充/描边/线宽/点数）必须与上游逐位相等",
+            g.structureDigest,
+            archStructureDigest(contours),
+        )
+        assertEquals(
+            "$label 的 0.1 网格坐标摘要（= 上游 poly() 的输出精度）必须与上游逐位相等",
+            g.rounded10,
+            archRoundedDigest(contours, 10),
+        )
+        assertEquals(
+            "$label 的 0.01 网格坐标摘要必须与上游逐位相等",
+            g.rounded100,
+            archRoundedDigest(contours, 100),
+        )
+    }
+
+    /** G-PORT-13 的「抽取次数」判据（正向与负向共用）。 */
+    private fun assertArchDrawCount(label: String, expected: Long, actual: Long) {
+        assertEquals(
+            "$label 的 PRNG 抽取次数必须与上游一致（渔人的抽取也一并消耗 ⇒ 差值 = 0）",
+            expected,
+            actual,
+        )
+    }
+
+    /** 颜色的摘要编码（与 node 探针同口径：`null` 一个标记，其余 5 个数）。 */
+    private fun archColorSteps(c: ShanShuiColor?): List<Int> =
+        if (c == null) {
+            listOf(0xFFFFFFFF.toInt())
+        } else {
+            listOf(
+                0x00000000,
+                c.r, c.g, c.b,
+                java.lang.Float.floatToRawIntBits(c.a.toFloat()),
+            )
+        }
+
+    /** 结构摘要：逐条轮廓的 填充 / 描边 / 线宽 / 点数（**不含坐标**）。 */
+    private fun archStructureDigest(contours: List<ShanShuiContour>): Long {
+        var h = FNV_OFFSET
+        for (c in contours) {
+            for (v in archColorSteps(c.fill)) h = fnvStep(h, v)
+            for (v in archColorSteps(c.stroke)) h = fnvStep(h, v)
+            h = fnvStep(h, java.lang.Float.floatToRawIntBits(c.width.toFloat()))
+            h = fnvStep(h, c.pts.size)
+        }
+        return h
+    }
+
+    /** 量化网格摘要：`Math.round(v * scale)` 后的整数坐标。 */
+    private fun archRoundedDigest(contours: List<ShanShuiContour>, scale: Int): Long {
+        var h = FNV_OFFSET
+        for (c in contours) {
+            h = fnvStep(h, c.pts.size)
+            for (p in c.pts) {
+                h = fnvStep(h, Math.round(p[0].toDouble() * scale).toInt())
+                h = fnvStep(h, Math.round(p[1].toDouble() * scale).toInt())
+            }
+        }
+        return h
+    }
+
+    companion object {
+        /** 黄金基线的资源路径（由 `scripts/qianli_upstream_ref.js` 生成）。 */
+        private const val GOLDEN_RESOURCE = "/qianli/shan_shui_upstream_golden.json"
+
+        /** G-PORT-13 的黄金基线资源路径（由 `scripts/e50_arch01_upstream_probe.js` 生成）。 */
+        private const val ARCH_GOLDEN_RESOURCE = "/qianli/shan_shui_arch01_golden.json"
+
+        /** FNV-1a 64 的 offset（与 node 探针同值）。 */
+        private const val FNV_OFFSET = -3750763034362895579L
+    }
 }

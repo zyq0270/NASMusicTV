@@ -1,0 +1,45 @@
+{
+ "meta": {
+  "generator": "scripts/e50_arch01_upstream_probe.js",
+  "upstream": "D:\\hxzhang\\MyGithubSoftware\\NasAudio\\shan-shui-inf-main\\index.html",
+  "upstreamBytes": 126559,
+  "patch": "① perlin 表初始化：Math.random() → __perlinLcg[]（LCG 种子 20250101）；② this.arch01 行内追加 this.__hut = hut;（行号不变）",
+  "seed": 157,
+  "noiseSeed": 20250101
+ },
+ "arch01": {
+  "call": {
+   "xoff": 0,
+   "yoff": 0,
+   "archSeed": 3,
+   "hei": 90,
+   "wid": 180,
+   "per": 0.5
+  },
+  "draws": 2534,
+  "contourCount": 214,
+  "manContourCount": 15,
+  "digest": "0x0017004f5e5f5dc7",
+  "structureDigest": "0xc03faefcb7ae3506",
+  "roundedDigest10": "0xcb9334c15182ca07",
+  "roundedDigest100": "0xbccea5e1c761eac8",
+  "pointCount": 951
+ },
+ "hut": {
+  "call": {
+   "xoff": 0,
+   "yoff": 0,
+   "hei": 40,
+   "wid": 60,
+   "tex": 10
+  },
+  "draws": 83,
+  "contourCount": 10,
+  "manContourCount": 0,
+  "digest": "0x822d75f2a072bddf",
+  "structureDigest": "0xebc4036b9e0a6490",
+  "roundedDigest10": "0x2263fb7b71ed7a72",
+  "roundedDigest100": "0xfa3e549b8a62a33f",
+  "pointCount": 67
+ }
+}

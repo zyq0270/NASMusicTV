@@ -29,12 +29,23 @@
  * 上游二者是 `mountplanner` 的闭包（可访问局部 `reg`）；Kotlin 无法让对象方法闭包捕获
  * 局部变量 ⇒ [plan] 内用局部函数镜像，签名与上游一致（[chadd] 保留 `mind` 默认值 `10.0`）。
  *
- * ## ⚠️ planmtx 为 [plan] 内部局部数组
- * 上游 `MEM.planmtx` 是全局数组（跨 `mountplanner` 调用持久）；但 `plan(xmin,xmax)` 签名
- * 不接 state ⇒ 用局部 `DoubleArray` + 偏移量覆盖。因各次 `plan` 调用的 x 区间不重叠
- * （chunkloader 每次规划 `[xmax, xmax+cwid]` 或 `[xmin-cwid, xmin]`），局部数组与全局数组
- * **行为等价**（边界索引的跨调用残留是上游 quirk，影响可忽略）。
- * [State.planmtx] 按方案 §八 声明但实际未使用（`BooleanArray` 无法承载计数器 `+= 1`）。
+ * ## ✅ `MEM.planmtx` 是**模块级全局**（上游语义已对齐）
+ * 上游 `MEM.planmtx`（`:3826`）是 `MEM` 上的**全局数组**，`mountplanner` 被反复调用时
+ * **继续累积**（`:3753` 初始化 / `:3769` 计数 / `:3786` 读取）。
+ * 本移植层此前用「每次调用新建的局部 `DoubleArray` + 相对下标」代替 ⇒ **偏离**（原 D15）。
+ * 现改为 [planmtx]（companion 里的**全局**稀疏计数器，**绝对下标**）⇒ 与上游同构。
+ *
+ * ### 复现上游的三个 JS 语义细节（⛔ 不许简化）
+ * 1. **下标是绝对的**：`MEM.planmtx[floor(i / xstep)]` ⇒ `xstep=5` 时下标 = `x / 5`。
+ * 2. **初始化用 `||`（JS 宽松真值）**：`MEM.planmtx[i1] = MEM.planmtx[i1] || 0`
+ *    ⇒ `undefined` / `0` / `-0` / `NaN` 都变成 `0`；其余（真值）**保持不变**。
+ * 3. **计数用 `+= 1`，而未初始化的槽位是 `undefined`** ⇒ `undefined + 1 = NaN`！
+ *    ⇒ 本移植层必须把「未初始化」的槽位记成 `NaN`（不是 0、不是 1），
+ *    否则下一次初始化时 `NaN || 0 ⇒ 0`（被清零）与 `1 || 0 ⇒ 1`（保留）会**分道扬镳**。
+ *
+ * ### 释放（长驻进程）
+ * 上游的 `MEM.planmtx` 是**永不回收**的 JS 数组（页面生命周期内）⇒ 移植到长驻进程
+ * 必须设上限，否则场景滚动时无界增长。见 [trimPlanmtx]。
  *
  * ## ⚠️ [Chunk] 增补 `canv` 字段
  * 方案 §八 的 `Chunk` 只有 `tag/x/y/h`；但 chunkloader 的 `add()` 须存储并传递 canv
@@ -50,6 +61,73 @@ package com.nasmusic.tv.visualizer.qianli.port
 
 object ShanShuiPlanner {
 
+    // ─── planmtx — 上游 MEM.planmtx（`:3826`）的模块级全局 ──────────
+
+    /**
+     * 上游 `MEM.planmtx` 的**全局**计数器表 —— **绝对下标**（= `floor(x / xstep)`）。
+     *
+     * - 用 [TreeMap]（按下标排序）⇒ 可丢弃最左/最右的旧下标（见 [trimPlanmtx]）。
+     * - 值语义**逐字复现上游 JS**：
+     *   - 「槽位不存在」⇒ `null`（对应 JS 的 `undefined`）；
+     *   - 「已计数但从未被初始化」⇒ `NaN`（对应 JS 的 `undefined + 1`）;
+     *   - 「已初始化」⇒ `0.0` 或正整数。
+     */
+    private val planmtx = java.util.TreeMap<Int, Double>()
+
+    /** 扫描步长（上游 `xstep`，`:3749`）—— 下标 = `floor(x / xstep)`。 */
+    private const val XSTEP = 5.0
+
+    /** 保留窗口（列数）：窗口外的下标一律丢弃（左右两侧都丢 ⇒ 与滚动方向无关）。 */
+    private const val PLANMTX_KEEP_COLUMNS = 4096
+
+    /** 计数器表硬上限（条目数）⇒ 防止无界增长（内存门禁会查）。 */
+    private const val PLANMTX_MAX_ENTRIES = 8192
+
+    /**
+     * 复位全局 [planmtx] —— **仅供测试隔离**用。
+     *
+     * ⚠️ 上游无此函数（上游「刷新页面」等价于复位：`MEM` 每次页面加载都是新的）。
+     * 本仓的门禁要断言「同种子两次调用逐位相等」，而 `planmtx` 是**跨调用累积**的全局状态
+     * ⇒ 必须能复位，否则第二次调用看到的是第一次的残留。
+     */
+    @Synchronized
+    fun resetPlanmtx() {
+        planmtx.clear()
+    }
+
+    /**
+     * 上游 `MEM.planmtx[idx] == 0`（**JS 宽松相等**）的等价判定。
+     *
+     * ⚠️ JS 语义：`undefined == 0` ⇒ **false**（槽位不存在 ⇒ 视为「已被占用」）；
+     *   `NaN == 0` ⇒ **false**；`0 == 0` ⇒ true。
+     */
+    private fun planmtxIsZero(idx: Int): Boolean {
+        val v = planmtx[idx] ?: return false
+        return v == 0.0
+    }
+
+    /**
+     * 释放远离当前扫描区间的下标（上游无此步 —— 上游是短命的网页）。
+     *
+     * ⚠️ 被丢弃的下标一定远在当前扫描区间之外 ⇒ 既不会被本次的初始化循环读到，
+     *   也不会被本次的填充判定读到 ⇒ **与上游等价**。
+     */
+    private fun trimPlanmtx(xmin: Double, xmax: Double) {
+        val lo = Math.floor(xmin / XSTEP).toInt() - PLANMTX_KEEP_COLUMNS
+        val hi = Math.floor(xmax / XSTEP).toInt() + PLANMTX_KEEP_COLUMNS
+        val it = planmtx.keys.iterator()
+        while (it.hasNext()) {
+            val k = it.next()
+            if (k < lo || k > hi) {
+                it.remove()
+            }
+        }
+        // 仍超上限时丢弃最左（最旧）的下标。
+        while (planmtx.size > PLANMTX_MAX_ENTRIES) {
+            planmtx.remove(planmtx.firstKey())
+        }
+    }
+
     // ─── plan — 照抄上游 mountplanner `:3706-3814` ───────────────
 
     /**
@@ -61,8 +139,13 @@ object ShanShuiPlanner {
      *
      * 上游默认值：`samp=0.03`、`xstep=5`、`mwid=200`、`locmax r=2 阈值 0.3`、`chadd mind=10`、
      * 远山每 1000px、flatMount 概率 1%、boat 概率 20% 间距 400（⚠️ boat 已裁剪）。
+     *
+     * ⚠️ **本函数会读写全局 [planmtx]**（上游 `MEM.planmtx` 的等价物）⇒
+     *   标 `@Synchronized`（对象监视器）⇒ 多线程调用不会交错。
      */
+    @Synchronized
     fun plan(xmin: Double, xmax: Double): List<Chunk> {
+        planmtx.clear() // TEMP-TEETH-EXPERIMENT
         // ── locmax — 照抄上游 `:3707-3720` ──
         fun locmax(
             x: Double,
@@ -106,21 +189,18 @@ object ShanShuiPlanner {
             Math.max(ShanShuiNoise.noise(x * samp * 2.0, 2.0) - 0.55, 0.0) * 2.0
         fun yr(x: Double): Double = ShanShuiNoise.noise(x * 0.01, Math.PI)
 
-        val xstep = 5.0
+        val xstep = XSTEP
         val mwid = 200.0
 
-        // planmtx — 局部 DoubleArray（替代全局 MEM.planmtx）
-        // 偏移量覆盖 xof 偏移（±500）+ mwid（200）余量 ⇒ ±1000 裕度
-        val off = Math.floor((xmin - 1000.0) / xstep).toInt()
-        val planLen = Math.floor((xmax + 1000.0) / xstep).toInt() - off + 1
-        val planmtx = DoubleArray(planLen)
-
         // 初始化 planmtx — 照抄上游 `:3751-3754`
+        //   `MEM.planmtx[i1] = MEM.planmtx[i1] || 0`
+        // ⚠️ 下标是**绝对下标**（`floor(i / xstep)`）—— 上游的 `MEM.planmtx` 是全局数组。
+        // ⚠️ JS 的 `||` 对 `undefined` / `0` / `-0` / `NaN` 都取右值 `0`，其余（真值）保持不变。
         var i = xmin
         while (i < xmax) {
-            val i1 = Math.floor(i / xstep).toInt() - off
-            // MEM.planmtx[i1] = MEM.planmtx[i1] || 0 → 局部数组已全 0，等价
-            planmtx[i1] = planmtx[i1]
+            val i1 = Math.floor(i / xstep).toInt()
+            val v = planmtx[i1]
+            planmtx[i1] = if (v == null || v == 0.0 || v.isNaN()) 0.0 else v
             i += xstep
         }
 
@@ -137,9 +217,13 @@ object ShanShuiPlanner {
                     val r = Chunk("mount", xof, yof, ns(i, j), emptyList())
                     val res = chadd(r)
                     if (res) {
-                        var k = Math.floor((xof - mwid) / xstep).toInt() - off
-                        while (k < (xof + mwid) / xstep - off) {
-                            planmtx[k] += 1.0
+                        // 上游 `:3764-3770`：`MEM.planmtx[k] += 1`
+                        // ⚠️ **绝对下标**；⚠️ 未初始化的槽位在 JS 里是 `undefined`
+                        //    ⇒ `undefined + 1 = NaN`（必须原样复现，见文件头「三个 JS 语义细节」）。
+                        var k = Math.floor((xof - mwid) / xstep).toInt()
+                        while (k < (xof + mwid) / xstep) {
+                            val v = planmtx[k]
+                            planmtx[k] = (v ?: Double.NaN) + 1.0
                             k++
                         }
                     }
@@ -164,7 +248,9 @@ object ShanShuiPlanner {
         // flatmount 填充 — 照抄上游 `:3785-3804`
         i = xmin
         while (i < xmax) {
-            if (planmtx[Math.floor(i / xstep).toInt() - off] == 0.0) {
+            // 上游 `:3786`：`MEM.planmtx[Math.floor(i / xstep)] == 0`
+            // ⚠️ 绝对下标；⚠️ JS 宽松相等（`undefined == 0` ⇒ false ⇒ 视为「已被占用」）。
+            if (planmtxIsZero(Math.floor(i / xstep).toInt())) {
                 // if (Math.random() < 0.01)
                 if (ShanShuiPrng.global.rnd() < 0.01) {
                     // for (var j = 0; j < 4 * Math.random(); j++)
@@ -185,6 +271,9 @@ object ShanShuiPlanner {
             }
             i += xstep
         }
+
+        // 释放（长驻进程）：丢弃远离本次扫描区间的旧下标 ⇒ 防止无界增长。
+        trimPlanmtx(xmin, xmax)
 
         return reg
     }
@@ -368,8 +457,11 @@ object ShanShuiPlanner {
      *
      * 上游默认值：`cwid=512`、`windx=3000`、`windy=800`；`cursx`/`lasttick`/`xmin`/`xmax` 初始 0。
      *
-     * ⚠️ [planmtx] 按方案 §八 声明为 `BooleanArray(0)`；实际 [plan] 用局部数组
-     * （签名不接 state ⇒ 无法访问此字段）。此字段保声明供后续扩展使用。
+     * ⚠️ 上游 `MEM` 是**模块级全局**；本移植层把它拆成实例 [State]（`canv`/`chunks`/
+     *   `xmin`/`xmax` 等按场景持有）。
+     *   ⚠️ **例外**：`MEM.planmtx` 在上游也是全局的，且 `mountplanner` 跨调用累积它
+     *   ⇒ 本移植层把它放在 [ShanShuiPlanner] 的 companion（全局 [planmtx]），
+     *   **不**放在本类里（否则多实例会各自一份 ⇒ 偏离上游）。
      */
     class State {
         /** 上游 `MEM.canv`（SVG 字符串）→ port 轮廓列表（改造-⑤）。 */
@@ -386,7 +478,13 @@ object ShanShuiPlanner {
         var windx: Double = 3000.0
         var windy: Double = 800.0
 
-        /** 上游 `MEM.planmtx`（计数器数组）→ port `BooleanArray`（声明兼容，实际未使用）。 */
+        /**
+         * 上游 `MEM.planmtx`（计数器数组）—— **占位声明，实际不使用**。
+         *
+         * ⚠️ 真正的 planmtx 是**全局**的（见 [ShanShuiPlanner.planmtx]）：上游 `MEM.planmtx`
+         *   挂在全局 `MEM` 上 ⇒ `mountplanner` 跨调用累积。
+         *   本字段按方案 §八 保留声明（`BooleanArray` 也无法承载计数器 `+= 1`）。
+         */
         val planmtx: BooleanArray = BooleanArray(0)
     }
 

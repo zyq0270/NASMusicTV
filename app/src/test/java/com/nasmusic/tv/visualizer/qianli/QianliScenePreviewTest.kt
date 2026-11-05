@@ -146,14 +146,19 @@ class QianliScenePreviewTest {
         return out
     }
 
-    /** 生产现状的四层（层带 / 映射 / α 全部读渲染器门禁缝）。 */
+    /**
+     * 生产现状的四层（层带 / 映射 / α 全部读渲染器门禁缝）。
+     *
+     * ⭐ **顺序 = 上游的层次顺序**（上游 `:3900` 把水的排序键压成 `y − 10000` ⇒ 水画在最前 = 最靠后）：
+     * 水 → 远景 → 中景 → 近景 ⇒ **山体白底盖住波线中段**（上游观感）。
+     */
     private fun layers(renderer: QianliScrollRenderer): List<LayerPlan> {
         val farA = mid(renderer.farAlphaRangeForGate())
         val waterA = mid(renderer.waterAlphaRangeForGate())
         return listOf(
+            plan(renderer, QianliScrollRenderer.GateLayer.WATER, "water", waterA),
             plan(renderer, QianliScrollRenderer.GateLayer.FAR, "far", farA),
             plan(renderer, QianliScrollRenderer.GateLayer.MID, "mid", 1.0f),
-            plan(renderer, QianliScrollRenderer.GateLayer.WATER, "water", waterA),
             plan(renderer, QianliScrollRenderer.GateLayer.NEAR, "near", 1.0f),
         )
     }
@@ -211,7 +216,7 @@ class QianliScenePreviewTest {
     /**
      * 层带映射。
      *
-     * - `fixed = true`：走渲染器的**真实**实现（高度项为减）。
+     * - `fixed = true`：走渲染器的**真实**实现（高度项为减；水层与中景层共用同一张映射）。
      * - `fixed = false`：复现修复前的实现（高度项为加）⇒ 用来对照真机截图。
      */
     private fun bandY(
@@ -221,10 +226,6 @@ class QianliScenePreviewTest {
         fixed: Boolean,
     ): Float {
         if (fixed) return map.bandY(chunkBaseY, worldY)
-        if (map.waterSpan > 0.0) {
-            val t = (worldY - chunkBaseY + 20.0) / map.waterSpan
-            return (t * map.bandHeightPx).toFloat()
-        }
         val base = map.bandHeightPx - (chunkBaseY - map.refBaseY) * map.baseSpread
         return (base + (chunkBaseY - worldY) * map.heightScale).toFloat()
     }

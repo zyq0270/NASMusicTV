@@ -18572,6 +18572,40 @@ GitHub runner 上这两样都不存在 ⇒ 公开构建与 CI 完全不受影响
 > ⚠️ 该 release 包**含 E51/E52 的上游移植件（上游无任何开源授权）⇒ 本地专用**：
 > ⛔ 不 push、不 tag、不建 release、不上传任何远端。
 
+##### 7.8 真机第三轮返工（四条，2026-11-05）
+
+**取证方式**：采样真机截图的像素（PIL，2712×1220）＋ **逐行读上游原文**
+（`shan-shui-inf-main/index.html`，MIT，Copyright 2018 Lingdong Huang）＋ 离线逐层预览
+⇒ ⛔ 全程不靠目测、也不靠印象。
+
+| # | 反馈 | 根因（附上游依据） | 修法 |
+|---|---|---|---|
+| 1 | 山脚下的橙色三角 | 上游「**山脚收笔**」`foot`（`:1728-1802`，`:1890` 调用）是**纯白填充**（`fil:"white"`），与「山体白底」**同色** ⇒ 落在白底上**看不见**（上游只露出它 α0.1~0.2 的淡灰轮廓线）。第二轮按旧方案 §3.3「L2 中山脚 = 赭石族」把「白底块」染成赭石 ⇒ 变成一排橙色尖刺 | 中景层的白**底块**改取**山体本色**（同色 ⇒ 融进山体）；近景层的白底块（岸线 / 石块）改**绢白**（上游就是纯白，⛔ 不是石绿） |
+| 2 | 半边山 | ⭐ **所有者指正：在近景层**。`prepareNear` 用**名义 `wid`** 推算内容范围（`spec.x ± (wid/2 + 140)`），但上游 `flatMount` 的左右轮廓（`grlist`）**向两端各延伸 3 点再等分**、`mount` 的山脊树与山脚石也超出名义跨度 ⇒ **真实几何超出名义范围** ⇒ `bakeBlock` 的选块条件（`spec.maxX < x0 \|\| spec.minX > x1`）判该 chunk「与块不相交」⇒ **超出部分任何块都不画它** ⇒ 平山被**竖直切掉** | 改 `fitContentX()`：**按轮廓点的真实 x 极值**定内容范围（四层统一）；新增门禁 `QianliContentRangeGateTest`（任一 chunk 的每个轮廓点必须落在 `[minX, maxX]` 内，含负向自证） |
+| 3 | 山上有一大块半圆 | ⭐ **根因不是形状，是「白填充在深底上不透明」**：上游整幅 SVG 是 `mix-blend-mode: multiply` 叠在**米白纸底**上（`:4028`）⇒ **纯白 × 纸底 = 纸底 ⇒ 上游的白填充全是隐形的**（实测：上游调色板 **1356 种颜色、0 种非灰**；`foot` 的 344 条白填充多边形在纸上完全看不见，只剩 α0.10–0.20 的淡灰线）。E50 的背景是**深色** ⇒ 同一个白填充变成**不透明的浅色团块** ⇒ 突兀成饼。上游参考实测：`Mount.rock` 的 WHITE BG（`:2485-2490`）= `ptlist[0] + [[0,0]]`，其顶行是**下半被压到 0.2 的椭圆**（`:2474-2476`）⇒ 形状就是**平底 D 形半椭圆**（95 处，w 20–122 / h 11–62 世界单位）—— **我们的移植层这个形状是对的**，不需改 | ① **白底块统一「融进所在山体 / 岸」**（取山体本色）⇒ 对应上游「隐形」的等价做法；② 顺带补移植上游 `Arch.arch01`（`:3002-3059` = `hut` + `box` + `rail`×2 + `Man.man`）—— 我们的 `ShanShuiArch.hut` 是「固定 8 段半圆」的**简化实现**（KDoc 自注「与上游无视觉等价关系」），上游 `hut`（`:2542-2607`）是 `reso=[10,10]` 网格（`nx = wid·(i/9 − 0.5)·(j/9)^0.7`、`ny = heir·(j/9)`、`heir = hei + hei·0.2·rnd()`）⇒ 画面上应是**一座桥**而不是圆顶 |
+| 4 | 中间大量细水纹 | ① **尺度**：江面带 0.62–1.00H（464 px）+ `waterSpan = 304` ⇒ **1.53 px/世界单位** ⇒ 上游那 **50 世界单位**的线束被摊成 **76 px**（上游比例应是 **32 px**）⇒ **竖向拉大 2.4 倍**；② **遮挡**：上游 `water`（`:3667-3704`）挂在**各自 mount 的基线**上、与山体**同一套世界 y 空间**，且水的 chunk 排序键被压成 `y − 10000`（`:3900`）⇒ **画在最前 = 最靠后** ⇒ 山体白底盖住每簇波线中段 ⇒ 只从山的两翼露出 | **忠于上游**（所有者裁定）：水层与中景层**共用同一条带、同一套映射**（`MID_REF_BASE_Y / MID_BASE_SPREAD / MID_HEIGHT_SCALE`）⇒ 每簇 52 世界单位 × 0.643 px ≈ **33 px**；层次顺序改成 **水 → 远景 → 中景 → 近景**（= 上游 `:3846-3873` 的 chunk 排序）⇒ 山体遮住波线中段；原「江面带」`WATER_Y0 / WATER_Y1` 退役（`WATER_Y0 = MID_Y0`） |
+
+> ⭐ **上游没有「日 / 月 / 圆盘」对象**（`redcirc` / `greencirc` 在上游 `:3787` / `:3801` 是**被注释掉的**调试代码）
+> ⇒ 画面里唯一的圆弧类形状就是 `Mount.rock` 的白椭圆（`:2485-2490`）与 `hut` 的草屋顶。
+
+**顺带查出的移植层偏离**（对照上游原文 + 上游参考图实测）：
+
+- **`MEM.planmtx` 必须是全局的**（**已修**）：上游 `:3753` / `:3769` 用的是模块级 `MEM.planmtx`
+  （`:3826` 声明，**跨多次 `mountplanner` 调用一直累积**）⇒ 我们的移植版做成了**每次调用新建的局部数组**
+  ⇒ 近景 `flatmount` 的落位与上游不同 ⇒ 已改为**全局稀疏计数器表 + 绝对下标**，
+  并逐字复现上游 JS 的两个坑：① 初始化用 `|| 0`（`undefined`/`0`/`-0`/`NaN` ⇒ `0`）；
+  ② 未初始化槽位 `+= 1` ⇒ `undefined + 1 = NaN`（⛔ 不许简化成 `0`/`1`）；
+  ③ 读取判据是 **JS 宽松相等** `MEM.planmtx[idx] == 0`（`undefined == 0` ⇒ **false**）。
+  （对照：上游的 `var reg = []`（`:3734`）与 `chadd`（`:3722-3732`）**确实是每次调用内的局部**
+  ⇒ 这一条我们本来是对的，⛔ 不动。）
+- ⛔ **`Mount.rock` 的形状不是偏离**（一度误判，已更正）：上游参考实测确认
+  `Mount.rock` 的 WHITE BG 就是**平底 D 形半椭圆**（顶行是下半被压到 0.2 的椭圆）⇒
+  **我们的移植层这个形状是对的** ⇒ 「米白半圆」的病因**只有**「白填充在深底上不透明」，
+  ⛔ 不是形状错。
+
+> ⚠️ **本轮把层带结构改了**（水层进中景带、层次顺序照抄上游）⇒ **构图有变**
+> ⇒ 出包前先给所有者看离线预览图确认，再打包。
+
 #### 八、文件清单
 
 - 新增：`app/src/main/java/com/nasmusic/tv/visualizer/qianli/`（含 `port/`）、
@@ -18593,5 +18627,15 @@ GitHub runner 上这两样都不存在 ⇒ 公开构建与 CI 完全不受影响
   `app/src/main/java/com/nasmusic/tv/ui/components/VisualizerStage.kt`（上下键 / 上下滑 / Toast）、
   `app/src/test/java/com/nasmusic/tv/visualizer/qianli/QianliColorVersionSwitchTest.kt`（**新建**，13 例）、
   `app/src/test/java/com/nasmusic/tv/visualizer/qianli/QianliScenePreviewTest.kt`（预览 harness 重写）
+- 第四轮改（真机四条，2026-11-05）：
+  `app/src/main/java/com/nasmusic/tv/visualizer/renderers/QianliScrollRenderer.kt`
+  （山脚/近景白底块染色、`fitContentX` 内容范围实测、水层并入中景带 + 共用映射、
+  层次顺序改成水→远景→中景→近景、`GateChunk` 增 `minX/maxX`）、
+  `app/src/main/java/com/nasmusic/tv/visualizer/qianli/port/ShanShuiArch.kt`（**补移植上游 `arch01`**）、
+  `app/src/main/java/com/nasmusic/tv/visualizer/qianli/port/ShanShui.kt`（`rock` 形状对照上游修正）、
+  `app/src/main/java/com/nasmusic/tv/visualizer/qianli/port/ShanShuiPlanner.kt`（`planmtx` 改全局）、
+  `app/src/test/java/com/nasmusic/tv/visualizer/qianli/QianliContentRangeGateTest.kt`（**新建**，内容范围门禁）、
+  `app/src/test/java/com/nasmusic/tv/visualizer/qianli/QianliScenePreviewTest.kt`（层序与映射跟随生产）、
+  `app/src/test/java/com/nasmusic/tv/visualizer/qianli/ShanShuiPortGateTest.kt`（追加 arch01 / planmtx 断言）
 - 文档：`CHANGELOG.md`、`docs/technical-overview.md`（本节）、
   `docs/visualizer-effects-list.md`（效果清单）
