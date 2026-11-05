@@ -571,6 +571,32 @@ class QianliUpstreamRenderer : RendererFx() {
      */
     private fun scrollSpeedWorld(): Double = SCROLL_SPEED_WORLD
 
+    /**
+     * 门禁缝：把**完整一帧**（纸底 + 场景）画进给定的 [Canvas]。
+     *
+     * ⛔ 只给**门禁 / 预览**用（Robolectric 的 **NATIVE 图形模式** ⇒ 走**真正的 Android Canvas / Skia**）。
+     *
+     * ⇒ 与生产的差别只有「一次画完」vs「分块烘焙 + blit」；
+     *    **变换、颜色、Paint、Path、纸纹 Shader 全是生产同一套** ⇒ 可用来做设备级画面校验。
+     *
+     * @param x0World 可见世界区间起点（世界单位）。
+     * @param x1World 可见世界区间终点（世界单位）。
+     */
+    internal fun gateDrawFrameForGate(
+        cv: Canvas,
+        w: Int,
+        h: Int,
+        x0World: Double,
+        x1World: Double,
+    ) {
+        if (w != laidW || h != laidH) rebuild(w, h)
+        drawPaper(cv, w.toFloat(), h.toFloat())
+        ensureStateAnchor(x0World)
+        loadRange(x0World, x1World)
+        // 屏幕 x = (worldX − cursxWorld)·scale ⇒ 原点即 cursxWorld·scale（与生产的 offsetPx 同口径）。
+        paintItems(cv, buildItems(state.canv, cursxWorld * scale))
+    }
+
     // ─────────────────────── 门禁缝（仅观测，不改行为） ───────────────────────
 
     /** 世界 → 屏幕的**均匀**变换（门禁用它验「x/y 同一缩放」）。 */
