@@ -284,6 +284,19 @@ android {
         }
         debug {
             isDebuggable = true
+            // ⭐ **可选的包名后缀**（默认**关闭** ⇒ 行为与以往完全一致）。
+            //
+            // 用途：真机 instrumented 测试（`connectedDebugAndroidTest`）需要装一个 **debug 签名**的
+            // App 到设备上；若设备上已装**同包名**的 **release 签名**包 ⇒ 签名不一致 ⇒
+            // `INSTALL_FAILED_UPDATE_INCOMPATIBLE` ⇒ 而 UTP 的安装流程会**先卸载旧包** ⇒
+            // **App 数据（服务器连接与凭据）会丢**。
+            // ⇒ 加后缀让两包**并存**（`com.nasmusic.tv.debug` vs `com.nasmusic.tv`）⇒ 不卸载、不丢数据。
+            //
+            // 用法：`./gradlew.bat connectedDebugAndroidTest "-Pe50.debugSuffix=true" …`
+            // ⛔ 该开关**不得**改成默认开启（会让所有 debug 安装都变成 `com.nasmusic.tv.debug`）。
+            if (providers.gradleProperty("e50.debugSuffix").isPresent) {
+                applicationIdSuffix = ".debug"
+            }
         }
     }
 
