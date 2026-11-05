@@ -162,6 +162,12 @@ object ShanShui {
         whiteBg.addAll(offList(ptlist[0], xoff, yoff))
         whiteBg.add(floatArrayOf(xoff.toFloat(), (yoff + 10.0 * 4.0).toFloat()))
         canv.add(ShanShuiContour(whiteBg, whiteFill, null, 0.0))
+        // 山体底缘（**派生数据**：上游没有这个图元；⛔ 不改上游语义，上面那条三角形白底照抄保留）。
+        // 上游的 WHITE BG 在纸底上**隐形**（`:4028` 整幅 SVG `mix-blend-mode:multiply`
+        // ⇒ 纯白 × 米白纸底 = 纸底）⇒ 上游视觉上的「山体下缘」其实是**这条不规则的底行折线**。
+        // E50 把山体涂成实色（青绿）后，白底的下缘会露出来 ⇒ 渲染器按这条底缘着色 ⇒ 无硬直边。
+        val bodyBase = offList(ptlist[ptlist.size - 1], xoff, yoff)
+        canv.add(ShanShuiContour(bodyBase, null, null, 0.0, SHANSHUI_TAG_BODY_BASE))
         // OUTLINE（上游 `:1882-1888`：stroke(ptlist[0], {col:"rgba(100,100,100,0.3)", noi:1, wid:3})）
         // ⇒ stroke 内部 poly(vtxlist, {fil:col, str:col, wid:out=1})；笔宽 3 已烘进 ribbon 几何
         canv.add(

@@ -19,4 +19,22 @@ data class ShanShuiContour(
     val stroke: ShanShuiColor?,
     /** 描边宽度（上游 `poly` 的 `wid`）。 */
     val width: Double,
+    /**
+     * **派生数据标记**（上游没有这个概念，默认 `null` = 上游原生图元）。
+     *
+     * 目前只有 [SHANSHUI_TAG_BODY_BASE] 一个取值。
+     */
+    val tag: String? = null,
 )
+
+/**
+ * 派生数据标记：**山体底缘折线**（`Mount.mountain` 的点阵末行）。
+ *
+ * ⛔ **上游没有这个图元** —— 它是给渲染器用的派生数据（上游那条三角形白底照抄保留，语义未动）。
+ *
+ * 为什么需要它：上游的 WHITE BG（`index.html:1875-1881`）在纸底上**隐形**
+ * （`:4028` 整幅 SVG `mix-blend-mode:multiply` ⇒ 纯白 × 米白纸底 = 纸底），
+ * 所以上游视觉上的「山体下缘」其实是**这条不规则的底行折线**。
+ * E50 把山体涂成实色（青绿）后，白底的下缘就会露出来 ⇒ 必须按真实底缘着色，才不会有硬直边。
+ */
+const val SHANSHUI_TAG_BODY_BASE = "bodyBase"

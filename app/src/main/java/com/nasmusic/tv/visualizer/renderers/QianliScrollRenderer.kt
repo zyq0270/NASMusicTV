@@ -22,6 +22,7 @@ import com.nasmusic.tv.visualizer.qianli.LayerSpec
 import com.nasmusic.tv.visualizer.qianli.QianliBlockPool
 import com.nasmusic.tv.visualizer.qianli.QianliColorTable
 import com.nasmusic.tv.visualizer.qianli.QianliSeal
+import com.nasmusic.tv.visualizer.qianli.port.SHANSHUI_TAG_BODY_BASE
 import com.nasmusic.tv.visualizer.qianli.port.ShanShui
 import com.nasmusic.tv.visualizer.qianli.port.ShanShuiColor
 import com.nasmusic.tv.visualizer.qianli.port.ShanShuiContour
@@ -475,6 +476,13 @@ class QianliScrollRenderer : RendererFx() {
     internal fun bodyFillIndexForGate(contours: List<ShanShuiContour>): Int = bodyFillIndex(contours)
 
     /**
+     * 门禁缝：山体实色填充在底缘之下再下延的**世界单位**（[BODY_EXTEND_WORLD]）。
+     *
+     * ⛔ 离线预览必须读这里 ⇒ 预览画出来的山脚与生产一致（不复制常量 ⇒ 不会漂移）。
+     */
+    internal fun bodyExtendWorldForGate(): Double = BODY_EXTEND_WORLD
+
+    /**
      * 门禁缝：山脊描边轮廓的下标（轮廓光 L2′ 描的那一条）。
      *
      * ⛔ 仅门禁用，不改行为：只转调 [ridgeIndex]，⛔ 不复制判定逻辑。
@@ -511,12 +519,8 @@ class QianliScrollRenderer : RendererFx() {
      */
     internal fun gateBakeMidBlockForGate(x0: Double, blockW: Int, blockH: Int): GateMidBlock {
         val world = ScrollWorld(TAG_MOUNT, PLAN_AHEAD_MID, ::prepareMid)
-        val map = BandMap(
-            bandHeightPx = bandHeight(MID_Y0, MID_Y1, blockH),
-            refBaseY = MID_REF_BASE_Y,
-            baseSpread = MID_BASE_SPREAD,
-            heightScale = MID_HEIGHT_SCALE,
-        )
+        // ⛔ 走**门禁缝**那份映射（与生产逐字相同 ⇒ 含带底余量）⇒ 门禁不会与生产分叉。
+        val map = bandMapForGate(LAYER_MID, blockH)
         val bmp = bakeBlock(world, x0, map, Kind.MOUNTAIN, blockW, blockH, LAYER_MID)
         return GateMidBlock(bmp, world.specs.map { it.contours })
     }
@@ -874,6 +878,26 @@ class QianliScrollRenderer : RendererFx() {
                 } else {
                     null
                 }
+                // 山体实色填充的**填充多边形**：脊线 + 底缘折线（不规则）⇒ 下缘不是直线。
+                // ⛔ 上游那条「脊线 + 远点」的三角形白底在纸底上隐形（multiply）⇒ 上游视觉上的
+                // 山体下缘其实是底行折线；我们涂实色后必须按真实底缘着色。
+                val baseIdx = contours.indexOfFirst { it.tag == SHANSHUI_TAG_BODY_BASE }
+                val bodyPoly: List<ShanShuiPath.Point>? = if (baseIdx >= 0 && bodyIdx >= 0) {
+                    val ridge = contours[bodyIdx].pts.dropLast(1)          // 去掉上游那个远点 (0, reso[0]*4)
+                    val baseYs = contours[baseIdx].pts.map { it[1].toDouble() }   // 底缘的 y 序列（噪声形状）
+                    if (ridge.isNotEmpty() && baseYs.isNotEmpty()) {
+                        val n = ridge.size
+                        val lower = ArrayList<ShanShuiPath.Point>(n)       // 下缘：脊线的 x 配底缘的 y，再垂直下延
+                        for (i in 0 until n) {
+                            val by = baseYs[(i * baseYs.size) / n] + BODY_EXTEND_WORLD
+                            lower.add(floatArrayOf(ridge[i][0], by.toFloat()))
+                        }
+                        ArrayList<ShanShuiPath.Point>(ridge.size + lower.size).apply {
+                            addAll(ridge)                                   // 脊线正序
+                            for (i in lower.indices.reversed()) add(lower[i]) // 下缘逆序
+                        }
+                    } else null
+                } else null
                 for (i in contours.indices) {
                     val c = contours[i]
                     val f = c.fill ?: continue
@@ -884,7 +908,15 @@ class QianliScrollRenderer : RendererFx() {
                         // 远景整条带（含上游三角剖分的 494 个三角形）⇒ 石绿族。
                         layerId == LAYER_FAR -> distantFillColor(f)
                         // 山体白底 ⇒ 坡面色（按坡面行号）。
-                        i == bodyIdx -> fillColor(rowJOf(spec, c, i, contours.size, kind), f)
+                        i == bodyIdx -> {
+                            if (bodyPoly != null) {
+                                // ⭐ 改画「山体自身轮廓」（脊线 + 不规则底缘）⇒ 下缘没有硬直边。
+                                //   ⛔ 绘制顺序不变：仍在 bodyIdx 这一轮里画（层叠关系不变）。
+                                buildPath(bodyPoly, x0, spec, map)
+                                path.close()
+                            }
+                            fillColor(rowJOf(spec, c, i, contours.size, kind), f)
+                        }
                         // 其它的白**底块**（无描边 + 笔宽 0），分三层处理：
                         //
                         // ⭐⭐ **上游的白填充全是「隐形」的**（上游 `:4028` 整幅 SVG
@@ -1407,6 +1439,16 @@ class QianliScrollRenderer : RendererFx() {
         val refBaseY: Double,
         val baseSpread: Double,
         val heightScale: Double,
+        /**
+         * **带底余量**（px）：基线最多只能落到「带底 − 余量」。
+         *
+         * 为什么要它：山脚线若正好压在带底上，层带位图的**下边界**会把山体**齐刷刷切一刀**
+         * ⇒ 画面上出现一条贯穿全宽的水平直边（真机：fracY≈0.552）。
+         * 留出余量 ⇒ 山脚浮在带内 ⇒ 切边落在**山体内部**（被山体本色盖住）而不是边界上。
+         *
+         * ⛔ 只给中景层用（其它层默认 0 ⇒ 行为不变）。
+         */
+        val reservePx: Double = 0.0,
     ) {
         /**
          * 换一条带（带顶/带底）但**其余参数不变**的副本。
@@ -1415,13 +1457,23 @@ class QianliScrollRenderer : RendererFx() {
          */
         fun withBand(y0: Float, y1: Float, h: Int): BandMap = BandMap(
             maxOf(1f, (y1 - y0) * h),
-            refBaseY, baseSpread, heightScale,
+            refBaseY, baseSpread, heightScale, reservePx,
         )
 
         fun bandY(chunkBaseY: Double, worldY: Double): Float {
             // 基线：chunk 的世界 y 越大（越靠下/越近）⇒ 脚落得越低（局部 y 越大）。
             // ⚠️ 这里必须是 `+`：`chunkBaseY − refBaseY` 与世界 y 同向 ⇒ 局部 y 也要同向。
-            val base = bandHeightPx + (chunkBaseY - refBaseY) * baseSpread
+            //
+            // ⭐ **基线锚在「带底 − 预留空间」处，不是带底本身**（2026-11-05 第五轮返工）：
+            //   山体实色填充会从山脚线再往下伸（底缘折线 + `BODY_EXTEND_WORLD`）⇒ 若基线
+            //   正好压在带底上，那一截会被层带位图的**下边界齐刷刷切一刀** ⇒ 画面上出现
+            //   一条贯穿全宽的水平直边（真机实测：fracY 0.552，边像素 788，第二名仅 317）。
+            //
+            // ⛔ **绝不能把基线钳到同一个值**（曾经的写法 `min(带高−余量, 带高+Δ·spread)`）：
+            //   未钳位值恒大于钳位值 ⇒ 所有 chunk 的基线被压成**同一条线** ⇒ 山脚排成直线
+            //   ⇒ 问题从「被切一刀」变成「排成一把尺子」（实测：映射基线极差 = 0.0 px）。
+            //   ⇒ 正确做法：**锚点 + 错落**：锚点固定，Δ 按 `baseSpread` 真实错落。
+            val base = bandHeightPx - reservePx + (chunkBaseY - refBaseY) * baseSpread
             return (base - (chunkBaseY - worldY) * heightScale).toFloat()
         }
     }
@@ -1439,6 +1491,8 @@ class QianliScrollRenderer : RendererFx() {
         LAYER_MID, LAYER_GLINT -> BandMap(
             bandHeight(MID_Y0, MID_Y1, h),
             MID_REF_BASE_Y, MID_BASE_SPREAD, MID_HEIGHT_SCALE,
+            // ⛔ 中景带留「带底余量」⇒ 山脚线不会压在层带位图的下边界上（否则被齐刷刷切一刀）。
+            MID_RESERVE_FRAC * h,
         )
         LAYER_NEAR -> BandMap(
             bandHeight(NEAR_Y0, NEAR_Y1, h),
@@ -1447,8 +1501,14 @@ class QianliScrollRenderer : RendererFx() {
         LAYER_WATER, LAYER_WATER_HI -> BandMap(
             // ⭐ 水层与中景层**共用同一套高度比例**（2026-11-05，所有者裁定「忠于上游」）：
             // 上游的水挂在各自 mount 的基线上、与山体同一套世界 y 空间 ⇒ 同一比例。
+            //
+            // ⚠️⚠️ **基线错落也必须共用同一套**（2026-11-05 第五轮返工）：
+            //   水与山脚用**不同的 `baseSpread`** ⇒ 同一座山的水被映射到别的高度
+            //   ⇒ 「水挂山脚」直接失效（水会飘在山脚之上/之下）。
+            //   ⇒ 水层与中景层必须用**同一个 `baseSpread` + 同一个 `reservePx`**。
             bandHeight(MID_Y0, MID_Y1, h),
-            MID_REF_BASE_Y, WATER_BASE_SPREAD, MID_HEIGHT_SCALE,
+            MID_REF_BASE_Y, MID_BASE_SPREAD, MID_HEIGHT_SCALE,
+            MID_RESERVE_FRAC * h,
         )
         else -> error("未知层号：$layerId")
     }
@@ -1577,10 +1637,50 @@ class QianliScrollRenderer : RendererFx() {
         //   符合上游的远近次序 ⇒ 只在两座中景山之间露出一线远山。
         const val FAR_Y0 = 0.34f
         const val FAR_Y1 = 0.50f
-        const val MID_Y0 = 0.20f
-        const val MID_Y1 = 0.55f
+        /**
+         * 中景带**上沿**：0.20 → **0.18**（2026-11-05 第五轮返工）。
+         *
+         * 为什么上移：基线锚点下移后（见 [MID_RESERVE_FRAC]），最高的山脊要留在带内
+         * ⇒ 带顶必须留出 `最高山脊（≈ 283px）` 的余量，否则山峰会**被带顶齐刷刷切一刀**
+         * （换一条水平直边）。⇒ 上移 2%H（≈ 22px）⇒ 与 [MID_BASE_SPREAD] 的错落一起，
+         * 带高足够装下「山脊 → 山脚 → 填充下延」的全跨度。
+         */
+        const val MID_Y0 = 0.18f
+        /**
+         * 中景带下沿：0.55 → **0.61**（2026-11-05，方案 A + 第五轮返工）。
+         *
+         * 为什么下移：带底要装下**错落后的山脚**（`Δ×[MID_BASE_SPREAD]` ≈ 96px）
+         * **加上**填充的下延（底缘自身 ≈ 19px + [BODY_EXTEND_WORLD] 9px）
+         * ⇒ 否则山脚会被层带位图的**下边界齐刷刷切一刀**（真机：fracY 0.552 的水平直边）。
+         * ⚠️ 近景带下沿 [NEAR_Y0] = 0.66 不动 ⇒ 两带仍不重叠。
+         */
+        const val MID_Y1 = 0.61f
         const val NEAR_Y0 = 0.66f
         const val NEAR_Y1 = 0.88f
+
+        /**
+         * 山体实色填充在底缘之下再下延的**世界单位**。
+         *
+         * 为什么：山体改成按**自身轮廓**（脊线 + 底缘折线）填充后，底缘不再有那块
+         * 三角形白底的 40 单位深度 ⇒ 水簇的顶部会从山脚里露出来
+         * ⇒ 填充在底缘之下再多压 14 个世界单位，把水盖住。
+         * （上游那条三角形只在山体**中段**有 40 单位深；我们这条是**全宽** ⇒ 14 单位足够。）
+         */
+        const val BODY_EXTEND_WORLD = 14.0
+
+        /**
+         * 中景层的「带底余量」（占屏高的比例）—— **基线锚点离带底有多远**。
+         *
+         * 为什么要有：山脚线若正好压在带底上，层带位图的**下边界**会把山体**齐刷刷切一刀**
+         * ⇒ 画面上出现一条贯穿全宽的水平直边（真机实测：fracY 0.552，边像素 788，第二名仅 317）。
+         *
+         * ⛔ **它只是锚点偏移，不是钳位**（曾经的写法 `min(带底−余量, 带底+Δ·spread)` 把
+         * 所有 chunk 的基线压成同一个值 ⇒ 山脚排成直线、映射基线极差 = 0.0 px ⇒ 白改）。
+         *
+         * 70px（@1080p）覆盖：错落后最低的山脚（+96px）到带底的余量、底缘自身深度（≈ 19px）
+         * 与下延 [BODY_EXTEND_WORLD]（9px）。
+         */
+        const val MID_RESERVE_FRAC = 0.065
 
         /**
          * ⛔ **原「江面带」0.62–1.00H 已退役**（2026-11-05，所有者裁定「忠于上游：
@@ -1678,16 +1778,15 @@ class QianliScrollRenderer : RendererFx() {
         const val WATER_BUNDLE_H = 52.0
 
         /**
-         * 水簇基线在带内的**散布系数**（px / 世界单位）。
+         * ⛔ **已删除 `WATER_BASE_SPREAD`**（2026-11-05 第五轮返工）。
          *
-         * ⚠️ **不能直接用中景的 `MID_BASE_SPREAD = 0.12`**：那个值把山脚基线压成 28 px
-         * （层峦叠嶂的构图需要）⇒ 水簇会**全部挤在同一高度**、读作一条横带。
+         * 为什么删：它让**水层与中景层用不同的基线错落系数**，而两层**共用同一张映射**
+         * ⇒ 同一座山的水被映射到别的高度 ⇒ **「水挂山脚」直接失效**（水会飘在山脚之上/之下）。
+         * ⇒ 水层现在**直接用 [MID_BASE_SPREAD]**（见 `bandMapForGate` 的 `LAYER_WATER` 分支）。
          *
-         * ⭐ 上游实测（参考图 + node 实跑）：水簇的基线散布在 **265 个世界单位**上
-         * （世界 y ∈ [281, 546]，= 场景下 40%）⇒ 这里取 **0.45**，
-         * 让水散布在山脚一带（≈ 0.44H–0.55H）而不是一条直线，也不是飘到天上。
+         * 旧值 0.45 的实测依据仍然有效、已并入 [MID_BASE_SPREAD] 的说明：
+         * 上游实测水簇基线散布在 **265 个世界单位**上（世界 y ∈ [281, 546]，= 场景下 40%）。
          */
-        const val WATER_BASE_SPREAD = 0.45
 
         /**
          * 内容 x 范围的**余量**（世界单位）—— [fitContentX] 实测几何后留的保险。
@@ -1699,7 +1798,23 @@ class QianliScrollRenderer : RendererFx() {
         const val FAR_BASE_SPREAD = 0.20
         const val FAR_HEIGHT_SCALE = 0.47
         const val MID_REF_BASE_Y = 540.0
-        const val MID_BASE_SPREAD = 0.12
+
+        /**
+         * 中景层**基线错落系数**（px / 世界单位）—— 山脚在带内的高低错落幅度。
+         *
+         * ⭐ **中景层与水层必须共用同一个值**（水挂在山脚上 ⇒ 两者必须一起错落）。
+         *
+         * 实测（本轮）：中景 chunk 的**世界基线**分布在 **[300, 600]**（极差 300 世界单位）
+         * ⇒ 上游的山脚在世界里**本来就高低错落**（上游 `mount` 的 y ∈ [300, 780]，
+         * 画布高 1000+ 单位 ⇒ 错落达画面高度的 ~1/3）。
+         *
+         * ⚠️ **旧值 0.12 把 300 个世界单位压成 36 px** ⇒ 山脚几乎排成一条直线
+         * ⇒ 加上「带底余量」的钳位后**极差直接归零**（实测 0.0 px）⇒ 真机上就是一把尺子。
+         * ⇒ 现在取 **0.40**：300 × 0.40 = **120 px** 的错落 ⇒ 山脚线自然起伏。
+         *
+         * 约束（层带高度必须装得下）：带高 ≥ `Δ范围 × 本系数 + 最高山脊 + 填充下延`。
+         */
+        const val MID_BASE_SPREAD = 0.40
         const val MID_HEIGHT_SCALE = 0.643
         const val NEAR_REF_BASE_Y = 650.0
         const val NEAR_BASE_SPREAD = 0.15

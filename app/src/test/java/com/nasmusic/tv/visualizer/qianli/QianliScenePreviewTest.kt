@@ -1,8 +1,10 @@
 package com.nasmusic.tv.visualizer.qianli
 
+import com.nasmusic.tv.visualizer.qianli.port.SHANSHUI_TAG_BODY_BASE
 import com.nasmusic.tv.visualizer.qianli.port.ShanShuiColor
 import com.nasmusic.tv.visualizer.qianli.port.ShanShuiContour
 import com.nasmusic.tv.visualizer.qianli.port.ShanShuiNoise
+import com.nasmusic.tv.visualizer.qianli.port.ShanShuiPath
 import com.nasmusic.tv.visualizer.qianli.port.ShanShuiPrng
 import com.nasmusic.tv.visualizer.renderers.QianliScrollRenderer
 import org.junit.Assert.assertTrue
@@ -101,8 +103,12 @@ class QianliScenePreviewTest {
             for (plan in layers(renderer)) {
                 val top = (plan.top * H).toFloat()
                 for (chunk in renderer.gateChunksForGate(plan.id)) {
-                    for (c in chunk.contours) {
-                        drawContour(canvas, c, chunk.baseY, plan.map, fixed, top, plan.alphaK)
+                    val body = bodyFillOf(renderer, chunk.contours)
+                    chunk.contours.forEachIndexed { i, c ->
+                        drawContour(
+                            canvas, c, chunk.baseY, plan.map, fixed, top, plan.alphaK,
+                            if (i == body.first) body.second else null,
+                        )
                     }
                 }
             }
@@ -118,14 +124,51 @@ class QianliScenePreviewTest {
         withSeed {
             val top = (plan.top * H).toFloat()
             for (chunk in renderer.gateChunksForGate(plan.id)) {
-                for (c in chunk.contours) {
-                    drawContour(canvas, c, chunk.baseY, plan.map, true, top, plan.alphaK)
+                val body = bodyFillOf(renderer, chunk.contours)
+                chunk.contours.forEachIndexed { i, c ->
+                    drawContour(
+                        canvas, c, chunk.baseY, plan.map, true, top, plan.alphaK,
+                        if (i == body.first) body.second else null,
+                    )
                 }
             }
         }
         val out = File(repoRoot(), "output/e50_layer_${plan.name}.png")
         canvas.writePng(out)
         return out
+    }
+
+    /**
+     * 山体实色填充的**多边形**（与渲染器 [QianliScrollRenderer] 同款）：
+     * 脊线 + 底缘折线（不规则）+ 向下延伸 [QianliScrollRenderer.bodyExtendWorldForGate]。
+     *
+     * ⛔ 为什么要在这里复刻：上游那条「脊线 + 远点」的三角形白底**在生产里已经不是可见色块**
+     *   （渲染器改画山体自身轮廓）⇒ 预览若还画三角形 ⇒ 预览与生产分叉，
+     *   而且会把「山脚一排白三角」当成构图问题 ⇒ 必须一起改。
+     *
+     * @return （山体白底的下标, 填充多边形）；没有底缘派生数据时多边形为 null（画原样）。
+     */
+    private fun bodyFillOf(
+        renderer: QianliScrollRenderer,
+        contours: List<ShanShuiContour>,
+    ): Pair<Int, List<ShanShuiPath.Point>?> {
+        val bodyIdx = renderer.bodyFillIndexForGate(contours)
+        val baseIdx = contours.indexOfFirst { it.tag == SHANSHUI_TAG_BODY_BASE }
+        if (baseIdx < 0 || bodyIdx < 0) return bodyIdx to null
+        val ridge = contours[bodyIdx].pts.dropLast(1)     // 去掉上游那个远点 (0, reso[0]*4)
+        val baseYs = contours[baseIdx].pts.map { it[1].toDouble() }
+        if (ridge.isEmpty() || baseYs.isEmpty()) return bodyIdx to null
+        val n = ridge.size
+        val lower = ArrayList<ShanShuiPath.Point>(n)
+        for (i in 0 until n) {
+            val by = baseYs[(i * baseYs.size) / n] + renderer.bodyExtendWorldForGate()
+            lower.add(floatArrayOf(ridge[i][0], by.toFloat()))
+        }
+        val poly = ArrayList<ShanShuiPath.Point>(n * 2).apply {
+            addAll(ridge)
+            for (i in lower.indices.reversed()) add(lower[i])
+        }
+        return bodyIdx to poly
     }
 
     private fun renderComposite(renderer: QianliScrollRenderer, v: Compose): File {
@@ -135,8 +178,12 @@ class QianliScenePreviewTest {
             for (plan in compositeLayers(renderer, v)) {
                 val top = (plan.top * H).toFloat()
                 for (chunk in renderer.gateChunksForGate(plan.id)) {
-                    for (c in chunk.contours) {
-                        drawContour(canvas, c, chunk.baseY, plan.map, true, top, plan.alphaK)
+                    val body = bodyFillOf(renderer, chunk.contours)
+                    chunk.contours.forEachIndexed { i, c ->
+                        drawContour(
+                            canvas, c, chunk.baseY, plan.map, true, top, plan.alphaK,
+                            if (i == body.first) body.second else null,
+                        )
                     }
                 }
             }
@@ -201,11 +248,13 @@ class QianliScenePreviewTest {
         fixed: Boolean,
         bandTop: Float,
         alphaK: Float,
+        bodyPoly: List<ShanShuiPath.Point>? = null,
     ) {
         if (c.pts.isEmpty()) return
-        val flat = FloatArray(c.pts.size * 2)
-        for (i in c.pts.indices) {
-            val pt = c.pts[i]
+        val src = bodyPoly ?: c.pts
+        val flat = FloatArray(src.size * 2)
+        for (i in src.indices) {
+            val pt = src[i]
             flat[i * 2] = pt[0]
             flat[i * 2 + 1] = bandY(map, chunkBaseY, pt[1].toDouble(), fixed) + bandTop
         }
