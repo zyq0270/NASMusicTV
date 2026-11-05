@@ -19074,6 +19074,44 @@ InputManager-JNI: Input channel object '… AdbInstallActivity (client)' was dis
 > ⇒ 已把「debug 变体加包名后缀」固化为**默认关闭的构建开关** `-Pe50.debugSuffix=true`，
 > 从此两包**并存** ⇒ 再也不会误卸载用户的数据。
 
+###### 7.16.7 ✅ **真机 instrumented 验证已通过**（2026-11-06 07:37）
+
+在**真机**（Redmi K70 / `22081212C`，Android 14 / API 34）上用 `am instrument` 跑
+`QianliUpstreamDeviceRenderTest` ⇒ **真 Skia、真 `BitmapShader` 纸纹、真非凸多边形填充**：
+
+```
+INSTRUMENTATION_STATUS: test=renderUpstreamPathOnDevice
+INSTRUMENTATION_STATUS_CODE: 0
+Time: 3.023
+OK (1 test)
+```
+
+渲染产物 `output/e50_device_render.png`（1920×1080）经 `scripts/e50_phone_look_check.py` 判定
+**6 项全 PASS（`LOOK_EXIT=0`）**：
+
+| 判据 | 上游参考图 | **真机渲染** | 判定 |
+|---|---|---|---|
+| 纸底基准色 | (245, 232, 208) | **(239, 227, 203)** | ✅ 暖米白绢色（`r>g>b`） |
+| 纸底占比 | 0.731 | **0.682** | ✅ ≥ 0.45（线描为主，不是色块堆） |
+| 墨占比 | 0.269 | **0.318** | ✅ 接近上游 |
+| 墨平均灰度 | 165.1 | **192.1** | ✅ ≤ 215（浅灰墨，不是纯黑） |
+| 彩色像素占比 | 0.0074 | **0.0198** | ✅ ≤ 0.05（纯灰阶 + 暖调纸底） |
+| 顶部 0–0.25 墨占比 | 0.0347 | **0.0817** | ✅ > 0.005（画面上部要有山） |
+| 底部 0.85–1.0 墨占比 | 0.2257 | **0.4048** | ✅ > 0.05（近景岸要有密纹） |
+
+画面内容核对（`output/e50_device_render.png`）：**绢白纸底 + 远山浅灰实块 + 皴笔线描山体 +
+浓墨树 + 山腰多层楼阁 + 茅屋 + 山石弧线 + 山脚水波纹** ⇒ 与上游同形态。
+
+> ⓘ **纵向分布的差异来自画幅比**：上游参考图 3000×800（3.75:1），本仓 16:9 全屏
+> （世界 y ∈ [0, 700.5] 铺满屏高）⇒ 纵向被放大 1.35× ⇒ 上部墨更多、底部更重。
+> ⇒ 属**全屏适配的必然结果**，不是移植缺陷。
+
+> ⭐ **这条路不需要解锁手机**：`am instrument` 在 App 进程内渲染 ⇒ 与屏幕锁不锁无关
+> ⇒ 设备级画面验证不再依赖「用户在场解锁手机」。
+> ⚠️ 但**安装 APK 仍需解锁**（MIUI 的确认界面在锁屏下被立即销毁 ⇒ 见 §7.16.6）——
+> 且本次已**自动点掉** MIUI 的「继续安装」（`install_tap.py` 思路：uiautomator dump 抓到
+> `com.miui.securitycenter:id/alertTitle`「USB安装提示」⇒ 点 `android:id/button2`「继续安装」）。
+
 #### 八、文件清单
 
 - 新增：`app/src/main/java/com/nasmusic/tv/visualizer/qianli/`（含 `port/`）、
