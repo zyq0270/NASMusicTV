@@ -50,7 +50,11 @@ class QianliUpstreamNativeLookTest {
             org.junit.Assume.assumeTrue("Robolectric NATIVE 运行时可用", nativeRuntimeAvailable())
             renderAndAssert()
         } catch (e: IllegalArgumentException) {
-            if (e.message != null && e.message.contains("robolectric-nativeruntime")) {
+            // ⚠️ ⛔ **不能直接写 `e.message.contains(...)`**：`Throwable.message` 是 **open / 自定义 getter**
+            //   ⇒ Kotlin **无法 smart cast** ⇒ 编译报「Smart cast to 'CharSequence' is impossible」。
+            //   ⇒ 必须先把值取到局部变量（`val msg = e.message`）再判断。
+            val msg = e.message
+            if (msg != null && msg.contains("robolectric-nativeruntime")) {
                 org.junit.Assume.assumeNoException("Robolectric NATIVE 原生运行时不可用（离线）⇒ 跳过", e)
             }
             throw e
@@ -88,17 +92,26 @@ class QianliUpstreamNativeLookTest {
         bmp.getPixels(px, 0, w, 0, 0, w, h)
 
         // ① 纸底基准色 = 四角 9×9 区域的主色（与 metrics 脚本同口径）
+        // ⚠️ ⛔ **坐标必须 clamp**（与真机 instrumented 版同一个坑）：
+        //    `cx` 最大 8 ⇒ `cx * (w/8)` 可达 `w` ⇒ `w - 1 - cx*(w/8)` 变成 **-1** ⇒ 越界。
+        val sx = (w / 8).coerceAtLeast(1)
+        val sy = (h / 8).coerceAtLeast(1)
         val corner = HashMap<Int, Int>()
         for (cx in 0 until 9) {
             for (cy in 0 until 9) {
-                for (cornerPt in listOf(
-                    intArrayOf(cx * (w / 8), cy * (h / 8)),
-                    intArrayOf(w - 1 - cx * (w / 8), cy * (h / 8)),
-                    intArrayOf(cx * (w / 8), h - 1 - cy * (h / 8)),
-                    intArrayOf(w - 1 - cx * (w / 8), h - 1 - cy * (h / 8)),
-                )) {
-                    val c = px[cornerPt[1] * w + cornerPt[0]]
-                    corner[c] = (corner[c] ?: 0) + 1
+                val xs = listOf(
+                    (cx * sx).coerceIn(0, w - 1),
+                    (w - 1 - cx * sx).coerceIn(0, w - 1),
+                )
+                val ys = listOf(
+                    (cy * sy).coerceIn(0, h - 1),
+                    (h - 1 - cy * sy).coerceIn(0, h - 1),
+                )
+                for (pxx in xs) {
+                    for (pyy in ys) {
+                        val c = px[pyy * w + pxx]
+                        corner[c] = (corner[c] ?: 0) + 1
+                    }
                 }
             }
         }

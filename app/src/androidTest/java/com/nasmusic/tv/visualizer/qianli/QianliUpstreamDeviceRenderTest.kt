@@ -57,17 +57,27 @@ class QianliUpstreamDeviceRenderTest {
         bmp.getPixels(px, 0, w, 0, 0, w, h)
 
         // ① 纸底基准色 = 四角 9×9 区域的主色（与 `scripts/e50_upstream_metrics.py` 同口径）
+        // ⚠️ ⛔ **坐标必须 clamp**（2026-11-06 真机实测踩到）：`cx` 最大 8 ⇒ `cx * (w/8)` 可达 `w`
+        //    ⇒ `w - 1 - cx*(w/8)` 变成 **-1** ⇒ `px[-w + ...]` 越界 ⇒
+        //    `ArrayIndexOutOfBoundsException: length=2073600; index=2073600`。
+        val sx = (w / 8).coerceAtLeast(1)
+        val sy = (h / 8).coerceAtLeast(1)
         val corner = HashMap<Int, Int>()
         for (cx in 0 until 9) {
             for (cy in 0 until 9) {
-                for (p in listOf(
-                    intArrayOf(cx * (w / 8), cy * (h / 8)),
-                    intArrayOf(w - 1 - cx * (w / 8), cy * (h / 8)),
-                    intArrayOf(cx * (w / 8), h - 1 - cy * (h / 8)),
-                    intArrayOf(w - 1 - cx * (w / 8), h - 1 - cy * (h / 8)),
-                )) {
-                    val c = px[p[1] * w + p[0]]
-                    corner[c] = (corner[c] ?: 0) + 1
+                val xs = listOf(
+                    (cx * sx).coerceIn(0, w - 1),
+                    (w - 1 - cx * sx).coerceIn(0, w - 1),
+                )
+                val ys = listOf(
+                    (cy * sy).coerceIn(0, h - 1),
+                    (h - 1 - cy * sy).coerceIn(0, h - 1),
+                )
+                for (pxx in xs) {
+                    for (pyy in ys) {
+                        val c = px[pyy * w + pxx]
+                        corner[c] = (corner[c] ?: 0) + 1
+                    }
                 }
             }
         }
