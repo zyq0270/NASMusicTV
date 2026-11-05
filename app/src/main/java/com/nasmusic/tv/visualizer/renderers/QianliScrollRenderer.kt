@@ -902,8 +902,11 @@ class QianliScrollRenderer : RendererFx() {
                         //    ⇒ 等价做法 = **透明填充（α=0）⇒ 只剩轮廓** ⇒ 不再是米白大饼。
                         // ③ 其它（叶簇 / 水花，带描边 ⇒ 不落这里）⇒ 绢白。
                         //
-                        // （叶簇 / 水花的 blob 轮廓带描边 ⇒ 不落这里 ⇒ 仍走绢白。）
-                        isWhiteish(f) && c.stroke == null && c.width == 0.0 -> when {
+                        // ⚠️ 判据只认「**无描边**的白填充」（⛔ **不再要求线宽 0**）：
+                        // 移植层 `ShanShui.kt:629` 的岸线 `grlist` 是 `width = 2.0`，
+                        // 用「线宽 0」判会把它漏掉 ⇒ 近景那条白岸线就一直是绢白色块。
+                        // （叶簇 / 水花的 blob **带描边** ⇒ 仍不落这里 ⇒ 仍是绢白 ✓。）
+                        isWhiteish(f) && c.stroke == null -> when {
                             layerId == LAYER_MID -> bodyCol ?: whiteFillColor(f)
                             layerId == LAYER_NEAR -> transparentFill(f)
                             else -> whiteFillColor(f)
