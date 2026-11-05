@@ -18398,7 +18398,7 @@ GitHub runner 上这两样都不存在 ⇒ 公开构建与 CI 完全不受影响
 
 | 位置 | 职责 |
 |---|---|
-| `app/src/main/java/com/nasmusic/tv/visualizer/qianli/port/` | **纯 JVM 移植层，零 Android 依赖**（`ShanShuiPrng` / `ShanShuiNoise` / `ShanShuiUtil` / `ShanShuiPath` / `ShanShuiBrush` / `ShanShuiTree` / `ShanShui` / `ShanShuiArch` / `ShanShuiPlanner` / `ShanShuiContour` / `ShanShuiColor`） |
+| `app/src/main/java/com/nasmusic/tv/visualizer/qianli/port/` | **纯 JVM 移植层，零 Android 依赖**（`ShanShuiPrng` / `ShanShuiNoise` / `ShanShuiUtil` / `ShanShuiPath` / `ShanShuiBrush` / `ShanShuiTree` / `ShanShui` / `ShanShuiArch` / `ShanShuiPoly` / `ShanShuiPlanner` / `ShanShuiContour` / `ShanShuiColor`） |
 | `app/src/main/java/com/nasmusic/tv/visualizer/qianli/` | 渲染器侧：**分块池** `QianliBlockPool` / **三版染色表** `QianliColorTable` / **印章烘焙** `QianliSeal` |
 | `app/src/main/java/com/nasmusic/tv/visualizer/renderers/QianliScrollRenderer.kt` | 渲染器：八层合成 + 音频包络 + 档位降级 |
 
@@ -18415,11 +18415,13 @@ GitHub runner 上这两样都不存在 ⇒ 公开构建与 CI 完全不受影响
 
 | 测试类 | 例数 | 覆盖判据 |
 |---|---|---|
-| `ShanShuiPortGateTest` | 18 | **G-PORT-1~8**：PRNG 黄金向量 / 噪声范围与可复现 / ribbon 对称性 / `cun` 返回语义 / mountain 点阵 / planner 最小间距与 y 升序 / 负向自证（Long 累加、漏预热、Horner 形式必红）/ 结构性保真断言 |
+| `ShanShuiPortGateTest` | 28 | **G-PORT-1~10**：PRNG 黄金向量（含 **Double 种子**）/ 噪声范围与可复现 / ribbon 对称性 / `cun` 返回语义 / mountain 点阵 / planner 最小间距与 y 升序 / **tree01 = 63 次抽取 / 11 条轮廓、tree03 = 504 次 / 73 条、皴线色逐条随机** / **远山三角剖分（条数 / 3 点 / 颜色 = `getCol(中点)` / PRNG=0 / 全局与逐块 FNV-1a 摘要逐位相等 / 退化楔形个数与位置）** / 负向自证（Long 累加、漏预热、Horner 形式必红）/ 结构性保真断言 |
 | `QianliScrollGateTest` | 10 | **G-SCROLL-1~5**：L2 与轮廓光同速 / 通道隔离（禁读 `frame.spectrum`）/ 静音帧 α 下限 / 有效速度 ≤ 基准 ×1.30 / 印章图层序在 grade 之后 |
 | `QianliBlockPoolTest` | 7 | **G-POOL-1~3**：块宽 ≥1.05×屏宽 / 待重生不阻塞绘制（画旧块不留白）/ 预算耗尽降级不画空白 |
 | `QianliSealGlyphGateTest` | 5 | **G6-①~③**：坐标零漂移与尺寸 / 白文落墨比 ∈[20%,72%] / 残缺面积 ≤2% |
 | `QianliScrollRendererTest` | 12 | **G-REND-1~6**：工厂能创建 / 主题自洽且可选 / 轮廓启发式命中 / 同块两次烘焙逐位一致 / 三版染色互异可用 / 后处理暗角字面量与关断 |
+| `QianliOrientationGateTest`（第二轮新增） | 2 | **G-REND-7**：**山脊映射后的层带局部 y 必须小于山脚**（含负向自证：峰脚对调必红）⇒ 这类符号错误**不许再靠真机肉眼才发现** |
+| `QianliScenePreviewTest`（第二轮新增） | 3 | **离线出图**：修复前 / 修复后 / 逐层 / 构图变体（诊断用，⛔ 不是判据） |
 
 每条判据都配**负向自证**（改坏 ⇒ 对应用例必红）。
 
@@ -18428,6 +18430,17 @@ GitHub runner 上这两样都不存在 ⇒ 公开构建与 CI 完全不受影响
 1. **青绿染色有 V-A / V-B / V-C 三版，当前采用 V-C**（`QianliScrollRenderer.COLOR_VERSION`），
    ⇒ **最终版本待所有者定案**（三版并排判读，一次定案）。
 2. **真机验收尚未进行** —— E50 方案 §十一 **U1–U13 未跑**，待所有者用真机判读。
+3. **远景块的绘制调用数 ×3**（第二轮新增，上游同值）：补上 `PolyTools.triangulate` 后，
+   远山 chunk 的轮廓数由 10 涨到 **504**（上游 `index.html:2419-2428` 同值）⇒
+   渲染器每块远山要画 504 次 fill + 504 次 stroke。
+   ⚠️ **G15（单块生成 ≤ `BLOCK_BUDGET_MS`）必须在真机复测** ——
+   本机 Robolectric 只有 LEGACY 图形模式（不栅格化）⇒ **本机测不出真实耗时**。
+   若真机出现卡顿：解法在**渲染侧**合批（不影响移植层的逐行一致性），⛔ 不要回退去改移植层。
+4. **上游那个「零面积三角形」被刻意保留**（第二轮新增）：上游 `distMount` 的 block 0
+   第 25 个三角形是 `[50,-46.9][0,0][0,0]`（面积 0）⇒ port 原样保留（门禁 G-PORT-10 钉住
+   「退化楔形的个数与位置」）⇒ 若要修，**必须先改上游**再同步，⛔ 不能单方面「顺手修正」。
+5. **`port` 坐标是 Float32，上游是 Float64**（D14）：本夹具下 0.1 精度坐标失配 0、色阶失配 0，
+   理论上仍有 ~1e-5 量级抖动 ⇒ 已在 `port/**` 文件头如实标注为已知偏差。
 
 > ⚠️ 早期落地稿的**两处笔误已于 2026-11-05 订正**（下列两条**不再是限制**）：
 > ① **编号**：`ordinalLabel` 由 `"43"` 改为 `"50"` —— E51 像素城市占 `"51"`、E52 旷野公路占 `"52"`，
@@ -18438,15 +18451,100 @@ GitHub runner 上这两样都不存在 ⇒ 公开构建与 CI 完全不受影响
 >    `supports()` 的 `ADV -> !needsParticleBudget || maxParticles > 0` 恒为真 ⇒ **三档均可选（含 LOW）**，
 >    与 E44 / E46–E49 同形制（早期误标 ULTRA 会把 LOW / MEDIUM 挡在门外）。
 
-#### 七、文件清单
+#### 七、真机首轮返工 + 逐行移植审计（2026-11-05 第二轮）
+
+##### 7.1 真机三条反馈的根因与修法
+
+真机（创维 API 22 基准机）装上首个 release 包后，反馈三条：**① 山体上下颠倒 ② 分成两行了 ③ 中间的波纹不知道是什么**。
+
+| # | 现象 | 根因 | 修法 |
+|---|---|---|---|
+| ① | 山体倒挂（像一片钟乳石） | **渲染器**的层带映射把「该点高出本 chunk 基线多少」这一项**加**上了：`(chunkBaseY − worldY)` 的语义是「高出多少」（≥ 0），而层带局部 y 是**画布 y（向下为正）** ⇒ 越高的点必须映射到**更小**的局部 y ⇒ 只能**减**。KDoc 原文与代码一致 ⇒ **公式本身写反** | `BandMap.bandY` 的高度项改**减号**；基线项同步改为 `+`（世界 y 越大 = 越靠下/越近 ⇒ 脚落得越低） |
+| ② | 分成两行了 | **远景带脚线落在 0.58H，比中景脚线（0.55H）还低** ⇒ 深度关系反了，那条远景带横贯画面中段，读成一道装饰边框。上游的次序是「远景脚线**恒高于**中景脚线」（`distmount` 的 y∈[230,280] vs `mount` 的 y∈[300,780]） | 远景带 `0.42–0.58H` → **`0.34–0.50H`** ⇒ 退到中景山体**后面**，只在两座中景山之间露出一线 |
+| ③ | 中间的波纹 | **不是 bug** —— 是**江水层**（上游 `water` 图元），层次为「中景山峦 → 远山 → 江水 → 近景坡石」 | 无需修；已在预览里逐层出图确认 |
+
+> ⚠️ **移植层本身是对的**：`mountain` 的点阵数学（上游 `:1822-1836`）与 port **逐字一致**
+> （`-y*h*p + hoff`、10 行 × 50 点、`p = 1 − j/reso`）⇒ 倒挂**不是**移植造成的，
+> 是渲染器把「世界 y（向上为负）」当成「画布 y（向下为正）」用。
+
+##### 7.2 逐行移植审计（26 条偏离 ⇒ 修掉 23 条）
+
+对 port 包 11 个文件 vs 上游 `index.html`（4,361 行）做**逐行核对**（表达式 / 常量 / **PRNG 抽取次数与次序** /
+上游「声明但从未使用」的形参 / KDoc 声明的上游行号是否属实）⇒ 出 **26 条偏离，其中 5 条致命**：
+
+| 严重度 | 内容 | 修法 |
+|---|---|---|
+| **致命** | **D5** 上游 `:2186` 的 `grlist1.reverse()` 是**原地改写** ⇒ `grlist1[0]` 取到的是**原末点**；port 取的是原首点 ⇒ 平山的白色填充多边形**不闭合**，描边多出一条横贯平山底部的长斜线 | 闭合点改取原末点 |
+| **致命** | **D3** 上游 `texture` 的默认 `col` 是**函数**（每行抽 1 次随机、α∈[0,0.3]）；port 用固定 α=0.5 ⇒ ①每座山少抽 200 次 PRNG ②**皴线明显偏黑** | 改成逐条求值的随机色；调用方可覆盖 |
+| **致命** | **D1/D2** 上游 tree01 有 **9** 个叶簇/棵、tree03 有 **72** 个/棵，port **整个未移植** ⇒ 树上无叶 + 每棵少抽 63 / 504 次 PRNG | 按上游补上叶簇 blob（含每 blob 7 次抽取） |
+| **致命** | **D4** 上游 arch02/03/04/rock 的第 3 实参是 mountain 自己的 `seed`（**不抽随机**）；port 抽了随机 ⇒ 每处多抽 1 次且值错配 | 改回上游的实参与求值序 |
+| **偏差** | **D7** `Math.min(size / 8, 10)` 的**整数**除法（50/8=6 ⇒ 6 次）vs 上游浮点（⇒ 7 次）；**D8/D9** 实参求值序；**D10/D11** `texture` 的自定义 `dis`/`col`；**D12** 植被色 α 的噪声调制；**D13** tree01 应发**两条**独立 poly | 逐条对齐 |
+| **记录不符** | **D16–D23**：8 个函数的 KDoc 写「照抄」但并非逐行移植；`ret` 形参「保留」与「已删」自相矛盾；上游行号错 6 行；`Math.random()` 计数 155→**154** | 全部改成事实（代码行为不动） |
+
+> ⭐ **两个连审计都算错的数**，用 **node 实跑上游 `index.html`** 校正：
+> tree01 是 **9 blob / 63 次抽取**（不是 5 / 35 —— 审计漏了 `i=6..9` 四档），
+> 且上游 `reso / 4` 是**浮点**除法（Kotlin 的 Int 除法会让它变成 77 次）。
+> 同类：`seg / 2 + 1` 的**浮点**循环边界（`3.5` ⇒ 4 次，不是 3 次）——
+> `distMount` 的块因此少一个底点（上游实测 block 0 = **10 点** = 4 底点 + 6 脊点）。
+
+##### 7.3 新增门禁
+
+| 测试 | 覆盖 |
+|---|---|
+| `QianliOrientationGateTest`（新增） | **G-REND-7**：对渲染器**真实**的中景 chunk（真实轮廓 + 真实层带映射），**山脊点**（世界 y 最小者）映射后的层带局部 y 必须**小于****山脚点**（世界 y 最大者）的 ⇒ 这类符号错误**不许再靠真机肉眼才发现**（含负向自证：峰脚对调必须判红） |
+| `QianliScenePreviewTest` + `PngCanvas`（新增） | **离线出图**：走渲染器的**真实**层带映射与**真实** chunk 几何 ⇒ 直接画成 PNG（逐层 / 修复前后对照 / 构图变体）。⛔ Android 单测的编译 classpath 上**没有** `java.awt` / `javax.imageio` ⇒ 光栅化与 PNG 编码是**自带的纯 `java.base` 实现**（`Deflater` + 手写 CRC32 + 非零环绕多边形填充，与 Android `Canvas` 默认 winding 一致） |
+| `ShanShuiPortGateTest` | 增 **G-PORT-9**（tree01 = 63 次抽取 / 11 条轮廓、tree03 = 504 次 / 73 条、皴线色逐条随机）+ **Double 种子黄金向量**（D16 守门） |
+
+> ⭐ 预览纪律：**层带与 α 一律读渲染器的门禁缝**（`bandForGate` / `farAlphaRangeForGate` …），
+> ⛔ 不在预览里硬编码一份 ⇒ 预览与生产不会分叉；
+> 且**必须带各层的 α**（生产 `computeAlphas` 的区间中值）⇒ 否则远景带会被画成 100% 不透明，
+> 把构图问题看错（本次就踩过一次）。
+
+##### 7.4 顺带修掉的内存大坑
+
+块高原本误用**全屏高** ⇒ 每块 `2016×1080×4 = 8.32 MiB`，6 个池 × 2 块 = **99.8 MiB**
+（方案 §7.5.5 的账按**层带高**算 = 48.71 MiB）⇒ 实际占用是方案的 **2.4 倍**，
+创维 API 22 基准机有 OOM 风险。已改为层带高 ⇒ 块部分 **30.54 MiB**，总量 **48.71 MiB**。
+（`QianliBlockPool` 的 KDoc 早就写着「块高 = 层带高，⛔ 不是全屏」—— 实现没照做。）
+
+##### 7.5 补齐上游 `PolyTools.triangulate`（所有者裁定「要与 shan-shui-inf 逐行移植」）
+
+此前 `distMount` 只移植了上游 `:2413-2417` 的「块多边形填色」，**漏了** `:2419-2428` 的
+三角剖分 + 三角形着色 ⇒ 远景是一条**平涂的锯齿带**（上游靠 494 个深浅不一的三角形把它
+打散成「有晶面层次的远山」）。
+
+⇒ 新增 `port/ShanShuiPoly.kt`（283 行）：上游 `index.html:206-383` 的整个 `PolyTools` 块的
+**逐行移植**（`midPt`（n 点）/ `triangulate` / `lineExpr` / `intersect` / `onSeg` / `ptInPoly` /
+`lnInPoly` / `sidesOf` / `areaOf` / `sliverRatio` / `bestEar` / `shatter`），内部全程 Double、
+只在最终产出落 Float32 ⇒ **零 Android 依赖**、**PRNG 抽取 = 0**。
+`ShanShui.distMount` 随之按上游每块发「1 条块填色 + N 条三角形」。
+
+> ⭐ **对账用 node 实跑上游 `index.html`，不是手抄**：夹具 `distMount(0,0,7,{hei:150,len:500,seg:5})`
+> ⇒ SVG `<polyline>` 总数 **504**（10 块填色 + **494** 三角形）、逐块三角形数
+> **37/44/44/44/44/52/60/84/60/25**、全局与逐块 **FNV-1a 摘要逐位相等**、
+> 颜色与坐标（0.1 文本精度）**0 处失配**、退化楔形（面积 0）**1 个**（block 0 / 第 25 个）位置一致。
+> ⇒ 门禁 **G-PORT-10** 六条把这些数字钉死（含 7 条负向自证）。
+
+> ⚠️ **上游怪癖原样保留**：那个零面积三角形（上游 SVG 原文 `50.0,-46.9 0.0,0.0 0.0,0.0`）
+> 不做「顺手修正」；`midPt` 的 reduce 顺序（`v/n + acc`，初值 `[0,0]`）⛔ 不等于 `(Σv)/n`；
+> `onSeg` 是**闭区间**（上游注释写 "non-inclusive" 但代码相反 ⇒ 以代码为准）。
+> ⚠️ 移植时还纠正了**我方任务书里抄错的三处上游细节**（`areaOf` 其实**没有** `|0`、
+> `sliverRatio` 其实**没有** `bds`/`minSliver`、`bestEar` 的 `minSliver` 只在 `optimize=true`
+> 分支出现）⇒ 按**上游原文**实现，不按转述。
+
+#### 八、文件清单
 
 - 新增：`app/src/main/java/com/nasmusic/tv/visualizer/qianli/`（含 `port/`）、
   `app/src/main/java/com/nasmusic/tv/visualizer/renderers/QianliScrollRenderer.kt`、
   `app/src/test/java/com/nasmusic/tv/visualizer/qianli/`
+  （第二轮新增 `PngCanvas.kt` / `QianliOrientationGateTest.kt` / `QianliScenePreviewTest.kt`）
 - 改：`app/src/main/java/com/nasmusic/tv/data/model/AppSettings.kt`（枚举项 + 中文名）、
   `app/src/main/java/com/nasmusic/tv/visualizer/VisualizerRendererFactory.kt`（工厂分支）、
   `app/src/main/res/values/strings.xml` 与 `app/src/main/res/values-en/strings.xml`、
   `app/src/test/java/com/nasmusic/tv/visualizer/fx/FxCoverageScanTest.kt`（渲染器登记）、
   `app/build.gradle.kts`（版本号）
+- 第二轮改：`app/src/main/java/com/nasmusic/tv/visualizer/qianli/port/**`（逐行移植修正）、
+  `app/src/main/java/com/nasmusic/tv/visualizer/renderers/QianliScrollRenderer.kt`（层带映射 / 块高 / 构图）、
+  `app/src/test/java/com/nasmusic/tv/visualizer/qianli/ShanShuiPortGateTest.kt`
 - 文档：`CHANGELOG.md`、`docs/technical-overview.md`（本节）、
   `docs/visualizer-effects-list.md`（效果清单）

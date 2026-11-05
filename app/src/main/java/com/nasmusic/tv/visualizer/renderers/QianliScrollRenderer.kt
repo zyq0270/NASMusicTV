@@ -604,32 +604,11 @@ class QianliScrollRenderer : RendererFx() {
         worldFar = far; worldMid = mid; worldNear = near; worldWater = water
 
         // ⑤ 层带映射（世界 y → 层带局部 y）
-        val farMap = BandMap(
-            bandHeightPx = bandHeight(FAR_Y0, FAR_Y1, h),
-            refBaseY = FAR_REF_BASE_Y,
-            baseSpread = FAR_BASE_SPREAD,
-            heightScale = FAR_HEIGHT_SCALE,
-        )
-        val midMap = BandMap(
-            bandHeightPx = bandHeight(MID_Y0, MID_Y1, h),
-            refBaseY = MID_REF_BASE_Y,
-            baseSpread = MID_BASE_SPREAD,
-            heightScale = MID_HEIGHT_SCALE,
-        )
-        val nearMap = BandMap(
-            bandHeightPx = bandHeight(NEAR_Y0, NEAR_Y1, h),
-            refBaseY = NEAR_REF_BASE_Y,
-            baseSpread = NEAR_BASE_SPREAD,
-            heightScale = NEAR_HEIGHT_SCALE,
-        )
-        val waterMap = BandMap(
-            bandHeightPx = bandHeight(WATER_Y0, WATER_Y1, h),
-            refBaseY = 0.0,
-            baseSpread = 0.0,
-            heightScale = 0.0,
-            waterSpan = WATER_LOCAL_SPAN,
-            waterOffset = WATER_LOCAL_OFFSET,
-        )
+        //    ⛔ 统一走 [bandMapForGate] ⇒ 只有一处构造 ⇒ 门禁缝与生产不会漂移。
+        val farMap = bandMapForGate(LAYER_FAR, h)
+        val midMap = bandMapForGate(LAYER_MID, h)
+        val nearMap = bandMapForGate(LAYER_NEAR, h)
+        val waterMap = bandMapForGate(LAYER_WATER, h)
 
         // ⑥ 块池（N = 2，块宽 = 1.05 × 屏宽 ⇒ 覆盖整屏时另一块可在后台重生）
         poolFar = makePool(LAYER_FAR, FAR_Y0.toDouble(), FAR_Y1.toDouble(), speedFar, FAR_ALPHA_MIN, far, farMap, Kind.MOUNTAIN, w, h)
@@ -664,14 +643,7 @@ class QianliScrollRenderer : RendererFx() {
         val w = laidW
         val h = laidH
         if (w <= 0 || h <= 0) return
-        val map = BandMap(
-            bandHeightPx = bandHeight(WATER_Y0, WATER_Y1, h),
-            refBaseY = 0.0,
-            baseSpread = 0.0,
-            heightScale = 0.0,
-            waterSpan = WATER_LOCAL_SPAN,
-            waterOffset = WATER_LOCAL_OFFSET,
-        )
+        val map = bandMapForGate(LAYER_WATER_HI, h)
         poolWaterHi = makePool(
             LAYER_WATER_HI, WATER_Y0.toDouble(), WATER_Y1.toDouble(), speedWater,
             WATER_ALPHA_MIN, water, map, Kind.WATER_HI, w, h,
@@ -692,10 +664,17 @@ class QianliScrollRenderer : RendererFx() {
         h: Int,
     ): QianliBlockPool {
         var blockW = w
+        // ⚠️⚠️ 块高 = **层带高**，⛔ **不是全屏高**（2026-11-05 修正）。
+        //    历史实现把全屏 h 传了进来 ⇒ 每块 2016×1080×4 = 8.32 MiB，
+        //    6 个池 × 2 块 = **99.8 MiB**（方案 §7.5.5 的账按层带高算 ⇒ 48.71 MiB）
+        //    ⇒ 实际占用是方案的 2.4 倍，创维 API 22 基准机必然 OOM 风险。
+        //    块高取层带高后，内容仍然铺满整条带（内容 y ∈ [0, bandHeightPx]）。
+        val bandH = Math.ceil(bandHeight(bandY0.toFloat(), bandY1.toFloat(), h).toDouble()).toInt()
+            .coerceAtLeast(1)
         val pool = QianliBlockPool(
             LayerSpec(id, bandY0, bandY1, speed, alphaFloor),
-            BLOCK_COUNT, w, h,
-        ) { x0 -> bakeBlock(world, x0, map, kind, blockW, h) }
+            BLOCK_COUNT, w, bandH,
+        ) { x0 -> bakeBlock(world, x0, map, kind, blockW, bandH) }
         blockW = pool.blockWidth
         return pool
     }
@@ -1256,12 +1235,18 @@ class QianliScrollRenderer : RendererFx() {
     /**
      * 一层的「世界 y → 层带局部 y」映射。
      *
-     * - 山体类：`bandY = 基线 + (chunkBaseY − worldY) × heightScale`
+     * - 山体类：`bandY = 基线 − (chunkBaseY − worldY) × heightScale`
      *   （每个 chunk 站在自己的基线上 ⇒ 山脚高低错落 ⇒ 「层峦叠嶂」而不是一条尺子线）。
      * - 水波类：`bandY = (worldY − chunkBaseY + waterOffset) / waterSpan × 带高`
      *   （chunk 局部 y 铺满整条江水带 ⇒ 各 chunk 的水纹在同一段高度上叠成连续水面）。
+     *
+     * ⚠️⚠️ **高度项必须是减号**（2026-11-05 真机实证：写成加号 ⇒ 整幅山体上下颠倒）。
+     *   `(chunkBaseY − worldY)` 的含义是「该点高出本 chunk 基线多少」——
+     *   世界 y 向上为负 ⇒ 该值 ≥ 0；而层带局部 y 是**画布 y（向下为正）**
+     *   ⇒ 越高的点必须映射到**更小**的局部 y ⇒ 只能**减**。
+     *   历史实现写成 `+` ⇒ 山峰被推到基线**下方** ⇒ 画面上是一片倒挂的「钟乳石」。
      */
-    private class BandMap(
+    internal class BandMap(
         val bandHeightPx: Float,
         val refBaseY: Double,
         val baseSpread: Double,
@@ -1274,9 +1259,76 @@ class QianliScrollRenderer : RendererFx() {
                 val t = (worldY - chunkBaseY + waterOffset) / waterSpan
                 return (t * bandHeightPx).toFloat()
             }
-            val base = bandHeightPx - (chunkBaseY - refBaseY) * baseSpread
-            return (base + (chunkBaseY - worldY) * heightScale).toFloat()
+            // 基线：chunk 的世界 y 越大（越靠下/越近）⇒ 脚落得越低（局部 y 越大）。
+            // ⚠️ 这里必须是 `+`：`chunkBaseY − refBaseY` 与世界 y 同向 ⇒ 局部 y 也要同向。
+            val base = bandHeightPx + (chunkBaseY - refBaseY) * baseSpread
+            return (base - (chunkBaseY - worldY) * heightScale).toFloat()
         }
+    }
+
+    /**
+     * 门禁缝：取某层的层带映射。
+     *
+     * ⛔ [rebuild] 与 [applyLevel] **必须**走这里 ⇒ 层带映射只有一处构造 ⇒ 不会漂移。
+     */
+    internal fun bandMapForGate(layerId: Int, h: Int): BandMap = when (layerId) {
+        LAYER_FAR -> BandMap(
+            bandHeight(FAR_Y0, FAR_Y1, h),
+            FAR_REF_BASE_Y, FAR_BASE_SPREAD, FAR_HEIGHT_SCALE,
+        )
+        LAYER_MID, LAYER_GLINT -> BandMap(
+            bandHeight(MID_Y0, MID_Y1, h),
+            MID_REF_BASE_Y, MID_BASE_SPREAD, MID_HEIGHT_SCALE,
+        )
+        LAYER_NEAR -> BandMap(
+            bandHeight(NEAR_Y0, NEAR_Y1, h),
+            NEAR_REF_BASE_Y, NEAR_BASE_SPREAD, NEAR_HEIGHT_SCALE,
+        )
+        LAYER_WATER, LAYER_WATER_HI -> BandMap(
+            bandHeight(WATER_Y0, WATER_Y1, h),
+            0.0, 0.0, 0.0,
+            WATER_LOCAL_SPAN, WATER_LOCAL_OFFSET,
+        )
+        else -> error("未知层号：$layerId")
+    }
+
+    /** 门禁缝：一个 chunk 的几何（基线世界 y + 轮廓）。 */
+    internal class GateChunk(val baseY: Double, val contours: List<ShanShuiContour>)
+
+    /**
+     * 门禁缝：取各层的**层带位置**（带顶、带底，归一化屏高）。
+     *
+     * ⛔ 离线预览必须读这里 ⇒ 预览与生产**不会**因为硬编码常量而分叉。
+     */
+    internal fun bandForGate(layerId: Int): Pair<Float, Float> = when (layerId) {
+        LAYER_FAR -> FAR_Y0 to FAR_Y1
+        LAYER_MID, LAYER_GLINT -> MID_Y0 to MID_Y1
+        LAYER_NEAR -> NEAR_Y0 to NEAR_Y1
+        LAYER_WATER, LAYER_WATER_HI -> WATER_Y0 to WATER_Y1
+        else -> error("未知层号：$layerId")
+    }
+
+    /** 门禁缝：取远景层的 α 区间（生产 `computeAlphas` 的上下限）。 */
+    internal fun farAlphaRangeForGate(): Pair<Double, Double> = FAR_ALPHA_MIN to FAR_ALPHA_MAX
+
+    /** 门禁缝：取江水层的 α 区间。 */
+    internal fun waterAlphaRangeForGate(): Pair<Double, Double> = WATER_ALPHA_MIN to WATER_ALPHA_MAX
+
+    /**
+     * 门禁缝：取某层已规划的 chunk 几何（⛔ 只做几何，不碰位图 ⇒ 纯 JVM 可跑）。
+     */
+    internal fun gateChunksForGate(layerId: Int): List<GateChunk> {
+        val world = when (layerId) {
+            LAYER_FAR -> ScrollWorld(TAG_DISTMOUNT, PLAN_AHEAD_FAR, ::prepareFar)
+            LAYER_MID, LAYER_GLINT -> ScrollWorld(TAG_MOUNT, PLAN_AHEAD_MID, ::prepareMid)
+            LAYER_NEAR -> ScrollWorld(TAG_FLATMOUNT, PLAN_AHEAD_NEAR, ::prepareNear)
+            LAYER_WATER, LAYER_WATER_HI -> ScrollWorld(TAG_MOUNT, PLAN_AHEAD_WATER, ::prepareWater)
+            else -> error("未知层号：$layerId")
+        }
+        world.ensure(0.0)
+        return world.specs
+            .filter { it.tag == world.wantTag }
+            .map { GateChunk(it.baseY, it.contours) }
     }
 
     /** 一条已规划的 chunk（几何**惰性生成一次**后缓存）。 */
@@ -1344,8 +1396,15 @@ class QianliScrollRenderer : RendererFx() {
 
         // ── 构图锚点（归一化屏高，⛔ 不写死 px）──
         const val HORIZON_Y = 0.620f
-        const val FAR_Y0 = 0.42f
-        const val FAR_Y1 = 0.58f
+        // ⚠️⚠️ 远景带 0.34–0.58 → **0.34–0.50**（2026-11-05，按上游的深度关系修正）。
+        //   上游的次序是「远景脚线**恒高于**中景脚线」：`distmount` 的 y∈[230,280]
+        //   vs `mount` 的 y∈[300,780]（上游 `:3778` / `:3760`）。
+        //   原值 0.42–0.58 让远景脚线落在 0.58H，**比中景脚线（0.55H）还低**
+        //   ⇒ 远景那条带子横贯画面中段，读成一道装饰边框（真机截图「分成两行了」）。
+        //   上移到 0.34–0.50 后：远景带退到中景山体**后面**（0.50H < 0.55H），
+        //   符合上游的远近次序 ⇒ 只在两座中景山之间露出一线远山。
+        const val FAR_Y0 = 0.34f
+        const val FAR_Y1 = 0.50f
         const val MID_Y0 = 0.20f
         const val MID_Y1 = 0.55f
         const val NEAR_Y0 = 0.66f
