@@ -146,6 +146,16 @@ JAVA_HOME="C:/Program Files/Android/Android Studio/jbr" \
 - ⛔ **私有分支只保护「代码」；文档与其它文件一律公开**（所有者 2026-11-04 明示：「私有分支保护的只有代码，其他文档和其他文件都应该公开」）
   - ⭐ **判据只有一条：是否含上游代码 / 是上游代码的翻译件或派生物。**
     含 ⇒ **私有**；不含 ⇒ **公开**（两个分支保持一致）。
+    ⚠️ **「含上游代码」的前提是「上游授权不允许再发布」**（E51/E52 的 loficities.com /
+    Slow Roads 均**无任何开源授权** ⇒ 外发即侵权 ⇒ 必须私有）。
+    ⭐ **上游有可再发布授权（MIT 等）时不在此列** —— 授权允许再发布，只需保留署名与许可声明
+    （本仓先例：E44「明月」的 three-globe（MIT）原件就在 `app/src/globe-upstream/`，公开在 main 上）。
+    **E50「千里江山」**（上游 `LingDong-/shan-shui-inf`，**MIT**，Copyright 2018 Lingdong Huang）
+    属后者 ⇒ **公开**（所有者 2026-11-05 裁定），
+    `app/src/main/java/com/nasmusic/tv/visualizer/qianli/**` 每个移植文件都带
+    「移植自 …（MIT，Copyright 2018 Lingdong Huang）」署名。
+    ⚠️ 但**「公开」≠ 只在 main**：E50 的工厂注册必须**同时**在 `feat/e51-private` 上（见下方
+    「覆盖层会掩蔽仓库同名文件」）⇒ **E50 代码在两个分支上都有且逐字节一致**（ cherry-pick，不是复制粘贴）。
   - **私有**（只在 `feat/e51-private`，⛔ 不 push）：
     · E51 / E52 的 **Kotlin 源码与测试**（`app/src/main/java/com/nasmusic/tv/visualizer/{e51,highway}/`、
       `app/src/test/java/com/nasmusic/tv/visualizer/{e51,highway}/`）
@@ -159,7 +169,10 @@ JAVA_HOME="C:/Program Files/Android/Android Studio/jbr" \
       `docs/archive/verification/scripts/e52_highway_*.{mjs,js}`（依赖私有原型）。
   - **公开**（两个分支保持一致）：`CHANGELOG.md`、`AGENTS.md`、`CLAUDE.md`、`app/build.gradle.kts`
     （含 `highway.enabled` / `lofi.city` 双变体开关，**CI 与公开构建缺省关闭**，故公开无害）、
-    `docs/**` 里除上述以外的全部、`scripts/` 里项目级通用工具、`.gitignore` 等。
+    `docs/**` 里除上述以外的全部、`scripts/` 里项目级通用工具、`.gitignore` 等、
+    以及 **E50「千里江山」的移植层与渲染器**（`app/src/main/java/com/nasmusic/tv/visualizer/qianli/**`、
+    `app/src/main/java/com/nasmusic/tv/visualizer/renderers/QianliScrollRenderer.kt`、
+    `app/src/test/java/com/nasmusic/tv/visualizer/qianli/**`；上游 MIT ⇒ 可再发布，见上一条的授权判据）。
   - ⛔ **不 push、不 tag、不发 release、不上传任何远端**；`feat/e51-private` **永远不随 `main` 推送**
     （① 只做本地提交；② 不设 upstream；③ 备份用 `git bundle`，⛔ 不用推送代替备份）。
 
