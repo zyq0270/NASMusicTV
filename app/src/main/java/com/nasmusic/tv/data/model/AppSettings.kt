@@ -202,6 +202,32 @@ enum class VisualizerTheme(
     CONCENTRIC_GEARS(R.string.visualizer_theme_concentric_gears, "齿轮", Tier.BASIC, "33"),
     LIGHT_BEAMS(R.string.visualizer_theme_light_beams, "光轴", Tier.BASIC, "35"),
     MOLECULE(R.string.visualizer_theme_molecule, "分子", Tier.BASIC, "37"),
+    /**
+     * 千里江山（第 50 个效果，E50）
+     *
+     * 视觉：移植自 [LingDong-/shan-shui-inf](https://github.com/LingDong-/shan-shui-inf)（MIT）
+     * 的无限滚动水墨山水。分块流生成（mountplanner + chunkloader），每块唯一、永不重复。
+     * 8 层合成：L0 绢底 / L1 远雾 / L2 中景山 / L2′ 轮廓光 / L3 近景山 / L4 江水 / L5 尘 / L6 印章。
+     * 音乐驱动：整体能量→滚动速度，频谱→各层透明度调制。
+     *
+     * ## 归 [Tier.ADV] + `needsParticleBudget = false`（方案 `docs/e50-qianli-jiangshan-plan.md` §二 209–215 行）
+     * 档位上如实标注「比 BASIC 重」（6 层平铺 blit + 8 类烘焙位图），但本效果一个粒子都不画、
+     * ⛔ 不读 `ctx.quality.maxParticles`（数量只按 `fx.level` 三档表调）⇒ 第 4 参是可核对的事实。
+     * [VisualQuality.supports] 的 `ADV -> !needsParticleBudget || maxParticles > 0` 因此恒为真，
+     * 三档全部可选（含 LOW）。
+     * ⚠️ 别误标 `true`：那会让 LOW 档「能渲染却不可选，切走即永久回不来」（2026-10-01 用户裁决修掉的那类缺陷）；
+     * ⚠️ 也别改挂 ULTRA —— 本效果不用帧缓冲，与 `allowFramebuffer` 无关。
+     *
+     * ⚠️ 若日后渲染器真的读取 `ctx.quality.maxParticles`（例如改用预算控光尘数量），
+     * `ParticleBudgetGateTest` 的源码扫描会与本标注对撞 ⇒ 必须同步改成 `true`。
+     *
+     * 编号取 `"50"`：E51 像素城市占 `"51"`、E52 旷野公路占 `"52"`，`"50"` 正是空出来的那个号
+     * （`docs/archive/e51-lofi-city-plan.md` §2.5 早已把 50 预留给千里江山）。
+     *
+     * 致谢：核心视觉算法移植自 LingDong Huang 的开源项目，感谢作者。
+     */
+    QIANLI_SCROLL(R.string.visualizer_theme_qianli_scroll, "千里江山", Tier.ADV, "50", needsParticleBudget = false),
+
     VINTAGE_TV(R.string.visualizer_theme_vintage_tv, "怀旧", Tier.BASIC, "38"),
 
     /**

@@ -182,6 +182,14 @@ def _copy_tree(src, dst):
 
 
 def main(argv):
+    # ⛔ 本机 Windows 控制台默认 CP936(GBK) ⇒ 打印 '✓'(U+2713) 会抛 UnicodeEncodeError
+    #    ⇒ 脚本崩在第一次成功行 ⇒ 退出码 1 ⇒ 漂移门禁恒红（误判）。
+    #    强制 stdout 走 UTF-8 + 容错替换；测试侧也按 UTF-8 读这个输出（两边一致）。
+    try:
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    except Exception:
+        pass
+
     check_only = '--check' in argv
     ov = overlay_root()
     if not os.path.isdir(ov):

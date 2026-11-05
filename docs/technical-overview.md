@@ -18377,3 +18377,76 @@ GitHub runner 上这两样都不存在 ⇒ 公开构建与 CI 完全不受影响
   `data/model/VisualizerThemeTest.kt`、`visualizer/renderers/StarrySkyTest.kt`
 - 仓库外（本机，不入库）：`~/.gradle/init.d/10-nasmusic-e51-local.gradle`、
   `D:/hxzhang/MyGithubSoftware/NASMusicTV-e51-local/src/**`
+
+### 10.281 v2.39.11 ｜ E50「千里江山」：移植 `shan-shui-inf` 的水墨山水长卷（2026-11-05）
+
+#### 一、做了什么
+
+新增频谱效果「千里江山」（`VisualizerTheme.QIANLI_SCROLL`，编号 `E50` / `ordinalLabel = "50"`）——
+水墨山水长卷的**无限滚动**：绢底天幕 / 远景 / 中景主山 / 轮廓光 / 近景 / 江水 / 光尘 / 印章
+八层合成，逐层独立速度，整体能量微调滚动速度，分频段调制各层透明度。
+
+#### 二、移植来源
+
+- 上游：`LingDong-/shan-shui-inf`（MIT，Copyright 2018 Lingdong Huang）。**感谢作者开源**。
+- 上游形态：单文件 `index.html`（4,361 行、零外部资产），SVG 字符串发射 + 惰性分块流（`chunkloader`）。
+- 本仓只做 JS→Kotlin 的**语言层移植**与渲染管线适配，⛔ 不篡改上游算法逻辑。
+- 方案：`docs/shan-shui-inf-porting-plan.md`（移植主文档）/
+  `docs/e50-qianli-jiangshan-plan.md`（配色、运动学与验收细节）。
+
+#### 三、落地结构
+
+| 位置 | 职责 |
+|---|---|
+| `app/src/main/java/com/nasmusic/tv/visualizer/qianli/port/` | **纯 JVM 移植层，零 Android 依赖**（`ShanShuiPrng` / `ShanShuiNoise` / `ShanShuiUtil` / `ShanShuiPath` / `ShanShuiBrush` / `ShanShuiTree` / `ShanShui` / `ShanShuiArch` / `ShanShuiPlanner` / `ShanShuiContour` / `ShanShuiColor`） |
+| `app/src/main/java/com/nasmusic/tv/visualizer/qianli/` | 渲染器侧：**分块池** `QianliBlockPool` / **三版染色表** `QianliColorTable` / **印章烘焙** `QianliSeal` |
+| `app/src/main/java/com/nasmusic/tv/visualizer/renderers/QianliScrollRenderer.kt` | 渲染器：八层合成 + 音频包络 + 档位降级 |
+
+#### 四、改造点（四处，其余逐行照搬）
+
+| # | 上游形态 | Kotlin 落点 |
+|---|---|---|
+| ① | SVG 字符串（`poly()` 发射 `<polyline>`） | **`ShanShuiContour`：点列 + 填充色 + 描边色 + 笔宽**（纯数据轮廓，port 包内零 `android.graphics.Path`） |
+| ② | PRNG（`Prng` + 全局覆写 `Math.random`） | **照抄**：BBS 式乘方取模，`Double` 全程，黄金向量逐位相等 |
+| ③ | Perlin 噪声（p5.js 移植版） | **逐行移植**：`ShanShuiNoise` |
+| ④ | 无限流（惰性分块 + 拼接） | **分块位图**：ring buffer + 两段式惰性重生 + 每帧 12 ms 预算片 |
+
+#### 五、门禁
+
+| 测试类 | 例数 | 覆盖判据 |
+|---|---|---|
+| `ShanShuiPortGateTest` | 18 | **G-PORT-1~8**：PRNG 黄金向量 / 噪声范围与可复现 / ribbon 对称性 / `cun` 返回语义 / mountain 点阵 / planner 最小间距与 y 升序 / 负向自证（Long 累加、漏预热、Horner 形式必红）/ 结构性保真断言 |
+| `QianliScrollGateTest` | 10 | **G-SCROLL-1~5**：L2 与轮廓光同速 / 通道隔离（禁读 `frame.spectrum`）/ 静音帧 α 下限 / 有效速度 ≤ 基准 ×1.30 / 印章图层序在 grade 之后 |
+| `QianliBlockPoolTest` | 7 | **G-POOL-1~3**：块宽 ≥1.05×屏宽 / 待重生不阻塞绘制（画旧块不留白）/ 预算耗尽降级不画空白 |
+| `QianliSealGlyphGateTest` | 5 | **G6-①~③**：坐标零漂移与尺寸 / 白文落墨比 ∈[20%,72%] / 残缺面积 ≤2% |
+| `QianliScrollRendererTest` | 12 | **G-REND-1~6**：工厂能创建 / 主题自洽且可选 / 轮廓启发式命中 / 同块两次烘焙逐位一致 / 三版染色互异可用 / 后处理暗角字面量与关断 |
+
+每条判据都配**负向自证**（改坏 ⇒ 对应用例必红）。
+
+#### 六、⚠️ 已知限制
+
+1. **青绿染色有 V-A / V-B / V-C 三版，当前采用 V-C**（`QianliScrollRenderer.COLOR_VERSION`），
+   ⇒ **最终版本待所有者定案**（三版并排判读，一次定案）。
+2. **真机验收尚未进行** —— E50 方案 §十一 **U1–U13 未跑**，待所有者用真机判读。
+
+> ⚠️ 早期落地稿的**两处笔误已于 2026-11-05 订正**（下列两条**不再是限制**）：
+> ① **编号**：`ordinalLabel` 由 `"43"` 改为 `"50"` —— E51 像素城市占 `"51"`、E52 旷野公路占 `"52"`，
+>    `50` 正是空出来的那个号（E51 方案早已把它预留给千里江山，见 `docs/archive/e51-lofi-city-plan.md` §2.5）
+>    ⇒ **不再与 E43「海边」重号**，29 个编号互异，`VisualizerThemeTest` 的计数断言同步为 29。
+> ② **画质档位**：由 `Tier.ULTRA` + `needsParticleBudget = true` 改为 `Tier.ADV` + `needsParticleBudget = false`
+>    —— 渲染器**不读** `ctx.quality.maxParticles`（数量只按 `fx.level` 三档表调）⇒ 第 4 参是可核对的事实，
+>    `supports()` 的 `ADV -> !needsParticleBudget || maxParticles > 0` 恒为真 ⇒ **三档均可选（含 LOW）**，
+>    与 E44 / E46–E49 同形制（早期误标 ULTRA 会把 LOW / MEDIUM 挡在门外）。
+
+#### 七、文件清单
+
+- 新增：`app/src/main/java/com/nasmusic/tv/visualizer/qianli/`（含 `port/`）、
+  `app/src/main/java/com/nasmusic/tv/visualizer/renderers/QianliScrollRenderer.kt`、
+  `app/src/test/java/com/nasmusic/tv/visualizer/qianli/`
+- 改：`app/src/main/java/com/nasmusic/tv/data/model/AppSettings.kt`（枚举项 + 中文名）、
+  `app/src/main/java/com/nasmusic/tv/visualizer/VisualizerRendererFactory.kt`（工厂分支）、
+  `app/src/main/res/values/strings.xml` 与 `app/src/main/res/values-en/strings.xml`、
+  `app/src/test/java/com/nasmusic/tv/visualizer/fx/FxCoverageScanTest.kt`（渲染器登记）、
+  `app/build.gradle.kts`（版本号）
+- 文档：`CHANGELOG.md`、`docs/technical-overview.md`（本节）、
+  `docs/visualizer-effects-list.md`（效果清单）

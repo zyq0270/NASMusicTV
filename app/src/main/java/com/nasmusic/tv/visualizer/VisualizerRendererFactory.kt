@@ -24,6 +24,7 @@ import com.nasmusic.tv.visualizer.renderers.SnowCedarRenderer
 import com.nasmusic.tv.visualizer.renderers.ConcentricGearsRenderer
 import com.nasmusic.tv.visualizer.renderers.LightBeamsRenderer
 import com.nasmusic.tv.visualizer.renderers.MoleculeRenderer
+import com.nasmusic.tv.visualizer.renderers.QianliScrollRenderer
 import com.nasmusic.tv.visualizer.renderers.VintageTvRenderer
 import com.nasmusic.tv.visualizer.renderers.DnaRenderer
 import com.nasmusic.tv.visualizer.renderers.StarrySkyRenderer
@@ -105,6 +106,8 @@ object VisualizerRendererFactory {
         // ⛔ 本机自用版走的是**覆盖层**那份工厂（见 AGENTS.md「本地构建携带隐藏分支效果」），
         //    那份才有真正的 `HighwayRenderer`。
         VisualizerTheme.HIGHWAY -> CircularRingRenderer()
+        // E50「千里江山」零外部资产（8 层位图全在首帧 boot 程序化烘焙）⇒ ⛔ 不收 Context。
+        VisualizerTheme.QIANLI_SCROLL -> QianliScrollRenderer()
     }
 
     /**

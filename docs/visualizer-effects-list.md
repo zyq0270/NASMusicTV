@@ -1,14 +1,14 @@
 # 可视化效果列表
 
-> **版本**：v2.38.13（versionCode 182）
-> **更新日期**：2026-10-15
+> **版本**：v2.39.11（versionCode 196）
+> **更新日期**：2026-11-05
 > **来源**：`app/src/main/java/com/nasmusic/tv/data/model/AppSettings.kt` — `VisualizerTheme` 枚举
 
-共 **26** 个效果，分三档。档位只决定「在哪种画质下可选」：
+共 **27** 个效果，分三档。档位只决定「在哪种画质下可选」：
 
 - **BASIC** —— 三档画质全可用。
 - **ADV** —— 逐项门控：看该效果**是否真的读取** `ctx.quality.maxParticles`（枚举第 4 参 `needsParticleBudget`），
-  不按 tier 一刀切 ⇒ 15 套里 14 套三档全可用，仅 `E14 节拍烟花` 在 LOW 档被挡。
+  不按 tier 一刀切 ⇒ 16 套里 15 套三档全可用，仅 `E14 节拍烟花` 在 LOW 档被挡。
 - **ULTRA** —— `supports()` 要求 `allowFramebuffer`，该字段只有 `HIGH` 为 `true` ⇒ MEDIUM / LOW 一律不提供。
 
 增删历史、实现细节、真机验收记录见 `docs/technical-overview.md` §10。
@@ -27,7 +27,7 @@
 | E38 | VINTAGE_TV | 怀旧 |
 | E43 | SEASIDE | 海边 |
 
-## ADV 档（15 套）
+## ADV 档（16 套）
 
 | 序号 | 枚举键 | 显示名 |
 |---|---|---|
@@ -46,6 +46,12 @@
 | E47 | SNOW_CEDAR | 雪松 |
 | E48 | DESERT_SMOKE | 大漠孤烟 |
 | E49 | BIRDS_FLOCK | 鸟群 |
+| E50 | QIANLI_SCROLL | 千里江山 |
+
+> `E50 千里江山` 归 ADV：分块运行时生成 + 8 层位图合成，确实「比 BASIC 重」，但渲染器
+> ⛔ **不读** `ctx.quality.maxParticles`（数量只按 `fx.level` 三档表调）⇒ `needsParticleBudget = false`
+> ⇒ **三档画质全部可选（含 LOW）**。编号取 `"50"`（E51 像素城市占 `"51"`、E52 旷野公路占 `"52"`），
+> 与 BASIC 档的 `E43 海边` 不重号（§10.281）。
 
 ## ULTRA 档（2 套）
 
@@ -60,7 +66,7 @@
 ## 门控的三个特殊项（容易漏）
 
 1. **E39 照片墙是唯一有「列表级」门控的效果**：`VisualizerTheme.selectable(photoWallAvailable)` 在三个照片来源
-   开关全关时把 `PHOTO_WALL` 从列表里过滤掉（指示器不显示、左右键也切不到）。其余 25 套恒在列表里（受画质档约束）。
+   开关全关时把 `PHOTO_WALL` 从列表里过滤掉（指示器不显示、左右键也切不到）。其余 26 套恒在列表里（受画质档约束）。
 2. **E14 节拍烟花**：ADV 档里唯一 `needsParticleBudget = true` 且非 ULTRA 的效果 ⇒ `LOW.maxParticles = 0` 时被
    `supports()` 挡下。
 3. **E18 / E41**：见上「ULTRA」口径。⛔ 没有任何「按设备能力隐藏效果」的过滤逻辑（`availableThemes()` 只看画质档 +

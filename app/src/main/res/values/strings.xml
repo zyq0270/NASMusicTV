@@ -1393,6 +1393,7 @@
     <string name="visualizer_theme_light_beams">光轴</string>
     <string name="visualizer_theme_liquid_grid">液态网格</string>
     <string name="visualizer_theme_liquid_ripple">液态涟漪</string>
+    <string name="visualizer_theme_qianli_scroll">千里江山</string>
     <string name="visualizer_theme_lofi_city">像素城市</string>
     <string name="visualizer_theme_lyrics_dot_matrix">歌词点阵</string>
     <string name="visualizer_theme_matrix_rain">数字雨</string>

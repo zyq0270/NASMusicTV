@@ -66,6 +66,7 @@ class FxCoverageScanTest {
         "SnowCedarRenderer",           // E47 雪松（暗角+颗粒烘进 grade 位图 = 1 图元/1.000 屏；字面量 0.34f 为门禁证据与 needsDamageCoalescer 的账，绘制由 vignetteOverride 恒 0 关断）
         "BirdsFlockRenderer",          // E49 鸟群（暗角+分色烘进 grade 位图 = 1 图元/1.000 屏；字面量 0.24f 与烘焙边缘 α 同数，绘制由 vignetteOverride 恒 0 关断，三段式与 E46/E47 同形）
         "DesertSmokeRenderer",         // E48 大漠孤烟（暗角+颗粒烘进同一张 grade 位图 = 1 图元/1.000 屏；字面量 0.10f，绘制由 vignetteOverride 恒 0 关断，三段式与 E46/E47/E49 同形。⛔ 退回 PostFx.NONE 会让 needsDamageCoalescer 在 LITE/FULL 也为真 ⇒ 每帧白补一次整画布 drawRect）
+        "QianliScrollRenderer",        // E50 千里江山·青绿长卷（暗角+颗粒烘进 grade 位图 = 1 blit/1.000 屏；字面量 0.10f 为门禁证据与 needsDamageCoalescer 的账，绘制由 vignetteOverride 恒 0 关断，三段式与 E46/E47/E48/E49 同形）
     )
 
     // ── 豁免名单：阶段推进时逐条移入 covered（理由必须写明，便于复核） ──

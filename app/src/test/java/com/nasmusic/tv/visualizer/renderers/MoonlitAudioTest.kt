@@ -67,8 +67,14 @@ class MoonlitAudioTest {
         //    定率式 `update()` 把 60fps 写死在系数里，掉帧时包络的推进量就与真实时间脱钩。
         //    ⚠️ E48 是本条**第一个被全量单测抓到的漏登**：E48 落地的三轮真机修复期间只跑过
         //    `--tests` 过滤的 6 类，全量门禁到 2026-10-16 才第一次跑 ⇒ 一跑就红。
-        assertEquals("生产侧只许 E44 / E46 / E47 / E48 用 dt 变体（⛔ 定率式 update() 的隐含 60fps 就是 M10 的根因）",
-            listOf("DesertSmokeRenderer.kt", "MoonlitRenderer.kt", "SnowWorld.kt", "TripodFogRenderer.kt"), callers.sorted())
+        // ⭐ 名单于 2026-11-05 加入 E50（`QianliScrollRenderer`）：它的六条包络
+        //    （bass / energy / mid 雾 / mid 亮 / treble / section）同样必须走 dt 变体。
+        //    理由与 E46 / E47 / E48 逐字同源 —— 定率式 `update()` 把 60fps 写死在系数里，
+        //    掉帧时包络的推进量就与真实时间脱钩；E50 的「宣纸底色随节拍呼吸」直接吃这六条。
+        //    ⛔ 判据形态不变：全仓**恰好这五个文件**（名单计数 4 → 5），
+        //    而"本效果内恰好四行"那两条数的是 E44 自己的文件 ⇒ 不受名单扩容影响。
+        assertEquals("生产侧只许 E44 / E46 / E47 / E48 / E50 用 dt 变体（⛔ 定率式 update() 的隐含 60fps 就是 M10 的根因）",
+            listOf("DesertSmokeRenderer.kt", "MoonlitRenderer.kt", "QianliScrollRenderer.kt", "SnowWorld.kt", "TripodFogRenderer.kt"), callers.sorted())
 
         val src = rendererSource()
         assertEquals("四个频段各推进一次 ⇒ 全文恰好 4 个调用点",
@@ -436,8 +442,12 @@ class MoonlitAudioTest {
         //    最近邻放大 ⇒ 基类那一次全屏 drawRect 必须关掉（否则同一暗角叠两遍，四角明显发死）。
         //    `postFx = PostFx(vignette = 0.18f)` 的字面量同样保留：它是 `FxCoverageScanTest` 的
         //    认定依据，也是 `needsDamageCoalescer` 的输入（改判 `PostFx.NONE` 会踩 E47 那条反向教训）。
-        assertEquals("只许 E44 / E46 / E47 / E48 / E49 覆写暗角钩子（其余效果的暗角必须仍是 postFx 字面量）",
-            listOf("BirdsFlockRenderer.kt", "DesertSmokeRenderer.kt", "MoonlitRenderer.kt", "SnowCedarRenderer.kt", "TripodFogRenderer.kt"), overriders.sorted())
+        // ⭐ 2026-11-05 加入 E50：形制与理由逐字同 E46 / E47 / E48 / E49 —— E50 的暗角 + 颗粒
+        //    已烘进同一张 grade 位图 ⇒ 基类那一次全屏 drawRect 必须用钩子关掉；
+        //    `postFx = PostFx(vignette = 0.10f)` 的字面量保留（覆盖门禁与 `needsDamageCoalescer`
+        //    两个下游读它）。同样是全量单测首次跑到本条才抓到的漏登。
+        assertEquals("只许 E44 / E46 / E47 / E48 / E49 / E50 覆写暗角钩子（其余效果的暗角必须仍是 postFx 字面量）",
+            listOf("BirdsFlockRenderer.kt", "DesertSmokeRenderer.kt", "MoonlitRenderer.kt", "QianliScrollRenderer.kt", "SnowCedarRenderer.kt", "TripodFogRenderer.kt"), overriders.sorted())
         assertTrue("基类默认值必须是哨兵（不覆盖）",
             mainFileText("RendererFx.kt").contains("vignetteOverride(fx: FxFrame): Float = NO_VIGNETTE_OVERRIDE"))
     }
