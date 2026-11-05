@@ -171,6 +171,14 @@ JAVA_HOME="C:/Program Files/Android/Android Studio/jbr" \
         ② Robolectric **NATIVE**（真 Skia，⛔ 需 `robolectric-nativeruntime` ⇒ **离线拉不到 ⇒ 自动跳过**）；
         ③ **真机 instrumented**（`app/src/androidTest/.../QianliUpstreamDeviceRenderTest.kt`，
         渲染进 Bitmap → `adb pull` ⇒ ⭐ **不需要解锁手机**，PIN 锁时截图路线走不通、这条能走）。
+        ⚠️ 路线 ③ 的两个硬约束（2026-11-06 实测）：
+        ⛔ **release 包里没有那个门禁缝** —— `internal` 成员只有测试引用 ⇒ R8 当「无人调用」删掉
+        （release dex 里 `gateDrawFrameForGate` 出现 **0** 次）⇒ ③ **只能跑 debug 变体**；
+        ⛔ debug 变体签名与设备上已装的 release 包冲突 ⇒ `INSTALL_FAILED_UPDATE_INCOMPATIBLE`
+        ⇒ 解法：给 debug 变体**临时**加 `applicationIdSuffix = ".debug"`（两包并存 ⇒ **不卸载、不丢 App 数据**），
+        验证完**必须回退**（该行不得提交）。
+        ⚠️ 别再试「给 androidTest APK 重签 release key 去插桩已装的 release App」——签名对了，
+        但 release 包里没那个方法 ⇒ `NoSuchMethodError`（已实测排除）。
       · ⛔ **上游移植件的黄金基线**由 `scripts/e50_*_upstream_probe.js`（node 跑上游原函数）生成，
         `node <probe> --check` 必须 exit=0 且基线文件不被改写；坐标摘要必须在 **Float32** 上算
         （端口存 `FloatArray` ⇒ 两侧不同精度 ⇒ 哈希必不同 ⇒ 门禁恒红而几何其实是对的）。

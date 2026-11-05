@@ -19017,6 +19017,19 @@ for (var i = xmin; i < xmax; i += xstep) {
 > 三条路线的判定口径**完全一致**（纸底暖米白 / 纸底占比 ≥ 0.45 / 墨平均灰度 ≤ 215 /
 > 彩色像素 ≤ 0.05 / 顶部 0–0.25 墨占比 > 0.005 / 底部 0.85–1.0 墨占比 > 0.05），
 > 与 `scripts/e50_phone_look_check.py` 同源 ⇒ 真机截图与真机渲染可以用同一把尺子量。
+>
+> ⛔ **路线 ③ 的两个硬约束**（2026-11-06 实测）：
+> ① **release 构建里没有这个门禁缝**：`gateDrawFrameForGate` 是 `internal` ⇒ **只有测试引用**，
+>    R8 判定「无人调用」⇒ **整个方法被删**（实测 release dex 里 `gateDrawFrameForGate` 出现 **0** 次，
+>    而 `QianliUpstreamRenderer` 出现 6 次）⇒ 路线 ③ **只能跑 debug 变体**。
+> ② **debug 变体的签名与设备上已装的 release 包冲突** ⇒ `INSTALL_FAILED_UPDATE_INCOMPATIBLE`。
+>    ⭐ 解法（**不卸载 release 包 ⇒ 不丢 App 数据**）：给 debug 变体临时加
+>    `applicationIdSuffix = ".debug"` ⇒ 两包**包名不同** ⇒ 可并存；
+>    验证完**必须回退**（该行不得提交，否则所有 debug 安装都变成 `com.nasmusic.tv.debug`）。
+>
+> ⚠️ 另一条看似可行的路走不通（已实测排除）：「把 debug 的 androidTest APK 用 release key 重签，
+>   再插桩设备上已装的 release App」——签名确实匹配了，但 **release 包里没有那个方法**（见 ①）⇒
+>   运行时 `NoSuchMethodError`。⇒ 门禁缝要么加 `-keep`（污染生产规则），要么只在 debug 变体跑。
 
 #### 八、文件清单
 
