@@ -18555,6 +18555,23 @@ GitHub runner 上这两样都不存在 ⇒ 公开构建与 CI 完全不受影响
 > ⛔ **风险**：创维 API 22 基准机的堆余量未量化；真机已跑通（未 OOM），
 > 但**长跑 + 其它高占用场景下有 OOM 可能** ⇒ 列入已知限制。
 
+##### 7.7 本轮验证数字（2026-11-05）
+
+| 项 | 结果 |
+|---|---|
+| 私有分支（`feat/e51-private`）全量单测 | **2718 例 / 0 失败 / 0 错误 / 3 跳过**（40m38s；含 E51/E52 那套门禁） |
+| `lintDebug` | **0 errors / 205 warnings**（CI 只按 errors 阻断） |
+| `main` 漂移门禁 + E50 子集 | 全绿（`PrivateOverlayDriftGateTest` + `*Qianli*` + `*ShanShui*`） |
+| 覆盖层漂移 | **0**（`python scripts/sync_private_overlay.py --check` EXIT=0） |
+| E50 24 文件两分支一致性 | `git diff main feat/e51-private` **为空**（逐字节一致） |
+| release 包 | `NASMusicTV-release-v2-39-11.apk`（38.84 MB，SHA-256 `30EA15E4D1EC6B597…`） |
+| `aapt2 dump badging` | `versionCode=196` / `versionName=2.39.11` / `targetSdk=34` / ABI `arm64-v8a`+`armeabi-v7a`+`x86_64`；三个 feature 全 `not-required`（手机与电视都可装） |
+| `apksigner verify` | **Verifies**（v1 + v2 方案）；证书 SHA-256 `24ed591af66cb925…` **与上一版同钥**（是 release key，不是 debug） |
+| R8 后存活扫描（dex 原始字节） | `QIANLI_SCROLL` / `LOFI_CITY` / `HIGHWAY` / `QianliColorVersion` / `visualizer_qianli_color_version` **全部 HIT**；`com/nasmusic/tv/visualizer/{e51,highway,qianli}/` 与 `QianliScrollRenderer` **类名未被混淆**；`assets/e52_highway/**` 资产在包内 |
+
+> ⚠️ 该 release 包**含 E51/E52 的上游移植件（上游无任何开源授权）⇒ 本地专用**：
+> ⛔ 不 push、不 tag、不建 release、不上传任何远端。
+
 #### 八、文件清单
 
 - 新增：`app/src/main/java/com/nasmusic/tv/visualizer/qianli/`（含 `port/`）、
