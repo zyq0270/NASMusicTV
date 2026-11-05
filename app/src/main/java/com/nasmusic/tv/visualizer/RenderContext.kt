@@ -74,6 +74,18 @@ class RenderContext {
     /** 音频反应强度 `0..1`（音频反应开关关闭时恒为 `0`，§5.5「不卡节拍」） */
     var photoAudioBoost: Float = 0f
 
+    // ── E50「千里江山」三版设色（`QIANLI_SCROLL`）─────────────────────────────
+    //
+    // ⛔ 与照片墙同一口径：**不进 `update(...)`**（`update()` 有 16 个位置参数、3 个调用点，
+    //    加参数要动全部调用点）⇒ 由 UI 层在**用户切换时直写**，渲染器每帧读它即可。
+    //    其余渲染器对这 1 个字段**零感知**。
+    //
+    // ⚠️ 取值范围只有 0/1/2；越界值由调用方（`QianliColorVersion.normalize`）挡住，
+    //    这里以默认版 2 兜底。
+
+    /** E50「千里江山」三版设色：0 = V_A（上游原样灰阶）/ 1 = V_B / 2 = V_C（当前默认）。 */
+    var qianliColorVersion: Int = 2
+
     val width: Float get() = canvasSize.width
     val height: Float get() = canvasSize.height
     /** 短边——多数效果用它做基准半径，保证竖屏也协调 */

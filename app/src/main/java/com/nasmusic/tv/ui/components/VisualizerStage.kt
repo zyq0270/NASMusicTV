@@ -7,6 +7,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -25,9 +26,11 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
@@ -67,6 +70,8 @@ import com.nasmusic.tv.data.model.LyricsLine
 import com.nasmusic.tv.data.model.Song
 import com.nasmusic.tv.data.model.VisualQuality
 import com.nasmusic.tv.data.model.VisualizerTheme
+import com.nasmusic.tv.data.prefs.AppPreferences
+import com.nasmusic.tv.data.prefs.QianliColorVersion
 import com.nasmusic.tv.ui.theme.NasMusicColors
 import com.nasmusic.tv.visualizer.AudioFrame
 import com.nasmusic.tv.visualizer.CoverPalette
@@ -75,6 +80,8 @@ import com.nasmusic.tv.visualizer.RenderContext
 import com.nasmusic.tv.visualizer.RendererSwapper
 import com.nasmusic.tv.visualizer.VisualizerRenderer
 import com.nasmusic.tv.visualizer.VisualizerRendererFactory
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 
 /**
  * 帧率读数的开关键（`Settings.Global`，只读）。
@@ -256,6 +263,65 @@ fun VisualizerStage(
         toastVisible = false
     }
 
+    // ── E50「千里江山」三版设色（V-A / V-B / V-C）────────────────
+    //
+    // ⛔ **只有「千里江山」主题响应**（遥控器上下键 + 手机上下滑）：
+    //    其它效果上这两个输入**维持原语义**（上键 = 空操作、下键 = 不消费、让事件冒泡），
+    //    别把 E50 的开关泄漏给别的效果（用户会莫名看到「千里江山 · 设色 V-B」的提示）。
+    //
+    // ⚠️ 渲染器每帧读的是 [RenderContext.qianliColorVersion]（逐帧直写、不进 `update()`）；
+    //    这里的 State 只负责「当前值」与 Toast 文案。
+    val appPrefs = remember(context) { AppPreferences.getInstance(context) }
+    val coroutineScope = rememberCoroutineScope()
+    var qianliColorVersion by remember { mutableIntStateOf(QianliColorVersion.DEFAULT) }
+
+    /**
+     * 「用户已经手动切过」标记（普通数组，**不用 State** —— 只在协程里读写，不触发重组）。
+     *
+     * 用途：挡住「读盘比按键慢」的竞态 —— 读盘回来时若用户已经切过，
+     * 就**不要**用读到的旧值盖掉用户刚选的那一版。
+     */
+    val colorVersionTouched = remember { booleanArrayOf(false) }
+
+    /** 设色版切换的短暂提示（null = 不显示）；自动消失（同效果名 Toast 的定时写法）。 */
+    var colorToastText by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(colorToastText) {
+        if (colorToastText == null) return@LaunchedEffect
+        kotlinx.coroutines.delay(1500)
+        colorToastText = null
+    }
+
+    // 进舞台时读一次持久化值 → 写进 renderCtx（渲染器每帧读它）。
+    // ⚠️ 读取完成前 renderCtx 里是默认值 2（= V-C）⇒ 与改造前「编译期固定 V_C」一致，不会闪错版。
+    LaunchedEffect(Unit) {
+        val stored = appPrefs.qianliColorVersion.first()
+        if (colorVersionTouched[0]) return@LaunchedEffect
+        qianliColorVersion = stored
+        renderCtx.qianliColorVersion = stored
+    }
+
+    /** 主题显示名（Toast 文案用；随语言资源走，不写死中文）。 */
+    val themeDisplayName = stringResource(theme.displayNameRes)
+
+    /**
+     * 切换 E50「千里江山」的设色版（V-A / V-B / V-C，循环）。
+     *
+     * 一次做完三件事：写 [RenderContext.qianliColorVersion]（渲染器每帧读它）、
+     * 持久化到 [AppPreferences]、弹一条短暂 Toast（否则用户看不出切没切）。
+     *
+     * @param delta `+1` = 下一个（0→1→2→0），`-1` = 上一个（2→1→0→2）。
+     * @return 是否真的切了；**非「千里江山」主题返回 false** ⇒ 调用方保持原语义。
+     */
+    fun applyQianliColorVersion(delta: Int): Boolean {
+        val next = nextQianliColorVersion(theme, qianliColorVersion, delta) ?: return false
+        colorVersionTouched[0] = true
+        qianliColorVersion = next
+        renderCtx.qianliColorVersion = next
+        colorToastText = "$themeDisplayName · 设色 ${QianliColorVersion.label(next)}"
+        coroutineScope.launch { appPrefs.setQianliColorVersion(next) }
+        return true
+    }
+
     // 进入舞台立即把焦点交给舞台 Box（TV 遥控器 D-Pad 依赖焦点路由）
     LaunchedEffect(Unit) {
         focusRequester.requestFocus()
@@ -272,8 +338,17 @@ fun VisualizerStage(
                     when (e.key) {
                         Key.DirectionLeft -> { onPrevTheme(); true }
                         Key.DirectionRight -> { onNextTheme(); true }
-                        // 上键：无动作（控制栏已移除）
-                        Key.DirectionUp -> true
+                        // 上键：「千里江山」切**下一个**设色版（0→1→2→0）；
+                        // 其它主题维持原样（无动作，控制栏已移除）⇒ 仍返回 true
+                        Key.DirectionUp -> {
+                            applyQianliColorVersion(+1)
+                            true
+                        }
+                        // 下键：「千里江山」切**上一个**设色版（2→1→0→2）；
+                        // 其它主题**维持原样**（不消费 ⇒ 让事件冒泡给下层组件）
+                        Key.DirectionDown -> {
+                            if (applyQianliColorVersion(-1)) true else false
+                        }
                         else -> false
                     }
                 } else false
@@ -289,6 +364,28 @@ fun VisualizerStage(
                         when {
                             totalDrag > threshold -> onPrevTheme()
                             totalDrag < -threshold -> onNextTheme()
+                        }
+                    }
+                )
+            }
+            .pointerInput(theme) {
+                // 手机：上下滑动切换「千里江山」的设色版（阈值与左右一致：80dp）
+                //
+                // ⚠️ **单独一个 pointerInput 块**（不与横滑合并）：两个 detector 挂同一层
+                //    会互相吞事件；分成两块后各自等自己方向的 slop
+                //    （横 detector 只在 |dx| > |dy| 时起手、竖 detector 反之）⇒ 互不干扰。
+                // ⚠️ key 用 [theme]：块内的主题判据必须是**当前**主题，
+                //    用 `Unit` 会把进舞台那一刻的主题**永久捕获**进去（切到「千里江山」后按了没反应）。
+                var totalDrag = 0f
+                detectVerticalDragGestures(
+                    onDragStart = { totalDrag = 0f },
+                    onVerticalDrag = { _, amount -> totalDrag += amount },
+                    onDragEnd = {
+                        val threshold = with(density) { 80.dp.toPx() }
+                        // 上滑（totalDrag < 0）⇒ 下一个；下滑 ⇒ 上一个（与遥控器上下键同向）
+                        when {
+                            totalDrag < -threshold -> applyQianliColorVersion(+1)
+                            totalDrag > threshold -> applyQianliColorVersion(-1)
                         }
                     }
                 )
@@ -484,12 +581,37 @@ fun VisualizerStage(
                 modifier = Modifier.align(Alignment.CenterHorizontally)
             ) {
                 Text(
-                    text = stringResource(theme.displayNameRes),
+                    text = themeDisplayName,
                     color = Color.White.copy(alpha = 0.85f),
                     fontSize = 20.sp,
                     modifier = Modifier
                         // drawBehind 画圆角矩形：避免 RoundedCornerShape clip 触发
                         // Android 5.1 hwui Region 段错误（见 ThemeIndicator 注释）
+                        .drawBehind {
+                            drawRoundRect(
+                                color = Color.Black.copy(alpha = 0.35f),
+                                cornerRadius = CornerRadius(12.dp.toPx())
+                            )
+                        }
+                        .padding(horizontal = 20.dp, vertical = 8.dp)
+                )
+            }
+
+            // 设色版 Toast（E50「千里江山」三版设色切换时短暂提示，如「千里江山 · 设色 V-B」）
+            // ⚠️ 与上面的效果名 Toast **分开一个 AnimatedVisibility**：两个提示的内容与
+            //    消失时机都不同（效果名 = 进舞台/切主题；设色版 = 切色版），共用一个
+            //    可见性 State 会互相把对方顶掉。
+            AnimatedVisibility(
+                visible = colorToastText != null,
+                enter = fadeIn(),
+                exit = fadeOut(),
+                modifier = Modifier.align(Alignment.CenterHorizontally)
+            ) {
+                Text(
+                    text = colorToastText.orEmpty(),
+                    color = Color.White.copy(alpha = 0.85f),
+                    fontSize = 16.sp,
+                    modifier = Modifier
                         .drawBehind {
                             drawRoundRect(
                                 color = Color.Black.copy(alpha = 0.35f),
@@ -604,6 +726,30 @@ fun VisualizerStage(
 
 /** 交叉淡入下限：低于此值直接跳过绘制（省掉全透明帧的空跑） */
 private const val ALPHA_EPS = 0.004f
+
+/**
+ * E50「千里江山」设色版切换的**纯函数**（遥控器上下键与手机上下滑共用）。
+ *
+ * ⛔ **只有「千里江山」主题会切色版**：其它效果上，上下键 / 上下滑必须维持原语义
+ *    （上键 = 空操作、下键 = 不消费、让事件冒泡）⇒ 返回 `null` 表示「不切换」。
+ *
+ * @param theme   当前主题。
+ * @param current 当前设色版（0/1/2；越界值按默认版处理）。
+ * @param delta   `+1` = 下一个（0→1→2→0），`-1` = 上一个（2→1→0→2）。
+ * @return 新的设色版；**非「千里江山」主题返回 null**。
+ */
+internal fun nextQianliColorVersion(
+    theme: VisualizerTheme,
+    current: Int,
+    delta: Int,
+): Int? {
+    if (theme != VisualizerTheme.QIANLI_SCROLL) return null
+    return if (delta >= 0) {
+        QianliColorVersion.next(current)
+    } else {
+        QianliColorVersion.prev(current)
+    }
+}
 
 /** 顶部歌词行 —— 脱离频谱刷新作用域，仅在行变化时重组 */
 @Composable

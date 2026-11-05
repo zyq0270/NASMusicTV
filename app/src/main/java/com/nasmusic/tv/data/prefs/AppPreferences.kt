@@ -422,6 +422,15 @@ class AppPreferences internal constructor(private val context: Context) {
     private val keyVisualizerTheme = stringPreferencesKey("settings_visualizer_theme")
     private val keyVisualizerQuality = stringPreferencesKey("visualizer_quality")
 
+    /**
+     * E50「千里江山」三版设色（0 = V-A / 1 = V-B / 2 = V-C；默认 2 = V-C）。
+     *
+     * ⛔ **不进 `AppSettings` 备份 JSON**：它是「这台设备上想看哪版设色」的**显示偏好**，
+     * 与「屏幕方向 / 焦点高亮」同类（设备本地偏好）⇒ 从手机备份恢复到电视时
+     * 不该改写电视上用户已经选好的设色版。
+     */
+    private val keyQianliColorVersion = intPreferencesKey("visualizer_qianli_color_version")
+
     // --- 照片墙（§7.3，17 个字段）---
     private val keyPhotoWallGalleryEnabled = booleanPreferencesKey("photo_wall_gallery_enabled")
     private val keyPhotoWallExternalEnabled = booleanPreferencesKey("photo_wall_external_enabled")
@@ -1067,6 +1076,27 @@ class AppPreferences internal constructor(private val context: Context) {
 
     suspend fun setVisualizerQuality(quality: VisualQuality) =
         dataStore.edit { it[keyVisualizerQuality] = quality.name }
+
+    /**
+     * E50「千里江山」当前设色版（Flow）。
+     *
+     * ⚠️ **读出来一律先过 [QianliColorVersion.normalize]**：越界值（< 0 或 > 2）
+     * 回落默认版 V-C（= 2）—— 偏好值可能来自旧版本或手改的 prefs 文件，
+     * 绝不把非法值喂给渲染器。
+     */
+    val qianliColorVersion: Flow<Int> = dataStore.data.map { prefs ->
+        QianliColorVersion.normalize(prefs[keyQianliColorVersion] ?: QianliColorVersion.DEFAULT)
+    }
+
+    /**
+     * 写 E50「千里江山」的设色版（0/1/2）。
+     *
+     * ⚠️ **写入侧也钳制**（与照片墙数值字段的既有写法一致）：非法值在落盘前
+     * 就被换成默认版 ⇒ 磁盘上永远只有合法值。
+     */
+    suspend fun setQianliColorVersion(version: Int) {
+        dataStore.edit { it[keyQianliColorVersion] = QianliColorVersion.normalize(version) }
+    }
 
     // --- 照片墙（§7.3，17 个 setter）---
     //

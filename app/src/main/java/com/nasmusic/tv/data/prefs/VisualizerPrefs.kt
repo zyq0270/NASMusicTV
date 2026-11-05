@@ -16,6 +16,10 @@ class VisualizerPrefs internal constructor(private val prefs: AppPreferences) {
     suspend fun setVisualizerQuality(quality: com.nasmusic.tv.data.model.VisualQuality) = prefs.setVisualizerQuality(quality)
     suspend fun setFontAdjustment(adjustment: Int) = prefs.setFontAdjustment(adjustment)
 
+    // E50「千里江山」三版设色（0=V-A / 1=V-B / 2=V-C，默认 2=V-C）
+    val qianliColorVersion = prefs.qianliColorVersion
+    suspend fun setQianliColorVersion(version: Int) = prefs.setQianliColorVersion(version)
+
     // 封面滤镜（Phase 5）
     val coverFilterEnabled = prefs.coverFilterEnabled
     val coverFilterBlurRadius = prefs.coverFilterBlurRadius

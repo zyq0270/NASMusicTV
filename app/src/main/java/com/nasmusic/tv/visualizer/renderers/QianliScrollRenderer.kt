@@ -13,6 +13,7 @@ import android.graphics.Shader
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.nativeCanvas
 import com.nasmusic.tv.data.model.VisualizerTheme
+import com.nasmusic.tv.data.prefs.QianliColorVersion
 import com.nasmusic.tv.visualizer.AudioFrame
 import com.nasmusic.tv.visualizer.RenderContext
 import com.nasmusic.tv.visualizer.fx.AudioSmoother
@@ -246,6 +247,15 @@ class QianliScrollRenderer : RendererFx() {
         if (iw != laidW || ih != laidH) rebuild(iw, ih)
         // ② 档位变化 ⇒ 只切换 L4′（⛔ 不动其余层 ⇒ 不清屏）。
         if (fx.level != laidLevel) applyLevel(fx.level)
+
+        // ②' 染色版本变化 ⇒ 各层**重烘**（颜色是烘进位图的，⛔ 不是逐帧算的）
+        //     ⇒ 标记各层块池待重生：旧块先顶上（⛔ 不闪白），预算片里逐块换成新色。
+        //     ⚠️ 取值范围 / 越界回落统一走 [QianliColorVersion]（唯一契约处）。
+        val wantVersion = QianliColorVersion.normalize(ctx.qianliColorVersion)
+        if (wantVersion != colorVersion.ordinal) {
+            setColorVersionForGate(wantVersion)
+            forceRegenerateLayers()
+        }
 
         // ③ 音频包络。⚠️ `fx.dt` **已经是秒**（FrameClock），⛔ 不再除 1000（E44 偏差 D31）。
         val dt = fx.dt.toDouble()
@@ -501,7 +511,7 @@ class QianliScrollRenderer : RendererFx() {
             baseSpread = MID_BASE_SPREAD,
             heightScale = MID_HEIGHT_SCALE,
         )
-        val bmp = bakeBlock(world, x0, map, Kind.MOUNTAIN, blockW, blockH)
+        val bmp = bakeBlock(world, x0, map, Kind.MOUNTAIN, blockW, blockH, LAYER_MID)
         return GateMidBlock(bmp, world.specs.map { it.contours })
     }
 
@@ -650,6 +660,21 @@ class QianliScrollRenderer : RendererFx() {
         )
     }
 
+    /**
+     * 染色版本变了 ⇒ 让所有层的块池**重新烘焙**（颜色烘在位图里）。
+     *
+     * ⛔ **不释放旧块** ⇒ 旧块继续被画（颜色还是旧的）⇒ 不闪白；
+     * 预算片里逐块换新 ⇒ 平滑过渡（远景层每块 504 条轮廓 ⇒ 换得慢一点，属正常）。
+     */
+    private fun forceRegenerateLayers() {
+        poolFar?.forceRegenerate()
+        poolMid?.forceRegenerate()
+        poolGlint?.forceRegenerate()
+        poolNear?.forceRegenerate()
+        poolWater?.forceRegenerate()
+        poolWaterHi?.forceRegenerate()
+    }
+
     /** 造一个块池；块宽由池自己算（⛔ 不在这里复刻公式，避免两边漂移）。 */
     private fun makePool(
         id: Int,
@@ -674,7 +699,7 @@ class QianliScrollRenderer : RendererFx() {
         val pool = QianliBlockPool(
             LayerSpec(id, bandY0, bandY1, speed, alphaFloor),
             BLOCK_COUNT, w, bandH,
-        ) { x0 -> bakeBlock(world, x0, map, kind, blockW, bandH) }
+        ) { x0 -> bakeBlock(world, x0, map, kind, blockW, bandH, id) }
         blockW = pool.blockWidth
         return pool
     }
@@ -772,6 +797,7 @@ class QianliScrollRenderer : RendererFx() {
         kind: Kind,
         blockW: Int,
         blockH: Int,
+        layerId: Int,
     ): Bitmap {
         world.ensure(x0)
         val bmp = Bitmap.createBitmap(blockW, blockH, Bitmap.Config.ARGB_8888)
@@ -784,21 +810,33 @@ class QianliScrollRenderer : RendererFx() {
             // ⚠️ 按**内容范围**相交来选，不是按 chunk 原点 ——
             //    distMount 的轮廓向右伸到 `x + len`（最多 1500），按原点选会在块边界切断远山。
             if (spec.maxX < x0 || spec.minX > x1) continue
-            drawChunk(cv, spec, x0, map, kind)
+            drawChunk(cv, spec, x0, map, kind, layerId)
         }
         return bmp
     }
 
     /** 画一个 chunk 的轮廓（两趟：先 fill，再 stroke）。 */
-    private fun drawChunk(cv: Canvas, spec: ChunkSpec, x0: Double, map: BandMap, kind: Kind) {
+    private fun drawChunk(
+        cv: Canvas,
+        spec: ChunkSpec,
+        x0: Double,
+        map: BandMap,
+        kind: Kind,
+        layerId: Int,
+    ) {
         val contours = spec.contours
         if (contours.isEmpty()) return
         when (kind) {
             Kind.MOUNTAIN -> {
-                // ⭐ 上游的白有**两种**用途（方案 §3.6.5）：
-                //   ① 山体白底（最大的一块白）⇒ 染成坡面色（青绿）；
+                // ⭐ 上游的白有**三种**用途（方案 §3.6.5 + §3.3 的角色色）：
+                //   ① 山体白底（最大的一块白）⇒ 染成坡面色（青绿，按坡面行号）；
                 //   ② 叶簇 / 水花的小白块 ⇒ 换**绢白**（⛔ 不留纯白，也不染成坡面色
-                //      ——那会让树与山体同色、树直接消失）。
+                //      ——那会让树与山体同色、树直接消失）；
+                //   ③ **山体底下的其它白底块**（山脚收笔 / 平山顶 / 远山整条带）
+                //      ⇒ 按**角色**取色（方案 §3.3）：L1 远山 = 石绿、L2 中山脚 = 赭石、
+                //      L3 近坡顶 = 石绿。
+                //      ⛔ 2026-11-05 真机前这三种都走了「② 绢白」⇒ 画面上出现
+                //      **山脚一排白三角** + **远山没有颜色**。
                 val bodyIdx = bodyFillIndex(contours)
                 for (i in contours.indices) {
                     val c = contours[i]
@@ -806,10 +844,16 @@ class QianliScrollRenderer : RendererFx() {
                     buildPath(c.pts, x0, spec, map)
                     path.close()
                     ptFill.style = Paint.Style.FILL
-                    val col = if (i == bodyIdx) {
-                        fillColor(rowJOf(spec, c, i, contours.size, kind), f)
-                    } else {
-                        whiteFillColor(f)
+                    val col = when {
+                        // 远景整条带（含上游三角剖分的 494 个三角形）⇒ 石绿族。
+                        layerId == LAYER_FAR -> distantFillColor(f)
+                        // 山体白底 ⇒ 坡面色（按坡面行号）。
+                        i == bodyIdx -> fillColor(rowJOf(spec, c, i, contours.size, kind), f)
+                        // 其它的白**底块**（无描边 + 笔宽 0）⇒ 角色色。
+                        //   （叶簇 / 水花的 blob 轮廓带描边 ⇒ 不落这里 ⇒ 仍走绢白。）
+                        isWhiteish(f) && c.stroke == null && c.width == 0.0 ->
+                            roleFillColor(roleRowJ(layerId), f)
+                        else -> whiteFillColor(f)
                     }
                     ptFill.color = argbOf(col)
                     cv.drawPath(path, ptFill)
@@ -959,6 +1003,44 @@ class QianliScrollRenderer : RendererFx() {
             (own.a.coerceIn(0.0, 1.0) * WHITE_FILL_A_K).coerceIn(0.0, 1.0),
         )
 
+    /**
+     * **角色色**：山脚 / 平山顶 / 远山这类「白底块」按方案 §3.3 的用途取族色。
+     *
+     * - [roleRowJ] 给出坡面行号：赭石族 = `t=0.2` ⇒ 行号 2；汁绿（石绿）族 = `t=0.8` ⇒ 行号 8。
+     * - α **沿用轮廓自带的**（⛔ 不用色表的 α）⇒ 上游的白底块本就是不透明 / 半透明，
+     *   换色不该顺便改透明度。
+     * - V-A（上游原样灰阶对照组）⇒ **不换色**，用轮廓自带色。
+     */
+    private fun roleFillColor(rowJ: Int, own: ShanShuiColor): ShanShuiColor {
+        if (colorVersion == QianliColorTable.Version.V_A) return own
+        val base = QianliColorTable.colorFor(colorVersion, rowJ, TOTAL_ROWS)
+        return ShanShuiColor(base.r, base.g, base.b, own.a.coerceIn(0.0, 1.0))
+    }
+
+    /** 角色 → 坡面行号（族色由色表按行号给出）。 */
+    private fun roleRowJ(layerId: Int): Int = when (layerId) {
+        LAYER_MID -> ROW_J_OCHRE
+        LAYER_NEAR -> ROW_J_GREEN
+        else -> ROW_J_GREEN
+    }
+
+    /**
+     * **远景色**：整条远山带（含上游三角剖分出的 494 个三角形）⇒ 石绿族。
+     *
+     * ⭐ 上游用**灰阶噪声**做明暗（`getCol` ⇒ `r=g=b ∈ [200,255]`）⇒
+     * 这里**保留明暗、只换色相**：α 按灰阶线性调制 ⇒ 暗的三角形更透 ⇒
+     * 底下的石绿块填色透出来 ⇒ **晶面层次仍在**（⛔ 全刷同一个色会把层次洗掉）。
+     */
+    private fun distantFillColor(own: ShanShuiColor): ShanShuiColor {
+        if (colorVersion == QianliColorTable.Version.V_A) return own
+        val base = QianliColorTable.colorFor(colorVersion, ROW_J_GREEN, TOTAL_ROWS)
+        val lum = (own.r + own.g + own.b) / 3.0
+        val k = ((lum - 200.0) / 55.0).coerceIn(0.0, 1.0)
+        val a = (own.a.coerceIn(0.0, 1.0) * (DIST_FACET_A_MIN + (1.0 - DIST_FACET_A_MIN) * k))
+            .coerceIn(0.0, 1.0)
+        return ShanShuiColor(base.r, base.g, base.b, a)
+    }
+
     /** 高光丝的 α 阈值：绝对下限与「最亮者的 80%」取大者；一个都不够亮时退化为取最亮。 */
     private fun waterHiThreshold(contours: List<ShanShuiContour>): Double {
         var maxA = 0.0
@@ -975,14 +1057,33 @@ class QianliScrollRenderer : RendererFx() {
     // ─────────────────────── 染色 ───────────────────────
 
     /**
+     * 当前染色版本（**运行期可变** —— 上下键切换三版设色）。
+     *
+     * ⚠️ 改它 ⇒ 各层的**烘焙位图必须重做**（颜色是烘进位图的，不是逐帧算的）
+     * ⇒ 切换时把各层的块池标记为「待重生」⇒ 旧块先顶上（⛔ 不闪白），
+     * 预算片里逐块换成新色 ⇒ 平滑过渡。
+     */
+    private var colorVersion: QianliColorTable.Version = QianliColorTable.Version.V_C
+
+    /** 门禁缝：设定当前染色版本（0 = V_A / 1 = V_B / 2 = V_C）。 */
+    internal fun setColorVersionForGate(v: Int) {
+        val idx = QianliColorVersion.normalize(v)
+        colorVersion = when (idx) {
+            QianliColorVersion.V_A -> QianliColorTable.Version.V_A
+            QianliColorVersion.V_B -> QianliColorTable.Version.V_B
+            else -> QianliColorTable.Version.V_C
+        }
+    }
+
+    /**
      * 填充色。
      *
      * - V-A（对照组）：⛔ 原样用轮廓自带的颜色（上游灰阶线稿）。
      * - V-B / V-C：用 [QianliColorTable] 的坡面行号染色（**按行号，⛔ 不按 y**）。
      */
     private fun fillColor(rowJ: Int, own: ShanShuiColor): ShanShuiColor =
-        if (COLOR_VERSION == QianliColorTable.Version.V_A) own
-        else QianliColorTable.colorFor(COLOR_VERSION, rowJ, TOTAL_ROWS)
+        if (colorVersion == QianliColorTable.Version.V_A) own
+        else QianliColorTable.colorFor(colorVersion, rowJ, TOTAL_ROWS)
 
     /**
      * 描边色（皴线 / 轮廓）。
@@ -992,8 +1093,8 @@ class QianliScrollRenderer : RendererFx() {
      * α 沿用轮廓自带的（上游的干湿浓淡），⛔ 不用色表的 α 覆盖。
      */
     private fun strokeColor(rowJ: Int, own: ShanShuiColor): ShanShuiColor {
-        if (COLOR_VERSION == QianliColorTable.Version.V_A) return own
-        val ink = QianliColorTable.colorFor(COLOR_VERSION, TOTAL_ROWS - 1, TOTAL_ROWS)
+        if (colorVersion == QianliColorTable.Version.V_A) return own
+        val ink = QianliColorTable.colorFor(colorVersion, TOTAL_ROWS - 1, TOTAL_ROWS)
         return ShanShuiColor(ink.r, ink.g, ink.b, own.a.coerceIn(0.0, 1.0))
     }
 
@@ -1253,11 +1354,35 @@ class QianliScrollRenderer : RendererFx() {
         val heightScale: Double,
         val waterSpan: Double = 0.0,
         val waterOffset: Double = 0.0,
+        /** 水波：chunk 基线在带内的基准世界 y（上游 mount 的 y 均值 ≈ 540）。 */
+        val waterRefBaseY: Double = 540.0,
+        /** 水波：chunk 基线铺满整条带所对应的世界 y 跨度（上游 300..780 ⇒ 480）。 */
+        val waterBaseRange: Double = 480.0,
     ) {
+        /**
+         * 换一条带（带顶/带底）但**其余参数不变**的副本。
+         *
+         * ⛔ 只给离线预览用（构图变体）⇒ 生产路径永远走 [bandMapForGate]。
+         */
+        fun withBand(y0: Float, y1: Float, h: Int): BandMap = BandMap(
+            maxOf(1f, (y1 - y0) * h),
+            refBaseY, baseSpread, heightScale,
+            waterSpan, waterOffset, waterRefBaseY, waterBaseRange,
+        )
         fun bandY(chunkBaseY: Double, worldY: Double): Float {
             if (waterSpan > 0.0) {
-                val t = (worldY - chunkBaseY + waterOffset) / waterSpan
-                return (t * bandHeightPx).toFloat()
+                // ── 水波：**逐行一致上游**（2026-11-05 真机：「水纹太奇怪了」+「下方黑条」）──
+                // 上游 `:3897-3902`：每个水波 chunk 挂在**各自的** mount chunk 基线上
+                //   （上游 mount 的 y ∈ [300,780]）⇒ **波纹散布在下游面各处**，⛔ 不是一条横带。
+                //   E50 原实现把局部 y 拉伸铺满整条带 ⇒ ①波纹被拉成 5 倍的锯齿带
+                //   ②江面带里只剩顶部一条 ⇒ 下方整片空 ⇒ 读作「黑条」。
+                // ⇒ 照抄上游两件事：
+                //   ① chunk 的基线按 [waterBaseRange] 铺进整条江面带（各 chunk 不同高）；
+                //   ② chunk 自己的局部 y 按**上游比例**铺（1 单位 = 带高/span px，⛔ 不拉伸）。
+                val pxPerUnit = bandHeightPx / waterSpan.toFloat()
+                val chunkLocal =
+                    ((chunkBaseY - waterRefBaseY) / waterBaseRange).toFloat() * bandHeightPx
+                return chunkLocal + ((worldY - chunkBaseY) * pxPerUnit).toFloat()
             }
             // 基线：chunk 的世界 y 越大（越靠下/越近）⇒ 脚落得越低（局部 y 越大）。
             // ⚠️ 这里必须是 `+`：`chunkBaseY − refBaseY` 与世界 y 同向 ⇒ 局部 y 也要同向。
@@ -1287,7 +1412,8 @@ class QianliScrollRenderer : RendererFx() {
         LAYER_WATER, LAYER_WATER_HI -> BandMap(
             bandHeight(WATER_Y0, WATER_Y1, h),
             0.0, 0.0, 0.0,
-            WATER_LOCAL_SPAN, WATER_LOCAL_OFFSET,
+            WATER_LOCAL_SPAN, 0.0,
+            WATER_REF_BASE_Y, WATER_BASE_RANGE,
         )
         else -> error("未知层号：$layerId")
     }
@@ -1450,11 +1576,20 @@ class QianliScrollRenderer : RendererFx() {
         const val BLOCK_COUNT = 2
         const val PLAN_STEP = 512.0
 
-        /** 规划前瞻（世界单位）：必须覆盖该层内容向右伸出的最大距离。 */
-        const val PLAN_AHEAD_FAR = 2100.0
-        const val PLAN_AHEAD_MID = 1100.0
-        const val PLAN_AHEAD_NEAR = 1200.0
-        const val PLAN_AHEAD_WATER = 1100.0
+        /**
+         * 规划前瞻（世界单位）：必须覆盖该层内容向右伸出的最大距离。
+         *
+         * ⚠️⚠️ **必须 ≥ 块宽 + 内容余量**（2026-11-05 真机「半边山」的根因）。
+         * 块宽 = `1.05 × 屏宽`（@1920 ⇒ 2016），而规划器给的 chunk 原点带 ±250 抖动、
+         * chunk 的**内容**还会向右再伸一段（中景 `wid/2+90`、近景 `wid/2+140`、
+         * 水纹 `450+40`、远山 `len+80`）⇒ 前瞻不足时，**块右端那一片根本没有 chunk**
+         * ⇒ 块被烘出来时右端缺一截 ⇒ 屏幕上就是「半边山」。
+         * 取 `2400`：> 2016（块宽）+ 250（抖动）+ 余量 ⇒ 四层都够。
+         */
+        const val PLAN_AHEAD_FAR = 2400.0
+        const val PLAN_AHEAD_MID = 2400.0
+        const val PLAN_AHEAD_NEAR = 2400.0
+        const val PLAN_AHEAD_WATER = 2400.0
 
         /** 修剪时保留的历史长度（世界单位）。 */
         const val KEEP_BACK_PX = 2400.0
@@ -1479,9 +1614,32 @@ class QianliScrollRenderer : RendererFx() {
         /** 水纹的横向半幅（世界单位）—— 选 chunk 时用它算内容范围。 */
         const val WATER_HALF_SPAN = 450.0
 
-        /** 水纹的局部 y 跨度（世界单位）与零点偏移。 */
-        const val WATER_LOCAL_SPAN = 80.0
-        const val WATER_LOCAL_OFFSET = 20.0
+        /**
+         * 水纹的局部 y 跨度（世界单位）与零点偏移。
+         *
+         * ⚠️⚠️ **跨度必须按「上游场景比例」给，⛔ 不能把水纹拉伸铺满整条带**
+         * （2026-11-05 真机：「水纹太奇怪了」）。
+         * 上游 `water`（`:3667-3704`）的局部 y 只跨 **50 个场景单位**（`yk += rnd*5` 逐簇下移、
+         * 摆幅 `sin(j*0.2)*hei*noise` 仅 ±2 单位），而上游场景高 **800** ⇒
+         * 1 单位 = 1 场景 px ⇒ 水面带只有 50/800 = 6% 高。
+         * ⇒ E50 的换算：`waterSpan = (WATER_Y1 − WATER_Y0) × 800 = 0.38 × 800 = 304`
+         *   ⇒ 1 单位 = `带高 / 304` px = `h / 800` px ⇒ **与上游同比例**（不拉伸）。
+         * 原值 `80` ⇒ 1 单位 = 5.1 px ⇒ **竖向被拉伸 5.1 倍**（实测：水纹被拉成 122px 的锯齿带）。
+         */
+        const val WATER_LOCAL_SPAN = 304.0
+
+        /**
+         * 水波 chunk 的基线在带内的基准 / 铺满跨度（**上游的 mount chunk 的 y 范围**）。
+         *
+         * 上游 `mountplanner`（`:3760`）的 `yof = j + 300`，`j ∈ [0, yr(i)*480)`
+         * ⇒ mount 的 y ∈ [300, 780]。
+         * ⇒ 水波按这个范围**铺满**整条江面带（基准 = 下界 300、跨度 480）
+         * ⇒ **与上游一致**：波纹散布在下游面各处，⛔ 不是只在带顶一条。
+         * ⚠️ 基准若取中值（540），低位 chunk 会映射到**带外**（负局部 y）
+         *   ⇒ 波纹跑到江面带上方、且带的下半截空着 ⇒ 底部读作黑条。
+         */
+        const val WATER_REF_BASE_Y = 300.0
+        const val WATER_BASE_RANGE = 480.0
 
         // ── 层带映射常量（⛔ 便于后续调）──
         const val FAR_REF_BASE_Y = 255.0
@@ -1497,8 +1655,25 @@ class QianliScrollRenderer : RendererFx() {
         // ── 染色 ──
         const val TOTAL_ROWS = 10
 
-        /** 染色版本（V-A = 上游原样灰阶对照组 / V-B 六族 / V-C 大青绿）。 */
+        /**
+         * 染色版本的**默认值**（V-A = 上游原样灰阶对照组 / V-B 六族 / V-C 大青绿）。
+         *
+         * ⚠️ 运行期可切（上下键）⇒ 实际生效的是实例字段 `colorVersion`；
+         * ⛔ 改这个常量**不会**改变已烘好的位图（颜色是烘进位图的）。
+         */
         val COLOR_VERSION: QianliColorTable.Version = QianliColorTable.Version.V_C
+
+        /**
+         * 角色色的**坡面行号**（色表按行号给族色，方案 §3.3）：
+         *
+         * - [ROW_J_OCHRE] = 2 ⇒ `t = 0.2` ⇒ **赭石族**（L2 中山脚）
+         * - [ROW_J_GREEN] = 8 ⇒ `t = 0.8` ⇒ **汁绿（石绿）族**（L1 远山 / L3 近坡顶）
+         */
+        const val ROW_J_OCHRE = 2
+        const val ROW_J_GREEN = 8
+
+        /** 远山三角剖分的**最暗**三角形 α 系数（上游灰阶 200 ⇒ 0.62；最亮 255 ⇒ 1.0）。 */
+        const val DIST_FACET_A_MIN = 0.62
 
         // ── 轮廓光（方案 §3.4-4：只有一种色 = 赭石亮锚 `#A97D40`）──
         const val GLINT_R = 0xA9

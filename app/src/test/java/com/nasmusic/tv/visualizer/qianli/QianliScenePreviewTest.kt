@@ -15,16 +15,18 @@ import java.io.File
 /**
  * E50 场景离线预览（**诊断用**，不是门禁）。
  *
- * 目的：真机截图暴露「山体上下颠倒 / 分成两行 / 中间多一条波纹」之后，
- * ⛔ 不能靠读代码猜画面 —— 本测试把渲染器的**真实**层带映射与**真实** chunk 几何
- * 画成 PNG，让人（和后续会话）能直接看图核对构图。
+ * 目的：真机截图暴露「山体上下颠倒 / 分成两行了 / 水纹奇怪 / 远山没颜色 /
+ * 山脚白三角 / 半边山 / 底部黑条」之后，⛔ 不能靠读代码猜画面 ——
+ * 本测试把渲染器的**真实**层带映射与**真实** chunk 几何画成 PNG，
+ * 让人（和后续会话）能直接看图核对构图。
  *
- * ## 两条纪律
+ * ## 三条纪律
  *
- * ① **层带与 α 一律读渲染器的门禁缝**（`bandForGate` / `farAlphaRangeForGate` …）
- *    ⇒ 预览永远反映生产常量，⛔ 不许在本文件里硬编码一份 ⇒ 不会与生产分叉。
+ * ① **层带、映射、α 一律读渲染器的门禁缝**（`bandForGate` / `bandMapForGate` /
+ *    `farAlphaRangeForGate` …）⇒ 预览永远反映生产常量，⛔ 不在本文件里硬编码一份。
  * ② **必须带各层的 α**（生产 `computeAlphas` 的区间中值）⇒ 否则远景带会被画成
  *    100% 不透明，比真机重得多，会把构图问题看错。
+ * ③ **逐层出图** ⇒ 哪一层画出了什么，一眼可辨（不用在合成图里猜）。
  *
  * ## 为什么不用 AWT
  *
@@ -55,14 +57,14 @@ class QianliScenePreviewTest {
         println("[E50 预览] 修复前 = ${before.absolutePath}（${before.length() / 1024} KB）")
     }
 
-    /** 逐层出图 —— 用来定位「哪一层画出了那排锯齿」。 */
+    /** 逐层出图 —— 用来定位「哪一层画出了什么」。 */
     @Test
     fun renderPerLayerPreviews() {
         val renderer = QianliScrollRenderer()
-        for (spec in layers(renderer)) {
-            val out = renderLayer(renderer, spec)
-            println("[E50 逐层预览] ${spec.name} = ${out.absolutePath}（${out.length() / 1024} KB）")
-            assertTrue("${spec.name} 层预览必须已写出", out.exists() && out.length() > 1_000)
+        for (plan in layers(renderer)) {
+            val out = renderLayer(renderer, plan)
+            println("[E50 逐层预览] ${plan.name} = ${out.absolutePath}（${out.length() / 1024} KB）")
+            assertTrue("${plan.name} 层预览必须已写出", out.exists() && out.length() > 1_000)
         }
     }
 
@@ -96,12 +98,11 @@ class QianliScenePreviewTest {
         val canvas = PngCanvas(W, H)
         canvas.fill(0xFF4C5A5E.toInt())
         withSeed {
-            for (spec in layers(renderer)) {
-                val map = renderer.bandMapForGate(spec.id, H)
-                val top = (spec.y0 * H).toFloat()
-                for (chunk in renderer.gateChunksForGate(spec.id)) {
+            for (plan in layers(renderer)) {
+                val top = (plan.top * H).toFloat()
+                for (chunk in renderer.gateChunksForGate(plan.id)) {
                     for (c in chunk.contours) {
-                        drawContour(canvas, c, chunk.baseY, map, fixed, top, spec.alphaK)
+                        drawContour(canvas, c, chunk.baseY, plan.map, fixed, top, plan.alphaK)
                     }
                 }
             }
@@ -111,19 +112,18 @@ class QianliScenePreviewTest {
         return out
     }
 
-    private fun renderLayer(renderer: QianliScrollRenderer, spec: BandSpec): File {
+    private fun renderLayer(renderer: QianliScrollRenderer, plan: LayerPlan): File {
         val canvas = PngCanvas(W, H)
         canvas.fill(0xFF4C5A5E.toInt())
         withSeed {
-            val map = renderer.bandMapForGate(spec.id, H)
-            val top = (spec.y0 * H).toFloat()
-            for (chunk in renderer.gateChunksForGate(spec.id)) {
+            val top = (plan.top * H).toFloat()
+            for (chunk in renderer.gateChunksForGate(plan.id)) {
                 for (c in chunk.contours) {
-                    drawContour(canvas, c, chunk.baseY, map, true, top, spec.alphaK)
+                    drawContour(canvas, c, chunk.baseY, plan.map, true, top, plan.alphaK)
                 }
             }
         }
-        val out = File(repoRoot(), "output/e50_layer_${spec.name}.png")
+        val out = File(repoRoot(), "output/e50_layer_${plan.name}.png")
         canvas.writePng(out)
         return out
     }
@@ -132,12 +132,11 @@ class QianliScenePreviewTest {
         val canvas = PngCanvas(W, H)
         canvas.fill(0xFF4C5A5E.toInt())
         withSeed {
-            for (spec in compositeLayers(renderer, v)) {
-                val map = spec.buildMap(H)
-                val top = (spec.y0 * H).toFloat()
-                for (chunk in renderer.gateChunksForGate(spec.id)) {
+            for (plan in compositeLayers(renderer, v)) {
+                val top = (plan.top * H).toFloat()
+                for (chunk in renderer.gateChunksForGate(plan.id)) {
                     for (c in chunk.contours) {
-                        drawContour(canvas, c, chunk.baseY, map, true, top, spec.alphaK)
+                        drawContour(canvas, c, chunk.baseY, plan.map, true, top, plan.alphaK)
                     }
                 }
             }
@@ -147,32 +146,43 @@ class QianliScenePreviewTest {
         return out
     }
 
-    /** 生产现状的四层（层带与 α 全部读渲染器门禁缝）。 */
-    private fun layers(renderer: QianliScrollRenderer): List<BandSpec> {
-        val far = renderer.bandForGate(QianliScrollRenderer.GateLayer.FAR)
-        val mid = renderer.bandForGate(QianliScrollRenderer.GateLayer.MID)
-        val water = renderer.bandForGate(QianliScrollRenderer.GateLayer.WATER)
-        val near = renderer.bandForGate(QianliScrollRenderer.GateLayer.NEAR)
-        val farA = renderer.farAlphaRangeForGate()
-        val waterA = renderer.waterAlphaRangeForGate()
+    /** 生产现状的四层（层带 / 映射 / α 全部读渲染器门禁缝）。 */
+    private fun layers(renderer: QianliScrollRenderer): List<LayerPlan> {
+        val farA = mid(renderer.farAlphaRangeForGate())
+        val waterA = mid(renderer.waterAlphaRangeForGate())
         return listOf(
-            BandSpec(QianliScrollRenderer.GateLayer.FAR, "far", far.first, far.second, 255.0, 0.20, 0.47, 0.0, 0.0, mid(farA)),
-            BandSpec(QianliScrollRenderer.GateLayer.MID, "mid", mid.first, mid.second, 540.0, 0.12, 0.643, 0.0, 0.0, 1.0f),
-            BandSpec(QianliScrollRenderer.GateLayer.WATER, "water", water.first, water.second, 0.0, 0.0, 0.0, 80.0, 20.0, mid(waterA)),
-            BandSpec(QianliScrollRenderer.GateLayer.NEAR, "near", near.first, near.second, 650.0, 0.15, 1.31, 0.0, 0.0, 1.0f),
+            plan(renderer, QianliScrollRenderer.GateLayer.FAR, "far", farA),
+            plan(renderer, QianliScrollRenderer.GateLayer.MID, "mid", 1.0f),
+            plan(renderer, QianliScrollRenderer.GateLayer.WATER, "water", waterA),
+            plan(renderer, QianliScrollRenderer.GateLayer.NEAR, "near", 1.0f),
         )
     }
 
-    /** 变体只动远景带；其余三层与现状一致。 */
-    private fun compositeLayers(renderer: QianliScrollRenderer, v: Compose): List<BandSpec> {
-        val base = layers(renderer)
-        val out = ArrayList<BandSpec>()
-        for (spec in base) {
-            if (spec.name == "far") {
+    private fun plan(
+        renderer: QianliScrollRenderer,
+        id: Int,
+        name: String,
+        alphaK: Float,
+    ): LayerPlan {
+        val band = renderer.bandForGate(id)
+        return LayerPlan(id, name, band.first, renderer.bandMapForGate(id, H), alphaK)
+    }
+
+    /** 变体只动远景带；其余三层与现状一致（映射直接取渲染器那份）。 */
+    private fun compositeLayers(renderer: QianliScrollRenderer, v: Compose): List<LayerPlan> {
+        val out = ArrayList<LayerPlan>()
+        for (p in layers(renderer)) {
+            if (p.id == QianliScrollRenderer.GateLayer.FAR) {
                 if (!v.farOn) continue
-                out.add(spec.copy(y0 = v.farY0, y1 = v.farY1, alphaK = spec.alphaK * v.farAlphaK))
+                out.add(
+                    p.copy(
+                        top = v.farY0,
+                        map = p.map.withBand(v.farY0, v.farY1, H),
+                        alphaK = p.alphaK * v.farAlphaK,
+                    ),
+                )
             } else {
-                out.add(spec)
+                out.add(p)
             }
         }
         return out
@@ -210,11 +220,11 @@ class QianliScenePreviewTest {
         worldY: Double,
         fixed: Boolean,
     ): Float {
+        if (fixed) return map.bandY(chunkBaseY, worldY)
         if (map.waterSpan > 0.0) {
-            val t = (worldY - chunkBaseY + map.waterOffset) / map.waterSpan
+            val t = (worldY - chunkBaseY + 20.0) / map.waterSpan
             return (t * map.bandHeightPx).toFloat()
         }
-        if (fixed) return map.bandY(chunkBaseY, worldY)
         val base = map.bandHeightPx - (chunkBaseY - map.refBaseY) * map.baseSpread
         return (base + (chunkBaseY - worldY) * map.heightScale).toFloat()
     }
@@ -258,29 +268,14 @@ class QianliScenePreviewTest {
         val farOn: Boolean,
     )
 
-    /** 一层的层带描述（层号 + 带顶/带底 + 映射常量 + 整层 α 系数）。 */
-    private data class BandSpec(
+    /** 一层的绘制计划（层号 + 带顶 + **渲染器那份映射** + 整层 α）。 */
+    private data class LayerPlan(
         val id: Int,
         val name: String,
-        val y0: Float,
-        val y1: Float,
-        val refBaseY: Double,
-        val baseSpread: Double,
-        val heightScale: Double,
-        val waterSpan: Double,
-        val waterOffset: Double,
-        /** 整层 α 系数（= 生产里 `computeAlphas` 的中值；⛔ 不填 1.0 会把远景带画得过重）。 */
+        val top: Float,
+        val map: QianliScrollRenderer.BandMap,
         val alphaK: Float,
-    ) {
-        fun buildMap(h: Int): QianliScrollRenderer.BandMap = QianliScrollRenderer.BandMap(
-            maxOf(1f, (y1 - y0) * h),
-            refBaseY,
-            baseSpread,
-            heightScale,
-            waterSpan,
-            waterOffset,
-        )
-    }
+    )
 
     private companion object {
         const val W = 1920

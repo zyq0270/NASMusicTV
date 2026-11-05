@@ -201,6 +201,17 @@ class QianliBlockPool(
         pendingRegen = blockRegen.any { it }
     }
 
+    /**
+     * 强制重生**全部**块（染色版本切换时用）。
+     *
+     * ⚠️ **不释放旧块** ⇒ 旧块在预算片把新块换进来之前继续被画 ⇒ **不闪白**
+     * （⛔ G-POOL-3「不许画空白」）；新块换入时旧块才被 `recycle`。
+     */
+    fun forceRegenerate() {
+        for (i in 0 until blockCount) blockRegen[i] = true
+        pendingRegen = true
+    }
+
     // ─────────────────────── 生命周期 ───────────────────────
 
     /**

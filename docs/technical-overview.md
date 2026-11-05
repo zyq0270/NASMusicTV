@@ -18532,10 +18532,32 @@ GitHub runner 上这两样都不存在 ⇒ 公开构建与 CI 完全不受影响
 > `sliverRatio` 其实**没有** `bds`/`minSliver`、`bestEar` 的 `minSliver` 只在 `optimize=true`
 > 分支出现）⇒ 按**上游原文**实现，不按转述。
 
+##### 7.6 真机第二轮返工（手机实测六条，2026-11-05）
+
+真机（手机）实测又提六条。**取证方式**：采样真机截图的像素（`PIL`，2712×1220）
+⇒ 客观量出各层的实际位置与尺度，⛔ 不靠目测。
+
+| # | 反馈 | 根因 | 修法 |
+|---|---|---|---|
+| 1 | 山下方有白色三角形 | 上游「**山脚收笔**」是白填充；渲染器只给「山体白底」那条上坡面色，**其余白块一律刷绢白** ⇒ 山脚成排白三角。方案 §3.3 明明规定 **L2 中山脚 = 赭石** | 白**底块**（无描边 + 笔宽 0）改按**角色**取色：中山脚 → 赭石族（行号 2）、近坡顶 → 石绿族（行号 8） |
+| 2 | 中间的水纹太奇怪 | ① `waterSpan=80` 把 24 个上游单位拉成 122px ⇒ **竖向拉伸 5.1 倍**；② 映射里减掉了 chunk 基线 ⇒ 所有水波**塌成一条横带**（上游是各 chunk 挂各自基线、**散布在下游面各处**） | 跨度改 `304`（= 带高比例 × 上游场景 800 ⇒ 1 单位 = 1 场景 px，**不拉伸**）；chunk 基线按上游 mount 的 y∈[300,780] **铺满**江面带 |
+| 3 | 画面下方有黑条 | 底部 12% 是**空**的（方案 §3.2 留白的江面带）+ **应用层** `NowPlayingScreen` 的 72–85% 黑渐变 ⇒ 叠加读作黑条。像素实测：底部颜色与屏幕顶部几乎相同 ⇒ 那里本来就空 | **不改**（所有者裁定「参考 shan-shui-inf」）：上游场景高 800、近景平山基线在 550–700、内容往上长 ⇒ **上游最底部也是空的（约 12.5%）** ⇒ E50 现有留白比例与上游一致 ⇒ 黑条是应用层压暗造成的，与 E50 无关 |
+| 4 | 远处的山脉没颜色 | 远景的 504 条轮廓全被刷绢白（远山带不是「山体白底」）⇒ 只剩灰白。方案 §3.3 规定 **L1 远山 = 石绿** | 远景整条带取石绿族；α 按上游灰阶（200–255）线性调制 ⇒ **晶面层次保留**（不洗成一块死绿） |
+| 5 | 没法切换三版上色 | 染色版本是**编译期常量** `COLOR_VERSION` | 新增 `QianliColorVersion`（**唯一契约处**：序号 / 默认 / 越界回落 / 循环 / 展示名）+ 上下键 + 手机上下滑 + 持久化 + Toast；渲染器改成**运行期字段**，版本一变就**标记块池重烘**（旧块先顶上 ⇒ 不闪白，预算片里逐块换色） |
+| 6 | 有时出现半边山 | **结构性**：`PLAN_AHEAD_MID/NEAR/WATER` = 1100/1200/1100 **小于块宽 2016** ⇒ 块被烘出来时**右端那一片根本没有 chunk** ⇒ 半边山 | 四个前瞻全改 **2400**（> 块宽 2016 + 规划器抖动 250 + 内容余量）⇒ 中景从「只有一座山」变成**连续山峦** |
+
+> ⭐ **#6 的修法顺带修好了构图**：前瞻不足时中景只有零星几座山，看起来像「分成两行」；
+> 补足前瞻后中景才是**连绵的山峦**（离线预览 `output/e50_preview_fixed.png` 可对照）。
+
+> ⚠️ **内存：不降质量**（所有者裁定「不降质量，按 shan-shui-inf 处理」）⇒
+> **不实施**方案 §7.5.5 的 ① `RGB_565` / ② `glint 0.5×` / ③ `waterHi 0.75×`；
+> E50 位图内存维持 **48.71 MiB @1080p**（容差线 46 MiB）⇒
+> ⛔ **风险**：创维 API 22 基准机的堆余量未量化；真机已跑通（未 OOM），
+> 但**长跑 + 其它高占用场景下有 OOM 可能** ⇒ 列入已知限制。
+
 #### 八、文件清单
 
 - 新增：`app/src/main/java/com/nasmusic/tv/visualizer/qianli/`（含 `port/`）、
-  `app/src/main/java/com/nasmusic/tv/visualizer/renderers/QianliScrollRenderer.kt`、
   `app/src/test/java/com/nasmusic/tv/visualizer/qianli/`
   （第二轮新增 `PngCanvas.kt` / `QianliOrientationGateTest.kt` / `QianliScenePreviewTest.kt`）
 - 改：`app/src/main/java/com/nasmusic/tv/data/model/AppSettings.kt`（枚举项 + 中文名）、
@@ -18546,5 +18568,13 @@ GitHub runner 上这两样都不存在 ⇒ 公开构建与 CI 完全不受影响
 - 第二轮改：`app/src/main/java/com/nasmusic/tv/visualizer/qianli/port/**`（逐行移植修正）、
   `app/src/main/java/com/nasmusic/tv/visualizer/renderers/QianliScrollRenderer.kt`（层带映射 / 块高 / 构图）、
   `app/src/test/java/com/nasmusic/tv/visualizer/qianli/ShanShuiPortGateTest.kt`
+- 第三轮改（真机六条）：`app/src/main/java/com/nasmusic/tv/visualizer/renderers/QianliScrollRenderer.kt`
+  （角色色 / 远景色 / 水波映射 / 前瞻 / 运行期色版）、`app/src/main/java/com/nasmusic/tv/visualizer/qianli/QianliBlockPool.kt`
+  （`forceRegenerate`）、`app/src/main/java/com/nasmusic/tv/data/prefs/QianliColorVersion.kt`（**新建**，唯一契约）、
+  `app/src/main/java/com/nasmusic/tv/data/prefs/AppPreferences.kt` + `VisualizerPrefs.kt`（持久化）、
+  `app/src/main/java/com/nasmusic/tv/visualizer/RenderContext.kt`（逐帧直写 `qianliColorVersion`）、
+  `app/src/main/java/com/nasmusic/tv/ui/components/VisualizerStage.kt`（上下键 / 上下滑 / Toast）、
+  `app/src/test/java/com/nasmusic/tv/visualizer/qianli/QianliColorVersionSwitchTest.kt`（**新建**，13 例）、
+  `app/src/test/java/com/nasmusic/tv/visualizer/qianli/QianliScenePreviewTest.kt`（预览 harness 重写）
 - 文档：`CHANGELOG.md`、`docs/technical-overview.md`（本节）、
   `docs/visualizer-effects-list.md`（效果清单）
