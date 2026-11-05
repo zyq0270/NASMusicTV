@@ -18750,7 +18750,7 @@ python scripts/e50_edge_check.py bottom output/e50_layer_mid.png   # 山体下�
 |---|---|
 | **世界** | 直接用 `ShanShuiPlanner.State` + `load()` + `render()` ⇒ 拿到**上游的全局 y 升序画家序** |
 | **变换** | `scale = h / 700.525`（上游 `windy/zoom`）；`screenX = (worldX − cursx)·scale`、`screenY = worldY·scale` ⇒ **x/y 同一个 scale**（上游 zoom 是均匀的） |
-| **滚动** | **单一** `cursxWorld`、单一速度（上游 100 世界 px/s 量级） |
+| **滚动** | **单一** `cursxWorld`、单一速度。⭐ **速度取上游口径 `100 世界 px/s`**（上游 `index.html:4211` `INC_STEP = 200`，`autoxcroll` 每 2000 ms 调一次 ⇒ `200/2 = 100` 世界 px/s）⇒ 观感与上游网页一致（上游可见世界宽 2627 单位 ⇒ 约 26 s 走完一屏）。⛔ **不要**沿用设色路径的 `SPEED_MID_PX / scale`（那是「视觉 px/s 相同」的口径 ⇒ 世界里只有 6.5 单位/s ⇒ **比上游慢 15 倍**） |
 | **底色** | 照抄 `:4336-4356` 烘 512×512 纸纹 tile，四象限对称，`BitmapShader(REPEAT)` 铺满 |
 | **白填充** | 画成**纸色（不透明）** ⇒ 等价于上游 multiply 的「擦除露纸」：遮住下方线条、自身与纸底同色 ⇒ **白色半圆与山脚硬边同时消失** |
 | **其余填充/描边** | 一律用轮廓**自带**的颜色与 α；⛔ **不用色表**（`QianliColorTable`）、⛔ 不按行号改色 |
@@ -18979,6 +18979,21 @@ for (var i = xmin; i < xmax; i += xstep) {
 
 > ⛔ **教训**：像素级代理判据容易误伤**抗锯齿混色** ⇒ 判据要直接对应**意图**，
 > 并且**负向自证要用同一份判据**（否则自证方向写反 ⇒ 恒红或恒绿）。
+
+###### 7.16.4 构建与提交
+
+| 项 | 结果 |
+|---|---|
+| 全量单测 | **2738 例 / 0 失败 / 0 错误 / 0 跳过**（271 类；`testDebugUnitTest --rerun-tasks`，`BUILD SUCCESSFUL in 20m 30s`） |
+| lint | **0 errors / 198 warnings**（`lintDebug`） |
+| E50 门禁合计 | 131 例 / 0 失败（`QianliUpstreamGateTest` 12 + `ShanShuiArch23GateTest` 8 + `ShanShuiTree45678GateTest` 3 + `ShanShuiBoatManGateTest` 6 + `ShanShuiPortGateTest` 38 + `QianliBodyBaseGateTest` 6 + `QianliContentRangeGateTest` 2 + 其余既有 E50 类） |
+| 提交（`main`） | `a767af7` |
+| 提交（`feat/e51-private`） | `495bc02`（cherry-pick；⚠️ **两处冲突需人工合并**：`VisualizerRendererFactory.kt` / `VisualizerStage.kt` —— 因为私有分支上这两个文件含 E51/E52 私有着色 ⇒ 合并口径 = **E51/E52 保留私有实实现 + E50 采用双路径开关**） |
+| 覆盖层漂移 | **0 处**（`python scripts/sync_private_overlay.py --check` ⇒ EXIT=0） |
+| 版本 | `2.39.12` / `versionCode 197` |
+
+> ⛔ **不 push、不 tag、不发 release**：E51/E52 是上游无授权的移植件（本地专用），
+> 而本包的 release 构建**带**隐藏分支效果（覆盖层）⇒ 只供本机/真机自测。
 
 #### 八、文件清单
 

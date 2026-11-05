@@ -186,6 +186,8 @@ class QianliUpstreamRenderer : RendererFx() {
         paperPixels = null
         pool?.release()
         pool = null
+        // 印章缓存是 `QianliSeal` 的**静态**缓存 ⇒ 与设色路径对称地释放（否则离效果后仍占着位图）。
+        QianliSeal.releaseAll()
         laidW = -1
         laidH = -1
     }
@@ -559,11 +561,15 @@ class QianliUpstreamRenderer : RendererFx() {
     /**
      * 滚动速度（**世界单位 / 秒**）。
      *
-     * ⭐ 换算口径：现有的中景层速度是 [SPEED_MID_PX] px/s（方案 §4.3 实测表）⇒
-     * 除以 [scale]（px / 世界单位）⇒ 世界单位 / 秒 ⇒ **视觉滚动速度与现状一致**
-     * （不会让用户觉得突然变慢 / 变快）。
+     * ⭐ **取上游口径：100 世界单位 / 秒**
+     * （上游 `index.html:4211` `INC_STEP = 200`，`:4072` `autoxcroll` 每 **2000 ms** 调一次
+     *   `xcroll(v)` ⇒ `200 / 2 = 100` 世界单位/秒）。
+     * ⇒ 观感与上游网页一致：上游可见世界宽 2627 单位 ⇒ 约 26 s 走完一屏。
+     *
+     * ⛔ **不要**沿用设色路径的「视觉 px/s 相同」口径（`SPEED_MID_PX / scale`）：
+     *   那是 `10 / 1.542 ≈ 6.5` 世界单位/s ⇒ **比上游慢 15 倍**（2026-11-06 修正）。
      */
-    private fun scrollSpeedWorld(): Double = SPEED_MID_PX / scale
+    private fun scrollSpeedWorld(): Double = SCROLL_SPEED_WORLD
 
     // ─────────────────────── 门禁缝（仅观测，不改行为） ───────────────────────
 
@@ -652,11 +658,15 @@ class QianliUpstreamRenderer : RendererFx() {
         const val BLOCK_COUNT = 2
 
         /**
-         * 视觉滚动速度（px/s）—— 取现有渲染器的**中景层**速度（`SPEED_MID` = 10.0）。
+         * **滚动速度（世界单位 / 秒）** —— 上游口径 **100**。
          *
-         * ⚠️ 这里是**换算的基准**，⛔ 不是本模式直接使用的速度（世界单位/秒由它除以 scale 得到）。
+         * 依据：上游 `index.html:4211` `INC_STEP = 200`（默认增量），
+         * `:4072` `autoxcroll` 每 **2000 ms** 调一次 `xcroll(v)` ⇒ `200 / 2 = 100` 世界单位/秒。
+         *
+         * ⛔ **不是**「视觉 px/s」—— 上游的 SVG 是 3000×800（zoom 1.142），
+         *   它的 100 世界单位/秒 在自己画布上就是 100 px/s ⇒ **观感与上游网页一致**。
          */
-        const val SPEED_MID_PX = 10.0
+        const val SCROLL_SPEED_WORLD = 100.0
 
         /**
          * 世界状态的**回收跨度**（世界单位）。
