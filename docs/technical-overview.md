@@ -18832,7 +18832,14 @@ python scripts/e50_edge_check.py bottom output/e50_layer_mid.png   # 山体下�
 
 ```bash
 python scripts/e50_upstream_metrics.py output/e50_upstream_ref.png output/e50_upstream_mode.png
+python scripts/e50_upstream_compare.py      # ⇒ output/e50_upstream_compare.png（上下并排对比图）
 ```
+
+> ✅ **并排对比图**（`output/e50_upstream_compare.png`）：上 = 上游参考图、下 = 本仓上游模式。
+> 形态已对齐：绢白纸底、远山浅灰、**皴笔线描**山体、浓墨树、**山腰多层楼阁**、茅屋、
+> **山石为弧线**（不再是白色半圆块）、山脚水波纹。
+> ⓘ 剩余差异主要来自**画幅比**（上游 3.75:1 vs 本仓 16:9 全屏）⇒ 纵向被放大 1.35×，
+>   加上两图的**随机场景不同**（上游每次刷新都不同）⇒ 中景留白处对不上，非系统性偏差。
 
 ##### 7.14 接线清单（补移植落地后由编排层执行）
 
