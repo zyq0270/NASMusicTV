@@ -19002,6 +19002,22 @@ for (var i = xmin; i < xmax; i += xstep) {
 > ⛔ **不 push、不 tag、不发 release**：E51/E52 是上游无授权的移植件（本地专用），
 > 而本包的 release 构建**带**隐藏分支效果（覆盖层）⇒ 只供本机/真机自测。
 
+###### 7.16.5 三条画面验证路线（各有分工，都不靠目测）
+
+| 路线 | 位置 | 画的是什么 | 何时用 |
+|---|---|---|---|
+| ① 自写软件光栅器 | `QianliUpstreamPreviewTest` | **几何 + 颜色**（纯 Kotlin 光栅化） | 逐帧调参时最快；⛔ 不覆盖 Android 的 `Canvas`/`Path`/`BitmapShader` |
+| ② Robolectric **NATIVE**（真 Skia） | `QianliUpstreamNativeLookTest` | **真 Android Canvas**（含纸纹 `BitmapShader` 平铺、非凸多边形填充、alpha 混合） | 需要平台原生运行时（`robolectric-nativeruntime`）⇒ ⛔ **离线环境拉不到** ⇒ 该测试**自动跳过**（不让单测套件变红） |
+| ③ **真机 instrumented** | `app/src/androidTest/.../QianliUpstreamDeviceRenderTest.kt` | **真机真 Skia**，渲染进 `Bitmap` → 写 PNG → `adb pull` 取回 | ⭐ **设备级**验证，**不需要解锁屏幕**（PIN 锁时截图路线走不通，这条能走） |
+
+> ⭐ 路线 ③ 的意义：真机**截图**要求手机解锁（本机是 PIN 锁 ⇒ 截不到 App 画面），
+> 而 instrumented test **在 App 进程内**渲染 ⇒ 与屏幕锁不锁**完全无关** ⇒
+> 设备级画面验证不再依赖「用户在场解锁手机」。
+>
+> 三条路线的判定口径**完全一致**（纸底暖米白 / 纸底占比 ≥ 0.45 / 墨平均灰度 ≤ 215 /
+> 彩色像素 ≤ 0.05 / 顶部 0–0.25 墨占比 > 0.005 / 底部 0.85–1.0 墨占比 > 0.05），
+> 与 `scripts/e50_phone_look_check.py` 同源 ⇒ 真机截图与真机渲染可以用同一把尺子量。
+
 #### 八、文件清单
 
 - 新增：`app/src/main/java/com/nasmusic/tv/visualizer/qianli/`（含 `port/`）、

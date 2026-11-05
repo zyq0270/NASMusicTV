@@ -158,6 +158,22 @@ JAVA_HOME="C:/Program Files/Android/Android Studio/jbr" \
     「移植自 …（MIT，Copyright 2018 Lingdong Huang）」署名。
     ⚠️ 但**「公开」≠ 只在 main**：E50 的工厂注册必须**同时**在 `feat/e51-private` 上（见下方
     「覆盖层会掩蔽仓库同名文件」）⇒ **E50 代码在两个分支上都有且逐字节一致**（ cherry-pick，不是复制粘贴）。
+    - **E50「千里江山」的两条呈现路径**（所有者 2026-11-06 裁定：默认「忠于上游」）：
+      · `QianliUpstreamRenderer`（**默认**）= 上游 `shan-shui-inf` 的**绢白纸底 + 线描山体**，
+        **单一世界空间 / 均匀缩放 / 唯一滚动速度（100 世界单位/秒）/ 白填充⇒纸色** ⇒ 画面与上游同形态。
+      · `QianliScrollRenderer`（保留）= 旧的**分层带 + 三版设色 + 自创装饰**路径，等效果定案。
+      · 切换**只**改 `visualizer/qianli/QianliRenderStyle.UPSTREAM_DEFAULT`（**单一真源**）：
+        工厂选渲染器 + 舞台关掉设色切换，都读它。
+      · ⚠️ 上游是**单一世界空间**（无分层带、无视差）；旧路径的分层带架构是**山脚那条水平直边、
+        「水挂不上山脚」、白底露白的**共同病根** ⇒ 别再回去调层带参数。
+      · **画面验证有三条路线**（判据同源，都在 `scripts/e50_phone_look_check.py`）：
+        ① 自写软件光栅器（`QianliUpstreamPreviewTest`，最快，不覆盖 Android Canvas）；
+        ② Robolectric **NATIVE**（真 Skia，⛔ 需 `robolectric-nativeruntime` ⇒ **离线拉不到 ⇒ 自动跳过**）；
+        ③ **真机 instrumented**（`app/src/androidTest/.../QianliUpstreamDeviceRenderTest.kt`，
+        渲染进 Bitmap → `adb pull` ⇒ ⭐ **不需要解锁手机**，PIN 锁时截图路线走不通、这条能走）。
+      · ⛔ **上游移植件的黄金基线**由 `scripts/e50_*_upstream_probe.js`（node 跑上游原函数）生成，
+        `node <probe> --check` 必须 exit=0 且基线文件不被改写；坐标摘要必须在 **Float32** 上算
+        （端口存 `FloatArray` ⇒ 两侧不同精度 ⇒ 哈希必不同 ⇒ 门禁恒红而几何其实是对的）。
   - **私有**（只在 `feat/e51-private`，⛔ 不 push）：
     · E51 / E52 的 **Kotlin 源码与测试**（`app/src/main/java/com/nasmusic/tv/visualizer/{e51,highway}/`、
       `app/src/test/java/com/nasmusic/tv/visualizer/{e51,highway}/`）
