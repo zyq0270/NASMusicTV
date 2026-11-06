@@ -210,7 +210,7 @@ enum class VisualizerTheme(
      * 8 层合成：L0 绢底 / L1 远雾 / L2 中景山 / L2′ 轮廓光 / L3 近景山 / L4 江水 / L5 尘 / L6 印章。
      * 音乐驱动：整体能量→滚动速度，频谱→各层透明度调制。
      *
-     * ## 归 [Tier.ADV] + `needsParticleBudget = false`（方案 `docs/e50-qianli-jiangshan-plan.md` §二 209–215 行）
+     * ## 归 [Tier.ADV] + `needsParticleBudget = false`（方案 `docs/archive/e50-qianli-jiangshan-plan.md` §二 209–215 行）
      * 档位上如实标注「比 BASIC 重」（6 层平铺 blit + 8 类烘焙位图），但本效果一个粒子都不画、
      * ⛔ 不读 `ctx.quality.maxParticles`（数量只按 `fx.level` 三档表调）⇒ 第 4 参是可核对的事实。
      * [VisualQuality.supports] 的 `ADV -> !needsParticleBudget || maxParticles > 0` 因此恒为真，

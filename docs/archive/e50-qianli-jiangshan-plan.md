@@ -1,6 +1,6 @@
 # E50「千里江山 · 青绿长卷」视觉化效果开发方案（补充文档）
 
-> ⭐ **本文已降为补充文档**。E50「千里江山」效果的**主文档**（可开发层次：Kotlin 文件结构与签名、K1–K8 实施任务、门禁规格、执行顺序）是 `docs/shan-shui-inf-porting-plan.md`。
+> ⭐ **本文已降为补充文档**。E50「千里江山」效果的**主文档**（可开发层次：Kotlin 文件结构与签名、K1–K8 实施任务、门禁规格、执行顺序）是 `docs/archive/shan-shui-inf-porting-plan.md`。
 > 本文保留配色细节（§3.3）、运动学细则（§4.3–4.6）、分帧烘焙（§7.3）、后处理三段式（§7.4）、印章描摹记录（§六）、原型 harness（§八）、门禁执行细节（§十）、真机验收单（§十一），供主文档引用。
 >
 > **状态**：**v2.0 · 2026-10-28 底座重写（所有者裁定「照抄移植 `shan-shui-inf`」）。**
@@ -14,7 +14,7 @@
 > 《Android 音乐频谱应用〈千里江山〉需求文档》（十一章 + 「给开发 AI 的重点提醒」八条）。
 > 定位经本仓语境改写为 **E50 候选可视化主题**（第 28 套效果），⛔ 不是独立 App。
 >
-> **致谢**：本效果核心视觉移植自 [LingDong-/shan-shui-inf](https://github.com/LingDong-/shan-shui-inf)（MIT，Copyright 2018 Lingdong Huang）。感谢作者开源。详见主文档 `docs/shan-shui-inf-porting-plan.md` 的致谢与保真纪律（§〇.5）。
+> **致谢**：本效果核心视觉移植自 [LingDong-/shan-shui-inf](https://github.com/LingDong-/shan-shui-inf)（MIT，Copyright 2018 Lingdong Huang）。感谢作者开源。详见主文档 `docs/archive/shan-shui-inf-porting-plan.md` 的致谢与保真纪律（§〇.5）。
 > 需求与现状的落差在 **§〇** 逐条裁定 —— **那一节是本文档最重要的一节**，
 > 后面所有章节都只是它的推论。
 >
@@ -372,7 +372,7 @@ sealCenter   = (W − inset − s/2, inset + s/2)   // 右上角，s 见 §六.3
 
 ### 3.6 逐行移植映射表（⭐ v2.0 的核心交付）
 
-> ⭐ **本节已剥离为独立文档**：`docs/shan-shui-inf-porting-plan.md`（含 §〇·A 裁定、§3.1′ 分块图层、§3.6 全节、§4.1′、§4.2′）。
+> ⭐ **本节已剥离为独立文档**：`docs/archive/shan-shui-inf-porting-plan.md`（含 §〇·A 裁定、§3.1′ 分块图层、§3.6 全节、§4.1′、§4.2′）。
 > 下面保留原文以便追溯；新读者请直接读那份文档。
 
 > 上游：`LingDong-/shan-shui-inf`（MIT），本机副本 `D:\hxzhang\MyGithubSoftware\NasAudio\shan-shui-inf-main\index.html`（4,361 行）。
@@ -947,7 +947,7 @@ H1 门禁把容差钉在 **46 MiB**（原估 41 MB × 1.12），HIGH 实测 51.9
 
 ### 8.1 交付物
 
-- `docs/e50-qianli-jiangshan-preview.html` —— Canvas 2D 原型（**活动期放 `docs/` 根，验收后 `git mv` 进 `docs/archive/`**）。
+- `docs/archive/e50-qianli-jiangshan-preview.html` —— Canvas 2D 原型（**活动期放 `docs/` 根，验收后 `git mv` 进 `docs/archive/`**）。
   必须支持：三档切换、**注入模拟频谱**（与 `AudioFrame` 同语义的 `bass/mid/treble/energy/section/pulse` 手滑条）、
   静音态（全 0）、印面单独放大视图、以及内嵌自检面板。
   ⭐ **v2.0 追加（D17）**：页内必须有 **`?paint=A|B|C` 三版开关**（V-A 灰阶 / V-B 行号染色 / V-C 大青绿），

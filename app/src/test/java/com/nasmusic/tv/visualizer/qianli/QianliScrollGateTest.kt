@@ -15,7 +15,7 @@ import java.io.File
 /**
  * E50 K6 渲染器骨架门禁（G-SCROLL-1 ~ G-SCROLL-5）。
  *
- * 方案：`docs/shan-shui-inf-porting-plan.md` §十 10.2。
+ * 方案：`docs/archive/shan-shui-inf-porting-plan.md` §十 10.2。
  *
  * ## 判据清单
  *

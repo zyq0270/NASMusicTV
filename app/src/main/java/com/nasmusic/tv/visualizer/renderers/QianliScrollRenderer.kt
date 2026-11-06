@@ -38,7 +38,7 @@ import kotlin.math.max
  *
  * ## 移植来源
  * - 上游：`LingDong-/shan-shui-inf`（MIT，Copyright 2018 Lingdong Huang）。感谢作者开源。
- * - 方案：`docs/e50-qianli-jiangshan-plan.md` §一 / §3.1′ / §3.2 / §4.1′ / §4.3 / §4.4 /
+ * - 方案：`docs/archive/e50-qianli-jiangshan-plan.md` §一 / §3.1′ / §3.2 / §4.1′ / §4.3 / §4.4 /
  *   §4.5 / §5.1 / §5.4 / §七.4。
  * - 几何：port 包 `com.nasmusic.tv.visualizer.qianli.port`（`ShanShui` / `ShanShuiPlanner`）。
  *

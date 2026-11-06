@@ -13,7 +13,7 @@ import org.robolectric.annotation.Config
 /**
  * E50 K6 分块缓冲门禁（G-POOL-1 ~ G-POOL-3）。
  *
- * 方案：`docs/shan-shui-inf-porting-plan.md` §十 10.3。
+ * 方案：`docs/archive/shan-shui-inf-porting-plan.md` §十 10.3。
  *
  * ## 判据清单
  *

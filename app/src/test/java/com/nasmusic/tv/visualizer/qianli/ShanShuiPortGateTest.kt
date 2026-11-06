@@ -23,7 +23,7 @@ import java.math.BigInteger
  * E50 K2–K5 移植层门禁（G-PORT-1 ~ G-PORT-8）—— **纯 JVM**（port 包零 Android 依赖）。
  *
  * 移植来源：`LingDong-/shan-shui-inf`（MIT，Copyright 2018 Lingdong Huang）。
- * 方案：`docs/shan-shui-inf-porting-plan.md` §十 10.1。
+ * 方案：`docs/archive/shan-shui-inf-porting-plan.md` §十 10.1。
  *
  * ## 判据清单
  *

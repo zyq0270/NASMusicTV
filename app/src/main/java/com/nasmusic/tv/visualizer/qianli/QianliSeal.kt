@@ -20,7 +20,7 @@ import kotlin.math.roundToInt
  * E50「千里江山」K7 印章层 —— 四字缪篆白文印的烘焙。
  *
  * ## 移植来源
- * - v1.x 原型 HTML：`docs/e50-qianli-jiangshan-preview.html` 行 545-667
+ * - v1.x 原型 HTML：`docs/archive/e50-qianli-jiangshan-preview.html` 行 545-667
  * - E50 方案 §六（印章层）
  *
  * ## 移植状态：**照抄**

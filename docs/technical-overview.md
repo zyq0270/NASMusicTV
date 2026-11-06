@@ -18391,8 +18391,8 @@ GitHub runner 上这两样都不存在 ⇒ 公开构建与 CI 完全不受影响
 - 上游：`LingDong-/shan-shui-inf`（MIT，Copyright 2018 Lingdong Huang）。**感谢作者开源**。
 - 上游形态：单文件 `index.html`（4,361 行、零外部资产），SVG 字符串发射 + 惰性分块流（`chunkloader`）。
 - 本仓只做 JS→Kotlin 的**语言层移植**与渲染管线适配，⛔ 不篡改上游算法逻辑。
-- 方案：`docs/shan-shui-inf-porting-plan.md`（移植主文档）/
-  `docs/e50-qianli-jiangshan-plan.md`（配色、运动学与验收细节）。
+- 方案：`docs/archive/shan-shui-inf-porting-plan.md`（移植主文档）/
+  `docs/archive/e50-qianli-jiangshan-plan.md`（配色、运动学与验收细节）。
 
 #### 三、落地结构
 

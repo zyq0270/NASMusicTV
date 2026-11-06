@@ -30,7 +30,7 @@ import java.io.File
 /**
  * E50 K6 渲染器级门禁（G-REND-1 ~ G-REND-6）。
  *
- * 方案：`docs/shan-shui-inf-porting-plan.md` §十 10.2（K6 验收）。
+ * 方案：`docs/archive/shan-shui-inf-porting-plan.md` §十 10.2（K6 验收）。
  *
  * ## 判据清单
  *

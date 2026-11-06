@@ -21,7 +21,7 @@ const HERE = dirname(process.argv[1]);
 const ROOT = resolve(HERE, '..', '..', '..', '..');
 const EDGE = 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe';
 const PORT = 9350;                                    // ⛔ 别和 seaside(9333)/moonlit(9334)/fog(9336)/snow(9337)/desert(9338)/flock(9349) 撞
-const PAGE = resolve(ROOT, 'docs', 'e50-qianli-jiangshan-preview.html');
+const PAGE = resolve(ROOT, 'docs', 'archive', 'e50-qianli-jiangshan-preview.html');
 const URL_STR = 'file:///' + PAGE.replace(/\\/g, '/');
 const OUT = resolve(ROOT, 'output', 'e50_frames');
 const SHOT_W = 1920, SHOT_H = 1080;                   // 原型逻辑画幅 = 1920×1080（app 的 1080p 基准机）

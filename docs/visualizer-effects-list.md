@@ -53,6 +53,10 @@
 > ⛔ **不读** `ctx.quality.maxParticles`（数量只按 `fx.level` 三档表调）⇒ `needsParticleBudget = false`
 > ⇒ **三档画质全部可选（含 LOW）**。编号取 `"50"`（E51 像素城市占 `"51"`、E52 旷野公路占 `"52"`），
 > 与 BASIC 档的 `E43 海边` 不重号（§10.281）。
+>
+> ⭐ **2026-11-06 定稿**（上游 `shan-shui-inf`，MIT）：默认路径 = 上游**绢白纸底 + 线描 + 单一世界空间 +
+> 恒速 + 整幅 multiply**；远山按所有者裁定改成**半透明墨晕**（不再是白）；
+> 画面**无限连续**（只裁不重置）。方案与验收细节已归档 ⇒ `docs/archive/shan-shui-inf-porting-plan.md`。
 
 ## ULTRA 档（2 套）
 

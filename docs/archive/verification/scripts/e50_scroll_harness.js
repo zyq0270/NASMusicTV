@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /* ============================================================================
    E50「千里江山」纯数学 / 预算 harness —— §七·§九·§十 数字的唯一再生来源
-   在 Node 的 vm 沙箱里桩掉 DOM/canvas，载入 docs/e50-qianli-jiangshan-preview.html
+   在 Node 的 vm 沙箱里桩掉 DOM/canvas，载入 docs/archive/e50-qianli-jiangshan-preview.html
    的**原文脚本**，驱动真实页面代码。无图形设备、无 Math.random（页面用 mulberry32 种子）
    ⇒ 同帧序必产同数字，Kotlin 侧可逐位对账。
 
@@ -23,7 +23,7 @@ const vm = require('vm');
 
 const HERE = path.dirname(process.argv[1]);
 const ROOT = path.resolve(HERE, '..', '..', '..', '..');
-const PAGE = path.join(ROOT, 'docs', 'e50-qianli-jiangshan-preview.html');
+const PAGE = path.join(ROOT, 'docs', 'archive', 'e50-qianli-jiangshan-preview.html');
 const OUT = path.join(ROOT, 'docs', 'archive', 'verification', 'results', 'e50_scroll_harness_final.txt');
 const args = process.argv.slice(2);
 const opt = (n, d) => { const i = args.indexOf('--' + n); return i >= 0 && i + 1 < args.length ? args[i + 1] : d; };
