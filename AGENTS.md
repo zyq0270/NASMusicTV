@@ -228,6 +228,15 @@ JAVA_HOME="C:/Program Files/Android/Android Studio/jbr" \
   - **私有**（只在 `feat/e51-private`，⛔ 不 push）：
     · E51 / E52 的 **Kotlin 源码与测试**（`app/src/main/java/com/nasmusic/tv/visualizer/{e51,highway}/`、
       `app/src/test/java/com/nasmusic/tv/visualizer/{e51,highway}/`）
+    · ⭐ **文档的唯一例外**：私有分支的 `docs/technical-overview.md` =
+      **main 的全文 + 一个附录**（61 段私有独有章节：E51 城市 14–57 与 E52 各轮 ⇒ 编号
+      **§10.282–§10.342**，与 main 的末段 §10.281 顺延接上 ⇒ 全文档编号唯一）；
+      `docs/visualizer-effects-list.md` = main 的全文 + 私有的 E51 / E52 两行。
+      ⇒ **为什么**：私有分支原先是 main 的**旧快照**，且 §10.276 等编号**与 main 撞车**
+      （同一个号既指 E51 城市段又指「洛雪音源」⇒ 引用含义不唯一）⇒ 2026-11-06 回灌成
+      「main 底板 + 私有附录」（main 的内容逐字保留为前缀，已校验）。
+      ⚠️ 回灌时**两份文档都要重跑**：私有分支改了 main 也在改的内容 ⇒ 先在 main 提交，
+      再 cherry-pick 到私有分支；私有分支独有的章节则只在私有分支追加。
     · **资产** `app/src/main/assets/e52_highway/`（上游 Slow Roads 贴图与模型）
     · **debug 探针** `app/src/debug/**`（GL probe / E52 的 P0 探针）
     · **移植件与其工具**（`scripts/lofi_*`、`scripts/e52/**`、`docs/archive/e51-lofi-city-plan.md`、
