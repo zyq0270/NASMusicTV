@@ -193,6 +193,38 @@ JAVA_HOME="C:/Program Files/Android/Android Studio/jbr" \
       · ⛔ **上游移植件的黄金基线**由 `scripts/e50_*_upstream_probe.js`（node 跑上游原函数）生成，
         `node <probe> --check` 必须 exit=0 且基线文件不被改写；坐标摘要必须在 **Float32** 上算
         （端口存 `FloatArray` ⇒ 两侧不同精度 ⇒ 哈希必不同 ⇒ 门禁恒红而几何其实是对的）。
+    - **E50「千里江山」的三条硬约束**（2026-11-06 真机反馈后确立）：
+      · ⭐ **整幅 multiply 要用「生成绘制项时把颜色乘纸色」实现，⛔ 不要引入 blend mode**：
+        上游 `mix-blend-mode: multiply` 加在**整个 `<svg>`** 上（`index.html:4028`）⇒ CSS 公式
+        `Co = p×(1 − α + α·c/255)` ⇒ **化简成「先乘纸色、再按原 α 做 source-over」**（等价 ⛔ 免 blend mode
+        ⇒ 不受 API 22 限制）。数值验证：墨 222 × 纸 (245,232,208) ⇒ (213.2, 202.0, 181.1)
+        ⇒ 与上游参考图实测**逐通道吻合**。门禁 = `QianliUpstreamGateTest` 的 **U-GATE-7**。
+        ⛔ `PorterDuff.MULTIPLY` **忽略源 alpha** ⇒ 与 CSS 公式**不等价**，别用。
+        ⛔ **印章不参与 multiply**（上游没有印章 ⇒ 它是唯一的自创保留项 ⇒ 保持朱砂原色）。
+      · ⭐ **远山墨色是有意偏离上游**（所有者 2026-11-06 裁定：「远山还是白色的，应该也按前景山颜色一样」）：
+        上游 `getCol` 灰阶 **[200,255]**（极淡 ⇒ 画面上像一片白）⇒ 本仓**三稿演进、终稿 = 半透明墨晕**：
+        **行底铺纸色（纯白哨兵，不透明）+ 刻面墨色族 [100,140]、alpha = 0.25**
+        （`ShanShui.FAR_MOUNTAIN_INK_ALPHA`）⇒ 实测 ≈ **RGB(207,196,175)**。
+        ⚠️ 别改成 alpha = 1.0（实心）⇒ 远山变画面最重的一块（纵深倒挂，实测 RGB(109,103,92)）；
+        也别改回上游灰阶（用户判定「还是白色」）。
+        ⚠️ `getCol` **先 `.toInt()` 再映射**（上游就是 `| 0` 截断）⇒ 才能逐位对齐。
+        ⚠️ **刻面的描边必须 alpha = 0**：上游 `str: co`（与填充同色）⇒ 不透明时**不可见**；
+          本仓填充是半透明 ⇒ 描边若也带透明度就会与填充**叠加**（0.25+0.25 ⇒ 0.4375）
+          ⇒ 三角剖分的每条边变**深色网格线** ⇒ 远山像一张渔网。alpha = 0 ⇒ 与上游视觉等价。
+        门禁：`ShanShuiPortGateTest` 的 G-PORT-10（判据＝「getCol 的浓淡映射到墨色族 + alpha = 0.25」）
+        + **G-PORT-10′**（墨色 ∈ [100,140]、三通道相等、alpha = 0.25、有浓淡变化、行底仍是纯白哨兵）。
+      · ⭐ **画面要「无限连续」⇒ 只能「裁剪」⛔ 不能「整体重置」**：
+        上游 `MEM.canv` / `MEM.chunks` **永不回收** ⇒ 累积 ⇒ 天然连续。
+        本仓的 `ShanShuiPlanner.trimChunks`（⛔ 早期是「世界走远 8000 单位就换一份新 state」
+        ⇒ **丢掉全部历史** ⇒ 新旧块内容密度突变 ⇒ 画面「断」）。
+        ⭐ **跨块边界的图元要完整** ⇒ 生产块烘焙必须带余量 `BLOCK_LOOKAROUND = 900` 世界单位
+        （`ShanShuiPlanner.render` 按 **chunk 中心 x** 过滤，cwid=512；块宽 = 2016px/scale ≈ **1308 世界单位**
+        ⇒ 中心在块外、形状伸进块内的图元原本会被**竖直切断**）。
+        ⛔ **门禁路径刻意不加余量**（每个门禁都新建渲染器 ⇒ 多规划 3000 世界单位
+        ⇒ 实测把 E50 门禁从 ~2 分钟拖到 **>40 分钟**）。
+      · ⛔ **Robolectric 4.11.1 没有运行时 `setGraphicsMode`**（只有 `@GraphicsMode` 注解）⇒
+        **NATIVE 图形模式的异常发生在类初始化期** ⇒ 方法内的 try/catch 兜不住 ⇒
+        `QianliUpstreamNativeLookTest.kt` 已**删除**（等价覆盖由真机 instrumented 承担）。
   - **私有**（只在 `feat/e51-private`，⛔ 不 push）：
     · E51 / E52 的 **Kotlin 源码与测试**（`app/src/main/java/com/nasmusic/tv/visualizer/{e51,highway}/`、
       `app/src/test/java/com/nasmusic/tv/visualizer/{e51,highway}/`）

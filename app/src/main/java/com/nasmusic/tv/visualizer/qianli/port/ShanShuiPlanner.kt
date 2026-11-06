@@ -524,6 +524,38 @@ object ShanShuiPlanner {
      *   ⇒ 本移植层把它放在 [ShanShuiPlanner] 的 companion（全局 [planmtx]），
      *   **不**放在本类里（否则多实例会各自一份 ⇒ 偏离上游）。
      */
+    /**
+     * 丢弃已经滚远了的 chunk（**只裁，不重置**）。
+     *
+     * ## 为什么是「裁剪」而不是「整体重置」
+     *
+     * 上游 `MEM.chunks` 是**永不回收**的数组 ⇒ 世界理论上无限长，但内存无限增长。
+     * 本仓必须设上限 ⇒ 早期做法是「世界走远就把整份 state 换成新的」（整体重置），
+     * ⛔ 但那会**丢掉全部历史** ⇒ 新生成的块只剩自己那一小段区间的内容
+     * ⇒ 与旧块（内容丰富）在边界处**内容密度突变** ⇒ 画面上出现「断」（真机截图证据）。
+     *
+     * ⇒ 改成**只裁掉滚远了的图元**（[trimChunks]）⇒
+     * · 历史保留 ⇒ 新旧块**同源**（都来自同一份累积画布）⇒ **画面无限连续** ✓
+     * · 内存有界（裁掉的图元不再参与绘制）✓
+     *
+     * ⚠️ [State.chunks] 是按 **y 升序**（画家序）排的 ⇒ 不能按 x 有序地切 ⇒ 只能整表扫一遍。
+     * 扫的频率很低（世界走很远才裁一次）⇒ 可接受。
+     *
+     * @param keepFromX 小于该世界 x 的 chunk 会被丢弃。
+     * @return 丢弃的 chunk 数。
+     */
+    fun trimChunks(state: State, keepFromX: Double): Int {
+        var removed = 0
+        val it = state.chunks.iterator()
+        while (it.hasNext()) {
+            if (it.next().x < keepFromX) {
+                it.remove()
+                removed++
+            }
+        }
+        return removed
+    }
+
     class State {
         /** 上游 `MEM.canv`（SVG 字符串）→ port 轮廓列表（改造-⑤）。 */
         val canv: MutableList<ShanShuiContour> = mutableListOf()

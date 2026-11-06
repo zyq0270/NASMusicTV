@@ -931,15 +931,20 @@ object ShanShui {
             ptlist.add(row)
         }
         for (row in ptlist) {
-            // ① 块多边形填色（上游 `:2413-2417`：poly(ptlist[i], {fil: getCol(行末点), str: "none", wid: 1})）
-            // ⚠️ 改造-① 的「颜色计算省略」在改造-⑤ 后**不再需要** —— 轮廓自带 fill ⇒ 照抄上游 getCol
-            val last = row[row.size - 1]
-            val c = (ShanShuiNoise.noise(
-                last[0].toDouble() * 0.02,
-                last[1].toDouble() * 0.02,
-                yoff,
-            ) * 55 + 200).toInt()
-            canv.add(ShanShuiContour(row, ShanShuiColor(c, c, c, 1.0), null, 1.0))
+            // ① 行底多边形（上游 `:2413-2417`：poly(ptlist[i], {fil: getCol(行末点), str: "none", wid: 1})）
+            //
+            // ⚠️ **颜色按所有者裁定偏离上游**（2026-11-06，用户原话：「远山还是白色的，
+            //   应该也按前景山颜色一样」）。三层演进（都是**有意偏离上游**，已在文档 §7.16.9 记录）：
+            //   ① 上游：行底 = `getCol` 的**不透明灰**（灰阶 [200,255]）⇒ 真机画面上远山是一片冷白。
+            //   ② 改成「与前景山同墨色、**实心**」⇒ 墨色对了，但远山成了画面里最重的一块
+            //      （纵深倒挂，实测 RGB(109,103,92)）。
+            //   ③ ⭐ **当前**：改成「**半透明墨晕**」—— 行底铺**纸色**（用「白填充 ⇒ 纸色」的哨兵，
+            //      见渲染器的 `isPaperWhite`），墨由下面的**三角刻面**以 **25% 透明度**叠上去。
+            //      ⇒ 合成色 ≈ RGB(207,196,175)：看得出有墨色（不再是白的），又保住远景的空气感。
+            //
+            // ⚠️ 行底**必须是不透明**的：它要盖住身后的一切（上游的行底也是不透明灰）。
+            //   墨晕的透明度只体现在**刻面**上。
+            canv.add(ShanShuiContour(row, ShanShuiColor(255, 255, 255, 1.0), null, 1.0))
             // ② 三角剖分 + 逐三角形填色并描边（上游 `:2419-2428`）
             //   上游：var T = PolyTools.triangulate(ptlist[i], {area: 100, convex: true, optimize: false});
             //         for (var k = 0; k < T.length; k++) {
@@ -961,14 +966,57 @@ object ShanShui {
             )
             for (tri in tris) {
                 val m = ShanShuiPoly.midPtExact(tri)
-                val tc = (ShanShuiNoise.noise(m[0] * 0.02, m[1] * 0.02, yoff) * 55 + 200).toInt()
-                val co = ShanShuiColor(tc, tc, tc, 1.0)
-                canv.add(ShanShuiContour(tri, co, co, 1.0))
+                // ⚠️ 先截断到上游的整数值，再映射到新墨色。
+                val upstreamGray = (ShanShuiNoise.noise(m[0] * 0.02, m[1] * 0.02, yoff) * 55 + 200).toInt()
+                val tc = farMountainInk(upstreamGray.toDouble())
+                // ⭐ 墨晕：墨色 + **25% 透明度**（渲染器还会把它乘一次纸底 ⇒ 暖调墨晕）。
+                val co = ShanShuiColor(tc, tc, tc, FAR_MOUNTAIN_INK_ALPHA)
+                // ⚠️ **描边 alpha = 0**（上游是 `poly(T[k], {fil: co, str: co, wid: 1})` ⇒ 描边与填充**同色**）。
+                //   上游的填充**不透明** ⇒ 描边画在同色填充上 ⇒ **完全不可见** ⇒ 视觉上等于「只有填充」。
+                //   本仓的填充是**半透明墨晕** ⇒ 若描边也带 25% 透明度，它会与填充**叠加**
+                //   （1 − 0.75×0.75 = 0.4375）⇒ 三角剖分的每条边都变成一条**深色网格线**
+                //   ⇒ 远山看起来像一张渔网（与上游的平滑远山明显不符）。
+                //   ⇒ 描边**保留在数据里**（结构上仍与上游一致：颜色、线宽都在），但 **alpha = 0** ⇒ 不可见
+                //   ⇒ 与上游**视觉等价**（都是「只有填充」），且没有网格线。
+                //   ⚠️ alpha = 0 的绘制在 Android Canvas 与软件光栅器里都是 **no-op**（`blend` 直接 return）。
+                val stroke = ShanShuiColor(tc, tc, tc, 0.0)
+                canv.add(ShanShuiContour(tri, co, stroke, 1.0))
             }
         }
         return canv
     }
 
+    /**
+     * 远山的墨色（**所有者裁定 2026-11-06**，偏离上游的 `getCol` 灰阶）。
+     *
+     * - 上游：灰阶 **[200, 255]** ⇒ 极淡 ⇒ 画面上像一片白。
+     * - 本仓：**与前景山相同的墨色** ⇒ 前景山的墨是 `rgba(100,100,100,·)`（`ShanShui.mountain` 的
+     *   OUTLINE / 皴 都是这一族）⇒ 这里取 **[100, 140]**，噪声作浓淡变化。
+     *
+     * @param upstreamGetCol 上游 `getCol` 的原值（**已截断为整数**的 [200, 255]）
+     *   ⇒ 只用它的**相对浓淡**（`t = (v − 200) / 55`），不直接拿它的绝对值当颜色。
+     */
+    private fun farMountainInk(upstreamGetCol: Double): Int {
+        val t = ((upstreamGetCol - 200.0) / 55.0).coerceIn(0.0, 1.0)
+        return (100 + t * 40).toInt()
+    }
+
+    /**
+     * 远山墨晕的**透明度**（所有者裁定 2026-11-06 的第 ③ 稿：「半透明墨晕」）。
+     *
+     * ## 为什么是 0.25
+     *
+     * 合成公式（渲染器把墨色乘纸底后按 alpha 做 source-over）：
+     * `Co = p·(1 − α) + (p·c/255)·α`
+     * 取墨 `c = 116`、纸 `p = (239, 227, 203)`、`α = 0.25`：
+     * `R = 239×0.75 + 109×0.25 = 206.4`、`G = 196.1`、`B = 175.3`
+     * ⇒ **RGB(207, 196, 175)** —— 比上游的灰阶原色 (213,202,181) 略深一点点，
+     *   肉眼是「有墨色的远山」而不是「一片白」。
+     *
+     * ⚠️ 若改成 1.0（实心）⇒ 远山变成画面里最重的一块（纵深倒挂，实测 RGB(109,103,92)）；
+     *   若改成 0.0 ⇒ 又退回「白」。
+     */
+    const val FAR_MOUNTAIN_INK_ALPHA = 0.25
     /**
      * 照抄上游 [Mount.rock]（`:2433-2522`）：石。
      * 上游默认值：hei=80, wid=100, tex=40, ret=0, sha=10；reso=[10,50]。

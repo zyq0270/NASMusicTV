@@ -1,5 +1,7 @@
 package com.nasmusic.tv.visualizer.qianli
 
+import com.nasmusic.tv.visualizer.qianli.port.ShanShuiColor
+import com.nasmusic.tv.visualizer.qianli.port.ShanShuiContour
 import com.nasmusic.tv.visualizer.qianli.port.ShanShuiNoise
 import com.nasmusic.tv.visualizer.qianli.port.ShanShuiPlanner
 import com.nasmusic.tv.visualizer.qianli.port.ShanShuiPrng
@@ -13,7 +15,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 /**
- * E50「忠于上游的绢白线描版」门禁（U-GATE-1 ~ U-GATE-6）。
+ * E50「忠于上游的绢白线描版」门禁（U-GATE-1 ~ U-GATE-8）。
  *
  * ## 判据清单
  *
@@ -25,6 +27,8 @@ import org.robolectric.annotation.Config
  * | U-GATE-4 | **背景是绢白** | 纸底 tile 的平均亮度 > 200，且 r > g > b（暖米白） |
  * | U-GATE-5 | **不染色** | 场景像素**不得**出现色表的青绿 / 赭石 / 花青；全部像素必须落在「纯灰阶 ∪ 灰×纸底的混合线」上 |
  * | U-GATE-6 | **单一滚动速度** | 只有一个滚动量；把所有对象平移同一个 Δ 后，**每一个**对象的屏幕 x 都恰好少了 Δ × scale（无视差） |
+ * | U-GATE-7 | **整幅 multiply（墨色乘纸色）** | 白 ⇒ 纸色；灰阶 222 ⇒ 逐通道 = 222×纸色/255 且 r>g>b（暖调）且变暗；alpha 原样保留；场景里的描边色确实已乘纸色 |
+ * | U-GATE-8 | **跨块边界的图元不被切断** | 凡是与块的世界区间相交的图元，都必须出现在该块实际画出的绘制项里；且必须存在**跨界**图元（否则门禁是空的） |
  *
  * ## 负向自证
  *
@@ -401,6 +405,137 @@ class QianliUpstreamGateTest {
                 assertEquals("色表色必须被计入命中数（判据有牙）", 0, hits)
             }
         }
+    }
+
+    // ══════════════════════ U-GATE-7 整幅 multiply（墨色乘纸色） ══════════════════════
+
+    /**
+     * U-GATE-7：上游是**整幅 multiply**（`index.html:4028`，`mix-blend-mode: multiply`
+     * 加在 `<svg>` 上）⇒ **所有墨色都要乘纸色**，而不只是白填充。
+     *
+     * ⭐ 判据用**上游参考图实测反推**的数值钉死：
+     * 上游远山刻面实测 `RGB(213,202,181)`、纸底 `(245,232,208)`
+     * ⇒ 原始灰 `221.7 / 222.0 / 221.9`（三通道一致 ⇒ 确为「纯灰 × 纸底」）。
+     * 本仓的纸色均值是 `(239,227,203)` ⇒ `222 × 纸色 / 255` 必须给出同族的暖调值。
+     */
+    @Test
+    fun uGate7_inkColorsAreMultipliedByPaper() {
+        val r = preparedRenderer()
+        val paper = r.gatePaperColorRgbForGate()
+        val pr = (paper shr 16) and 0xFF
+        val pg = (paper shr 8) and 0xFF
+        val pb = paper and 0xFF
+
+        // ① 白色 ⇒ 纸色（这就是「白填充 ⇒ 纸色」的统一形式）
+        val white = r.gateMultiplyByPaperForGate(ShanShuiColor(255, 255, 255, 1.0))
+        assertEquals("白色必须变成纸色（乘纸色的特例）", paper, rgbOf(white))
+        assertEquals("alpha 不得被改动", 1.0, white.a, 0.0)
+
+        // ② 灰阶 222（上游远山刻面的典型值）⇒ 必须是暖调（三通道不相等且 r>g>b）
+        val g222 = r.gateMultiplyByPaperForGate(ShanShuiColor(222, 222, 222, 1.0))
+        assertEquals("R 通道必须是 222×纸R/255", (222 * pr + 127) / 255, g222.r)
+        assertEquals("G 通道必须是 222×纸G/255", (222 * pg + 127) / 255, g222.g)
+        assertEquals("B 通道必须是 222×纸B/255", (222 * pb + 127) / 255, g222.b)
+        assertTrue("乘纸色后必须是暖调（r>g>b）", g222.r > g222.g && g222.g > g222.b)
+        assertTrue("乘纸色后必须比原色暗（222 → ${g222.r}）", g222.r < 222)
+
+        // ③ 半透明必须**保留 alpha**（上游的描边大量带 alpha）
+        val half = r.gateMultiplyByPaperForGate(ShanShuiColor(100, 100, 100, 0.4))
+        assertEquals("alpha 必须原样保留", 0.4, half.a, 1e-9)
+        assertEquals("R 通道仍按乘纸色算", (100 * pr + 127) / 255, half.r)
+
+        // ④ 场景里的描边色**必须已经是乘过纸色的**（不是上游原色）
+        val items = r.gateItemsForRange(worldX0, worldX1, 0.0)
+        var checked = 0
+        for (it in items) {
+            val s = it.stroke ?: continue
+            if (s.r == s.g && s.g == s.b && s.r == 255) continue // 纯白描边（极少）
+            // 乘过纸色的灰 ⇒ r>g>b（暖调）；未乘的灰 ⇒ r==g==b（冷灰）
+            assertTrue(
+                "描边色必须是乘过纸色的暖调（实测 rgb=${s.r},${s.g},${s.b}）",
+                s.r > s.g && s.g > s.b,
+            )
+            checked++
+            if (checked >= 40) break
+        }
+        assertTrue("场景里必须存在描边（否则这条门禁是空的）", checked > 0)
+    }
+
+    // ══════════════════════ U-GATE-8 跨块边界的图元不被切断 ══════════════════════
+
+    /**
+     * U-GATE-8：**块边界处的山体必须完整**（2026-11-06 真机反馈「画面有断」的回归门禁）。
+     *
+     * ## 判据
+     *
+     * 凡是**与块的世界区间相交**的图元，都必须出现在该块实际画出的绘制项里。
+     *
+     * ## 为什么这条能咬住那个 bug
+     *
+     * `ShanShuiPlanner.render`（照抄上游 `chunkrender` `:3973-3984`）按 chunk 的
+     * **中心 x** 过滤（`xmin − cwid < chunk.x < xmax + cwid`，cwid = 512）。
+     * 本仓的**块宽** = `2016 px / scale` ≈ **1308 世界单位**（上游屏幕宽 3000 单位
+     * ⇒ 同样的 512 余量够用）⇒ **中心落在块外、形状却伸进块内**的图元
+     * （山体半宽 ≤ 300；近景楼阁/树/舟更宽）**根本不在画布里** ⇒ 被**竖直切断**。
+     *
+     * ⇒ 解法是生产块烘焙带**余量** [QianliUpstreamRenderer.BLOCK_LOOKAROUND]。
+     * 本条用 [QianliUpstreamRenderer.gateBlockItemsForGate]（**与生产同一套加载区间**）
+     * 来验证「余量够大 ⇒ 不再漏」。
+     */
+    @Test
+    fun uGate8_everyPrimitiveOverlappingTheBlockIsDrawnInThatBlock() {
+        val r = preparedRenderer()
+        // 块左缘用**px**（与生产的 `bakeSceneBlock(x0Px, …)` 同口径）。
+        val scale = r.gateTransformForGate().scale
+        val x0Px = 400.0 * scale
+        val block = r.gateBlockForGate(x0Px)
+        val x0 = block.worldX0
+        val x1 = block.worldX1
+        val st = r.gateStateForGate()
+
+        // 该块**实际画出**的轮廓（`render` 后的 `state.canv` ⇒ buildItems 的输入）。
+        val drawn = HashSet<Long>(st.canv.size * 2)
+        for (c in st.canv) drawn.add(contourSig(c))
+
+        var checked = 0
+        var crossed = 0
+        for (chunk in st.chunks) {
+            for (c in chunk.canv) {
+                if (c.pts.size < 2) continue
+                var lo = Double.MAX_VALUE
+                var hi = -Double.MAX_VALUE
+                for (p in c.pts) {
+                    val wx = p[0].toDouble()
+                    if (wx < lo) lo = wx
+                    if (wx > hi) hi = wx
+                }
+                // 不与块区间相交 ⇒ 与本块无关。
+                if (hi < x0 || lo > x1) continue
+                checked++
+                // 「中心在块外、形状伸进块内」= 跨界图元（那个 bug 的受害者）。
+                if (lo < x0 || hi > x1) crossed++
+                assertTrue(
+                    "与块区间相交的图元必须被画出来（chunk x=${chunk.x}，图元 x∈[$lo,$hi]）",
+                    drawn.contains(contourSig(c)),
+                )
+            }
+        }
+        assertTrue("必须检查到与块相交的图元（否则这条门禁是空的，实测 $checked 条）", checked > 0)
+        assertTrue(
+            "必须存在**跨界**图元（否则这条门禁守不住「被竖直切断」那个 bug，实测 $crossed 条）",
+            crossed > 0,
+        )
+    }
+
+    /** 轮廓签名（FNV-1a 64，对 Float32 原始位）—— 只用于「同一份轮廓」的同一性判定。 */
+    private fun contourSig(c: ShanShuiContour): Long {
+        var h = -3750763034362895579L
+        for (p in c.pts) {
+            h = (h xor (p[0].toRawBits().toLong())) * 1099511628211L
+            h = (h xor (p[1].toRawBits().toLong())) * 1099511628211L
+        }
+        h = (h xor c.pts.size.toLong()) * 1099511628211L
+        return h
     }
 
     // ══════════════════════ U-GATE-6 单一滚动速度 ══════════════════════

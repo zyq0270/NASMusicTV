@@ -331,7 +331,19 @@ class QianliUpstreamRenderer : RendererFx() {
         val blockWorldW = blockW.toDouble() / scale
 
         ensureStateAnchor(x0World)
-        loadRange(x0World, x0World + blockWorldW)
+        // ⭐ **必须带余量**（2026-11-06 修「画面有断」）：`ShanShuiPlanner.render` 按 **chunk 中心 x** 过滤
+        //   （`xmin − cwid < chunk.x < xmax + cwid`，cwid = 512）。
+        //   本仓的**块宽** = `2016 px / scale` ≈ **1308 世界单位**（`scale = h / 700.5` ≈ 1.54 @1080p），
+        //   而**屏幕宽** = `1920 px / scale` ≈ 1245 世界单位 ⇒ 可见世界只有上游（3000 单位）的 41%。
+        //   ⇒ 中心落在块外、形状却伸进块内的图元（山体半宽 ≤ 300，近景楼阁/树/舟更宽）
+        //     **根本不在画布里** ⇒ 被**竖直切断** ⇒ 画面出现一道竖直断缝。
+        // ⭐ 上游不会这样：它的屏幕宽 3000 世界单位（`MEM.windx`）⇒ 同样的 512 余量足够覆盖
+        //   ⇒ 切口的残缺发生在**屏幕外**⇒ 看不见。
+        // ⇒ 解法：烘焙时向外多规划/多渲染一个余量（≥ 最大图元半宽 + 一点）。
+        loadRange(
+            x0World - BLOCK_LOOKAROUND,
+            x0World + blockWorldW + BLOCK_LOOKAROUND,
+        )
 
         val bmp = Bitmap.createBitmap(blockW, screenH, Bitmap.Config.ARGB_8888)
         paintItems(Canvas(bmp), buildItems(state.canv, x0Px))
@@ -345,19 +357,63 @@ class QianliUpstreamRenderer : RendererFx() {
     }
 
     /**
-     * 状态回收：世界走得够远就把 [state] 换成一份**锚在当前世界**的新状态。
+     * 门禁缝：**照抄生产块烘焙**的加载区间（含 [BLOCK_LOOKAROUND] 余量）。
      *
-     * ⚠️ 上游 `MEM.chunks` 是**永不回收**的数组 ⇒ 长驻进程必须自己设上限。
-     * 新状态的 `xmin/xmax` 直接锚到当前世界 ⇒ [ShanShuiPlanner.load] 只会向前规划
-     * （外加一次 512 宽的回看），不会从 0 开始重扫。
+     * ⭐ 与 [bakeSceneBlock] 的 `loadRange` 参数**逐字一致** ⇒ 门禁看到的加载区间
+     *   与真机烘焙的加载区间**完全相同** ⇒ 这条门禁守得住「跨块边界的图元不被切断」。
+     *
+     * ⛔ 门禁的其它入口（[gateItemsForRange]）**刻意不带余量** —— 那是为了快，
+     *   而这条缝专门用来守「余量够不够」。
+     *
+     * @param x0Px 块左缘（**px**，与生产的 `bakeSceneBlock(x0Px, …)` 同口径）。
+     */
+    internal fun gateBlockForGate(x0Px: Double): GateBlock {
+        val blockW = pool?.blockWidth ?: return GateBlock(0.0, 0.0, emptyList())
+        val x0World = x0Px / scale
+        val blockWorldW = blockW.toDouble() / scale
+        ensureStateAnchor(x0World)
+        // ⭐ 与生产**逐字一致**的加载区间。
+        loadRange(
+            x0World - BLOCK_LOOKAROUND,
+            x0World + blockWorldW + BLOCK_LOOKAROUND,
+        )
+        return GateBlock(
+            x0World,
+            x0World + blockWorldW,
+            buildItems(state.canv, x0Px),
+        )
+    }
+
+    /** 门禁缝的返回值：一块场景的**世界区间** + 它**实际画出的**绘制项。 */
+    internal data class GateBlock(
+        val worldX0: Double,
+        val worldX1: Double,
+        val items: List<DrawItem>,
+    )
+
+    /**
+     * 状态回收：世界走得够远就**裁掉滚远了的图元**（⛔ **不再整体重置**）。
+     *
+     * ⚠️ 上游 `MEM.chunks` 是**永不回收**的数组 ⇒ 世界理论上无限长、画面天然连续。
+     *
+     * ⭐ **2026-11-06 改法**：早期做法是「世界走远就把整份 [state] 换成新的」（整体重置），
+     * ⛔ 但那会**丢掉全部历史** ⇒ 新生成的块只剩自己那一小段区间的内容
+     * ⇒ 与旧块（内容丰富）在边界处**内容密度突变** ⇒ 画面出现「断」（真机截图证据）。
+     * ⇒ 改成**只裁掉滚远了的图元**（[ShanShuiPlanner.trimChunks]）⇒
+     * · 历史保留 ⇒ 新旧块**同源**（同一份累积画布）⇒ **画面无限连续** ✓
+     * · 内存有界 ✓
      */
     private fun ensureStateAnchor(x0World: Double) {
-        if (x0World - stateAnchorWorld <= STATE_RESET_SPAN) return
-        state = ShanShuiPlanner.State().also {
-            it.xmin = x0World
-            it.xmax = x0World
-        }
+        if (x0World - stateAnchorWorld <= TRIM_SPAN) return
         stateAnchorWorld = x0World
+        ShanShuiPlanner.trimChunks(state, x0World - KEEP_BEHIND_WORLD)
+        // ⚠️ 安全网：万一图元数仍过多（例如窗口被大幅缩小），才整体重置。
+        if (state.chunks.size > STATE_HARD_RESET_CHUNKS) {
+            state = ShanShuiPlanner.State().also {
+                it.xmin = x0World
+                it.xmax = x0World
+            }
+        }
     }
 
     // ─────────────────────── 绘制项（生产与门禁/预览共用） ───────────────────────
@@ -410,10 +466,55 @@ class QianliUpstreamRenderer : RendererFx() {
             val raw = c.fill
             val isWhite = raw != null && isPaperWhite(raw)
             // ⭐ 白填充 ⇒ **纸色**（不透明）—— 等价上游 multiply 的「擦成纸底」。
-            val fill = if (isWhite) paperColor() else raw
-            out.add(DrawItem(px, fill, c.stroke, c.width, minX, maxX, isWhite))
+            val fill = if (isWhite) paperColor() else raw?.let { multiplyByPaper(it) }
+            // ⚠️ 描边同样要乘纸色（上游是**整幅** multiply，不是只对白填充）⇒ 见 [multiplyByPaper]。
+            val stroke = c.stroke?.let { multiplyByPaper(it) }
+            out.add(DrawItem(px, fill, stroke, c.width, minX, maxX, isWhite))
         }
         return out
+    }
+
+    /**
+     * 上游的**整幅 multiply**：`mix-blend-mode: multiply` 加在**整个 `<svg>`** 上
+     * （上游 `index.html:4028`）。
+     *
+     * ## 上游的合成语义
+     *
+     * CSS Compositing 的 multiply 公式（backdrop = 纸底，不透明）：
+     * `最终色 = p × (1 − α + α·c/255)`（逐通道）。
+     *
+     * ⭐ **这个公式可以化简成「先把颜色乘纸色、再按原 α 做 source-over」**：
+     * `p×(1−α) + (p·c/255)×α = p×(1−α+α·c/255)` ✓ **完全等价**。
+     * 而 source-over 对颜色是**线性**的 ⇒ 只要在**生成绘制项时**把每个颜色乘上纸色，
+     * 组内合成与最终合成两步都自动正确 ⇒ **不需要任何 blend mode**（⇒ 不受 API 22 限制）。
+     *
+     * ## 数值验证（用上游参考图实测反推）
+     *
+     * 上游远山刻面实测 `RGB(213,202,181)`；纸底 `(245,232,208)` ⇒ 反推原始灰
+     * `221.7 / 222.0 / 221.9`（三通道一致 ⇒ 确为「纯灰 × 纸底」）。
+     * 本实现：`222×245/255 = 213.2`、`222×232/255 = 202.0`、`222×208/255 = 181.1`
+     * ⇒ **(213,202,181)** 与上游**逐通道吻合** ✓
+     *
+     * ## 已知近似
+     *
+     * ⚠️ 这里用的是**纸色均值**（平色）当 backdrop ⇒ 墨色区域**不透出纸纹**；
+     * 上游的纸纹会透过墨色（真 multiply 逐像素相乘）。
+     * ⇒ 与「白填充用平色纸」是**同一类近似**（已记在 §7.11.3）。
+     *
+     * ⛔ **印章不参与 multiply**：上游没有印章（它的落款是屋顶招牌上的 `"Pizza Hut"` 彩蛋）
+     * ⇒ 印章是我们唯一的自创保留项 ⇒ 保持原色（朱砂），不乘纸色。
+     */
+    private fun multiplyByPaper(c: ShanShuiColor): ShanShuiColor {
+        val pr = (paperColorRgb shr 16) and 0xFF
+        val pg = (paperColorRgb shr 8) and 0xFF
+        val pb = paperColorRgb and 0xFF
+        // ⚠️ `+127` 是四舍五入（浏览器/Skia 的 8 位乘法是四舍五入，不是截断）。
+        return ShanShuiColor(
+            (c.r * pr + 127) / 255,
+            (c.g * pg + 127) / 255,
+            (c.b * pb + 127) / 255,
+            c.a,
+        )
     }
 
     /**
@@ -641,12 +742,25 @@ class QianliUpstreamRenderer : RendererFx() {
         originPx: Double,
     ): List<DrawItem> {
         ensureStateAnchor(x0World)
+        // ⚠️ **这里刻意不加 [BLOCK_LOOKAROUND] 余量**（与生产的块烘焙不同）：
+        //   余量是为「跨块边界的图元要完整」服务的**渲染**需求；
+        //   而门禁每次调用都会新建渲染器 ⇒ 带余量会让每个门禁多规划 3000 世界单位
+        //   ⇒ 反复生成山体 ⇒ 实测把 E50 门禁从 ~2 分钟拖到 >40 分钟（2026-11-06 真踩）。
+        //   ⇒ 门禁只验「图元本身的几何/颜色」⇒ 用**精确区间**即可。
         loadRange(x0World, x1World)
         return buildItems(state.canv, originPx)
     }
 
     /** 门禁缝：当前的世界状态（chunk 列表 ⇒ 画家序）。 */
     internal fun gateStateForGate(): ShanShuiPlanner.State = state
+
+    /**
+     * 门禁缝：把一个颜色按上游的**整幅 multiply** 变换（[multiplyByPaper]）。
+     *
+     * ⛔ 只给门禁/测试用（用来钉死「墨色乘纸色」这条上游语义）。
+     */
+    internal fun gateMultiplyByPaperForGate(c: ShanShuiColor): ShanShuiColor =
+        multiplyByPaper(c)
 
     /** 门禁缝：设定滚动量（**只用于预览**：把镜头挪到世界的某一段）。 */
     internal fun gateSetScrollForGate(v: Double) {
@@ -695,11 +809,32 @@ class QianliUpstreamRenderer : RendererFx() {
         const val SCROLL_SPEED_WORLD = 100.0
 
         /**
-         * 世界状态的**回收跨度**（世界单位）。
+         * **裁剪**的触发跨度（世界单位）：世界走了这么多就裁一次滚远了的图元。
          *
-         * ⚠️ 上游 `MEM.chunks` 永不回收 ⇒ 长驻进程必须自己设上限。
-         * 取 8000 世界单位 ≈ 20 分钟滚动（@1080p、10 px/s）⇒ 内存有界、又不频繁重建。
+         * ⛔ **不是**「整体重置」的跨度 —— 见 [ensureStateAnchor] 的说明。
          */
-        const val STATE_RESET_SPAN = 8000.0
+        const val TRIM_SPAN = 512.0
+
+        /**
+         * 裁剪时**保留**镜头后方这么多世界单位（≈ 2.4 屏）。
+         *
+         * ⛔ 必须 ≥ 块宽（≈1245）+ [BLOCK_LOOKAROUND] ⇒ 否则仍在屏幕上的图元会被裁掉 ⇒ 又出现「断」。
+         */
+        const val KEEP_BEHIND_WORLD = 3000.0
+
+        /**
+         * 烘焙时的**余量**（世界单位）：向外多规划/多渲染这么多。
+         *
+         * ⭐ 必须 ≥ 最大的图元半宽（山体 `wid ≤ 600` ⇒ 半宽 300；再加 `xof` 的 ±250 抖动 ⇒ ≈550）
+         *   ⇒ 取 900 留足余量。
+         * ⛔ 不带余量 ⇒ 跨块边界的图元在烘焙时不在画布里 ⇒ 被**竖直切断**（真机截图证据）。
+         */
+        const val BLOCK_LOOKAROUND = 900.0
+
+        /**
+         * 安全网：图元数超过这个值就**整体重置**（正常情况下永远达不到 ——
+         * 裁剪会把滚远的图元清掉 ⇒ 数量只与「镜头附近的图元密度」有关）。
+         */
+        const val STATE_HARD_RESET_CHUNKS = 20000
     }
 }

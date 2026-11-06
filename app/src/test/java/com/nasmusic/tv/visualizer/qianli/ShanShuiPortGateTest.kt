@@ -38,7 +38,8 @@ import java.math.BigInteger
  * | G-PORT-7 | 负向自证 | Long 累加 / 漏预热 / Horner 三变体各自必红 |
  * | G-PORT-8 | 结构性保真 | 无 NaN；坐标 \|x\|,\|y\| < 1e5；点数 > 2；同种子两次逐位相等 |
  * | G-PORT-9 | **PRNG 抽取次数与上游一致** | tree01 = 63 次 / 11 条；tree03 = 504 次 / 73 条；皴线颜色逐条随机 |
- * | G-PORT-10 | **远山三角剖分与上游一致** | 轮廓 504 条 = 10 块填色 + 494 三角形；逐块条数 [37,44,44,44,44,52,60,84,60,25]；坐标摘要 0xea8cbf2d27b1bcf6 逐位相等；退化楔形恰好 1 个（block 0 / 第 25 个）；颜色 = getCol(中点)；PRNG 抽取 = 0 |
+ * | G-PORT-10 | **远山三角剖分与上游一致** | 轮廓 504 条 = 10 块填色 + 494 三角形；逐块条数 [37,44,44,44,44,52,60,84,60,25]；坐标摘要 0xea8cbf2d27b1bcf6 逐位相等；退化楔形恰好 1 个（block 0 / 第 25 个）；颜色 = getCol(中点)**的浓淡映射到前景山墨色族**（⭐ **按所有者裁定偏离上游的灰阶 [200,255]**，见 G-PORT-10′）；PRNG 抽取 = 0 |
+ * | G-PORT-10′ | **远山墨色属前景山同族**（2026-11-06 裁定） | 全部远山轮廓的墨色 ∈ [100, 140]、三通道相等、且**有浓淡变化**（max > min） |
  * | G-PORT-11 | **rock 几何与上游逐位一致** | 4 个夹具的 WHITE BG 轮廓 51 点逐位相等（Float32 原始位）；样式 = 白填充/无描边/线宽 0；OUTLINE = 灰 0.3 + 线宽 1 |
  * | G-PORT-12 | **plan 与上游逐条一致 + planmtx 全局性** | 三组夹具（不重叠 / 有 mount / 重叠）的两段规划逐条一致；PRNG 抽取次数 = 上游扣掉 boat 后的次数；「局部 planmtx」口径必须与上游不同（判据有牙） |
  *
@@ -962,11 +963,80 @@ class ShanShuiPortGateTest {
      *
      * ⚠️ `getCol` 的 `yoff` 是 **distMount 的入参 yoff**（上游 `:2409-2412` 的闭包捕获），
      *   **不是** chunk 的 y ⇒ 重算时用同一个 yoff。
+     *
+     * ⭐ **按所有者裁定偏离上游**（2026-11-06，用户原话：「远山还是白色的，应该也按前景山颜色一样」）：
+     * 上游 `getCol` 给的是**灰阶 [200, 255]**（极淡 ⇒ 画面上远山像一片白）。
+     * 本仓改成**与前景山同族的墨色** ⇒ 判据随之变成
+     * 「**先算上游 `getCol(中点)`，再按它的相对浓淡映射到新墨色**」。
+     *
+     * ⛔ 判据**不能**放宽成「随便什么颜色都行」—— 那会让这条门禁变成空壳；
+     *   下面的负向自证专门喂「上游的灰阶原值」⇒ 必须判红 ⇒ 证明门禁真的绑在新映射上。
      */
     @Test
     fun gPort10_distMountTriangleColorEqualsGetColOfMidPoint() {
         resetPortGlobals()
         assertTriangleColors(distMountContours(), distYoff)
+    }
+
+    /**
+     * G-PORT-10′（远山墨晕）：远山必须是「**前景山同墨色 + 半透明**」的墨晕。
+     *
+     * ⭐ 这是「按所有者裁定偏离上游」这条决策的**直接门禁**（三稿演进后的终稿）：
+     * · 墨色 ∈ **[100, 140]**（前景山同族）—— 上游是灰阶 [200,255]（⇒ 白）⇒ 退回上游必红；
+     * · alpha = **0.25**（墨晕）—— 实心（1.0）⇒ 远山变画面最重的一块，必红；
+     *   全透明（0.0）⇒ 又退回「白」，必红；
+     * · 三角剖分的**行底**必须仍是**纯白哨兵**（渲染器据此铺纸色）⇒ 不得被改成墨色。
+     */
+    @Test
+    fun gPort10_farMountainInkIsInForegroundInkFamily() {
+        resetPortGlobals()
+        var min = Int.MAX_VALUE
+        var max = Int.MIN_VALUE
+        var tris = 0
+        var rows = 0
+        for (c in distMountContours()) {
+            val f = c.fill ?: continue
+            if (c.stroke == null) {
+                // 行底（上游 `:2413-2417` 的块多边形）⇒ 本仓用「纯白哨兵」铺纸色。
+                rows++
+                assertEquals("远山行底必须是纯白哨兵 rgb=(${f.r},${f.g},${f.b})", 255, f.r)
+                assertEquals("远山行底必须是纯白哨兵 rgb=(${f.r},${f.g},${f.b})", 255, f.g)
+                assertEquals("远山行底必须是纯白哨兵 rgb=(${f.r},${f.g},${f.b})", 255, f.b)
+                assertEquals("远山行底必须不透明（它要盖住身后的一切）", 1.0, f.a, 0.0)
+                continue
+            }
+            tris++
+            if (f.r < min) min = f.r
+            if (f.r > max) max = f.r
+            assertEquals("远山墨色必须三通道相等（实测 rgb=${f.r},${f.g},${f.b}）", f.r, f.g)
+            assertEquals("远山墨色必须三通道相等（实测 rgb=${f.r},${f.g},${f.b}）", f.r, f.b)
+            assertEquals(
+                "远山刻面必须是半透明墨晕（实测 alpha=${f.a}）",
+                ShanShui.FAR_MOUNTAIN_INK_ALPHA,
+                f.a,
+                1e-9,
+            )
+            // ⚠️ 描边：上游是 `str: co`（与填充同色）⇒ 不透明时**不可见** ⇒ 视觉上等于「只有填充」。
+            //   本仓填充是半透明墨晕 ⇒ 描边若也带透明度就会与填充**叠加** ⇒ 出现渔网网格 ⇒ 必须 alpha = 0。
+            val s = c.stroke
+            assertTrue("远山刻面必须带描边（上游 `str: co`）", s != null)
+            assertEquals("远山刻面的描边颜色必须与填充同色（上游 str: co）", f.r, s!!.r)
+            assertEquals("远山刻面的描边颜色必须与填充同色（上游 str: co）", f.g, s.g)
+            assertEquals("远山刻面的描边颜色必须与填充同色（上游 str: co）", f.b, s.b)
+            assertEquals(
+                "远山刻面的描边必须 alpha = 0（否则与半透明填充叠加 ⇒ 远山变成渔网，实测 ${s.a}）",
+                0.0,
+                s.a,
+                0.0,
+            )
+        }
+        assertTrue("必须产出远山轮廓（实测三角 $tris 条 + 行底 $rows 条）", tris > 0 && rows > 0)
+        assertTrue("远山墨色必须 ≤ 140（实测最大 $max）—— 超过即退回上游的极淡灰", max <= 140)
+        assertTrue("远山墨色必须 ≥ 100（实测最小 $min）—— 低于即比前景山更重", min >= 100)
+        assertTrue(
+            "远山墨色必须有浓淡变化（实测区间 [$min, $max]）—— 全同值说明噪声浓淡丢了",
+            max > min,
+        )
     }
 
     /**
@@ -991,7 +1061,8 @@ class ShanShuiPortGateTest {
      * ① **移植前的口径**（10 条块填色、没有三角形）⇒ 条数 / 摘要 / 颜色三道断言都要红；
      * ② 三角形只有 2 个点（退化）⇒ 形状断言要红；
      * ③ 三角形 3 点但**共线**（面积为 0）⇒ 形状断言要红；
-     * ④ 三角形的颜色不等于 `getCol(中点)` ⇒ 颜色断言要红；
+     * ④ 三角形的颜色不等于「getCol(中点) 映射到新墨色」⇒ 颜色断言要红；
+     *    （⚠️ 特意喂**上游的灰阶原值 231** ⇒ 它在旧门禁下是"正确的"⇒ 证明新判据有牙）；
      * ⑤ 「triangulate 偷抽随机数」的变体（在测量窗口内插一次抽取）⇒ 抽取次数断言要红。
      */
     @Test
@@ -1017,10 +1088,12 @@ class ShanShuiPortGateTest {
             assertTriangleColors(legacy, distYoff)
         }
         // ② 2 点的退化三角形
+        //    ⚠️ 填充/描边用**合法值**（墨色 122 / alpha 0.25 / 描边 alpha 0）
+        //    ⇒ 这样只有「点数」这一条判据会红 ⇒ 负向自证才真的证明「点数判据有牙」。
         val twoPoints = ShanShuiContour(
             listOf(floatArrayOf(0f, 0f), floatArrayOf(10f, 10f)),
-            ShanShuiColor(200, 200, 200, 1.0),
-            ShanShuiColor(200, 200, 200, 1.0),
+            ShanShuiColor(122, 122, 122, ShanShui.FAR_MOUNTAIN_INK_ALPHA),
+            ShanShuiColor(122, 122, 122, 0.0),
             1.0,
         )
         gateMustCatch("2 点的退化三角形必须被形状判据咬住") {
@@ -1029,8 +1102,8 @@ class ShanShuiPortGateTest {
         // ③ 3 点但**全部重合**（空壳三角形）
         val allSame = ShanShuiContour(
             listOf(floatArrayOf(3f, 4f), floatArrayOf(3f, 4f), floatArrayOf(3f, 4f)),
-            ShanShuiColor(200, 200, 200, 1.0),
-            ShanShuiColor(200, 200, 200, 1.0),
+            ShanShuiColor(122, 122, 122, ShanShui.FAR_MOUNTAIN_INK_ALPHA),
+            ShanShuiColor(122, 122, 122, 0.0),
             1.0,
         )
         gateMustCatch("三点全重合的空壳三角形必须被形状判据咬住") {
@@ -1058,7 +1131,18 @@ class ShanShuiPortGateTest {
                 degenerateTriangleList(extraDegenerate),
             )
         }
-        // ④ 颜色不等于 getCol(中点)
+        // ④ 颜色不等于「getCol(中点) 映射到新墨色」
+        //    ⚠️ 特意喂**上游的灰阶原值**（231 = 上游 getCol 的典型值）⇒
+        //    它在**旧门禁**下是"正确的" ⇒ 若新门禁不咬住它，就说明门禁被放宽成空壳了。
+        val upstreamGrayColor = ShanShuiContour(
+            listOf(floatArrayOf(0f, 0f), floatArrayOf(10f, 20f), floatArrayOf(20f, 0f)),
+            ShanShuiColor(231, 231, 231, 1.0),
+            ShanShuiColor(231, 231, 231, 1.0),
+            1.0,
+        )
+        gateMustCatch("上游的灰阶原值（已按裁定偏离）必须被颜色判据咬住") {
+            assertTriangleColors(listOf(upstreamGrayColor), 0.0)
+        }
         val wrongColor = ShanShuiContour(
             listOf(floatArrayOf(0f, 0f), floatArrayOf(10f, 20f), floatArrayOf(20f, 0f)),
             ShanShuiColor(1, 2, 3, 1.0),
@@ -1153,10 +1237,23 @@ class ShanShuiPortGateTest {
     private fun assertTriangleShape(label: String, tri: ShanShuiContour) {
         assertEquals("$label 必须有 3 个点（上游 poly(T[k]) 就是 3 点）", 3, tri.pts.size)
         assertTrue("$label 必须有填充色（上游 fil: co）", tri.fill != null)
+        // ⚠️ 上游是 `poly(T[k], {fil: co, str: co, wid: 1})` ⇒ 描边与填充**同色**。
+        //   ⇒ 判据拆成两半：
+        //   ① **RGB 必须相同**（颜色本身是上游的 `co`）—— 这是上游的结构性要求；
+        //   ② **alpha 允许不同**：本仓的填充是**半透明墨晕**（0.25），若描边也带 0.25
+        //      就会与填充叠加 ⇒ 三角剖分的每条边变**深色网格线** ⇒ 远山像渔网 ⇒
+        //      描边的 alpha 必须是 **0**（视觉上与上游等价：上游填充不透明 ⇒ 描边不可见）。
+        val f = tri.fill!!
+        val s = tri.stroke
+        assertTrue("$label 必须有描边（上游 str: co）", s != null)
+        assertEquals("$label 的描边 RGB 必须与填充相同（上游 fil = str = co）", f.r, s!!.r)
+        assertEquals("$label 的描边 RGB 必须与填充相同（上游 fil = str = co）", f.g, s.g)
+        assertEquals("$label 的描边 RGB 必须与填充相同（上游 fil = str = co）", f.b, s.b)
         assertEquals(
-            "$label 的描边色必须与填充色相同（上游 fil = str = co）",
-            tri.fill,
-            tri.stroke,
+            "$label 的描边 alpha 必须是 0（否则与半透明填充叠加 ⇒ 出现渔网网格，实测 ${s.a}）",
+            0.0,
+            s.a,
+            0.0,
         )
         assertEquals("$label 的描边宽度必须是 1（上游 wid: 1）", 1.0, tri.width, 0.0)
         // 闭合：3 点围成的三角形必须**非空**（三点不得全部重合 ⇒ 不能是空壳）
@@ -1223,13 +1320,21 @@ class ShanShuiPortGateTest {
         assertTrue("必须产出三角形（实测 $n 条）", n > 0)
     }
 
-    /** 单个三角形的颜色重算（上游 `:2409-2412` + `:2425-2427`）。 */
+    /**
+     * 单个三角形的颜色重算（上游 `:2409-2412` + `:2425-2427`，**再按所有者裁定映射到新墨晕**）。
+     *
+     * ⚠️ 映射公式与生产侧 [ShanShui.distMount] 里的 `farMountainInk` **必须逐位一致**：
+     * `t = (gray − 200) / 55`（钳到 [0,1]）⇒ `ink = (100 + t × 40).toInt()`。
+     * ⚠️ alpha 必须是 **0.25**（墨晕）—— 所有者裁定 2026-11-06 的第 ③ 稿。
+     */
     private fun assertTriangleColor(label: String, tri: ShanShuiContour, yoff: Double) {
         val m = ShanShuiPoly.midPtExact(tri.pts)
-        val c = (ShanShuiNoise.noise(m[0] * 0.02, m[1] * 0.02, yoff) * 55 + 200).toInt()
+        val gray = (ShanShuiNoise.noise(m[0] * 0.02, m[1] * 0.02, yoff) * 55 + 200).toInt()
+        val t = ((gray - 200.0) / 55.0).coerceIn(0.0, 1.0)
+        val c = (100 + t * 40).toInt()
         assertEquals(
-            "$label 的颜色必须是 getCol(中点) 的结果",
-            ShanShuiColor(c, c, c, 1.0),
+            "$label 的颜色必须是 getCol(中点)（灰阶 $gray）映射到前景山墨色族后的结果",
+            ShanShuiColor(c, c, c, ShanShui.FAR_MOUNTAIN_INK_ALPHA),
             tri.fill,
         )
     }

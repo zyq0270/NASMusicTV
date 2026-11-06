@@ -10,10 +10,12 @@ import com.nasmusic.tv.visualizer.qianli.port.ShanShuiColor
 import com.nasmusic.tv.visualizer.qianli.port.ShanShuiContour
 import com.nasmusic.tv.visualizer.qianli.port.ShanShuiNoise
 import com.nasmusic.tv.visualizer.qianli.port.ShanShuiPrng
+import com.nasmusic.tv.visualizer.qianli.QianliRenderStyle
 import com.nasmusic.tv.visualizer.renderers.CircularRingRenderer
 import com.nasmusic.tv.visualizer.renderers.FxFrame
 import com.nasmusic.tv.visualizer.renderers.QianliScrollRenderer
 import com.nasmusic.tv.visualizer.renderers.QianliScrollRenderer.GateMidBlock
+import com.nasmusic.tv.visualizer.renderers.QianliUpstreamRenderer
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -120,27 +122,43 @@ class QianliScrollRendererTest {
     // ══════════════════════ G-REND-1 工厂能创建 ══════════════════════
 
     /**
-     * G-REND-1：工厂必须造出 [QianliScrollRenderer]（⛔ 不是 `CircularRingRenderer` 兜底）。
+     * G-REND-1：工厂必须造出 **E50 的渲染器**（⛔ 不是 `CircularRingRenderer` 兜底）。
      *
      * ⚠️ 这一条防的是「E50 的源码在，但工厂里没注册 / 被兜底分支吃掉」——
      * 那样画面上永远是默认的圆环，而所有单测都绿。
+     *
+     * ⭐ **E50 现在有两条呈现路径**（所有者 2026-11-06 裁定：默认「忠于上游」）：
+     * `QianliUpstreamRenderer`（绢白纸底 + 上游线描 + 单一世界空间）/ `QianliScrollRenderer`
+     * （分层带 + 三版设色）。⇒ 判据跟着**单一真源** [QianliRenderStyle.UPSTREAM_DEFAULT] 走，
+     * 而不是钉死某一个类（否则切回设色路径时这条门禁会误报）。
      */
     @Test
     fun gRend1_factoryCreatesTheQianliScrollRenderer() {
         val ctx = ApplicationProvider.getApplicationContext<Context>()
         val r = VisualizerRendererFactory.create(VisualizerTheme.QIANLI_SCROLL, ctx)
         assertTrue(
-            "工厂必须造出 QianliScrollRenderer（实测 ${r.javaClass.name}）",
-            r is QianliScrollRenderer,
+            "工厂必须造出 E50 的渲染器（实测 ${r.javaClass.name}）",
+            r is QianliScrollRenderer || r is QianliUpstreamRenderer,
         )
+        if (QianliRenderStyle.UPSTREAM_DEFAULT) {
+            assertTrue(
+                "默认路径必须是「忠于上游」的渲染器（实测 ${r.javaClass.name}）",
+                r is QianliUpstreamRenderer,
+            )
+        } else {
+            assertTrue(
+                "切回设色路径后必须是 QianliScrollRenderer（实测 ${r.javaClass.name}）",
+                r is QianliScrollRenderer,
+            )
+        }
         assertEquals("主题必须自洽", VisualizerTheme.QIANLI_SCROLL, r.theme)
         assertFalse("⛔ 不得落到 CircularRingRenderer 兜底", r is CircularRingRenderer)
     }
 
     /**
-     * G-REND-1 负向自证：把「别的渲染器」喂给正向用例用的同一份断言 ⇒ 必须判红。
+     * G-REND-1 负向自证：把「别的渲染器」喂给正向用例用的**同一份断言** ⇒ 必须判红。
      *
-     * ⚠️ 这里断言的是反向命题（兜底渲染器不是 QianliScrollRenderer）——
+     * ⚠️ 这里断言的是反向命题（兜底渲染器不是 E50 的渲染器）——
      * 正向断言一旦被放宽成「随便什么都行」，这条负向用例就会红 ⇒ 它是判据的护栏。
      */
     @Test
@@ -150,8 +168,8 @@ class QianliScrollRendererTest {
         val fallback: Any = CircularRingRenderer()
         gateMustCatch("兜底渲染器必须被判据咬住（否则正向判据被放宽了）") {
             assertTrue(
-                "工厂必须造出 QianliScrollRenderer",
-                fallback is QianliScrollRenderer,
+                "工厂必须造出 E50 的渲染器",
+                fallback is QianliScrollRenderer || fallback is QianliUpstreamRenderer,
             )
         }
     }
