@@ -63,17 +63,17 @@ class VisualizerThemeTest {
 
     @Test
     fun `theme library is all concrete effects, no auto mode`() {
-        // 29 = 26 + E50 千里江山 + LOFI_CITY + E52 HIGHWAY。⛔ 与 lofi.city 开关无关：枚举恒声明，只有 selectable() 会过滤。
-        assertEquals(29, VisualizerTheme.entries.size)
+        // 30 = 29 + E53 歌词舞台。⛔ 与 lofi.city 开关无关：枚举恒声明，只有 selectable() 会过滤。
+        assertEquals(30, VisualizerTheme.entries.size)
     }
 
     @Test
     fun `selectable list contains every theme when the photo wall is available`() {
         val selectable = VisualizerTheme.selectable(photoWallAvailable = true)
-        // 27 = 29 项枚举减去被 lofi.city / highway.enabled 两个编译期开关过滤掉的那两项
+        // 28 = 30 项枚举减去被 lofi.city / highway.enabled 两个编译期开关过滤掉的那两项
         // （本用例照片墙是开着的 ⇒ 不触发列表级门控）。
-        assertEquals(27 + lofiInList + highwayInList, selectable.size)
-        assertEquals(27 + lofiInList + highwayInList, selectable.distinct().size)
+        assertEquals(28 + lofiInList + highwayInList, selectable.size)
+        assertEquals(28 + lofiInList + highwayInList, selectable.distinct().size)
         assertTrue(selectable.contains(VisualizerTheme.PHOTO_WALL))
     }
 
@@ -104,24 +104,24 @@ class VisualizerThemeTest {
             listOf(VisualizerTheme.PHOTO_WALL),
             on.filter { it !in off.toSet() }
         )
-        // 关：28 项（29 − 照片墙）再减两个被开关过滤的；开：29 项再减两个被开关过滤的。
-        assertEquals(26 + lofiInList + highwayInList, off.size)
-        assertEquals(27 + lofiInList + highwayInList, on.size)
+        // 关：29 项（30 − 照片墙）再减两个被开关过滤的；开：30 项再减两个被开关过滤的。
+        assertEquals(27 + lofiInList + highwayInList, off.size)
+        assertEquals(28 + lofiInList + highwayInList, on.size)
     }
 
     @Test
     fun `ordinal labels are unique`() {
         val labels = VisualizerTheme.entries.map { it.ordinalLabel }
-        // 29 个编号互异 —— 千里江山取 "50"（E51 占 "51"、E52 占 "52"），不再与 E43「海边」重号。
-        assertEquals(29, labels.distinct().size)
+        // 30 个编号互异 —— 千里江山取 "50"（E51 占 "51"、E52 占 "52"、E53 占 "53"），不再与 E43「海边」重号。
+        assertEquals(30, labels.distinct().size)
     }
 
     @Test
     fun `display names are non blank and unique`() {
         val names = VisualizerTheme.entries.map { it.displayName }
         assertTrue(names.none { it.isBlank() })
-        // 「千里江山」是唯一显示名 ⇒ 29 个互异。
-        assertEquals(29, names.distinct().size)
+        // 「千里江山」是唯一显示名 ⇒ 30 个互异。
+        assertEquals(30, names.distinct().size)
     }
 
     @Test

@@ -81,6 +81,10 @@ import com.nasmusic.tv.visualizer.RendererSwapper
 import com.nasmusic.tv.visualizer.VisualizerRenderer
 import com.nasmusic.tv.visualizer.VisualizerRendererFactory
 import com.nasmusic.tv.visualizer.qianli.QianliRenderStyle
+import com.nasmusic.tv.visualizer.renderers.LyricsStageRenderer
+import com.nasmusic.tv.visualizer.renderers.lyricsStage.LyricsStageBridge
+import com.nasmusic.tv.visualizer.renderers.lyricsStage.LyricsStageMode
+import com.nasmusic.tv.visualizer.renderers.lyricsStage.LyricsStagePayload
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
@@ -330,6 +334,74 @@ fun VisualizerStage(
         return true
     }
 
+    // ── E53「歌词舞台」子模式（5 个**手动切换**的歌词效果）────────
+    //
+    // ⛔ **仅手动切换**：不自动定时切换、不随歌曲切换、不随段落/副歌切换。
+    // 上下键 / 手势上下滑动 ⇒ 下一个 / 上一个子模式（循环）。
+    //
+    // ⚠️ 渲染器每帧读的是**推给它的** [LyricsStagePayload]
+    //    （⛔ 不走 `RenderContext` —— 那个类被本机私有分支的覆盖层遮蔽，
+    //     改它会让本地构建与 CI 行为分叉）。
+    //
+    // 整曲歌词行只在 `lyrics` 变化时重建（逐帧重算是 O(N) 全量扫描，必须缓存）。
+    val lyricsStageLines = remember(lyrics) { LyricsStageBridge.buildLines(lyrics ?: emptyList()) }
+
+    /** 逐帧复用的歌词载荷（可变 ⇒ 逐帧零分配） */
+    val lyricsStagePayload = remember { LyricsStagePayload() }
+
+    /** 当前子模式（渲染器每次主题切换都会被重建 ⇒ 模式要重新告知它） */
+    var lyricsStageMode by remember { mutableStateOf(LyricsStageMode.Default) }
+
+    /** 子模式切换的短暂提示（null = 不显示）；存的是**模式**而非文案 ——
+     *  文案要在组合层用 `stringResource` 拼（⛔ `stringResource` 是 @Composable，
+     *  普通局部函数里调不了）。 */
+    var lyricsStageToastMode by remember { mutableStateOf<LyricsStageMode?>(null) }
+    LaunchedEffect(lyricsStageToastMode) {
+        if (lyricsStageToastMode == null) return@LaunchedEffect
+        kotlinx.coroutines.delay(1500)
+        lyricsStageToastMode = null
+    }
+
+    /** 子模式 Toast 文案（组合层拼 ⇒ 英文界面显示英文名） */
+    val lyricsStageToastText = lyricsStageToastMode?.let { mode ->
+        "$themeDisplayName · ${stringResource(mode.displayNameRes)}"
+    }
+
+    // 进舞台时读一次持久化的子模式。
+    LaunchedEffect(Unit) {
+        lyricsStageMode = LyricsStageMode.fromOrdinal(appPrefs.lyricsStageMode.first())
+    }
+
+    // 把当前子模式推给渲染器。
+    // ⚠️ 渲染器由 [RendererSwapper] 管，主题/画质一变就被重建 ⇒ 每次重组后都要重新推。
+    LaunchedEffect(lyricsStageMode, theme, quality) {
+        if (theme != VisualizerTheme.LYRICS_STAGE) return@LaunchedEffect
+        (swapper.current as? LyricsStageRenderer)?.setMode(lyricsStageMode)
+    }
+
+    /**
+     * 切换 E53「歌词舞台」的子模式（循环）。
+     *
+     * 一次做完三件事：更新模式（渲染器随之换子渲染器）、持久化到 [AppPreferences]、
+     * 弹一条短暂 Toast（否则用户看不出切没切）。
+     *
+     * @param delta `+1` = 下一个，`-1` = 上一个。
+     * @return 是否真的切了；**非「歌词舞台」主题返回 false** ⇒ 调用方保持原语义。
+     */
+    fun applyLyricsStageMode(delta: Int): Boolean {
+        if (theme != VisualizerTheme.LYRICS_STAGE) return false
+        val next = if (delta >= 0) {
+            LyricsStageMode.next(lyricsStageMode)
+        } else {
+            LyricsStageMode.prev(lyricsStageMode)
+        }
+        lyricsStageMode = next
+        (swapper.current as? LyricsStageRenderer)?.setMode(next)
+        lyricsStageToastMode = next
+        coroutineScope.launch { appPrefs.setLyricsStageMode(next.ordinal) }
+        return true
+    }
+
     // 进入舞台立即把焦点交给舞台 Box（TV 遥控器 D-Pad 依赖焦点路由）
     LaunchedEffect(Unit) {
         focusRequester.requestFocus()
@@ -347,15 +419,21 @@ fun VisualizerStage(
                         Key.DirectionLeft -> { onPrevTheme(); true }
                         Key.DirectionRight -> { onNextTheme(); true }
                         // 上键：「千里江山」切**下一个**设色版（0→1→2→0）；
+                        // 「歌词舞台」切**下一个**歌词子模式；
                         // 其它主题维持原样（无动作，控制栏已移除）⇒ 仍返回 true
                         Key.DirectionUp -> {
-                            applyQianliColorVersion(+1)
-                            true
+                            if (applyLyricsStageMode(+1)) true
+                            else {
+                                applyQianliColorVersion(+1)
+                                true
+                            }
                         }
                         // 下键：「千里江山」切**上一个**设色版（2→1→0→2）；
+                        // 「歌词舞台」切**上一个**歌词子模式；
                         // 其它主题**维持原样**（不消费 ⇒ 让事件冒泡给下层组件）
                         Key.DirectionDown -> {
-                            if (applyQianliColorVersion(-1)) true else false
+                            if (applyLyricsStageMode(-1)) true
+                            else if (applyQianliColorVersion(-1)) true else false
                         }
                         else -> false
                     }
@@ -377,7 +455,8 @@ fun VisualizerStage(
                 )
             }
             .pointerInput(theme) {
-                // 手机：上下滑动切换「千里江山」的设色版（阈值与左右一致：80dp）
+                // 手机：上下滑动切换「千里江山」的设色版 / 「歌词舞台」的子模式
+                // （阈值与左右一致：80dp）
                 //
                 // ⚠️ **单独一个 pointerInput 块**（不与横滑合并）：两个 detector 挂同一层
                 //    会互相吞事件；分成两块后各自等自己方向的 slop
@@ -392,8 +471,12 @@ fun VisualizerStage(
                         val threshold = with(density) { 80.dp.toPx() }
                         // 上滑（totalDrag < 0）⇒ 下一个；下滑 ⇒ 上一个（与遥控器上下键同向）
                         when {
-                            totalDrag < -threshold -> applyQianliColorVersion(+1)
-                            totalDrag > threshold -> applyQianliColorVersion(-1)
+                            totalDrag < -threshold -> {
+                                if (!applyLyricsStageMode(+1)) applyQianliColorVersion(+1)
+                            }
+                            totalDrag > threshold -> {
+                                if (!applyLyricsStageMode(-1)) applyQianliColorVersion(-1)
+                            }
                         }
                     }
                 )
@@ -499,6 +582,15 @@ fun VisualizerStage(
                 // ⛔ 必须在 `swapper.current.draw(...)` **之前**：`PhotoRenderer` 读的就是这 7 个字段。
                 photoWall?.applyTo(renderCtx)
                 val cur = swapper.current
+                // E53「歌词舞台」：把歌词数据推给渲染器。
+                // ⛔ **不走 `RenderContext`**（那个类被本机私有分支的覆盖层遮蔽）。
+                // ⚠️ 逐帧只改三个字段、不新建对象 ⇒ 零分配。
+                if (cur is LyricsStageRenderer) {
+                    lyricsStagePayload.lines = lyricsStageLines
+                    lyricsStagePayload.currentIndex = lyricInfo.lineIndex
+                    lyricsStagePayload.timeSec = progressMs / 1000.0
+                    cur.applyLyrics(lyricsStagePayload)
+                }
                 // tick 参与读取以确保每帧重绘
                 // ⛔ `!cur.isViewBased` 防御：换主题瞬间（sync 后、State 重组前）本分支
                 //    仍是 Canvas，而 swapper.current 已指向新渲染器 —— 若是 view 型
@@ -617,6 +709,30 @@ fun VisualizerStage(
             ) {
                 Text(
                     text = colorToastText.orEmpty(),
+                    color = Color.White.copy(alpha = 0.85f),
+                    fontSize = 16.sp,
+                    modifier = Modifier
+                        .drawBehind {
+                            drawRoundRect(
+                                color = Color.Black.copy(alpha = 0.35f),
+                                cornerRadius = CornerRadius(12.dp.toPx())
+                            )
+                        }
+                        .padding(horizontal = 20.dp, vertical = 8.dp)
+                )
+            }
+
+            // 歌词子模式 Toast（E53「歌词舞台」切换子模式时短暂提示，如「歌词舞台 · 逐字行光」）
+            // ⚠️ 与效果名 Toast、设色版 Toast **各占一个 AnimatedVisibility**：
+            //    三者的内容与消失时机都不同，共用一个可见性 State 会互相把对方顶掉。
+            AnimatedVisibility(
+                visible = lyricsStageToastText != null,
+                enter = fadeIn(),
+                exit = fadeOut(),
+                modifier = Modifier.align(Alignment.CenterHorizontally)
+            ) {
+                Text(
+                    text = lyricsStageToastText.orEmpty(),
                     color = Color.White.copy(alpha = 0.85f),
                     fontSize = 16.sp,
                     modifier = Modifier

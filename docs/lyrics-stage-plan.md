@@ -23,6 +23,25 @@ Folia 实现了 17 种全屏歌词动画主题，本方案从中选取 4 个主�
 
 代码实现中，每个移植文件头部标注对应的 Folia 源文件路径与版本号。
 
+### 许可
+
+Folia 以 **AGPL-3.0** 发布 —— 该许可**允许再发布**（与本仓 E51/E52 所用的
+「上游无任何开源授权、不可外发」的情形不同），因此本移植层可以随本仓库公开，
+条件是：
+
+1. **保留署名与许可声明** —— 每个移植文件头部标注 Folia 源文件路径与版本号；
+   本节即为总体的署名与许可声明。
+2. **标明衍生关系** —— 本文件与 `docs/technical-overview.md` §10.282 都写明
+   「移植自 Folia（AGPL-3.0）」。
+3. ⚠️ **AGPL-3.0 与 GPLv3 的兼容性**：AGPL-3.0 §13 允许与 GPLv3 作品链接，
+   但**组合后的作品须以 AGPL-3.0 授权**。本仓主许可证是 GPLv3 ⇒
+   「把 AGPL 派生件放进 GPLv3 仓库」这一步的最终授权口径**由所有者裁定**；
+   本方案只做技术事实记录，不替所有者做许可决定。
+
+> ⚠️ 本仓的既定判据（见 `AGENTS.md`）：**是否含上游代码 / 是上游代码的翻译件或派生物**
+> ⇒ 含则私有、不含则公开。Folia 有可再发布的开源授权 ⇒ 按该判据**不在「必须私有」之列**，
+> 与 E44「明月」的 three-globe（MIT，原件就在 `app/src/globe-upstream/`）同例。
+
 ---
 
 ## 0. 歌词模式总览
@@ -31,14 +50,15 @@ Folia 实现了 17 种全屏歌词动画主题，本方案从中选取 4 个主�
 
 | # | 子模式 | 中文名 | 来源 | Folia 对应主题 | 画质档位 | 状态 |
 |---|---|---|---|---|---|---|
-| 0 | `DOT_MATRIX` | 歌词点阵 | NASMusicTV E23 原创 | — | ADV | 现有，吸收 |
-| 1 | `GLOW_LINE` | 逐字行光 | Folia 逐行移植 | `classic` | ADV | 移植中 |
-| 2 | `FULL_VIEW` | 全屏纵览 | Folia 逐行移植 | `fume` | ULTRA | 移植中 |
-| 3 | `TILT_PULSE` | 倾斜律动 | Folia 逐行移植 | `tilt` | ADV | 移植中 |
-| 4 | `PARTITA` | 分栏引导 | Folia 逐行移植 | `partita` | ADV | 移植中 |
+| 0 | `DOT_MATRIX` | 歌词点阵 | NASMusicTV E23 原创 | — | ADV | 已接入（薄封装复用 `LyricsDotMatrixRenderer`） |
+| 1 | `GLOW_LINE` | 逐字行光 | Folia 逐行移植 | `classic` | ADV | 已移植 |
+| 2 | `FULL_VIEW` | 全屏纵览 | Folia 逐行移植 | `fume` | HIGH（其余降级为 GLOW_LINE） | 已移植 |
+| 3 | `TILT_PULSE` | 倾斜律动 | Folia 逐行移植 | `tilt` | ADV | 已移植 |
+| 4 | `PARTITA` | 分栏引导 | Folia 逐行移植 | `partita` | ADV | 已移植 |
 
 > ⛔ **仅手动切换**：不自动定时切换、不随歌曲切换、不随段落/副歌切换。
-> 子模式选择持久化到 `VisualizerPrefs`，切歌后保持。
+> 子模式选择持久化到 `AppPreferences.lyricsStageModeOrdinal`（DataStore），切歌后保持。
+> 门禁：`LyricsStageManualSwitchTest`（源码扫描：渲染器里不存在任何自动切换机制）。
 
 ---
 
@@ -198,48 +218,80 @@ enum class LyricsStageMode(val displayName: String) {
 
 ---
 
-## 2. RenderContext 扩展
+## 2. 歌词数据的传递通道（⚠️ 实作改为**不走 `RenderContext`**）
+
+### 2.1 为什么不用 `RenderContext`
+
+原方案是给 `RenderContext` 加三个字段（`lyricLines` / `lyricLineStartTimesMs` / `lyricWords`）。
+**实作时否决了这条路**，两个硬理由：
+
+1. `RenderContext.update()` 已有 **16 个位置参数**，再加字段会让三个调用点全部变长；
+2. ⛔ **本机私有分支的覆盖层会遮蔽同名文件** —— `RenderContext.kt` 在
+   `NASMusicTV-e51-local` 覆盖层里有一份 ⇒ 本地构建用的是**覆盖层那份**。
+   改仓库那份 ⇒ 本地编译与 CI 编译**行为分叉**（本地少了新字段 ⇒ 直接编译失败）。
+
+⇒ 改为：歌词数据由 `VisualizerStage` **每帧直接推给** `LyricsStageRenderer`。
+
+### 2.2 载荷
 
 ```kotlin
-// visualizer/RenderContext.kt — 新增字段
+// visualizer/renderers/lyricsStage/LyricsStagePayload.kt
 
-/** 全曲歌词行列表（FULL_VIEW 子模式用） */
-var lyricLines: List<LyricLine> = emptyList()
-
-/** 每行起始时间 ms（FULL_VIEW 用，与 lyricLines 对应） */
-var lyricLineStartTimesMs: List<Long> = emptyList()
-
-/** 当前行逐词时间戳（GLOW_LINE / PARTITA 用，替代现有的 lyricWordTimestamps） */
-var lyricWords: List<LyricWord> = emptyList()
+/**
+ * ⚠️ **可变类而非 data class**：舞台每帧只改三个字段、不新建对象 ⇒ 逐帧零分配。
+ */
+class LyricsStagePayload(
+    var lines: List<LyricLine> = emptyList(),  // 整曲歌词行（FULL_VIEW 要排整版版面）
+    var currentIndex: Int = -1,                // 当前行索引
+    var timeSec: Double = 0.0,                 // 播放进度（秒）
+) {
+    val current: LyricLine? get() = lines.getOrNull(currentIndex)
+    val next: LyricLine? get() = lines.getOrNull(currentIndex + 1)
+    val hasLyrics: Boolean get() = lines.isNotEmpty()
+}
 ```
 
-> ⚠️ 现有 `currentLyricLine` / `nextLyricLine` / `lyricLineProgress` / `lyricLineIndex` /
-> `lyricWordTimestamps` / `lyricHasWordTimestamps` / `lyricMaxLineChars` / `longestLyricLine`
-> 字段保留不动——现有 E23 渲染器依赖它们。
-> 新增字段仅供歌词舞台子模式使用。
-
-### 数据填充来源
-
-`VisualizerStage` 的帧循环中，从 `lyrics: List<LyricsLine>?` 参数构造 `LyricLine` 列表：
+### 2.3 填充来源
 
 ```kotlin
-// VisualizerStage.kt — 帧循环内，构造 RenderContext 时
-ctx.lyricLines = lyrics?.map { it.toLyricLine() } ?: emptyList()
-ctx.lyricLineStartTimesMs = lyrics?.map { it.startTimeMs } ?: emptyList()
-ctx.lyricWords = ctx.currentLyricLine?.let { /* 从当前行解析 */ } ?: emptyList()
+// VisualizerStage.kt — 组合作用域（整曲只重建一次）
+val lyricsStageLines = remember(lyrics) { LyricsStageBridge.buildLines(lyrics ?: emptyList()) }
+val lyricsStagePayload = remember { LyricsStagePayload() }
+
+// VisualizerStage.kt — 帧循环内（逐帧只改三个字段）
+if (cur is LyricsStageRenderer) {
+    lyricsStagePayload.lines = lyricsStageLines
+    lyricsStagePayload.currentIndex = lyricInfo.lineIndex
+    lyricsStagePayload.timeSec = progressMs / 1000.0
+    cur.applyLyrics(lyricsStagePayload)
+}
 ```
 
-`LyricsLine` → `LyricLine` 的转换实现 `toLyricLine()`：
-将 `LyricsLine`（NASMusicTV 现有模型）的字段映射到 `LyricLine`。
-逐词时间戳的解析逻辑：
-- 若 `ctx.lyricHasWordTimestamps == true` 且 `lyricWordTimestamps` 非空，按词均分到 `LyricWord`
-- 否则用行级时间均分：每个词的 `startTime = line.startTime + (wordIndex / wordCount) * lineDuration`
-- 词颜色通过 `resolveWordColor(word.text, theme.wordColors, theme.accentColor)` 预计算
+`LyricsLine` → `LyricLine` 的转换实现 `LyricsStageBridge.buildLines(lyrics)`：
+- 行开始时间 = `LyricsLine.time / 1000`；行结束时间 = **下一行的 `time`**（没有则 `+3s` 兜底）
+- 逐词时间戳：按位置与切出的词一一对应；词的**结束时间取下一个词的开始时间**
+  （本仓的 `WordTimestamp` 只有 `startMs`、无结束时间），
+  与 Folia `buildLineRenderHints` 里 `getLastWordEndTime` 的兜底一致
+- 无逐词时间戳时：按行级时间在词之间均分
+- `renderHints` 由 `LyricRenderHints.buildLineRenderHints(line)` 推导
 
-> ⚠️ `parseToLyricLine(line, words)` 是 `toLyricLine()` 的别名——各子渲染器中用 `parseToLyricLine` 指代同一转换，
-> 实际实现统一为 `LyricsLine.toLyricLine()`。定义位置：`data/model/LyricLine.kt`（新增扩展函数）。
+> ⚠️ `parseToLyricLine(line, words)` 是 `toLyricLine()` 的别名 —— 实作统一为
+> `LyricsStageBridge.buildLines(lyrics)`（`visualizer/renderers/lyricsStage/LyricsStagePayload.kt`）。
 
-> ⚠️ `VisualQuality` 枚举定义在 `AppSettings.kt`（第 560 行起），**不在**独立的 `VisualQuality.kt` 文件中。
+> ⚠️ `VisualQuality` 枚举定义在 `AppSettings.kt`（第 586 行起），**不在**独立的 `VisualQuality.kt` 文件中。
+
+### 2.4 调色板字段名（⚠️ 与原方案不同）
+
+本仓的 `CoverPalette` 只有三个成员 —— **没有** `primaryColor` / `accentColor`：
+
+| Folia | 本仓 | 说明 |
+|---|---|---|
+| `theme.primaryColor` | `ctx.palette.accent` | 基础文字色 |
+| `theme.accentColor` | `ctx.palette.secondary` | 高亮 / 激活色 |
+| （背景） | `ctx.palette.background` | 页面底色 |
+
+> 本仓**没有** Folia 的 `theme.wordColors`（关键词配色表）⇒ `resolveWordColor(...)`
+> 一律传**空列表** + 回落色 `ctx.palette.secondary`，逐词配色的**算法**仍完整移植。
 
 ---
 
@@ -2353,7 +2405,7 @@ class PartitaSubRenderer : LyricsSubRenderer {
 
 ### 9.1 按键切换
 
-在 `VisualizerStage.kt:347` 的 `onPreviewKeyEvent` 中：
+在 `VisualizerStage.kt` 的 `onPreviewKeyEvent` 中：
 
 ```kotlin
 .onPreviewKeyEvent { e ->
@@ -2361,20 +2413,15 @@ class PartitaSubRenderer : LyricsSubRenderer {
         when (e.key) {
             Key.DirectionLeft -> { onPrevTheme(); true }
             Key.DirectionRight -> { onNextTheme(); true }
+            // 上键：「千里江山」切下一个设色版；「歌词舞台」切下一个子模式
             Key.DirectionUp -> {
-                if (theme == VisualizerTheme.LYRICS_STAGE) {
-                    onLyricsStageNextMode(); true
-                } else {
-                    // 现有 LOFI_CITY / HIGHWAY 逻辑
-                    false
-                }
+                if (applyLyricsStageMode(+1)) true
+                else { applyQianliColorVersion(+1); true }
             }
+            // 下键：「千里江山」切上一个设色版；「歌词舞台」切上一个子模式
             Key.DirectionDown -> {
-                if (theme == VisualizerTheme.LYRICS_STAGE) {
-                    onLyricsStagePrevMode(); true
-                } else {
-                    false
-                }
+                if (applyLyricsStageMode(-1)) true
+                else if (applyQianliColorVersion(-1)) true else false
             }
             else -> false
         }
@@ -2382,32 +2429,53 @@ class PartitaSubRenderer : LyricsSubRenderer {
 }
 ```
 
+> ⚠️ **上下键的优先级**：歌词舞台优先，其次 E50 设色版。
+> ⚠️ `Key.DirectionUp` 恒返回 `true`（沿用既有语义：控制栏已移除，上键是空操作也要吃掉）；
+> `Key.DirectionDown` 在**什么都没切**时返回 `false`（不消费 ⇒ 让事件冒泡给下层组件）。
+
 ### 9.2 手势切换
 
-在 `VisualizerStage.kt` 的 `pointerInput` 中：
+在 `VisualizerStage.kt` 的**竖向** `pointerInput` 块里（与横滑**分开一个块**，
+两个 detector 挂同一层会互相吞事件）：
 
 ```kotlin
-.pointerInput(Unit) {
+.pointerInput(theme) {   // ⚠️ key 必须是 theme：用 Unit 会把进舞台那一刻的主题永久捕获
+    var totalDrag = 0f
     detectVerticalDragGestures(
-        onDragStart = { },
+        onDragStart = { totalDrag = 0f },
+        onVerticalDrag = { _, amount -> totalDrag += amount },
         onDragEnd = {
-            if (theme != VisualizerTheme.LYRICS_STAGE) return@detectVerticalDragGestures
-            if (dragDistanceY < -threshold) onLyricsStageNextMode()
-            else if (dragDistanceY > threshold) onLyricsStagePrevMode()
+            val threshold = with(density) { 80.dp.toPx() }   // 与横滑一致
+            when {
+                totalDrag < -threshold -> {
+                    if (!applyLyricsStageMode(+1)) applyQianliColorVersion(+1)
+                }
+                totalDrag > threshold -> {
+                    if (!applyLyricsStageMode(-1)) applyQianliColorVersion(-1)
+                }
+            }
         }
     )
 }
 ```
 
-- 阈值：屏高的 15%
-- 切换时 300ms 淡入淡出（alpha 插值）
+- 阈值：**80dp**（与横滑切换主题一致，不是屏高 15%）
+- 上滑 = 下一个、下滑 = 上一个（与遥控器上下键**同向**）
+- 切换时 300ms 淡入（`saveLayer` + alpha）
 
 ### 9.3 切换约束
 
 - ⛔ **仅手动切换**：不自动定时切换
 - ⛔ 不随歌曲切换自动重置子模式
 - ⛔ 不随段落/副歌切换自动变化
-- 子模式选择持久化到 `VisualizerPrefs`
+- 子模式选择持久化到 `AppPreferences.lyricsStageModeOrdinal`（DataStore）
+- ⛔ **非「歌词舞台」主题时，上下键/上下滑动的语义保持原样**（留给 E50「千里江山」的设色版）
+  ⇒ `applyLyricsStageMode(delta)` 在非该主题时返回 `false`，调用方据此走原逻辑
+
+> 门禁：`LyricsStageManualSwitchTest` —— **源码扫描**断言渲染器里不存在
+> `delay(` / `CoroutineScope` / `System.currentTimeMillis()` / `songId` 参与模式判定，
+> 且舞台的上下键与竖滑都走 `applyLyricsStageMode`。
+> （行为性要求用单测咬不住 —— 枚举单测只能证明「有 5 个模式」，证明不了「不会自动换」。）
 
 ---
 
@@ -2416,12 +2484,17 @@ class PartitaSubRenderer : LyricsSubRenderer {
 ### 10.1 VisualizerTheme 枚举新增
 
 ```kotlin
-// data/model/AppSettings.kt:181 — VisualizerTheme 枚举末尾追加
-LYRICS_STAGE(R.string.visualizer_theme_lyrics_stage, "歌词舞台", Tier.ULTRA, "53"),
+// data/model/AppSettings.kt — VisualizerTheme 枚举末尾追加
+LYRICS_STAGE(R.string.visualizer_theme_lyrics_stage, "歌词舞台", Tier.ADV, "53", needsParticleBudget = false),
 ```
 
-> 归 ULTRA 的原因：FULL_VIEW 子模式需要整曲版面 + 相机变换，与 WORLD 同理。
-> LOW/MEDIUM 画质下 FULL_VIEW 不可用（由子渲染器自行判断）。
+> ⚠️ **归 `Tier.ADV`（不是 ULTRA）**：子模式 0 的粒子数按效果自己的档位表
+> （E23 的 `capacityForTier`），⛔ 不读 `ctx.quality.maxParticles`
+> ⇒ **三档画质全部可选（含 LOW）**。
+> 归 ULTRA 会让 `supports()` 要求 `allowFramebuffer` ⇒ 只有 HIGH 档能选 ⇒
+> 大部分设备根本用不上这个主题。
+> 子模式 2（全屏纵览）需要整曲版面 + 相机变换 ⇒ **只在 HIGH 档提供**，
+> 非 HIGH 档由 `createSubRenderer` 降级为 GLOW_LINE。
 
 ### 10.2 VisualizerRendererFactory 新增
 
@@ -2439,109 +2512,192 @@ class LyricsStageRenderer : VisualizerRenderer {
 
     private var mode: LyricsStageMode = LyricsStageMode.Default
     private var subRenderer: LyricsSubRenderer? = null
-    private var crossfadeAlpha: Float = 1f
+    private var payload: LyricsStagePayload = LyricsStagePayload.Empty
+    private var lastCtx: RenderContext? = null
+    private var lastQuality: VisualQuality = VisualQuality.Default
+    private var transitionStartMs: Long = 0L
     private var isTransitioning: Boolean = false
+    private var lastLineIndex: Int = Int.MIN_VALUE
+    private val layerPaint = android.graphics.Paint()
+
+    // ── 对外接口（供 VisualizerStage 调用）──────────────────────
+
+    fun currentMode(): LyricsStageMode = mode
+
+    /** 实际渲染的子模式（FULL_VIEW 在非 HIGH 画质下 ⇒ GLOW_LINE） */
+    fun effectiveMode(): LyricsStageMode = when (mode) {
+        LyricsStageMode.FULL_VIEW ->
+            if (lastQuality == VisualQuality.HIGH) LyricsStageMode.FULL_VIEW
+            else LyricsStageMode.GLOW_LINE
+        else -> mode
+    }
+
+    /** 舞台每帧推入歌词数据 */
+    fun applyLyrics(newPayload: LyricsStagePayload) { payload = newPayload }
+
+    /**
+     * 设置子模式（舞台在读到持久化值后调用）。
+     *
+     * ⚠️ 渲染器每次主题切换都会被 `RendererSwapper` 重建 ⇒ 子模式必须由外部重新告知。
+     */
+    fun setMode(newMode: LyricsStageMode) {
+        if (newMode == mode && subRenderer != null) return
+        applyMode(newMode, lastCtx)
+    }
+
+    fun nextMode() = setMode(LyricsStageMode.next(mode))
+    fun prevMode() = setMode(LyricsStageMode.prev(mode))
+
+    // ── VisualizerRenderer ─────────────────────────────────────
 
     override fun onEnter(ctx: RenderContext) {
-        // 读取持久化的子模式
-        mode = LyricsStageMode.fromOrdinal(loadModeOrdinal())
-        createSubRenderer(mode, ctx)
+        lastCtx = ctx
+        lastQuality = ctx.quality
+        lastLineIndex = Int.MIN_VALUE
+        applyMode(mode, ctx)
     }
 
     override fun DrawScope.draw(frame: AudioFrame, ctx: RenderContext) {
         val current = subRenderer ?: return
+
+        // 当前行变化 ⇒ 让子渲染器重建与当前行有关的状态
+        if (payload.currentIndex != lastLineIndex) {
+            lastLineIndex = payload.currentIndex
+            current.onLineChanged(ctx, payload)
+        }
+
+        var alpha = 1f
         if (isTransitioning) {
-            // 300ms 淡入淡出
-            val elapsed = transitionElapsedMs
-            val t = (elapsed / 300f).coerceIn(0f, 1f)
-            crossfadeAlpha = if (t < 0.5f) t * 2f else 1f - (t - 0.5f) * 2f
-            if (t >= 1f) {
-                isTransitioning = false
-                crossfadeAlpha = 1f
-            }
-            withAlpha(crossfadeAlpha) {
-                current.draw(frame, ctx)
-            }
+            val elapsed = ctx.nowMs - transitionStartMs
+            val t = (elapsed.toFloat() / TRANSITION_MS).coerceIn(0f, 1f)
+            alpha = t
+            if (t >= 1f) { isTransitioning = false; alpha = 1f }
+        }
+
+        if (alpha >= 1f) {
+            current.draw(frame, ctx, payload)
         } else {
-            current.draw(frame, ctx)
+            // 子模式切换的 300ms 淡入：整层画进一个带 alpha 的图层
+            drawIntoCanvas { canvas ->
+                val native = canvas.nativeCanvas
+                layerPaint.alpha = (alpha * 255f).toInt().coerceIn(0, 255)
+                val checkpoint = native.saveLayer(null, layerPaint)
+                current.draw(frame, ctx, payload)
+                native.restoreToCount(checkpoint)
+            }
         }
     }
 
     override fun onExit() {
         subRenderer?.onExit()
         subRenderer = null
+        lastCtx = null
     }
 
-    /** 上下键/手势调用 */
-    fun nextMode() {
-        mode = (mode.ordinal + 1) % LyricsStageMode.entries.size
-        switchTo(mode)
-    }
+    // ── 内部 ───────────────────────────────────────────────────
 
-    fun prevMode() {
-        mode = (mode.ordinal - 1 + LyricsStageMode.entries.size) % LyricsStageMode.entries.size
-        switchTo(mode)
-    }
-
-    private fun switchTo(newMode: LyricsStageMode) {
-        // 保存子模式
-        saveModeOrdinal(newMode.ordinal)
-        // 创建新子渲染器
-        createSubRenderer(newMode, /* ctx */)
-        // 开始 300ms 过渡
-        isTransitioning = true
-        transitionElapsedMs = 0L
-    }
-
-    private fun createSubRenderer(mode: LyricsStageMode, ctx: RenderContext) {
+    private fun applyMode(newMode: LyricsStageMode, ctx: RenderContext?) {
+        mode = newMode
         subRenderer?.onExit()
-        subRenderer = when (mode) {
+        val quality = ctx?.quality ?: lastQuality
+        lastQuality = quality
+        subRenderer = createSubRenderer(newMode, quality)
+        lastLineIndex = Int.MIN_VALUE
+        if (ctx != null) {
+            subRenderer?.onEnter(ctx, payload)
+            transitionStartMs = ctx.nowMs
+            isTransitioning = true
+        } else {
+            isTransitioning = false
+        }
+    }
+
+    /** FULL_VIEW 只在 HIGH 画质提供；非 HIGH 画质降级为 GLOW_LINE */
+    private fun createSubRenderer(target: LyricsStageMode, quality: VisualQuality) =
+        when (target) {
             LyricsStageMode.DOT_MATRIX -> DotMatrixSubRenderer()
             LyricsStageMode.GLOW_LINE -> GlowLineSubRenderer()
-            LyricsStageMode.FULL_VIEW -> {
-                // FULL_VIEW 需要 HIGH 画质
-                if (ctx.quality == VisualQuality.HIGH) FullViewSubRenderer()
-                else GlowLineSubRenderer()  // 降级到 GLOW_LINE
-            }
+            LyricsStageMode.FULL_VIEW ->
+                if (quality == VisualQuality.HIGH) FullViewSubRenderer() else GlowLineSubRenderer()
             LyricsStageMode.TILT_PULSE -> TiltPulseSubRenderer()
             LyricsStageMode.PARTITA -> PartitaSubRenderer()
         }
-        subRenderer?.onEnter(ctx)
-    }
 
-    // 持久化
-    private fun loadModeOrdinal(): Int = /* 从 prefs 读取 */ 0
-    private fun saveModeOrdinal(ord: Int) { /* 写入 prefs */ }
-
-    private var transitionElapsedMs: Long = 0L
+    companion object { const val TRANSITION_MS = 300L }
 }
 ```
 
-### 10.4 VisualizerPrefs 新增
+> ⚠️ **「当前行变化」需要单独一个钩子**：Folia 的每个模式都按 `activeLine` 重建布局
+> （`useMemo(..., [activeLine])`）。本仓的渲染器生命周期是「主题级」的（一个主题切换时重建），
+> 而歌词行每几秒就变一次 ⇒ 必须在行变化时通知子渲染器。
+> ⇒ `LyricsSubRenderer` 多了一个 `onLineChanged(ctx, lyrics)`，
+> **默认实现 = 重新走一遍 `onEnter`**（多数子模式的布局是「按当前行」的）。
+> ⛔ 布局是**整曲级**的子模式（如全屏纵览的整版版面）应覆写它、只更新与当前行有关的部分。
+
+### 10.4 持久化（⚠️ 实作走 DataStore，不是 SharedPreferences）
+
+本仓的 `VisualizerPrefs` 包的是 `AppPreferences` → **DataStore Preferences**，
+API 是 `val x: Flow<T>` + `suspend fun setX(v)`（⛔ 不是 `prefs.getInt(...)`）。
 
 ```kotlin
-// data/prefs/VisualizerPrefs.kt — 新增
-private val keyLyricsStageMode = intPreferencesKey("settings_lyrics_stage_mode")
+// data/prefs/LyricsStageModeContract.kt —— 取值契约（与 QianliColorVersion 同构）
+object LyricsStageModeContract {
+    const val COUNT = 5
+    val RANGE = 0 until COUNT
+    const val DEFAULT = 0
+    fun normalize(value: Int): Int = if (value in RANGE) value else DEFAULT
+}
 
-val lyricsStageModeOrdinal: Int
-    get() = prefs.getInt(keyLyricsStageMode, 0)
+// data/prefs/AppPreferences.kt
+private val keyLyricsStageMode = intPreferencesKey("visualizer_lyrics_stage_mode")
 
-suspend fun setLyricsStageModeOrdinal(ord: Int) =
-    prefs.setInt(keyLyricsStageMode, ord)
+val lyricsStageMode: Flow<Int> = dataStore.data.map { prefs ->
+    LyricsStageModeContract.normalize(prefs[keyLyricsStageMode] ?: LyricsStageModeContract.DEFAULT)
+}
+
+suspend fun setLyricsStageMode(mode: Int) {
+    dataStore.edit { it[keyLyricsStageMode] = LyricsStageModeContract.normalize(mode) }
+}
+
+// data/prefs/VisualizerPrefs.kt —— 门面转出
+val lyricsStageMode = prefs.lyricsStageMode
+suspend fun setLyricsStageMode(mode: Int) = prefs.setLyricsStageMode(mode)
 ```
 
-### 10.5 VisualizerViewModel 新增
+> ⚠️ **不进 `AppSettings` 备份 JSON**：与 `qianliColorVersion` 同理 ——
+> 它是「这台设备上想看哪个歌词子模式」的**设备本地显示偏好**。
+> ⚠️ **读写两侧都钳制** ⇒ 磁盘上永远只有合法值。
+
+### 10.5 舞台侧的子模式状态
+
+子模式状态放在 `VisualizerStage`（组合作用域），**不放 ViewModel** ——
+它与 E50 的 `qianliColorVersion` 是同一类「设备本地显示偏好」，
+两者都遵循「舞台层持有 State + 渲染器逐帧读」的既有写法。
 
 ```kotlin
-// ui/viewmodel/VisualizerViewModel.kt — 新增
-private val _lyricsStageMode = MutableStateFlow(LyricsStageMode.Default)
-val lyricsStageMode: StateFlow<LyricsStageMode> = _lyricsStageMode.asStateFlow()
+// ui/components/VisualizerStage.kt
+val lyricsStageLines = remember(lyrics) { LyricsStageBridge.buildLines(lyrics ?: emptyList()) }
+val lyricsStagePayload = remember { LyricsStagePayload() }
+var lyricsStageMode by remember { mutableStateOf(LyricsStageMode.Default) }
 
-fun setLyricsStageMode(mode: LyricsStageMode) {
-    _lyricsStageMode.value = mode
-    viewModelScope.launch {
-        prefs.visualizerPrefs.setLyricsStageModeOrdinal(mode.ordinal)
-    }
+// 进舞台时读一次持久化值
+LaunchedEffect(Unit) { lyricsStageMode = LyricsStageMode.fromOrdinal(appPrefs.lyricsStageMode.first()) }
+
+// 渲染器每次主题切换都会被重建 ⇒ 每次重组后把模式重新推给它
+LaunchedEffect(lyricsStageMode, theme, quality) {
+    if (theme != VisualizerTheme.LYRICS_STAGE) return@LaunchedEffect
+    (swapper.current as? LyricsStageRenderer)?.setMode(lyricsStageMode)
+}
+
+// 上下键 / 上下滑动共用
+fun applyLyricsStageMode(delta: Int): Boolean {
+    if (theme != VisualizerTheme.LYRICS_STAGE) return false
+    val next = if (delta >= 0) LyricsStageMode.next(lyricsStageMode) else LyricsStageMode.prev(lyricsStageMode)
+    lyricsStageMode = next
+    (swapper.current as? LyricsStageRenderer)?.setMode(next)
+    lyricsStageToastText = "$themeDisplayName · ${next.displayName}"
+    coroutineScope.launch { appPrefs.setLyricsStageMode(next.ordinal) }
+    return true
 }
 ```
 
@@ -2568,40 +2724,56 @@ fun setLyricsStageMode(mode: LyricsStageMode) {
 
 | 文件 | 职责 | 移植来源 |
 |---|---|---|
-| `visualizer/renderers/LyricsStageRenderer.kt` | 主渲染器（子模式管理+分发） | 新架构 |
+| `visualizer/renderers/LyricsStageRenderer.kt` | 主渲染器（子模式管理+分发+300ms 淡入） | 新架构 |
 | `visualizer/renderers/lyricsStage/LyricsStageMode.kt` | 子模式枚举 | 新 |
 | `visualizer/renderers/lyricsStage/LyricsSubRenderer.kt` | 子渲染器接口 | 新 |
-| `visualizer/renderers/lyricsStage/GlowWordCore.kt` | 词状态机+时序（shared） | Folia `GlowWord.tsx` + `glowWordTiming.ts` |
-| `visualizer/renderers/lyricsStage/GlowLineSubRenderer.kt` | 子模式 1：逐字行光 | Folia `classic/Visualizer.tsx` |
-| `visualizer/renderers/lyricsStage/DotMatrixSubRenderer.kt` | 子模式 0：点阵 | NASMusicTV E23 |
+| `visualizer/renderers/lyricsStage/LyricsStagePayload.kt` | 逐帧歌词载荷 + `LyricsStageBridge` 转换 | 新 |
+| `visualizer/renderers/lyricsStage/LyricModels.kt` | `LyricWord` / `LyricLine` / `LineRenderHints` / `GraphemeTiming` | Folia `types.ts` |
+| `visualizer/renderers/lyricsStage/LyricRenderHints.kt` | 行级时序提示推导 | Folia `renderHints.ts` |
+| `visualizer/renderers/lyricsStage/GraphemeSplitter.kt` | grapheme 拆分（API 22 无 `Intl.Segmenter`） | 新（替代 `Intl.Segmenter`） |
 | `visualizer/renderers/lyricsStage/GraphemeTimingBuilder.kt` | Grapheme 时序构建 | Folia `graphemeTiming.ts` |
+| `visualizer/renderers/lyricsStage/GlowWordCore.kt` | 词状态机+时序（shared） | Folia `GlowWord.tsx` + `glowWordTiming.ts` |
+| `visualizer/renderers/lyricsStage/WordColoring.kt` | 逐词配色 | Folia `wordColoring.ts` |
+| `visualizer/renderers/lyricsStage/GlowWordOverlap.kt` | 防重叠几何 | Folia `glowWordOverlap.ts` |
+| `visualizer/renderers/lyricsStage/GlowWordGlow.kt` | **逐字形辉光层**（classic 与 partita **共用**） | Folia `wordGlow.ts` |
+| `visualizer/renderers/lyricsStage/GlowLineSubRenderer.kt` | 子模式 1：逐字行光 | Folia `classic/Visualizer.tsx` + `wordGlow.ts` |
+| `visualizer/renderers/lyricsStage/DotMatrixSubRenderer.kt` | 子模式 0：点阵（薄封装） | NASMusicTV E23 |
+| `visualizer/renderers/lyricsStage/FullViewSubRenderer.kt` | 子模式 2：全屏纵览 | Folia `useFumeCanvasStage.ts` |
+| `visualizer/renderers/lyricsStage/TiltPulseSubRenderer.kt` | 子模式 3：倾斜律动 | Folia `tilt/VisualizerTilt.tsx` |
+| `visualizer/renderers/lyricsStage/PartitaSubRenderer.kt` | 子模式 4：分栏引导 | Folia `partita/PartitaChunk.tsx` |
+| `visualizer/renderers/lyricsStage/tilt/TiltLayout.kt` | 倾斜布局+时序 | Folia `VisualizerTilt.tsx` |
+| `visualizer/renderers/lyricsStage/tilt/SentenceLayout.kt` | 句子级拆分 | Folia `sentenceLayout.ts` |
+| `visualizer/renderers/lyricsStage/partita/PartitaLayout.kt` | 分栏布局 | Folia `partitaLayout.ts` |
 | `visualizer/renderers/lyricsStage/fume/FumeMath.kt` | 数学工具 | Folia `fumeMath.ts` |
+| `visualizer/renderers/lyricsStage/fume/FumeTypes.kt` | fume 数据类型 | Folia `fumeTypes.ts` |
 | `visualizer/renderers/lyricsStage/fume/FumeReveal.kt` | 逐字打印时序 | Folia `fumeReveal.ts` |
 | `visualizer/renderers/lyricsStage/fume/FumeTextStyle.kt` | 文字样式 | Folia `fumeTextStyle.ts` |
 | `visualizer/renderers/lyricsStage/fume/FumeBlockFrame.kt` | Block 状态计算 | Folia `fumeBlockFrame.ts` |
 | `visualizer/renderers/lyricsStage/fume/FumeCamera.kt` | 相机焦点 | Folia `fumeCamera.ts` |
 | `visualizer/renderers/lyricsStage/fume/FumeCameraStep.kt` | 每帧相机步进 | Folia `fumeCameraStep.ts` |
-| `visualizer/renderers/lyricsStage/fume/FumeCanvasText.kt` | 文字绘制 | Folia `fumeCanvasText.ts` |
 | `visualizer/renderers/lyricsStage/fume/FumeTextMeasure.kt` | 文字测量 | Folia `fumeTextMeasure.ts` |
-| `visualizer/renderers/lyricsStage/FullViewSubRenderer.kt` | 子模式 2：全屏纵览 | Folia `useFumeCanvasStage.ts` |
-| `visualizer/renderers/lyricsStage/fume/FumeTypes.kt` | fume 数据类型 | Folia `fumeTypes.ts` |
-| `visualizer/renderers/lyricsStage/tilt/TiltLayout.kt` | 倾斜布局+时序 | Folia `VisualizerTilt.tsx` |
-| `visualizer/renderers/lyricsStage/TiltPulseSubRenderer.kt` | 子模式 3：倾斜律动 | Folia `VisualizerTilt.tsx` |
-| `visualizer/renderers/lyricsStage/partita/PartitaLayout.kt` | 分栏布局 | Folia `partitaLayout.ts` |
-| `visualizer/renderers/lyricsStage/PartitaSubRenderer.kt` | 子模式 4：分栏引导 | Folia `PartitaChunk.tsx` |
+| `visualizer/renderers/lyricsStage/fume/FumeCanvasText.kt` | 文字绘制 | Folia `fumeCanvasText.ts` |
+| `visualizer/renderers/lyricsStage/fume/FumeLiveRaster.kt` | 活动块光栅化 | Folia `fumeLiveRaster.ts` |
+| `data/prefs/LyricsStageModeContract.kt` | 子模式序号的取值契约 | 新（与 `QianliColorVersion` 同构） |
+
+> ⚠️ **子模式 0 不重写粒子系统**：`DotMatrixSubRenderer` 是薄封装，
+> 直接委托给现有的 `LyricsDotMatrixRenderer`（含它的暗角 0.44 + 颗粒 0.026 后处理）。
+> ⇒ 不需要提取 `LyricsDotMatrixCore`。
 
 ### 11.2 修改文件
 
 | 文件 | 改动 |
 |---|---|
-| `data/model/AppSettings.kt` | `VisualizerTheme` 新增 `LYRICS_STAGE` 枚举项 |
-| `visualizer/VisualizerRendererFactory.kt` | `when` 分支新增 `LYRICS_STAGE` |
-| `visualizer/RenderContext.kt` | 新增 `lyricLines` / `lyricLineStartTimesMs` / `lyricWords` |
-| `ui/components/VisualizerStage.kt` | 上下键 + 手势处理新增 `LYRICS_STAGE` 分支 |
-| `data/prefs/VisualizerPrefs.kt` | 新增 `lyricsStageModeOrdinal` 读写 |
-| `ui/viewmodel/VisualizerViewModel.kt` | 新增 `lyricsStageMode` 状态管理 |
+| `data/model/AppSettings.kt` | `VisualizerTheme` 新增 `LYRICS_STAGE`（`Tier.ADV`、`needsParticleBudget = false`、ordinal `"53"`） |
+| `visualizer/VisualizerRendererFactory.kt` | `when` 分支新增 `LYRICS_STAGE -> LyricsStageRenderer()` |
+| `data/prefs/AppPreferences.kt` | 新增 `keyLyricsStageMode` + `lyricsStageMode` Flow + `setLyricsStageMode`（读写两侧都钳制） |
+| `data/prefs/VisualizerPrefs.kt` | 转出 `lyricsStageMode` / `setLyricsStageMode` |
+| `ui/components/VisualizerStage.kt` | 上下键 + 上下滑动的 `LYRICS_STAGE` 分支；每帧推 `LyricsStagePayload`；子模式 Toast |
 | `res/values/strings.xml` | 新增 `visualizer_theme_lyrics_stage` |
 | `res/values-en/strings.xml` | 新增英文翻译 |
+| `app/build.gradle.kts` | `versionCode 197 → 198`、`versionName 2.39.12 → 2.39.13` |
+
+> ⛔ **不动 `RenderContext.kt`** —— 它被本机私有分支的覆盖层遮蔽（见 §2.1）。
 
 ### 11.3 提取共享
 
@@ -2620,37 +2792,42 @@ fun setLyricsStageMode(mode: LyricsStageMode) {
 | `GlowWordCoreTest` | `statusOf_*` | 词状态机：waiting/active/passed 边界 |
 | `GlowWordCoreTest` | `activeEndTime_*` | activeEndTime 计算：instant/fast/normal |
 | `GlowWordCoreTest` | `displayDuration_*` | wordDisplayDuration 最小值约束 |
-| `GlowWordCoreTest` | `profileFor_*` | LineRenderHints → GlowWordProfile 转换 |
+| `GlowWordCoreTest` | `resolveProfile_*` | LineRenderHints → GlowWordProfile 转换 |
+| `GlowWordCoreTest` | `lineContainerMotion_*` | 行容器入场/离场三档 |
+| `GlowWordGlowTest` | `radiiFor_*` / `fadeDuration_*` | 辉光半径与淡出时长按揭示模式 |
+| `GlowWordGlowTest` | `peakForGrapheme_*` | 逐字形辉光峰值曲线（instant/fast/normal 三档 + 逐字扫光 + 离场淡出） |
+| `GraphemeTimingBuilderTest` | `buildFor_*` | 词→grapheme 时序（含 syllable 路径） |
+| `GraphemeTimingBuilderTest` | `buildLineRenderHints_*` | renderHints 的 timingClass / transition / reveal |
+| `LyricsStageModeTest` | `next_*` / `prev_*` | 子模式枚举循环 |
 | `FumeMathTest` | `easeOutCubic_*` | 缓动函数边界值 |
 | `FumeMathTest` | `easeInOutCubic_*` | 缓动函数中点对称 |
 | `FumeMathTest` | `quadraticBezier_*` | 贝塞尔曲线端点 |
 | `FumeMathTest` | `resolveDelayedGlowEnvelope_*` | 辉光包络峰值 |
 | `FumeMathTest` | `isCJK_*` | CJK 字符检测 |
 | `FumeMathTest` | `hashString_*` | FNV-1a 哈希一致性 |
-| `FumeRevealTest` | `resolvePrintedGraphemeCount_*` | 逐字打印数量边界 |
-| `FumeRevealTest` | `resolveLinePassCutoffTime_*` | 行过场截止时间 |
-| `FumeBlockFrameTest` | `resolveFumeGlowBases_*` | 辉光基础值 |
-| `FumeBlockFrameTest` | `isOnScreen_*` | 屏幕可见性判断 |
-| `FumeBlockFrameTest` | `resolveBlockTiming_*` | Block 时序状态 |
-| `FumeCameraTest` | `resolveCameraScaleForBlock_*` | 相机缩放 |
-| `FumeCameraTest` | `resolveCameraRetargetDuration_*` | 重定向时长 |
-| `FumeCameraTest` | `resolveOverviewRetargetDuration_*` | 全景重定向时长 |
 | `TiltLayoutTest` | `determineLineCount_*` | 行数确定（对数+jitter+阈值） |
+| `TiltLayoutTest` | `seededRandom_*` | `sin(seed*1000+offset)` 公式 |
 | `TiltLayoutTest` | `getCharPulseIntensity_*` | 脉冲强度（sin 波 + 余晖） |
-| `GraphemeTimingBuilderTest` | `buildFor_*` | 词→grapheme 时序 |
-| `GraphemeTimingBuilderTest` | `buildEven_*` | 均分时序 |
-| `PartitaLayoutTest` | `buildWordConfigs_*` | 词级随机偏移 |
-| `PartitaLayoutTest` | `buildSequentialColumns_*` | 分栏布局 |
+| `TiltLayoutTest` | `findSegmentWordRange_*` | 段→词区间映射 |
+| `PartitaLayoutTest` | `buildWordConfigs_*` | 词级随机偏移 + CSS 字符串字段 |
+| `PartitaLayoutTest` | `buildSequentialColumns_*` | 分栏布局（不均匀分块 + 交错方向） |
+| `PartitaLayoutTest` | `getTargetColumnCount_*` | 列数表 |
 
 ### 12.2 集成测试
 
 | 测试 | 内容 |
 |---|---|
 | `LyricsStageModeTest` | 子模式枚举循环：DOT_MATRIX → GLOW_LINE → FULL_VIEW → TILT_PULSE → PARTITA → DOT_MATRIX |
-| `LyricsStageRendererTest` | 渲染器创建/销毁生命周期 |
-| `LyricsStageRendererTest` | 子模式切换 300ms 过渡 |
-| `VisualizerThemeStringsGateTest` | 更新双语显示名（新增 LYRICS_STAGE） |
-| `FxCoverageScanTest` | 更新渲染器类数（25 → 46：新增 21 个类） |
+| `VisualizerThemeStringsGateTest` | 双语显示名（新增 `LYRICS_STAGE`）— **无需改动**（自动覆盖） |
+| `VisualizerThemeTest` | 效果总数 29 → 30、可选列表计数、ordinal / 显示名唯一性 |
+| `StarrySkyTest` | 效果总数 29 → 30 |
+| `FxCoverageScanTest` | `LyricsStageRenderer` 登记进**豁免**名单（后处理由子渲染器自带） |
+
+> ⚠️ **5 个子渲染器都不继承 `RendererFx`**（只实现 `LyricsSubRenderer`）
+> ⇒ `FxCoverageScanTest` 的 `class X : RendererFx(` / `class X : VisualizerRenderer`
+> 正则**匹配不到** ⇒ **无需登记**。
+> ⛔ 原方案写的「25 → 46」是错的：那个门禁断言的是 `decls.size >= 26`（下限，不是精确值），
+> 真正的失败点是「每个扫到的类都必须在 covered / exempt 名单里」+「名单里的名字必须仍存在」。
 
 ### 12.3 真机回归
 

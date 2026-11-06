@@ -19325,3 +19325,100 @@ CSS:  最终色 = p × (1 − α + α·c/255)
   - **新增** `scripts/e50_far_mountain_check.py`（远山区域逐像素对账：纸色 / 刻面 / 其它占比）
 - 文档：`CHANGELOG.md`、`docs/technical-overview.md`（本节）、
   `docs/visualizer-effects-list.md`（效果清单）
+
+### 10.282 v2.39.13 ｜ E53「歌词舞台」（移植自 Folia 的 5 个歌词子模式）
+
+> ⚠️ **本节编号与私有分支的附录冲突**：私有分支 `feat/e51-private` 的
+> `docs/technical-overview.md` = main 全文 + 附录（61 段私有独有章节，编号 §10.282–§10.342）。
+> 本节占用 §10.282 ⇒ **回灌时私有分支的附录需顺延为 §10.283–§10.343**
+> （AGENTS.md「回灌时两份文档都要重跑」：先在 main 提交，再 cherry-pick 到私有分支）。
+
+#### 1. 做了什么
+
+新增顶级效果 **E53「歌词舞台」**（`VisualizerTheme.LYRICS_STAGE`，`ordinalLabel = "53"`）。
+一个主题内含 **5 个歌词子模式**，**仅手动切换**（上下键 / 手势上下滑动）：
+
+| # | 子模式 | 中文名 | 来源 | 画质档位 |
+|---|---|---|---|---|
+| 0 | `DOT_MATRIX` | 歌词点阵 | NASMusicTV E23 原创（复用 `LyricsDotMatrixRenderer`） | ADV |
+| 1 | `GLOW_LINE` | 逐字行光 | 移植自 Folia `classic` | ADV |
+| 2 | `FULL_VIEW` | 全屏纵览 | 移植自 Folia `fume` | HIGH 才提供，其余降级为 GLOW_LINE |
+| 3 | `TILT_PULSE` | 倾斜律动 | 移植自 Folia `tilt` | ADV |
+| 4 | `PARTITA` | 分栏引导 | 移植自 Folia `partita` | ADV |
+
+- ⛔ **不自动定时切换、不随歌曲切换、不随段落/副歌切换**（用户裁决）。
+- 子模式序号持久化在 `AppPreferences.lyricsStageModeOrdinal`（DataStore，**不进备份 JSON**，
+  与 `qianliColorVersion` 同理 —— 设备本地显示偏好）。
+- 方案文档：`docs/lyrics-stage-plan.md`（逐行移植说明 + 5 个子模式的算法细节）。
+
+#### 2. 许可与署名
+
+子模式 1–4 **移植自 folia-major（AGPL-3.0）**，逐文件头部标注来源路径与
+「Project Folia version 0.5.27-a16525c」；`docs/lyrics-stage-plan.md` 开头有致谢章节。
+子模式 0 是本仓原创（E23），不涉及上游。
+
+#### 3. 关键架构决策：歌词数据**不走 `RenderContext`**
+
+⛔ `RenderContext.update()` 有 16 个位置参数，且**本机私有分支的覆盖层会遮蔽同名文件**
+（`RenderContext.kt` 出现在 `NASMusicTV-e51-local` 覆盖层里 ⇒ 本地构建用的是覆盖层那份）。
+改它 ⇒ 本地编译与 CI 编译行为分叉。
+
+⇒ 改为：**`VisualizerStage` 每帧把 `LyricsStagePayload` 直接推给 `LyricsStageRenderer`**
+（`applyLyrics(...)`）。载荷是**可变类**（三个字段逐帧改、不新建对象）⇒ 逐帧零分配。
+
+- 整曲歌词行（`LyricsLine` → `LyricLine` 的转换）在 `lyrics` 变化时重建一次
+  （逐帧重算是 O(N) 全量扫描）；转换逻辑在 `LyricsStageBridge`。
+- 词的结束时间取「下一个词的开始时间」（本仓的 `WordTimestamp` 只有 `startMs`，无结束时间），
+  与 Folia `buildLineRenderHints` 里 `getLastWordEndTime` 的兜底一致。
+
+#### 4. 新增文件
+
+| 文件 | 职责 |
+|---|---|
+| `visualizer/renderers/LyricsStageRenderer.kt` | 主渲染器（子模式管理 + 300ms 切换淡入） |
+| `visualizer/renderers/lyricsStage/LyricsStageMode.kt` | 子模式枚举（5 项 + 循环 next/prev） |
+| `visualizer/renderers/lyricsStage/LyricsSubRenderer.kt` | 子渲染器接口 |
+| `visualizer/renderers/lyricsStage/LyricsStagePayload.kt` | 逐帧歌词载荷 + `LyricsStageBridge` 转换 |
+| `visualizer/renderers/lyricsStage/LyricModels.kt` | `LyricWord` / `LyricLine` / `LineRenderHints` / `GraphemeTiming` |
+| `visualizer/renderers/lyricsStage/LyricRenderHints.kt` | 移植 `renderHints.ts` |
+| `visualizer/renderers/lyricsStage/GraphemeSplitter.kt` | grapheme 拆分（API 22 无 `Intl.Segmenter`） |
+| `visualizer/renderers/lyricsStage/GraphemeTimingBuilder.kt` | 移植 `graphemeTiming.ts` |
+| `visualizer/renderers/lyricsStage/GlowWordCore.kt` | 移植 `glowWordTiming.ts` + `GlowWord.tsx` 状态机 |
+| `visualizer/renderers/lyricsStage/WordColoring.kt` | 移植 `wordColoring.ts`（逐词配色） |
+| `visualizer/renderers/lyricsStage/GlowWordOverlap.kt` | 移植 `glowWordOverlap.ts`（防重叠） |
+| `visualizer/renderers/lyricsStage/{GlowLine,FullView,TiltPulse,Partita,DotMatrix}SubRenderer.kt` | 5 个子渲染器 |
+| `visualizer/renderers/lyricsStage/tilt/{TiltLayout,SentenceLayout}.kt` | 移植 `VisualizerTilt.tsx` + `sentenceLayout.ts` |
+| `visualizer/renderers/lyricsStage/partita/PartitaLayout.kt` | 移植 `partitaLayout.ts` |
+| `visualizer/renderers/lyricsStage/fume/Fume*.kt`（9 个） | 移植 `fume/*` |
+| `data/prefs/LyricsStageModeContract.kt` | 子模式序号的取值契约（与 `QianliColorVersion` 同构） |
+
+#### 5. 修改文件
+
+| 文件 | 改动 |
+|---|---|
+| `data/model/AppSettings.kt` | `VisualizerTheme` 新增 `LYRICS_STAGE`（`Tier.ADV`、`needsParticleBudget = false`、ordinal `"53"`） |
+| `visualizer/VisualizerRendererFactory.kt` | `when` 新增 `LYRICS_STAGE -> LyricsStageRenderer()` |
+| `data/prefs/AppPreferences.kt` | 新增 `keyLyricsStageMode` + `lyricsStageMode` Flow + `setLyricsStageMode`（**读写两侧都钳制**） |
+| `data/prefs/VisualizerPrefs.kt` | 转出 `lyricsStageMode` / `setLyricsStageMode` |
+| `ui/components/VisualizerStage.kt` | 上下键 + 上下滑动的 `LYRICS_STAGE` 分支；每帧推 `LyricsStagePayload`；子模式 Toast |
+| `res/values/strings.xml` / `values-en/strings.xml` | `visualizer_theme_lyrics_stage` |
+| `app/build.gradle.kts` | `versionCode 197 → 198`、`versionName 2.39.12 → 2.39.13` |
+
+#### 6. 门禁
+
+- **新增**：`GlowWordCoreTest`、`GraphemeTimingBuilderTest`（含 renderHints 判据）、
+  `LyricsStageModeTest`、`tilt/TiltLayoutTest`、`partita/PartitaLayoutTest`、`fume/FumeMathTest`。
+- **改计数**：`VisualizerThemeTest`（29 → 30）、`StarrySkyTest`（29 → 30）。
+- **`FxCoverageScanTest`**：`LyricsStageRenderer` 登记进**豁免**名单 ——
+  5 个子模式的后处理由子渲染器自带（子模式 0 直接复用 E23 的暗角 0.44 + 颗粒 0.026），
+  主渲染器再叠一道 ⇒ 二次暗角。
+- **⚠️ 5 个子渲染器都不继承 `RendererFx`**（只实现 `LyricsSubRenderer`）
+  ⇒ `FxCoverageScanTest` 的 `class X : RendererFx(` / `class X : VisualizerRenderer`
+  正则**匹配不到** ⇒ 无需登记。
+
+#### 7. 画质档位
+
+`LYRICS_STAGE` 归 **ADV** + `needsParticleBudget = false` ⇒ 三档画质全部可选（含 LOW）：
+子模式 0 的粒子数按效果自己的档位表（E23 的 `capacityForTier`），⛔ 不读 `ctx.quality.maxParticles`。
+子模式 2（全屏纵览）需要整曲版面 + 相机变换 ⇒ **只在 HIGH 档提供**，
+非 HIGH 档由 `LyricsStageRenderer.createSubRenderer` 降级为 GLOW_LINE。

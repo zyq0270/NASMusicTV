@@ -1395,7 +1395,13 @@
     <string name="visualizer_theme_liquid_ripple">液态涟漪</string>
     <string name="visualizer_theme_qianli_scroll">千里江山</string>
     <string name="visualizer_theme_lofi_city">像素城市</string>
+    <string name="lyrics_stage_mode_dot_matrix">歌词点阵</string>
+    <string name="lyrics_stage_mode_full_view">全屏纵览</string>
+    <string name="lyrics_stage_mode_glow_line">逐字行光</string>
+    <string name="lyrics_stage_mode_partita">分栏引导</string>
+    <string name="lyrics_stage_mode_tilt_pulse">倾斜律动</string>
     <string name="visualizer_theme_lyrics_dot_matrix">歌词点阵</string>
+    <string name="visualizer_theme_lyrics_stage">歌词舞台</string>
     <string name="visualizer_theme_matrix_rain">数字雨</string>
     <string name="visualizer_theme_milkdrop_feedback">反馈残像</string>
     <string name="visualizer_theme_molecule">分子</string>

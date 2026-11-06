@@ -431,6 +431,15 @@ class AppPreferences internal constructor(private val context: Context) {
      */
     private val keyQianliColorVersion = intPreferencesKey("visualizer_qianli_color_version")
 
+    /**
+     * E53「歌词舞台」子模式序号（0..4；默认 0 = 歌词点阵）。
+     *
+     * ⛔ **不进 `AppSettings` 备份 JSON**：与 [keyQianliColorVersion] 同理 ——
+     * 它是「这台设备上想看哪个歌词子模式」的**显示偏好**（设备本地），
+     * 从手机备份恢复到电视时不该改写电视上用户已经选好的子模式。
+     */
+    private val keyLyricsStageMode = intPreferencesKey("visualizer_lyrics_stage_mode")
+
     // --- 照片墙（§7.3，17 个字段）---
     private val keyPhotoWallGalleryEnabled = booleanPreferencesKey("photo_wall_gallery_enabled")
     private val keyPhotoWallExternalEnabled = booleanPreferencesKey("photo_wall_external_enabled")
@@ -1096,6 +1105,26 @@ class AppPreferences internal constructor(private val context: Context) {
      */
     suspend fun setQianliColorVersion(version: Int) {
         dataStore.edit { it[keyQianliColorVersion] = QianliColorVersion.normalize(version) }
+    }
+
+    /**
+     * 读 E53「歌词舞台」的子模式序号（0..4；默认 0 = 歌词点阵）。
+     *
+     * 读取侧钳制 —— 偏好值可能来自旧版本或手改的 prefs 文件，
+     * 绝不把非法值喂给渲染器。
+     */
+    val lyricsStageMode: Flow<Int> = dataStore.data.map { prefs ->
+        LyricsStageModeContract.normalize(prefs[keyLyricsStageMode] ?: LyricsStageModeContract.DEFAULT)
+    }
+
+    /**
+     * 写 E53「歌词舞台」的子模式序号（0..4）。
+     *
+     * ⚠️ **写入侧也钳制**（与 [setQianliColorVersion] 既有写法一致）：非法值在落盘前
+     * 就被换成默认值 ⇒ 磁盘上永远只有合法值。
+     */
+    suspend fun setLyricsStageMode(mode: Int) {
+        dataStore.edit { it[keyLyricsStageMode] = LyricsStageModeContract.normalize(mode) }
     }
 
     // --- 照片墙（§7.3，17 个 setter）---

@@ -484,6 +484,28 @@ enum class VisualizerTheme(
      * 预算门禁都按声明计数）。
      */
     HIGHWAY(R.string.visualizer_theme_highway, "旷野公路", Tier.ADV, "52", needsParticleBudget = false),
+
+    /**
+     * E53「歌词舞台」
+     *
+     * 一个主题内含 5 个**手动切换**的歌词子模式：
+     *  0 歌词点阵（NASMusicTV E23 原创，复用现有 `LyricsDotMatrixRenderer`）
+     *  1 逐字行光（移植自 Folia `classic`）
+     *  2 全屏纵览（移植自 Folia `fume` —— 整曲版面 + 相机变换）
+     *  3 倾斜律动（移植自 Folia `tilt`）
+     *  4 分栏引导（移植自 Folia `partita`）
+     *
+     * 上下键 / 手势上下滑动切换子模式；
+     * ⛔ **仅手动切换** —— 不自动定时切换、不随歌曲切换、不随段落/副歌切换。
+     * 子模式序号持久化在 `AppPreferences.lyricsStageModeOrdinal`。
+     *
+     * ## 归 [Tier.ADV] + `needsParticleBudget = false`
+     * 子模式 0 的粒子数按效果自己的档位表（E23 的 `capacityForTier`），
+     * ⛔ 不读 `ctx.quality.maxParticles` ⇒ LOW 档**照常提供**本效果。
+     * 子模式 2（全屏纵览）需要整曲版面 + 相机变换 ⇒ 只在 HIGH 档提供；
+     * LOW/MEDIUM 档由子渲染器自行降级到「逐字行光」。
+     */
+    LYRICS_STAGE(R.string.visualizer_theme_lyrics_stage, "歌词舞台", Tier.ADV, "53", needsParticleBudget = false),
     ;
 
     /** 效果分级：决定画质档位可用性 */

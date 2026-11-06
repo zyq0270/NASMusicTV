@@ -1384,7 +1384,13 @@
     <string name="visualizer_theme_liquid_ripple">Liquid ripple</string>
     <string name="visualizer_theme_qianli_scroll">Rivers and Mountains</string>
     <string name="visualizer_theme_lofi_city">Pixel City</string>
+    <string name="lyrics_stage_mode_dot_matrix">Lyrics dot matrix</string>
+    <string name="lyrics_stage_mode_full_view">Full-song scroll</string>
+    <string name="lyrics_stage_mode_glow_line">Word glow</string>
+    <string name="lyrics_stage_mode_partita">Guided columns</string>
+    <string name="lyrics_stage_mode_tilt_pulse">Tilt pulse</string>
     <string name="visualizer_theme_lyrics_dot_matrix">Lyrics dot matrix</string>
+    <string name="visualizer_theme_lyrics_stage">Lyrics Stage</string>
     <string name="visualizer_theme_matrix_rain">Matrix rain</string>
     <string name="visualizer_theme_milkdrop_feedback">Feedback afterimage</string>
     <string name="visualizer_theme_molecule">Molecule</string>

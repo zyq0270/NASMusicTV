@@ -20,6 +20,10 @@ class VisualizerPrefs internal constructor(private val prefs: AppPreferences) {
     val qianliColorVersion = prefs.qianliColorVersion
     suspend fun setQianliColorVersion(version: Int) = prefs.setQianliColorVersion(version)
 
+    // E53「歌词舞台」子模式序号（0=点阵 / 1=行光 / 2=全屏 / 3=倾斜 / 4=分栏，默认 0）
+    val lyricsStageMode = prefs.lyricsStageMode
+    suspend fun setLyricsStageMode(mode: Int) = prefs.setLyricsStageMode(mode)
+
     // 封面滤镜（Phase 5）
     val coverFilterEnabled = prefs.coverFilterEnabled
     val coverFilterBlurRadius = prefs.coverFilterBlurRadius

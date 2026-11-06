@@ -103,6 +103,14 @@ class FxCoverageScanTest {
         //    `PostFx.NONE` 让 `hasFullScreenPass()` 恒假 ⇒ `RendererFx.needsDamageCoalescer`
         //    在 LITE/FULL 也为真 ⇒ 每帧白补一次整画布 `drawRect`（铺屏 1.000 屏）。E47 现与 E46
         //    同形制：字面量 `0.34f` 留着当门禁证据 + `vignetteOverride` 恒 0 关断基类绘制。
+        // ⭐ 2026-11-06 新增：E53「歌词舞台」主渲染器。
+        //   ⛔ 它**按设计**不叠加后处理：5 个歌词子模式各自的后处理已由子渲染器自带
+        //   （子模式 0 直接复用 E23 的 `LyricsDotMatrixRenderer`，其暗角 0.44 + 颗粒 0.026 已生效），
+        //   主渲染器再加一道 ⇒ 二次暗角 / 二次颗粒。
+        //   ⚠️ 副作用（如实记录）：`PostFx.NONE` 让 `hasFullScreenPass()` 恒假
+        //   ⇒ `RendererFx.needsDamageCoalescer` 在 LITE/FULL 也为真
+        //   ⇒ 每帧补一次整画布 `drawRect`（肉眼不可见；该效果每帧头一笔就是全屏歌词底 ⇒ 收益为零）。
+        "LyricsStageRenderer" to "E53 歌词舞台：后处理由各子渲染器自带（点阵子模式复用 E23 的暗角 0.44 + 颗粒 0.026）⇒ 主渲染器不叠加，避免二次暗角（按设计不适用）",
     )
 
     private val scannedRoots = listOf("renderers", "photo")

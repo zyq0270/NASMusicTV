@@ -15,6 +15,7 @@ import com.nasmusic.tv.visualizer.renderers.MatrixRainRenderer
 import com.nasmusic.tv.visualizer.renderers.MilkdropRenderer
 import com.nasmusic.tv.visualizer.renderers.MoonlitRenderer
 import com.nasmusic.tv.visualizer.renderers.LyricsDotMatrixRenderer
+import com.nasmusic.tv.visualizer.renderers.LyricsStageRenderer
 import com.nasmusic.tv.visualizer.renderers.EcgWaveRenderer
 import com.nasmusic.tv.visualizer.renderers.HypnoticFunctionRenderer
 import com.nasmusic.tv.visualizer.renderers.OrbitalRingsRenderer
@@ -115,6 +116,10 @@ object VisualizerRendererFactory {
         //    ⚠️ 两条路径共用同一套移植层（`qianli/port/` 下的 port 包，忠于上游），分叉只在渲染器。
         VisualizerTheme.QIANLI_SCROLL ->
             if (QianliRenderStyle.UPSTREAM_DEFAULT) QianliUpstreamRenderer() else QianliScrollRenderer()
+        // E53「歌词舞台」：一个主题内含 5 个**手动切换**的歌词子模式
+        // （点阵 / 逐字行光 / 全屏纵览 / 倾斜律动 / 分栏引导）。
+        // 零外部资产 ⇒ ⛔ 不收 Context。
+        VisualizerTheme.LYRICS_STAGE -> LyricsStageRenderer()
     }
 
     /**
