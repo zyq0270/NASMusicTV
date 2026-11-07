@@ -13,7 +13,6 @@ import com.nasmusic.tv.visualizer.renderers.LiquidGridRenderer
 import com.nasmusic.tv.visualizer.renderers.LiquidRippleRenderer
 import com.nasmusic.tv.visualizer.renderers.MatrixRainRenderer
 import com.nasmusic.tv.visualizer.renderers.MoonlitRenderer
-import com.nasmusic.tv.visualizer.renderers.LyricsDotMatrixRenderer
 import com.nasmusic.tv.visualizer.renderers.LyricsStageRenderer
 import com.nasmusic.tv.visualizer.renderers.HypnoticFunctionRenderer
 import com.nasmusic.tv.visualizer.renderers.OrbitalRingsRenderer
@@ -73,7 +72,9 @@ object VisualizerRendererFactory {
         VisualizerTheme.LIQUID_RIPPLE -> LiquidRippleRenderer()
         VisualizerTheme.MATRIX_RAIN -> MatrixRainRenderer()
         VisualizerTheme.CONSTELLATION -> ConstellationRenderer()
-        VisualizerTheme.LYRICS_DOT_MATRIX -> LyricsDotMatrixRenderer()
+        // ⛔ E23「歌词点阵」不再是独立主题（2026-11-07 被 E53「歌词舞台」吸收）
+        //    ⇒ 它没有自己的 when 分支了；它的画面由 E53 的子模式 0（`DotMatrixSubRenderer`）
+        //    委托同一个 `LyricsDotMatrixRenderer` 画出来。
         VisualizerTheme.HYPNOTIC_FUNCTION -> HypnoticFunctionRenderer()
         VisualizerTheme.ORBITAL_RINGS -> OrbitalRingsRenderer()
         VisualizerTheme.RADAR_GRID -> RadarGridRenderer()

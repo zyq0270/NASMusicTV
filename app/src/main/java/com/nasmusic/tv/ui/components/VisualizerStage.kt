@@ -75,6 +75,7 @@ import com.nasmusic.tv.data.prefs.QianliColorVersion
 import com.nasmusic.tv.ui.theme.NasMusicColors
 import com.nasmusic.tv.visualizer.AudioFrame
 import com.nasmusic.tv.visualizer.CoverPalette
+import com.nasmusic.tv.visualizer.EffectFurniture
 import com.nasmusic.tv.visualizer.FpsMeter
 import com.nasmusic.tv.visualizer.RenderContext
 import com.nasmusic.tv.visualizer.RendererSwapper
@@ -98,6 +99,17 @@ import kotlinx.coroutines.launch
  * 且⛔ 不会在普通用户的播放器 UI 上留下常驻调试信息。
  */
 private const val FPS_SETTING_KEY = "nasmusic_fps"
+
+/**
+ * 当前生效的渲染器 + 它**对应的请求主题**。
+ *
+ * ⛔ 存「请求主题」而不是 `renderer.theme` —— 工厂在未启用变体时会回落成别的渲染器
+ *    （LOFI_CITY → CircularRingRenderer），那时 `renderer.theme != theme`，比主题会误判。
+ */
+private data class ActiveRenderer(
+    val theme: VisualizerTheme,
+    val renderer: VisualizerRenderer,
+)
 
 /**
  * 全屏可视化舞台（三层结构）。
@@ -187,7 +199,10 @@ fun VisualizerStage(
     // 当前生效渲染器的 State 快照：swapper.current 是普通 var（sync 后才更新、
     // 且不触发重组），view 型旁路的 AndroidView / Canvas 分支切换依赖此快照重组。
     // 首次 sync 前为 null ⇒ 走 Canvas 空帧分支（与改造前行为一致）。
-    val currentRenderer = remember { mutableStateOf<VisualizerRenderer?>(null) }
+    // ⚠️ 快照里**同时存下请求主题**（[ActiveRenderer]）：舞台要按「效果自己声明的家具」
+    //    （[EffectFurniture]）决定叠加层，而渲染器是**在 LaunchedEffect 里**创建的 ⇒
+    //    主题刚换的那一帧，State 里还是**上一个**渲染器 ⇒ 必须按主题比对后才敢用它的家具。
+    val activeRenderer = remember { mutableStateOf<ActiveRenderer?>(null) }
 
     // 歌词级常量（最长行字数 / 最长行文本）：只随 lyrics 变化。
     // 每帧重算是 O(N) 全量扫描，必须缓存。
@@ -224,7 +239,9 @@ fun VisualizerStage(
         if (swapper.sync(theme, quality, false, renderCtx, System.currentTimeMillis())) {
             // 快照同步进 State：swapper.current 变化本身不触发重组，
             // 这里写 State 才能让下面的 Canvas / AndroidView 分支切换生效
-            currentRenderer.value = swapper.current
+            // ⚠️ 连**请求主题**一起存（[ActiveRenderer]）⇒ 舞台按主题比对后才用它的家具
+            //    （主题刚换的那一帧，State 里还是上一个渲染器）。
+            activeRenderer.value = swapper.current?.let { ActiveRenderer(theme, it) }
             prevRenderer.value = swapper.previous
             if (swapper.isCrossfading) {
                 fadeAlpha.floatValue = 0f
@@ -526,7 +543,10 @@ fun VisualizerStage(
         )
 
         // ② 效果层（新效果；交叉淡入时从透明渐显）
-        val active = currentRenderer.value
+        // ⚠️ 这里**不**按主题过滤：View 型渲染器（three-globe 的 WebView）的
+        //    AndroidView 分支要拿到**当前**渲染器实例；主题刚换时它可能还是上一个
+        //    （与改造前同语义：这份 State 在 LaunchedEffect 里才更新）。
+        val active = activeRenderer.value?.renderer
         if (active != null && active.isViewBased) {
             // View 型渲染器旁路（three-globe 等 WebView 渲染器）：
             // 用 AndroidView 承载，不经 DrawScope —— draw() 不再被调用。
@@ -655,22 +675,54 @@ fun VisualizerStage(
             }
         }
 
-        val isVintageTv = theme == VisualizerTheme.VINTAGE_TV
+        // ── 舞台叠加层的「家具」由**效果自己声明**（[EffectFurniture]）────────
+        //
+        // ⚠️ **主题无关**：这里不再有逐主题的特例 ——
+        //    「怀旧」要 4:3 内容区 + 深色墨、「歌词舞台」不要顶部歌词条，
+        //    全部由各自的渲染器通过 [VisualizerRenderer.furniture] 声明。
+        //    ⇒ **新增效果永远不需要改这个文件。**
+        //
+        // ⚠️ **一帧窗口**：渲染器是在 `LaunchedEffect` 里创建的 ⇒ 主题刚换的那一帧，
+        //    State 里还是**上一个**渲染器 ⇒ 用 [ActiveRenderer] 里的「请求主题」比对，
+        //    **不匹配就当作没有家具**（退回默认「全显示」）。
+        //    ⇒ 屏幕上永远不会出现**错的**家具；最坏只是晚一帧。
+        val activeForTheme = activeRenderer.value
+        val furniture: EffectFurniture? = if (activeForTheme != null && activeForTheme.theme == theme) {
+            activeForTheme.renderer.furniture.value
+        } else {
+            null
+        }
 
-        // 怀旧 4:3 反色文字（2026-09-27 二次定稿）：
-        // 仅「黑带」区用白字、画面区一律黑字 —— 分界即 4:3 黑带右缘，
-        // 不随暗角阈值外扩（真机反馈：白字伸进画面太多）。
-        // ⛔ 本机 Android 5.1 无 BlendMode.Difference（API 29+），故用双层裁剪实现。
+        // 内容区（4:3 之类）左右各留多少：效果声明了比例才有内容区，否则满屏。
         val cfg = LocalConfiguration.current
-        val vintagePillarDp = if (isVintageTv) {
-            maxOf((cfg.screenWidthDp - cfg.screenHeightDp * 4f / 3f) / 2f, 0f).dp
-        } else 0.dp
-        val vintageBandEndPx = with(LocalDensity.current) { (vintagePillarDp - 48.dp).toPx() }
+        val contentAspect = furniture?.contentAspect
+        val contentInsetDp = if (contentAspect != null) {
+            maxOf((cfg.screenWidthDp - cfg.screenHeightDp * contentAspect) / 2f, 0f).dp
+        } else {
+            0.dp
+        }
+        val contentEdgePx = with(density) { contentInsetDp.toPx() }
+
+        // ⚠️ 白字 / 黑字的分界点 —— **屏幕上正好落在内容区的左缘**（4:3 画面的左边界）。
+        //    算式看着像「内容区左缘 − 48 dp」，是因为 `clipRect` 用的是**歌曲信息 Box 的局部坐标**，
+        //    而该 Box 自身带 `start = 48.dp` 内边距 ⇒ 局部 −48 dp 恰好把**屏幕**分界推到内容区边缘。
+        //    ⛔ 这一对「局部 −48 dp / Box +48 dp」互相抵消的算式是**现有观感定稿**
+        //       （所有者 2026-11-07 裁定：代码即真相）⇒ **两个 48 dp 都要保持原值**，
+        //       ⛔ 不要只改其中一个（会让分界跑偏 48 dp）。
+        //    ⛔ 本机 Android 5.1 无 BlendMode.Difference（API 29+），故用双层裁剪实现。
+        val splitPx = contentEdgePx - with(density) { 48.dp.toPx() }
+
+        // 内容区是浅底（怀旧：牛皮纸）⇒ 落在内容区里的字改用深色墨；侧边深色区用白字。
+        val contentIsLight = furniture?.contentIsLight == true
+        // 有内容区（两侧留了深色边）才需要「双层裁剪 + 反色」；否则只有一层白字。
+        val hasSideBands = contentInsetDp > 0.dp
 
         // ③ 前景层
         Column(Modifier.fillMaxSize()) {
-            // 顶部歌词行（怀旧效果已自带中间大字歌词，隐藏顶部栏）
-            if (!isVintageTv) {
+            // 顶部歌词提示行
+            // ⚠️ 由**效果自己声明**：自己渲染歌词的效果（如「怀旧」「歌词舞台」）
+            //    关掉它 ⇒ 顶部不会再把当前行显一遍（字残重复）。
+            if (furniture?.lyricTopBar != false) {
                 LyricTopBar(
                     lyrics = lyrics,
                     progressMs = progressMs,
@@ -759,33 +811,39 @@ fun VisualizerStage(
             Spacer(Modifier.weight(1f))
 
             // 左下：歌曲信息
-            // 怀旧 4:3：黑带是纯黑背景、画面区是纸底 —— 单色文字必有一侧不可见
-            // （真机反馈：黑字落在纯黑 band 上看不到）。反色文字模式：黑带区白字、
-            // 画面区黑字，双层裁剪、分界 = 黑带右缘；右端以 end 内边距挡在黑带之外。
-            Box(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(start = 48.dp, bottom = 8.dp, end = vintagePillarDp)
-            ) {
-                // 左黑带区 → 白字（与背景反色）
-                SongInfoTexts(
-                    song = song,
-                    titleColor = Color.White,
-                    artistColor = Color.White.copy(alpha = 0.6f),
-                    modifier = Modifier.drawWithContent {
-                        clipRect(right = vintageBandEndPx) { this@drawWithContent.drawContent() }
+            // ⚠️ 由**效果自己声明**要不要显示（[EffectFurniture.songInfo]）。
+            if (furniture?.songInfo != false) {
+                // ⚠️ 内容区若是**浅底**（怀旧：牛皮纸），单色文字必有一侧不可见
+                //    （真机反馈：黑字落在纯黑 band 上看不到）。⇒ 双层裁剪：
+                //    侧边深色区用白字、内容区用深色墨；没有内容区的效果只有一层白字。
+                //    右端以 `end = contentInsetDp` 的内边距挡在内容区之外。
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(start = 48.dp, bottom = 8.dp, end = contentInsetDp)
+                ) {
+                    // 侧边深色区 → 白字（与背景反色）；分界点 = splitPx
+                    if (hasSideBands) {
+                        SongInfoTexts(
+                            song = song,
+                            titleColor = Color.White,
+                            artistColor = Color.White.copy(alpha = 0.6f),
+                            modifier = Modifier.drawWithContent {
+                                clipRect(right = splitPx) { this@drawWithContent.drawContent() }
+                            }
+                        )
                     }
-                )
-                // 画面区 → 黑字（非怀旧：整体白字、不裁剪，布局与旧版一致）
-                SongInfoTexts(
-                    song = song,
-                    titleColor = if (isVintageTv) Color.Black else Color.White,
-                    artistColor = if (isVintageTv) Color.Black.copy(alpha = 0.6f)
-                    else Color.White.copy(alpha = 0.6f),
-                    modifier = if (isVintageTv) Modifier.drawWithContent {
-                        clipRect(left = vintageBandEndPx) { this@drawWithContent.drawContent() }
-                    } else Modifier
-                )
+                    // 内容区 → 浅底用黑字、深底用白字（无内容区时 = 整体白字，不裁剪）
+                    SongInfoTexts(
+                        song = song,
+                        titleColor = if (contentIsLight) Color.Black else Color.White,
+                        artistColor = if (contentIsLight) Color.Black.copy(alpha = 0.6f)
+                        else Color.White.copy(alpha = 0.6f),
+                        modifier = if (hasSideBands) Modifier.drawWithContent {
+                            clipRect(left = splitPx) { this@drawWithContent.drawContent() }
+                        } else Modifier
+                    )
+                }
             }
 
             // 底部：指示器（控制栏已移除）
@@ -794,7 +852,7 @@ fun VisualizerStage(
                     themes = VisualizerTheme.selectable(photoWallAvailable),
                     current = theme,
                     quality = quality,
-                    onLightBg = isVintageTv
+                    onLightBg = contentIsLight
                 )
 
                 Spacer(Modifier.size(24.dp))

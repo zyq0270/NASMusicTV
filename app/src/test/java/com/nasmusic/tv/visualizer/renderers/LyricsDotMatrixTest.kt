@@ -8,17 +8,25 @@ import java.io.File
 import kotlin.math.abs
 
 /**
- * E23 歌词点阵（§B7 · T4.7）门禁。
+ * E23 歌词点阵（§B7 · T4.7 · 2026-11-07 合批改造）门禁。
  *
- * 四段：
- * - **行为段**：**直接调生产函数** [LyricsDotMatrixRenderer.calculateRowQuota] /
- *   [LyricsDotMatrixRenderer.karaokePacing] —— ⛔ 不复制算法（复制必然漂移）；
- * - **性能段（P2–P6）**：源码形态判据（`getPixel` 必须为 0 / `getPixels` ≥ 2 / `step` 恒 1 /
- *   `rewind` 取代 `reset` / 全局量在循环外 / 死代码已删）；
+ * 本轮（2026-11-07）修掉两个缺陷：
+ * 1. **逐粒子 `Path.addOval`**：E53「歌词舞台」子模式 0 实测 ≈ 11,700 次 JNI/帧 ⇒ ≈30 fps。
+ *    ⇒ 改为 `Canvas.drawPoints(float[], offset, count, Paint)`（`Cap.ROUND` + `strokeWidth` = 点直径）。
+ * 2. **卡拉OK 扫描 1 Hz**：`ctx.lyricLineProgress` 来自 1 Hz 的 StateFlow ⇒ 扫描每秒跳一次。
+ *    ⇒ 宿主（E53）用逐帧的 `LyricsStagePayload` 推给渲染器（带行索引配对）。
+ *
+ * 门禁分段：
+ * - **行为段**：**直接调生产函数**（⛔ 不复制算法 —— 复制必然漂移）：
+ *   [LyricsDotMatrixRenderer.calculateRowQuota] / [LyricsDotMatrixRenderer.karaokePacing] /
+ *   [LyricsDotMatrixRenderer.resolveLyricProgress] / [LyricsDotMatrixRenderer.lineProgressOf] /
+ *   [LyricsDotMatrixRenderer.subIndex] / [LyricsDotMatrixRenderer.visibilityBucketOf]；
+ * - **形态段**：源码判据（先**剥注释**）—— 逐粒子的 `addOval` 必须消失、`drawPoints` 必须到位、
+ *   绘制路径必须零分配；
  * - **观感段（Q2/Q4）**：亮档 alpha 数值 + `postFx` 字面量；
- * - **保留段（§13.5-D4）**：卡拉OK 三档亮度 + 6 次 `drawPath` + 守卫注释必须在位。
+ * - **保留段（§13.5-D4）**：卡拉OK 三档亮度 + 分档阈值 + 守卫注释必须在位。
  *
- * ⛔ 负向自证 2 条 —— 缺一条就可能空转。
+ * ⛔ 负向自证 —— 缺一条就可能空转。
  * ⛔ 源码判据一律**先剥注释**（本仓库已踩 5 次：判据命中自己刚写的 KDoc ⇒ 假 FAIL）。
  * ⛔ 负向样本必须与正向**喂同一份谓词**（不要另写「预期为 false」的表达式）。
  */
@@ -82,34 +90,45 @@ class LyricsDotMatrixTest {
         assertFalse("⛔ 不得再算 idealStep", "idealStep" in sample)
     }
 
-    // ═══════════════════════════ ④ P5 rewind ═══════════════════════════
+    // ═══════════════ ④ 合批契约：逐粒子的 addOval 必须消失 ═══════════════
 
     @Test
-    fun `④ P5 每帧必须 rewind 而非 reset`() {
-        val draw = funBody(classBody(codeOfE23(), "LyricsDotMatrixRenderer"), "drawContent")
-        assertTrue("必须 `for (p in paths) p.rewind()`", "p.rewind()" in draw)
-        assertFalse("⛔ 不得再用 p.reset()", "p.reset()" in draw)
+    fun `④ 合批契约 - 不得再有逐粒子 addOval 必须改为 drawPoints 合批`() {
+        val body = classBody(codeOfE23(), "LyricsDotMatrixRenderer")
+        assertFalse("⛔ 不得再有逐粒子的 addOval（每帧上万次 JNI）", usesPerParticleOval(body))
+        assertFalse("⛔ 不得再有 asAndroidPath（Path 方案已整体下线）", "asAndroidPath" in body)
+        assertFalse("⛔ 不得再持有 android Path", "android.graphics.Path" in body)
+        // 合批通道：必须真的用 drawPoints
+        val draw = funBody(body, "drawPointBatches")
+        assertTrue("drawPointBatches 必须能切出来（空转自证）", draw.isNotEmpty())
+        assertTrue("必须调用原生 drawPoints", "drawPoints(" in draw)
+        assertTrue("必须用 Cap.ROUND（圆点而非方块）", "Cap.ROUND" in body)
+        assertTrue("必须按点直径设置 strokeWidth", "strokeWidth" in draw)
+        // ⛔ 负向（喂同一份谓词）：旧写法必须被抓
+        assertTrue("负向 N3：旧的逐粒子 addOval 必须被 addOval 判据抓到",
+            usesPerParticleOval(OLD_SNIPPET_ADD_OVAL))
     }
 
     // ═══════════════════════════ ⑤ P3 全局量外提 ═══════════════════════════
 
     @Test
-    fun `⑤ P3 全局量必须在 addLineToPaths 循环外算一次`() {
+    fun `⑤ P3 全局量必须在逐粒子扫描之外算一次`() {
         val body = classBody(codeOfE23(), "LyricsDotMatrixRenderer")
         val draw = funBody(body, "drawContent")
-        val add = funBody(body, "addLineToPaths")
-        assertTrue("addLineToPaths 必须能切出来（空转自证）", add.isNotEmpty())
+        val fill = funBody(body, "fillLine")
+        assertTrue("drawContent 必须能切出来（空转自证）", draw.isNotEmpty())
+        assertTrue("fillLine 必须能切出来（空转自证）", fill.isNotEmpty())
         assertTrue("drawContent 必须算 sinB",
             Regex("""val\s+sinB\s*=\s*sin\(""").containsMatchIn(draw))
         assertTrue("drawContent 必须算 amp",
             Regex("""val\s+amp\s*=\s*2\.2f""").containsMatchIn(draw))
         // ⛔ 循环体内不得再重算（旧实现每点算一遍 = 7,200 次冗余）
-        assertFalse("⛔ addLineToPaths 内不得再算 frame.bass.coerceIn", "frame.bass.coerceIn" in add)
-        assertFalse("⛔ addLineToPaths 内不得再声明 amp",
-            Regex("""val\s+amp\s*=""").containsMatchIn(add))
-        assertTrue("breath 必须用提好的 sinB", "sinB * 0.10f" in add)
+        assertFalse("⛔ 逐粒子扫描内不得再算 frame.bass.coerceIn", "frame.bass.coerceIn" in fill)
+        assertFalse("⛔ 逐粒子扫描内不得再声明 amp",
+            Regex("""val\s+amp\s*=""").containsMatchIn(fill))
+        assertTrue("breath 必须用提好的 sinB", "frameSinB * 0.10f" in body)
         assertTrue("floatY 的逐点 sin 必须保留（提不了）",
-            "sin(globalT * 2.0f + localX * 10f)" in add)
+            "sin(frameGlobalT * 2.0f + localXs[i] * 10f)" in fill)
     }
 
     // ═══════════════════════════ ⑥ P4 死代码 ═══════════════════════════
@@ -117,31 +136,34 @@ class LyricsDotMatrixTest {
     @Test
     fun `⑥ P4 死代码必须已删`() {
         val body = classBody(codeOfE23(), "LyricsDotMatrixRenderer")
-        val add = funBody(body, "addLineToPaths")
-        assertFalse("⛔ phaseVal 必须已删（零引用）", "phaseVal" in add)
-        assertFalse("⛔ baseSize 必须已删（恒 1.0f）", "baseSize" in add)
+        val measure = funBody(body, "measureLine")
+        assertFalse("⛔ phaseVal 必须已删（零引用）", "phaseVal" in measure)
+        assertFalse("⛔ baseSize 必须已删（恒 1.0f）", "baseSize" in measure)
         assertFalse("⛔ textLen 必须彻底删除（形参 + 两处实参）", "textLen" in body)
     }
 
     // ═══════════════════════ ⑦ 卡拉OK 必须保留（§13.5-D4）═══════════════════════
 
     @Test
-    fun `⑦ 卡拉OK 三档亮度、6 次 drawPath 与守卫注释必须保留`() {
+    fun `⑦ 卡拉OK 三档亮度、分档阈值与守卫注释必须保留`() {
         val body = classBody(codeOfE23(), "LyricsDotMatrixRenderer")
-        val add = funBody(body, "addLineToPaths")
+        val bright = funBody(body, "brightnessOf")
+        val tier = funBody(body, "tierOf")
         // 三档亮度分支（§B7 专项评估 ①）
-        assertTrue("必须有 `!hasLyrics -> 0.9f`", "!hasLyrics -> 0.9f" in add)
-        assertTrue("必须有 `!isSinging ->`（待唱行）", "!isSinging ->" in add)
-        assertTrue("必须有卡拉OK 前沿判定 `localX - kProgress`", "localX - kProgress" in add)
-        assertTrue("必须有已唱段亮度 0.78f", "0.78f" in add)
-        assertTrue("必须有前沿字亮度 1.0f", "1.0f" in add)
+        assertTrue("必须有 `!lineHasLyrics -> 0.9f`", "!lineHasLyrics -> 0.9f" in bright)
+        assertTrue("必须有 `!lineIsSinging ->`（待唱行）", "!lineIsSinging ->" in bright)
+        assertTrue("必须有卡拉OK 前沿判定 `localX - frameKProgress`",
+            "localX - frameKProgress" in bright)
+        assertTrue("必须有已唱段亮度 0.78f", "0.78f" in bright)
+        assertTrue("必须有前沿字亮度 1.0f", "1.0f" in bright)
         // 三档量化
-        assertTrue("tier 必须含 0.88f 阈值", "brightness * visibility > 0.88f" in add)
-        assertTrue("tier 必须含 0.45f 阈值", "brightness * visibility > 0.45f" in add)
-        // 6 条 Path 无条件绘制（draw 次数与卡拉OK 无关）
-        val draw = funBody(body, "drawContent")
-        assertEquals("必须恒 6 次 drawPath（3 档 × 2 层）",
-            6, Regex("""drawPath\(paths\[\d\]""").findAll(draw).count())
+        assertTrue("tier 必须含 0.88f 阈值", "brightness * visibility > 0.88f" in tier)
+        assertTrue("tier 必须含 0.45f 阈值", "brightness * visibility > 0.45f" in tier)
+        // 3 档 × 2 层的结构常量必须还在
+        assertTrue("必须保留 LAYER_CORE / LAYER_GLOW 两层",
+            "LAYER_CORE" in body && "LAYER_GLOW" in body)
+        assertTrue("必须保留 3 档 × 2 层 × 2 行的子批次结构",
+            "2 * 3 * 2 * VIS_BUCKETS" in body)
         // 守卫注释（§15.7 第 18 条）—— 在**未剥注释**的原文里找
         val raw = readFile(renderersFile("LyricsDotMatrixRenderer.kt"))
         assertTrue("必须有「不得以性能为由删除」守卫注释（§15.7 第 18 条）",
@@ -152,13 +174,18 @@ class LyricsDotMatrixTest {
 
     @Test
     fun `⑧ Q2 亮档 alpha 必须已降过曝`() {
-        val draw = funBody(classBody(codeOfE23(), "LyricsDotMatrixRenderer"), "drawContent")
-        assertTrue("paths[4] core 峰值必须 0.62 + pulse×0.14（峰值 0.76）",
-            "0.62f + frame.pulse * 0.14f" in draw)
-        assertTrue("paths[5] 外辉光必须提到 0.26",
-            "0.26f + frame.pulse * 0.10f" in draw)
-        assertFalse("⛔ 不得再有旧的 0.80f + frame.pulse * 0.18f",
-            "0.80f + frame.pulse * 0.18f" in draw)
+        val draw = funBody(classBody(codeOfE23(), "LyricsDotMatrixRenderer"), "drawPointBatches")
+        assertTrue("亮档 core 峰值必须 0.62 + pulse×0.14（峰值 0.76）",
+            "0.62f + pulse * 0.14f" in draw)
+        assertTrue("亮档外辉光必须提到 0.26",
+            "0.26f + pulse * 0.10f" in draw)
+        assertFalse("⛔ 不得再有旧的 0.80f + pulse * 0.18f",
+            "0.80f + pulse * 0.18f" in draw)
+        // 其余四档的 alpha 也不许漂
+        assertTrue("暗档 core alpha 必须 0.45", "0.45f" in draw)
+        assertTrue("暗档 glow alpha 必须 0.10", "0.10f" in draw)
+        assertTrue("中档 core alpha 必须 0.60", "0.60f" in draw)
+        assertTrue("中档 glow alpha 必须 0.22", "0.22f" in draw)
     }
 
     // ═══════════════════════════ ⑨ Q4 postFx ═══════════════════════════
@@ -225,7 +252,107 @@ class LyricsDotMatrixTest {
             abs(C.karaokePacing(0.5f) - linear(0.5f)) > 1e-3f)
     }
 
-    // ═══════════════════ 负向 N1/N2：源码判据必须能抓到旧写法 ═══════════════════
+    // ══════════════ ⑫ 逐帧进度覆盖（卡拉OK 不再 1 Hz 跳格）══════════════
+
+    @Test
+    fun `⑫ 行为 - 行内进度覆盖只在屏上那一行命中时生效`() {
+        // 行索引对得上 ⇒ 用覆盖值
+        assertEquals("命中时必须用覆盖值", 0.42f,
+            C.resolveLyricProgress(3, 0.42f, 3, 0.9f), 1e-6f)
+        // 行索引对不上 ⇒ 回退到 1 Hz 的值（屏上那一行与宿主推的那一行可能差一帧）
+        assertEquals("行索引不匹配必须回退", 0.9f,
+            C.resolveLyricProgress(3, 0.42f, 4, 0.9f), 1e-6f)
+        // 无覆盖 ⇒ 回退
+        assertEquals("无覆盖必须回退", 0.9f,
+            C.resolveLyricProgress(-1, 0.42f, 3, 0.9f), 1e-6f)
+        // 覆盖值必须被夹到 0..1
+        assertEquals("覆盖越界必须钳到 1", 1f,
+            C.resolveLyricProgress(3, 5f, 3, 0f), 1e-6f)
+        assertEquals("覆盖越界必须钳到 0", 0f,
+            C.resolveLyricProgress(3, -5f, 3, 1f), 1e-6f)
+        assertEquals("回退值也必须被夹住", 1f,
+            C.resolveLyricProgress(-1, 0f, 3, 7f), 1e-6f)
+        // ⛔ 负向（喂同一份谓词）：「永远用回退值」的破实现必须被区分出来
+        val alwaysFallback = { _: Int, _: Float, _: Int, fb: Float -> fb.coerceIn(0f, 1f) }
+        assertTrue("永远回退的破实现不得被判为等同（区分力自证）",
+            abs(alwaysFallback(3, 0.42f, 3, 0.9f) - C.resolveLyricProgress(3, 0.42f, 3, 0.9f)) > 1e-3f)
+    }
+
+    @Test
+    fun `⑬ 行为 - 行内进度换算与 computeLyricInfo 同口径`() {
+        assertEquals("行首必须是 0", 0f, C.lineProgressOf(10.0, 14.0, 10.0), 1e-6f)
+        assertEquals("行中必须是 0.5", 0.5f, C.lineProgressOf(10.0, 14.0, 12.0), 1e-6f)
+        assertEquals("行尾必须是 1", 1f, C.lineProgressOf(10.0, 14.0, 14.0), 1e-6f)
+        assertEquals("未到行首必须钳到 0", 0f, C.lineProgressOf(10.0, 14.0, 3.0), 1e-6f)
+        assertEquals("过行尾必须钳到 1", 1f, C.lineProgressOf(10.0, 14.0, 99.0), 1e-6f)
+        assertEquals("零长行必须给 1（与 computeLyricInfo 同口径）",
+            1f, C.lineProgressOf(10.0, 10.0, 10.0), 1e-6f)
+        // ⛔ 负向：线性但**不钳位**的破实现必须被区分出来
+        val unclamped = { s: Double, e: Double, t: Double -> ((t - s) / (e - s)).toFloat() }
+        assertTrue("不钳位的破实现不得被判为等同（区分力自证）",
+            abs(unclamped(10.0, 14.0, 99.0) - C.lineProgressOf(10.0, 14.0, 99.0)) > 1e-3f)
+    }
+
+    // ══════════════ ⑭ 子批次结构与分档粒度（逐字消散/凝聚不得退化）══════════════
+
+    @Test
+    fun `⑭ 子批次结构必须是 2 行 × 3 档 × 2 层 且 分档粒度保留逐字效果`() {
+        assertEquals("可见度分档数必须是 16", 16, C.VIS_BUCKETS)
+        assertEquals("子批次总数 = 2 行 × 3 档 × 2 层 × 分档数",
+            2 * 3 * 2 * 16, C.SUB_BATCHES)
+        // 索引必须互不相同且落在范围内
+        val seen = HashSet<Int>()
+        for (line in 0..1) for (tier in 0..2) for (layer in 0..1) for (b in 0 until C.VIS_BUCKETS) {
+            val idx = C.subIndex(line, tier, layer, b)
+            assertTrue("子批次索引必须落在 [0, SUB_BATCHES)", idx in 0 until C.SUB_BATCHES)
+            assertTrue("子批次索引必须互不相同（line=$line tier=$tier layer=$layer b=$b）",
+                seen.add(idx))
+        }
+        assertEquals("必须恰好用满全部子批次", C.SUB_BATCHES, seen.size)
+        // 分档必须单调、且能区分不同的可见度 ⇒ 逐字消散/凝聚的粒度保留
+        var prev = -1
+        for (i in 0..20) {
+            val v = i / 20f
+            val b = C.visibilityBucketOf(v)
+            assertTrue("分档必须单调（v=$v）", b >= prev)
+            prev = b
+        }
+        assertTrue("可见度 0.25 与 0.75 必须落在不同档（否则逐字缩放退化成整行一起）",
+            C.visibilityBucketOf(0.25f) != C.visibilityBucketOf(0.75f))
+        assertEquals("可见度 1 必须落在最后一档", C.VIS_BUCKETS - 1, C.visibilityBucketOf(1f))
+        assertEquals("可见度 0 必须落在第一档", 0, C.visibilityBucketOf(0f))
+        // ⛔ 负向（喂同一份谓词）：「不分档」的破实现必须被判别出来
+        val noBucket = { _: Float -> 0 }
+        assertTrue("恒定 0 档的破实现不得被判为等同（区分力自证）",
+            noBucket(0.75f) != C.visibilityBucketOf(0.75f))
+    }
+
+    // ══════════════ ⑮ 绘制路径零分配（缓冲只能在 onEnterContent 分配）══════════════
+
+    @Test
+    fun `⑮ 绘制路径必须零分配 - 缓冲只在 onEnterContent 里分配`() {
+        val body = classBody(codeOfE23(), "LyricsDotMatrixRenderer")
+        val drawFns = listOf(
+            "drawContent", "measureLine", "fillLine", "drawPointBatches",
+            "resetSubBatches", "finalizeSubBatches", "writePoint", "visibilityOf",
+            "brightnessOf", "tierOf", "visibilityBucket"
+        )
+        for (name in drawFns) {
+            val fn = funBody(body, name)
+            assertTrue("$name 必须能切出来（空转自证）", fn.isNotEmpty())
+            assertFalse("⛔ $name 内不得新建 FloatArray（缓冲只能在 onEnterContent 分配）",
+                "FloatArray(" in fn)
+            assertFalse("⛔ $name 内不得新建 IntArray", "IntArray(" in fn)
+            assertFalse("⛔ $name 内不得用 listOf/mapOf", "listOf(" in fn || "mapOf(" in fn)
+        }
+        // 缓冲的分配点必须且只能在 onEnterContent（onExitContent 只做释放）
+        val enter = funBody(body, "onEnterContent")
+        val exit = funBody(body, "onExitContent")
+        assertTrue("onEnterContent 必须分配点缓冲", "pointBuffers[i] = FloatArray(" in enter)
+        assertTrue("onExitContent 必须释放点缓冲", "pointBuffers[i] = FloatArray(0)" in exit)
+    }
+
+    // ═══════════════════ 负向 N1/N2/N3：源码判据必须能抓到旧写法 ═══════════════════
 
     @Test
     fun `负向N1 旧逐像素 getPixel 必须被判据抓到`() {
@@ -239,7 +366,7 @@ class LyricsDotMatrixTest {
     }
 
     @Test
-    fun `负向N2 旧 coerceIn(1f,3f) 与 reset 必须被判据抓到`() {
+    fun `负向N2 旧 coerceIn(1f,3f) 与 step 理想值必须被判据抓到`() {
         val oldStep = """
             val idealStep = kotlin.math.sqrt(estPixels / cap.toFloat())
                 .coerceIn(1f, 3f).toInt().coerceAtLeast(1)
@@ -250,11 +377,17 @@ class LyricsDotMatrixTest {
         assertFalse("正向：新实现的 sampleLine 不得有 coerceIn(1f, 3f)",
             Regex("""coerceIn\(\s*1f\s*,\s*3f\s*\)""")
                 .containsMatchIn(funBody(classBody(codeOfE23(), "LyricsDotMatrixRenderer"), "sampleLine")))
+    }
 
-        val oldReset = "for (p in paths) p.reset()"
-        assertTrue("负向 N2b：旧 `p.reset()` 必须被 reset 判据抓到", "p.reset()" in oldReset)
-        assertFalse("正向：新实现的 drawContent 不得有 p.reset()",
-            "p.reset()" in funBody(classBody(codeOfE23(), "LyricsDotMatrixRenderer"), "drawContent"))
+    @Test
+    fun `负向N3 旧逐粒子 addOval 必须被判据抓到`() {
+        assertTrue("负向 N3：旧的逐粒子 addOval 必须被 addOval 判据抓到",
+            usesPerParticleOval(OLD_SNIPPET_ADD_OVAL))
+        assertFalse("正向：新实现不得有 addOval",
+            usesPerParticleOval(classBody(codeOfE23(), "LyricsDotMatrixRenderer")))
+        // ⛔ 词边界：注释里提到 addOval 不算（判据只跑剥过注释的源码）
+        assertFalse("判据不得被注释里的 addOval 误伤（已剥注释）",
+            usesPerParticleOval(stripComments("// 旧码用 addOval 画点")))
     }
 
     // ═══════════════════════════ 辅助 ═══════════════════════════
@@ -272,6 +405,10 @@ class LyricsDotMatrixTest {
     private fun usesGetPixel(code: String): Boolean =
         Regex("""(?<![A-Za-z0-9_])getPixel\(""").containsMatchIn(code)
 
+    /** ⛔ 逐粒子椭圆（每帧上万次 JNI）—— 合批改造后必须归零 */
+    private fun usesPerParticleOval(code: String): Boolean =
+        Regex("""(?<![A-Za-z0-9_])addOval\(""").containsMatchIn(code)
+
     /** 旧实现片段（负向样本；**只**用于证明判据能抓到它） */
     private val OLD_SNIPPET_GETPIXEL = """
         for (y in 0 until bmpH step step) {
@@ -280,6 +417,14 @@ class LyricsDotMatrixTest {
                 if (b.getPixel(x, y) and 0xFF000000.toInt() != 0) cnt++
             }
         }
+    """.trimIndent()
+
+    /** 旧的逐粒子 `addOval`（负向样本；**只**用于证明判据能抓到它） */
+    private val OLD_SNIPPET_ADD_OVAL = """
+        paths[coreIdx].asAndroidPath().addOval(
+            px - size - size * 2f, py - size - size * 2f,
+            px - size + size * 2f, py - size + size * 2f,
+            android.graphics.Path.Direction.CCW)
     """.trimIndent()
 
     /** 切出 `class <name>` 的类体（到下一个顶层 class / 文件尾） */

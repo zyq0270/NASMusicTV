@@ -126,8 +126,10 @@ JAVA_HOME="C:/Program Files/Android/Android Studio/jbr" \
     ⛔ **移植件路径清单**（loficities.com 上游代码的翻译件/派生物，**上游无任何开源授权**）：
     `visualizer/pixel/**`、`visualizer/scenes/lofi/LofiCity*.kt`、生成表 `CityRegistry.kt`、
     `visualizer/renderers/LofiCityRenderer.kt`、`ui/components/LofiCityCard.kt`、`test/**/Lofi*Test.kt`、
-    `scripts/lofi_city_registry_sync.py`、`docs/archive/e51-lofi-city-plan.md`、
+    `scripts/lofi_city_registry_sync.py`、
     `docs/archive/verification/results/lofi_registry_*.json`。
+    ⚠️ `docs/archive/e51-lofi-city-plan.md` **不在此清单** —— 它是**我们自己的调研纪实**
+    （不含上游代码本体）⇒ 公开文档，2026-11-07 起已在 `main` 上。
   - ⛔ **不 push、不 tag、不发 release、不上传任何远端**。`feat/e51-private` **永远不随 `main` 推送**：
     ① 日常开发只 `git commit` 到该分支；② 该分支**不设 upstream**；③ 需要备份用 `git bundle` 落盘，
     ⛔ 不用推送代替备份；④ 仓库已是 **PUBLIC**，任何一次误推都会立刻公开。
@@ -144,6 +146,28 @@ JAVA_HOME="C:/Program Files/Android/Android Studio/jbr" \
   ⚠️ **残留（已知并接受）**：force-push 只改了 ref，旧 commit 对象仍在 GitHub 对象库中，
   知道 hash 的人仍可通过 API 拉取；`forks: 0`（无人复制出去），最新 Release 早于移植件提交。
   所有者 2026-10-23 决定**不**提交 GitHub 清缓存工单，此项按"接受残留"处理，**勿再主动重提**。
+
+- ⛔ **文档类资料是全局可公开的**（所有者 2026-11-07 裁决：「文档类的资料，是全局可公开的，要保证 main 分支和私有分支的内容一致」）
+  - ⭐ **文档不因为「只在某个分支存在」就自动私有** —— 判据仍是「是否含上游代码 / 是上游代码的翻译件或派生物本体」；
+    **我们自己的调研与研究不算代码公开**，当然可以公共发布（所有者同话：「附录中的内容是我们自己的研究，
+    不能算是代码公开。当然是可以公共发布的，无需隐藏」）。
+  - ⭐ **`main` 与私有分支 `feat/e51-private` 的文档内容必须一致（逐字节一致）** ——
+    `docs/technical-overview.md`、`docs/visualizer-effects-list.md`、
+    `docs/archive/e51-lofi-city-plan.md`、`docs/archive/e52-progress.md` 等，两边都要有、且内容相同。
+  - ⭐ **操作方式：写一份 → 覆盖到私有分支**（`git checkout main -- <路径>`）——
+    ⛔ **不要**用「cherry-pick + 手工合并 + 顺延编号」的方式同步文档
+    （那正是 2026-11-06 之前「main 底板 + 私有附录」结构下 §10.276 编号与 `main` 撞车的历史成因）。
+  - ⚠️ **唯一例外**：含**上游代码 / 上游代码的翻译件或派生物本体**的文件仍然私有
+    （E51/E52 的 loficities.com / Slow Roads **无任何开源授权** ⇒ 外发即侵权）：
+    两份 E52 原型 HTML（`docs/archive/e52-highway-preview.html` / `docs/archive/e52-highway-webgl-preview.html`）、
+    `docs/archive/verification/results/e52_golden_vectors.json`、
+    `docs/archive/verification/scripts/e52_highway_*.{mjs,js}`、`scripts/lofi_*`、`scripts/e52/**`、
+    `scripts/e51/tools/**`、E51/E52 的 Kotlin 源码与测试、E52 资产（`app/src/main/assets/e52_highway/`）、
+    debug 探针（`app/src/debug/**`）。
+  - ⚠️ **代码侧仍然是两分支不同**：被本地覆盖层遮蔽的那几份（`visualizer/e51/**`、`visualizer/highway/**`、
+    `ui/components/LofiCityCard.kt`、`visualizer/renderers/LofiCityRenderer.kt`、`visualizer/RenderContext.kt`、
+    `visualizer/VisualizerRendererFactory.kt`、`ui/components/VisualizerStage.kt`）
+    在私有分支上带真实现 ⇒ **必须原地改两处**，不能整份覆盖。
 
 - ⛔ **私有分支只保护「代码」；文档与其它文件一律公开**（所有者 2026-11-04 明示：「私有分支保护的只有代码，其他文档和其他文件都应该公开」）
   - ⭐ **判据只有一条：是否含上游代码 / 是上游代码的翻译件或派生物。**
@@ -228,26 +252,33 @@ JAVA_HOME="C:/Program Files/Android/Android Studio/jbr" \
   - **私有**（只在 `feat/e51-private`，⛔ 不 push）：
     · E51 / E52 的 **Kotlin 源码与测试**（`app/src/main/java/com/nasmusic/tv/visualizer/{e51,highway}/`、
       `app/src/test/java/com/nasmusic/tv/visualizer/{e51,highway}/`）
-    · ⭐ **文档的唯一例外**：私有分支的 `docs/technical-overview.md` =
-      **main 的全文 + 一个附录**（61 段私有独有章节：E51 城市 14–57 与 E52 各轮 ⇒ 编号
-      **§10.282–§10.342**，与 main 的末段 §10.281 顺延接上 ⇒ 全文档编号唯一）；
-      `docs/visualizer-effects-list.md` = main 的全文 + 私有的 E51 / E52 两行。
+    · ⭐ **文档：两个分支已完全一致（已不再是「私有的例外」）** —— 所有者 2026-11-07 改判
+      「文档类资料全局可公开」后，私有分支的 `docs/technical-overview.md` 与 `main` 上的
+      **逐字节一致**：原先 61 段私有独有附录（E51 城市 14–57 与 E52 各轮 ⇒ 编号
+      **§10.283–§10.343**）已于 2026-11-07 **整体移到 `main`**，它是 E51/E52 的
+      **落地纪实**，随文档其余部分一起公开；`docs/visualizer-effects-list.md` 的
+      E51 / E52 两行同样已在 `main` 上 ⇒ 两分支一致。
       ⇒ **为什么**：私有分支原先是 main 的**旧快照**，且 §10.276 等编号**与 main 撞车**
-      （同一个号既指 E51 城市段又指「洛雪音源」⇒ 引用含义不唯一）⇒ 2026-11-06 回灌成
-      「main 底板 + 私有附录」（main 的内容逐字保留为前缀，已校验）。
-      ⚠️ 回灌时**两份文档都要重跑**：私有分支改了 main 也在改的内容 ⇒ 先在 main 提交，
-      再 cherry-pick 到私有分支；私有分支独有的章节则只在私有分支追加。
+      （同一个号既指 E51 城市段又指「洛雪音源」⇒ 引用含义不唯一）⇒ 2026-11-06 曾回灌成
+      「main 底板 + 私有附录」（main 的内容逐字保留为前缀，已校验），2026-11-07 改判后
+      附录整体搬上 `main`，「私有附录」这层结构**已取消** ⇒ 两分支文档从此**逐字节一致**。
+      ⚠️ 同步文档**只走覆盖**：先在 `main` 提交，再 `git checkout main -- <路径>` 覆盖到私有分支；
+      ⛔ 不要 cherry-pick + 手工合并 + 顺延编号（那会重新制造编号撞车）。
     · **资产** `app/src/main/assets/e52_highway/`（上游 Slow Roads 贴图与模型）
     · **debug 探针** `app/src/debug/**`（GL probe / E52 的 P0 探针）
-    · **移植件与其工具**（`scripts/lofi_*`、`scripts/e52/**`、`docs/archive/e51-lofi-city-plan.md`、
+    · **移植件与其工具**（`scripts/lofi_*`、`scripts/e52/**`、`scripts/e51/tools/**`、
       `docs/archive/verification/results/lofi_registry_*.json`）
+      ⚠️ `docs/archive/e51-lofi-city-plan.md` **已于 2026-11-07 移出本清单** ——
+      它是**我们自己的调研纪实**（不是上游代码本体）⇒ 属公开文档，已在 `main` 上。
     · **两份 E52 原型 HTML**（`docs/archive/e52-highway-preview.html` / `docs/archive/e52-highway-webgl-preview.html`）
       —— 它们**是文档**，但**内含上游移植件** ⇒ 按「代码」处理 ⇒ 私有。
       同理 `docs/archive/verification/results/e52_golden_vectors.json`（上游数值向量）与
       `docs/archive/verification/scripts/e52_highway_*.{mjs,js}`（依赖私有原型）。
   - **公开**（两个分支保持一致）：`CHANGELOG.md`、`AGENTS.md`、`CLAUDE.md`、`app/build.gradle.kts`
     （含 `highway.enabled` / `lofi.city` 双变体开关，**CI 与公开构建缺省关闭**，故公开无害）、
-    `docs/**` 里除上述以外的全部、`scripts/` 里项目级通用工具、`.gitignore` 等、
+    `docs/**` 里除上述以外的全部（含 **`docs/archive/e51-lofi-city-plan.md`** —— 它是**我们自己的
+    调研纪实**，2026-11-07 已从私有分支搬到 `main`，属公开文档）、`scripts/` 里项目级通用工具、
+    `.gitignore` 等、
     以及 **E50「千里江山」的移植层与渲染器**（`app/src/main/java/com/nasmusic/tv/visualizer/qianli/**`、
     `app/src/main/java/com/nasmusic/tv/visualizer/renderers/QianliScrollRenderer.kt`、
     `app/src/test/java/com/nasmusic/tv/visualizer/qianli/**`；上游 MIT ⇒ 可再发布，见上一条的授权判据）。

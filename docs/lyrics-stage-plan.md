@@ -2895,7 +2895,7 @@ fun applyLyricsStageMode(delta: Int): Boolean {
 | RenderContext 扩展 | fume 需要全曲歌词数据，当前只有 current/next | 新增字段，由 VisualizerStage 的歌词源每帧更新 |
 | Intl.Segmenter | Android API 22 无 `Intl.Segmenter` | 用 `BreakIterator` 或手动 CJK 检测替代 grapheme 拆分 |
 | pretext 文字测量 | `@chenglou/pretext` 在 Android 无等价物 | 用 `Paint.measureText` 逐字测量 |
-| 现有 E23 兼容 | 用户可能已习惯 E23 作为独立主题 | `LYRICS_DOT_MATRIX` 主题保留不动 |
+| 现有 E23 兼容 | 用户可能已习惯 E23 作为独立主题 | `LYRICS_DOT_MATRIX` 主题已于 2026-11-07 下线：被本主题的**子模式 0** 吸收（渲染器保留，老用户存的值经 `LEGACY_MAP` 回落到 E53） |
 
 ---
 

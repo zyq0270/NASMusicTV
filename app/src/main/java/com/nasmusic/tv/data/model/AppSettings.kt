@@ -161,10 +161,10 @@ data class AppSettings(
 )
 
 /**
- * 可视化效果主题（28 套手动效果，无自动导演档）。
+ * 可视化效果主题（27 套手动效果，无自动导演档）。
  *
- * ⚠️ 计数口径：[VisualizerTheme.entries] 恒在册（28 项，与 lofi.city / highway.enabled
- * 两个编译期开关无关）；两个开关都关着时**可选**的是 26 套（`selectable()` 的过滤结果）。
+ * ⚠️ 计数口径：[VisualizerTheme.entries] 恒在册（27 项，与 lofi.city / highway.enabled
+ * 两个编译期开关无关）；两个开关都关着时**可选**的是 25 套（`selectable()` 的过滤结果）。
  *
  * ⚠️ 其中 [LOFI_CITY] 受编译期开关 `BuildConfig.LOFI_CITY_ENABLED` 控制，
  * **枚举项恒在册**（`entries.size` 与本机/CI 无关），只有 [selectable] 出的列表会过滤它。
@@ -196,7 +196,11 @@ enum class VisualizerTheme(
     LIQUID_RIPPLE(R.string.visualizer_theme_liquid_ripple, "液态涟漪", Tier.ADV, "15"),
     MATRIX_RAIN(R.string.visualizer_theme_matrix_rain, "数字雨", Tier.ADV, "16"),
     CONSTELLATION(R.string.visualizer_theme_constellation, "星座", Tier.ADV, "17"),
-    LYRICS_DOT_MATRIX(R.string.visualizer_theme_lyrics_dot_matrix, "歌词点阵", Tier.ADV, "23"),
+    // ⛔ E23「歌词点阵」（`"23"`）已于 2026-11-07 下线为**独立主题**：它的画面就是
+    //    E53「歌词舞台」的**子模式 0**（`DotMatrixSubRenderer` 委托同一个渲染器）⇒
+    //    保留两个入口只会让用户看到两份一模一样的东西。
+    //    渲染器**不删**（仍是子模式 0 的实现），只把主题入口收进 E53；
+    //    老用户存过的 `"LYRICS_DOT_MATRIX"` 见 [LEGACY_MAP] ⇒ 回落到 E53。
     HYPNOTIC_FUNCTION(R.string.visualizer_theme_hypnotic_function, "催眠", Tier.BASIC, "25"),
     ORBITAL_RINGS(R.string.visualizer_theme_orbital_rings, "太阳系", Tier.ADV, "29"),
     RADAR_GRID(R.string.visualizer_theme_radar_grid, "雷达", Tier.BASIC, "30"),
@@ -491,6 +495,7 @@ enum class VisualizerTheme(
      *
      * 一个主题内含 5 个**手动切换**的歌词子模式：
      *  0 歌词点阵（NASMusicTV E23 原创，复用现有 `LyricsDotMatrixRenderer`）
+     *    —— ⛔ E23 已于 2026-11-07 作为**独立主题**下线（被本主题吸收 ⇒ 见 [LEGACY_MAP]）
      *  1 逐字行光（移植自 Folia `classic`）
      *  2 全屏纵览（移植自 Folia `fume` —— 整曲版面 + 相机变换）
      *  3 倾斜律动（移植自 Folia `tilt`）
@@ -557,6 +562,11 @@ private val LEGACY_MAP = mapOf(
         // 虽然也回落到 Default，但那是「碰巧等价」；显式登记 = 固化迁移意图）。
         "ECG_WAVE" to CIRCULAR_RING,
         "MILKDROP_FEEDBACK" to CIRCULAR_RING,
+        // E23「歌词点阵」于 2026-11-07 被 E53「歌词舞台」**吸收**（E53 的**子模式 0**
+        // 就是点阵本身）⇒ 老用户存过的 `"LYRICS_DOT_MATRIX"` 回落到 **E53**（不是默认效果）：
+        // 画面不变（同一个渲染器），只是入口从「一个独立主题」变成「歌词舞台的第 0 个子模式」。
+        // ⛔ 与上面两条不同：它们没有更贴近的后继者 ⇒ 只能回落到默认 CIRCULAR_RING。
+        "LYRICS_DOT_MATRIX" to LYRICS_STAGE,
     )
 
         fun fromKey(key: String?): VisualizerTheme =

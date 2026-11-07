@@ -218,4 +218,29 @@ class LyricsDotMatrixDensityGateTest {
                 LyricsDotMatrixRenderer.MAX_PARTICLE_BUDGET
         )
     }
+
+    // ── ⑥ 合批改造（2026-11-07）不得把点阵密度/逐字粒度压掉 ──────
+
+    @Test
+    fun `⑥ 合批改造不得降低点阵密度 - 半径分档不得把逐字消散压成一档`() {
+        // 合批（`drawPoints`）的笔宽是**整批**的 ⇒ 半径必须分档。
+        // ⛔ 分档过粗 ⇒ 「逐字消散 / 逐字凝聚」退化成「整行一起缩放」⇒ 观感回退。
+        val buckets = (0 until 16)
+            .map { LyricsDotMatrixRenderer.visibilityBucketOf(it / 15f) }
+            .toSet()
+        assertTrue(
+            "16 个均匀可见度必须落到 ≥ 8 个不同的半径档（实测 ${buckets.size}）",
+            buckets.size >= 8
+        )
+        // ⛔ 负向：恒定 0 档的破实现只有 1 个档 ⇒ 判据必须能把它区分出来
+        val broken = (0 until 16).map { 0 }.toSet()
+        assertTrue(
+            "恒定 0 档的破实现必须被本判据区分出来",
+            broken.size < buckets.size
+        )
+        // 粒子预算（= 点阵密度）**不受**合批改造影响
+        assertEquals(3600, LyricsDotMatrixRenderer.capacityForTier(VisualQuality.MEDIUM))
+        assertEquals(3600, LyricsDotMatrixRenderer.capacityForTier(VisualQuality.HIGH))
+        assertEquals(900, LyricsDotMatrixRenderer.capacityForTier(VisualQuality.LOW))
+    }
 }

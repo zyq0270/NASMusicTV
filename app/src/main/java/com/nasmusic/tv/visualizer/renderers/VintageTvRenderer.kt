@@ -8,6 +8,8 @@ import android.graphics.Paint as AndroidPaint
 import android.graphics.RectF
 import android.graphics.Shader
 import android.graphics.Typeface
+import androidx.compose.runtime.State
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.RoundRect
@@ -26,6 +28,7 @@ import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.unit.IntOffset
 import com.nasmusic.tv.data.model.VisualizerTheme
 import com.nasmusic.tv.visualizer.AudioFrame
+import com.nasmusic.tv.visualizer.EffectFurniture
 import com.nasmusic.tv.visualizer.RenderContext
 import com.nasmusic.tv.visualizer.VisualizerRandom
 import com.nasmusic.tv.visualizer.VisualizerRenderer
@@ -63,6 +66,26 @@ import kotlin.math.sqrt
 class VintageTvRenderer : VisualizerRenderer {
 
     override val theme = VisualizerTheme.VINTAGE_TV
+
+    /**
+     * 本效果对**舞台叠加层**的诉求。
+     *
+     * - 整个电视画面就是歌词 ⇒ 顶部歌词提示条**不显示**（否则当前行会显两遍）。
+     * - 画面是 **4:3 内容区 + 两侧深色胶片边** ⇒ 内容区比例 = [ASPECT]。
+     *   ⛔ 比例**只在这里定义一次**（`ASPECT` 是本类的唯一真源）——
+     *      舞台据此把叠加层让开两侧黑边；渲染器自己也用同一个常量算画面区。
+     * - 内容区是**牛皮纸浅底**（#DBB98E）⇒ 落在内容区里的字要用**深色**墨。
+     */
+    private val stageFurniture = mutableStateOf(
+        EffectFurniture(
+            lyricTopBar = false,
+            songInfo = true,
+            contentAspect = ASPECT,
+            contentIsLight = true,
+        )
+    )
+
+    override val furniture: State<EffectFurniture> get() = stageFurniture
 
     // ── 随机源 ──────────────────────────────────────────────
     private val rng = VisualizerRandom()

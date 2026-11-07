@@ -1,11 +1,14 @@
 package com.nasmusic.tv.visualizer.renderers
 
+import androidx.compose.runtime.State
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
 import com.nasmusic.tv.data.model.VisualQuality
 import com.nasmusic.tv.data.model.VisualizerTheme
 import com.nasmusic.tv.visualizer.AudioFrame
+import com.nasmusic.tv.visualizer.EffectFurniture
 import com.nasmusic.tv.visualizer.RenderContext
 import com.nasmusic.tv.visualizer.VisualizerRenderer
 import com.nasmusic.tv.visualizer.renderers.lyricsStage.DotMatrixSubRenderer
@@ -40,6 +43,24 @@ import com.nasmusic.tv.visualizer.renderers.lyricsStage.TiltPulseSubRenderer
 class LyricsStageRenderer : VisualizerRenderer {
 
     override val theme = VisualizerTheme.LYRICS_STAGE
+
+    /**
+     * 本效果对**舞台叠加层**的诉求。
+     *
+     * ⛔ 5 个子模式**都自己绘制歌词** ⇒ 顶部歌词提示条**一律不显示**
+     *    （否则当前行会被显两遍 —— 字残重复）。
+     *
+     * ⚠️ 决策放在**主渲染器**这里，⛔ **不要**下沉到 5 个子渲染器 ——
+     *    子渲染器只管画面；「要不要舞台叠加层」是**整个效果**的诉求。
+     */
+    private val stageFurniture = mutableStateOf(
+        EffectFurniture(
+            lyricTopBar = false,
+            songInfo = true,
+        )
+    )
+
+    override val furniture: State<EffectFurniture> get() = stageFurniture
 
     /** 当前选中的子模式（FULL_VIEW 在非 HIGH 画质下被降级，见 [effectiveMode]） */
     private var mode: LyricsStageMode = LyricsStageMode.Default

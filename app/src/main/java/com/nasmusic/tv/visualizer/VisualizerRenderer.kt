@@ -2,6 +2,7 @@ package com.nasmusic.tv.visualizer
 
 import android.content.Context
 import android.view.View
+import androidx.compose.runtime.State
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import com.nasmusic.tv.data.model.VisualizerTheme
 
@@ -87,4 +88,16 @@ interface VisualizerRenderer {
      * Canvas 路径的既有 27 套渲染器**一行都不用改**（默认空实现）。
      */
     fun onFrame(frame: AudioFrame, ctx: RenderContext) {}
+
+    /**
+     * 本效果对**舞台叠加层**的诉求（默认「全显示」）。
+     *
+     * ⚠️ 类型是 [State]：效果可以在**运行期**改它（子模式切换等），舞台读了 `value`
+     *    ⇒ 自动重组。实现类要改就自己持一份 `mutableStateOf` 并覆写本属性；
+     *    ⛔ 不要写 [EffectFurniture.DEFAULT_STATE]（全局只读）。
+     *
+     * ⚠️ 默认实现 ⇒ 既有渲染器**一行都不用改**；新增效果也**不需要改舞台**
+     *    （舞台按本声明决定要不要画顶部歌词条 / 左下歌曲信息、内容区比例与墨色）。
+     */
+    val furniture: State<EffectFurniture> get() = EffectFurniture.DEFAULT_STATE
 }

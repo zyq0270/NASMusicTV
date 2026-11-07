@@ -1,7 +1,17 @@
 # E51「像素城市」开发方案 —— LoFi Cities 效果的复刻与本地化
 
+> ⚠️ **本文引用的上游源码与工具不随本文公开** —— 它们含上游（loficities.com）材料，
+> 而上游**无任何开源授权** ⇒ 外发即侵权 ⇒ 只留在私有分支 `feat/e51-private`
+> （以及本机一次性的 `logs_temp/` 目录）上：`scripts/e51/tools/**`、`scripts/e52/**`、
+> `logs_temp/lofi_modules/**`、`docs/archive/e52-highway-preview.html`、
+> `docs/archive/e52-highway-webgl-preview.html`、
+> `docs/archive/verification/results/e52_golden_vectors.json`、
+> `docs/archive/verification/results/lofi_registry_*.json`。
+> ⛔ 本文本身只是**我们自己的调研与研究**（不含上游代码本体）⇒ 按所有者 2026-11-07 裁决
+> 「文档类资料是全局可公开的」与 `main` 一并公开，两个分支内容一致。
+
 状态：**批量移植进行中**（P1 引擎 + P2 地球过场 + P3 首批三城已于 2026-10-22 落地，见 `docs/technical-overview.md` §10.270；「57 座全做」的批量移植曾于 12 座后被所有者叫停（§8.2），2026-10-23 起恢复逐城直译 + 每城编译对账，**截至 2026-10-27 已落地 57 / 57**（`SCENES_BUILT` 57 项，最新一座波士顿·橡子街见 §8.52）。⏳ **下一座取 `logs_temp/next_city.py` 的排序结果（最短的未开工城）**；§8.2/§8.5 的数字全是冻结态历史。编号 E51；E50 已被 `docs/archive/e50-qianli-jiangshan-plan.md` 预览方案占用。中文名 **像素城市** / 英文 **Pixel City**。
-> 📌 **文档公开，代码私有**：本文是开发分析与计划文档，已移至 `main` 分支公开。**E51 的 Kotlin 源码、测试、资产与 `loficities.com` 上游翻译件仍只在本地分支 `feat/e51-private`（⛔ 不 push、不 tag、不发 release）**。落地纪律与 git 后果见 **§2.6**。
+⛔ **最高优先级约束（所有者 2026-10-22 第二次版权裁决）**：**移植件一律不上传 GitHub、不随任何版本发布** —— 没有版权的代码不外发。此条**取代** §2 原先「风险归属由所有者承担」的口径，落地纪律与 git 后果见 **§2.6**。任何会话在 push / tag / 发 release 之前必须先读 §2.6。
 ✅ **可开工**：原开工门槛（§10 D-g 版权护栏、D-e 移植件留存）与命名（D-f「像素城市」）全部落定；§10 现存**一个开放项 D-m**（其它功能要 push 时如何把 E51 提交从待推历史里摘出去）。P0 探针在本机 `local.properties` 开 `lofi.city=true` 后开始（见 §2.5）。
 ⚠️ **未跑的阶段**：P0 真机探针（放大硬边 + 每帧成本）、§9 P3 要求的逐城地标相似度人工评分——两者都要上电视，本机做不了。
 上游参照：https://loficities.com/ （作者 Safa Elmali）

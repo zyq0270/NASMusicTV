@@ -3,11 +3,14 @@ package com.nasmusic.tv.visualizer.renderers
 import android.graphics.Bitmap
 import android.graphics.Canvas as AndroidCanvas
 import android.graphics.Paint as AndroidPaint
+import android.graphics.PorterDuff
+import android.graphics.PorterDuffXfermode
 import android.graphics.Typeface
-import androidx.compose.ui.graphics.BlendMode
-import androidx.compose.ui.graphics.asAndroidPath
-import androidx.compose.ui.graphics.Path
+import android.os.Build
+import androidx.annotation.RequiresApi
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.toArgb
 import com.nasmusic.tv.data.model.VisualizerTheme
 import com.nasmusic.tv.visualizer.AudioFrame
 import com.nasmusic.tv.visualizer.RenderContext
@@ -20,7 +23,14 @@ import kotlin.math.sin
 // ═══════════════════════════════════════════════════════════════════
 
 /**
- * E23 `LYRICS_DOT_MATRIX` — 全息粒子歌词（两行滚动版）
+ * 全息粒子歌词（两行滚动版）—— **E53「歌词舞台」的子模式 0**
+ * （原 E23「歌词点阵」独立主题，2026-11-07 下线并入 E53）
+ *
+ * ⚠️ **本类不再是独立主题**（2026-11-07，所有者裁决）：E23 被 E53「歌词舞台」**吸收** ——
+ * 它的画面就是 E53 的**子模式 0**，由 [com.nasmusic.tv.visualizer.renderers.lyricsStage.DotMatrixSubRenderer]
+ * 委托本类画出 ⇒ 枚举项 `VisualizerTheme.LYRICS_DOT_MATRIX` 已删除，主题名随宿主为
+ * `VisualizerTheme.LYRICS_STAGE`（下方 `theme` 覆写即为此故）。
+ * ⛔ 老用户存过的 `"LYRICS_DOT_MATRIX"` 由 `AppSettings.kt` 的 `LEGACY_MAP` 回落到 E53。
  *
  * 动画流程：
  * 1. 初始：两行同时凝聚
@@ -38,6 +48,7 @@ import kotlin.math.sin
  *   ⚠️ `floatY` 里的 `sin(globalT*2 + localX*10)` 含逐点 `localX`，**提不了**。
  * - **P4** 删死代码：`phaseVal`（零引用）、`textLen`（未使用形参）、`baseSize`（恒 1.0f）。
  * - **P5** `paths.reset()` → `rewind()`（保留内部数据结构供快速复用）。
+ *   ⛔ **2026-11-07 起本文件已无 `Path`**（见下方「合批改造」一节）⇒ P5 随之作废。
  * - **P6** `step` 3 → **1**（P2 之后采样已 < 1 ms ⇒ 近乎免费；同样 `cap` 个点覆盖更完整，
  *   点总数与每帧绘制成本**完全不变**）。
  *
@@ -50,12 +61,42 @@ import kotlin.math.sin
  *   **T1.6.2 已改用 `asAndroidPath().addOval(l, t, r, b)` float 重载** ⇒ `Rect` 分配早已为 0；
  *   P1 只剩「native 调用 9,000 → 7,416」的边际收益，却要付出半径 **6 档量化（≈ 8% 误差）**
  *   ⇒ 收益/代价不成立，**不做**。
+ *   ⛔ **2026-11-07 起这条已被「合批改造」整体取代**（`addOval` 本身已下线 ⇒ P1 无对象）。
  * - **Q3**（4 档亮度 / 8 条 `Path`）：§B7 标注为**可选**（需先确认重建成本），收益小、复杂度高 ⇒ 不做。
  *
  * ## ⚠️ 低画质的降密度（v1.47 真机：本套 7 fps，全档最慢）
- * 本套的 `drawPath` 提交次数已经是 **6 次/帧**（3 档亮度 × 2 层），无从再省；
- * 真正贵的是每次提交里装的**椭圆个数**。故低档只降 [capacityForTier] 的粒子上限，
- * 并按 [fontMaxRatio] 同步收缩字号上限以维持点阵密度（不缩字号 = 低档文字出空洞）。
+ * 本套的提交次数早已合批到位；贵的是每次提交里装的**点个数**。故低档只降 [capacityForTier]
+ * 的粒子上限，并按 [fontMaxRatio] 同步收缩字号上限以维持点阵密度（不缩字号 = 低档文字出空洞）。
+ *
+ * ## ✅ 合批改造（2026-11-07）：逐粒子 `addOval` → `drawPoints`（E53 子模式 0 的帧率根因）
+ *
+ * ### 病根：每帧上万次 JNI 调用
+ * 旧码为**每个粒子**调一次 `Path.addOval`（JNI）⇒ E53「歌词舞台」子模式 0
+ * （粒子上限 7200/行）实测 **≈ 11,700 次/帧** ⇒ 该子模式只能跑 **≈30 fps**。
+ * 且旧码把上万颗椭圆塞进 **6 条 `Path`** ⇒ 每帧还要为这条巨型路径做曲线细分。
+ *
+ * ### ✅ 改法：`Canvas.drawPoints(float[], offset, count, Paint)`
+ * - `Cap.ROUND` + `strokeWidth = 点直径` ⇒ 每个点画成一个**实心圆盘**，
+ *   与旧码的 `addOval`（圆心 `(px - size, py - size)`、半径 `2 * size`）**逐像素等价**；
+ * - 每帧的 native 提交从「上万次」降到「几十次」（每个非空子批次一次）。
+ * - ⛔ **不得**降粒子密度：那正是 2026-11-07 用户反馈「要再加多粒子」的诉求（见下一节）。
+ *
+ * ### ⚠️ `drawPoints` 的笔宽是**整批**的 ⇒ 半径必须分档
+ * 旧码是**逐粒子**的半径（`size` 随 `visibility` 变）⇒ 合批后必须按半径分组。
+ * 分档依据选的是 **`visibility`**（**逐字**量：消散 / 凝聚的逐字进度）⇒
+ * 「逐字消散 / 逐字凝聚」的粒度**保留**（[VIS_BUCKETS] = 16 档 ⇒ 半径步进 6.25%），
+ * 而不是退化成「整行一起缩放」。
+ * ⚠️ 两行**分开统计**（12 个缓冲而不是 6 条 path）：逐字消散 / 凝聚期间两行的半径分布差异极大
+ * （合并会让「正在消散」那行的半径污染另一行）⇒ 代表半径必须按行分开。
+ *
+ * ### ✅ 卡拉OK 扫描改为**逐帧**（同一轮修掉的第二个缺陷）
+ * `ctx.lyricLineProgress` 来自 `PlayerManager` 的 **1 Hz** 进度 StateFlow
+ * ⇒ 逐字扫描**每秒才跳一次**。宿主（E53 歌词舞台）手里的 `LyricsStagePayload`
+ * 是**逐帧**更新的（`timeSec` = 逐帧读到的播放位置）⇒ 由它推给本渲染器
+ * （[setLyricsProgressOverride]）。⚠️ 覆盖**带行索引**：宿主推的「当前行」与本渲染器
+ * **屏上**那一行可能差一帧 ⇒ 只有行索引对得上时才应用（[resolveLyricProgress]）。
+ * ⛔ E23 独立主题已下线 ⇒ **唯一宿主**（`DotMatrixSubRenderer`）逐帧推覆盖
+ *    ⇒ 覆盖**总是**生效（本类不再有 1 Hz 的场景）。
  *
  * ## ✅ 点阵密度修复（2026-11-07，用户反馈「要再加多粒子，现在都不够组成文字」）
  *
@@ -88,16 +129,17 @@ import kotlin.math.sin
  * 数字由 `scripts/measure_lyrics_dot_matrix_density.java` 再生（⛔ 不许手抄）。
  *
  * ### 作用面
- * 本文件既是 E23「歌词点阵」独立主题，也是 E53「歌词舞台」的子模式 0 ⇒ 两边都吃到 病根 ① 的修复。
+ * ⛔ 本类**不再作为独立主题**（2026-11-07 E23 下线并入 E53）⇒ 只作为 E53「歌词舞台」的
+ * **子模式 0** 被 [com.nasmusic.tv.visualizer.renderers.lyricsStage.DotMatrixSubRenderer] 委托。
  * 「加密度」本身（病根 ②）做成**宿主可开关的每实例预算覆盖** [setParticleBudget]，
- * 由 E53 歌词舞台**显式开启** ⇒ E23 独立主题的预算档位（3600 / 900）**保持不变**。
+ * 由 E53 歌词舞台**显式开启**（中/高档 3600 → 7200）。
  *
  * ## ⛔ 卡拉OK 逐字亮度分档必须保留（§13.5-D4）
- * 它不是性能瓶颈，删了反而更慢 —— 详见 [addLineToPaths] 内的守卫注释。
+ * 它不是性能瓶颈，删了反而更慢 —— 详见 [brightnessOf] 内的守卫注释。
  */
 class LyricsDotMatrixRenderer : RendererFx() {
 
-    override val theme = VisualizerTheme.LYRICS_DOT_MATRIX
+    override val theme = VisualizerTheme.LYRICS_STAGE
 
     /** §B7-Q4 收尾后处理（暗角 + 颗粒）。`FxLevel.OFF` 档位下整段零开销 */
     override val postFx = PostFx(vignette = 0.44f, grain = 0.026f)
@@ -120,8 +162,122 @@ class LyricsDotMatrixRenderer : RendererFx() {
     private var line0Text: String = ""
     private var line1Text: String = ""
 
-    // 6 条 Path：3 档亮度 × 2 层（批量绘制）
-    private val paths = Array(6) { Path() }
+    // ── 点批次（3 档亮度 × 2 层 × 2 行 = 12 个缓冲）────────────────────
+    //
+    // ⛔ 2026-11-07：**逐粒子 `Path.addOval` 已下线**。
+    //    旧码每帧为每个粒子调一次 `addOval`（JNI）⇒ E53「歌词舞台」子模式 0
+    //    实测 ≈ 11,700 次/帧 ⇒ 该子模式只能跑 ≈30 fps。
+    //    改为 `Canvas.drawPoints(float[], offset, count, Paint)`：
+    //    `Cap.ROUND` + `strokeWidth = 点直径` ⇒ 与旧 `addOval` **逐像素等价**，
+    //    而每帧的 native 提交从「上万次」降到「几十次」。
+    //
+    // 缓冲索引 = `(line * 3 + tier) * 2 + layer`（layer 0 = core，1 = glow）。
+    private val pointBuffers = Array(12) { FloatArray(0) }
+
+    /**
+     * 子批次的**点数**（第一遍统计的结果）。
+     *
+     * 子批次 = 缓冲 × **可见度分档**（见 [VIS_BUCKETS]）：`drawPoints` 的 `strokeWidth`
+     * 是**整批**的，而旧码是**逐粒子**的半径 ⇒ 必须把半径相近的粒子合成一批。
+     * 分档依据是 `visibility`（**逐字**量：消散/凝聚的逐字进度）⇒
+     * 分档后仍保留「逐字消散 / 逐字凝聚」的粒度，不会退化成整行一起缩放。
+     */
+    private val subCount = IntArray(SUB_BATCHES)
+
+    /** 子批次的 `size` 累计（第一遍统计用；第二遍取均值当代表半径） */
+    private val subSizeSum = FloatArray(SUB_BATCHES)
+
+    /** 子批次的**代表半径**（= `size` 均值；core 批） */
+    private val subRadius = FloatArray(SUB_BATCHES)
+
+    /** 子批次在其缓冲内的**起点**（单位 = **点**；写点/提交时 ×2 换成 float 下标） */
+    private val subOffset = IntArray(SUB_BATCHES)
+
+    /** 子批次的**写入游标**（第二遍写点用） */
+    private val subFill = IntArray(SUB_BATCHES)
+
+    /**
+     * 每粒子的档位/分档缓存（第一遍算出、第二遍复用）。
+     * 编码 = `tier * VIS_BUCKETS + bucket`；`-1` = 该粒子本帧不画。
+     * 前 [scratchStride] 个是上行、其后是下行。
+     */
+    private var tierScratch = ByteArray(0)
+
+    /** 每档（3 档 × 2 层）的最终颜色（逐帧刷新 ⇒ **成员**复用，⛔ 逐帧零分配） */
+    private val batchArgbs = IntArray(6)
+
+    /** [tierScratch] 的每行长度（= 每行粒子上限） */
+    private var scratchStride = 0
+
+    // ── 画笔（构造期成员 ⇒ 逐帧零分配）───────────────────────────
+
+    /**
+     * ⭐ 唯一一份加色混合模式对象（`Paint.setXfermode` 不拷贝，复用安全）。
+     * ⛔ 必须在 [pointPaint] **之前**声明（Kotlin 按声明顺序初始化）。
+     */
+    private val plusXfermode = PorterDuffXfermode(PorterDuff.Mode.ADD)
+
+    /**
+     * ⭐ 逐点合批的**唯一**画笔（`drawPoints` 用）。
+     *
+     * ⚠️ `strokeWidth` = 点的**直径**（旧码 `addOval` 的半径是 `2 * size` ⇒ 直径 `4 * size`），
+     *    `Cap.ROUND` ⇒ 每个点画成一个**实心圆盘** ⇒ 与旧码逐像素等价。
+     * ⛔ `Style.STROKE` 是必需的：`drawPoints` 只有在**描边**画笔下才按
+     *    `strokeWidth` 画圆点（填充画笔画的是 1~2 px 的小方块）。
+     */
+    private val pointPaint = AndroidPaint().apply {
+        style = AndroidPaint.Style.STROKE
+        strokeCap = AndroidPaint.Cap.ROUND
+        isAntiAlias = true
+        applyPlusBlend(this)
+    }
+
+    /**
+     * 把画笔设成「加色混合」——**逐档复刻** Compose 的 `BlendMode.Plus` 映射：
+     * API 29+ ⇒ `android.graphics.BlendMode.PLUS`；API < 29 ⇒ `PorterDuff.Mode.ADD`。
+     *
+     * ⛔ **不得**统一只用 `PorterDuff.Mode.ADD`：旧码走的是 Compose 的映射，
+     *    两档的硬件加速行为**不一定**等价 ⇒ 必须逐档一致（画面才不变）。
+     */
+    private fun applyPlusBlend(paint: AndroidPaint) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            applyPlusBlendApi29(paint)
+        } else {
+            paint.xfermode = plusXfermode
+        }
+    }
+
+    /**
+     * API 29+ 的加色混合。
+     *
+     * ⚠️ `android.graphics.BlendMode` 是 **API 29** 才有的类 ⇒ 必须隔离在
+     * `@RequiresApi` 方法里（否则老设备会在**类校验期**就炸，而不是等到执行到这里）。
+     */
+    @RequiresApi(Build.VERSION_CODES.Q)
+    private fun applyPlusBlendApi29(paint: AndroidPaint) {
+        paint.blendMode = android.graphics.BlendMode.PLUS
+    }
+
+    // ── 本帧共享量（逐帧刷新；只在本渲染器内使用）─────────────────
+    private var frameKProgress = 0f
+    private var frameBassPulse = 1f
+    private var frameGlobalT = 0f
+    private var frameSinB = 0f
+    private var frameAmp = 0f
+    private var frameEnergy = 0f
+
+    // ── 逐行绘制参数（逐帧重设；**两行轮流用同一份** ⇒ 调用前必须先重设）──
+    //
+    // ⚠️ **刻意用扁平的成员字段而不是一个嵌套 class** —— 本仓库的门禁
+    //    （`LyricsDotMatrixTest` 的 `classBody`）按「下一个**顶层** class」截断类体，
+    //    类里再嵌一个 class 就会把类体截断 ⇒ 门禁读不到后面的函数。
+    private var lineIsSinging = false
+    private var lineIsScattering = false
+    private var lineScatterElapsedMs = 0L
+    private var lineIsCoalescing = false
+    private var lineCoalesceElapsedMs = 0L
+    private var lineYOffset = 0f
+    private var lineHasLyrics = false
 
     // ── §B7-P2 采样缓冲（首次采样时分配一次，此后复用 ⇒ 零分配）──
     /** 逐行批读缓冲（长度 ≥ `bmpW`）。⛔ 只读**当前行**，不整图读（§B7 R12） */
@@ -190,13 +346,61 @@ class LyricsDotMatrixRenderer : RendererFx() {
      * 设置每行粒子上限覆盖（<= 0 表示恢复档位默认）。
      *
      * 供宿主（如 E53「歌词舞台」子模式 0）按需**加密度**用：
-     * E23「歌词点阵」独立主题不调用它 ⇒ 其预算档位（3600 / 900）保持不变。
+     * ⚠️ 唯一调用方是 E53「歌词舞台」的子模式 0 ⇒ 它**总是**被调用（中/高档 ×2）。
      *
      * @param perLine 每行粒子数上限
      */
     internal fun setParticleBudget(perLine: Int) {
         particleBudgetOverride = perLine.coerceIn(0, MAX_PARTICLE_BUDGET)
     }
+
+    // ── 逐帧行内进度覆盖（宿主推入）──────────────────────────────
+
+    /**
+     * **逐帧**行内进度覆盖（0..1）。`-1f` = 无覆盖。
+     *
+     * ⛔ [RenderContext.lyricLineProgress] 是 **1 Hz** 的（它来自 `PlayerManager` 的
+     *    1 Hz 进度 StateFlow）⇒ 卡拉OK 的逐字扫描**每秒才跳一次**。
+     *    E53「歌词舞台」的 `LyricsStagePayload` 则是**逐帧**更新的
+     *    （`timeSec` = 逐帧读到的播放位置）⇒ 宿主可把它推给本渲染器。
+     */
+    private var progressOverride = -1f
+
+    /**
+     * 覆盖所属的**歌词行索引**（与 [RenderContext.lyricLineIndex] 同一套索引）。
+     * `-1` = 无覆盖。
+     *
+     * ⚠️ **必须带行索引**：宿主推的是「当前正在唱的那一行」的进度，
+     *    而本渲染器**屏上**那一行未必是它（`ctx.lyricLineIndex` 是 1 Hz 的、
+     *    `payload.currentIndex` 是逐帧的 ⇒ 两者可差一帧）⇒
+     *    只有行索引对得上时才应用覆盖（见 [resolveLyricProgress]）。
+     */
+    private var progressOverrideLine = -1
+
+    /**
+     * 设置逐帧行内进度覆盖。
+     *
+     * @param lineIndex 该进度所属的歌词行索引
+     * @param progress 行内进度（0..1，超出范围会被夹住）
+     */
+    internal fun setLyricsProgressOverride(lineIndex: Int, progress: Float) {
+        progressOverrideLine = lineIndex
+        progressOverride = progress
+    }
+
+    /** 清除逐帧行内进度覆盖 ⇒ 回退到 [RenderContext.lyricLineProgress]（1 Hz） */
+    internal fun clearLyricsProgressOverride() {
+        progressOverrideLine = -1
+        progressOverride = -1f
+    }
+
+    /**
+     * 本渲染器**当前正在唱**（卡拉OK 扫过）的那一行在歌词表里的索引。
+     *
+     * ⚠️ 它是**本渲染器自己的行号**（[displayedLineIndex]），未必等于宿主的
+     *    `payload.currentIndex` ⇒ 宿主推覆盖时必须用它来配对。
+     */
+    internal fun singingLineIndex(): Int = displayedLineIndex
 
     /**
      * 字号上限所用的预算档（见 companion 的 [fontBudgetCap]）。
@@ -261,6 +465,11 @@ class LyricsDotMatrixRenderer : RendererFx() {
         line1CharIdx = IntArray(cap)
         line0LocalX = FloatArray(cap)
         line1LocalX = FloatArray(cap)
+        // 点批次缓冲：每个（行 × 档 × 层）一批，每批 ≤ 该行粒子上限个点（2 float/点）
+        // ⚠️ 只在这里分配一次 ⇒ 绘制路径零分配（`PerfBudgetContractTest` 的硬要求）。
+        for (i in pointBuffers.indices) pointBuffers[i] = FloatArray(cap * 2)
+        tierScratch = ByteArray(cap * 2)
+        scratchStride = cap
         line0Count = 0
         line1Count = 0
         line0Text = ""
@@ -284,6 +493,9 @@ class LyricsDotMatrixRenderer : RendererFx() {
         line1CharIdx = IntArray(0)
         line0LocalX = FloatArray(0)
         line1LocalX = FloatArray(0)
+        for (i in pointBuffers.indices) pointBuffers[i] = FloatArray(0)
+        tierScratch = ByteArray(0)
+        scratchStride = 0
         line0Count = 0
         line1Count = 0
     }
@@ -654,7 +866,13 @@ class LyricsDotMatrixRenderer : RendererFx() {
         updateLine1(frame, elapsed, w, h)
 
         // ── 批量绘制 ────────────────────────────────────────
-        val lineProgress = if (hasLyrics) ctx.lyricLineProgress.coerceIn(0f, 1f) else 1f
+        // 行内进度：**优先**用宿主持有的**逐帧**覆盖（E53 歌词舞台推入），
+        // 否则回退到 [RenderContext.lyricLineProgress]（1 Hz ⇒ 扫描每秒才跳一次）。
+        val lineProgress = if (hasLyrics) {
+            resolveLyricProgress(
+                progressOverrideLine, progressOverride, displayedLineIndex, ctx.lyricLineProgress
+            )
+        } else 1f
         val kProgress = karaokePacing(lineProgress)
 
         val accent = ctx.palette.accent
@@ -671,184 +889,261 @@ class LyricsDotMatrixRenderer : RendererFx() {
         val sinB = sin(t * 2.0f)
         val amp = 2.2f * (0.35f + frame.bass.coerceIn(0f, 1f) * 2.2f)
 
-        // §B7-P5：`rewind()` 保留内部数据结构供快速复用（`reset()` 会丢弃）
-        for (p in paths) p.rewind()
+        // 本帧共享量（逐帧刷新；供下面的两遍扫描用 ⇒ 零分配）
+        frameKProgress = kProgress
+        frameBassPulse = bassPulse
+        frameGlobalT = t
+        frameSinB = sinB
+        frameAmp = amp
+        frameEnergy = frame.energy
 
-        // 绘制上行
-        if (line0Count > 0) {
-            val line0Singing = phase != Phase.SCATTERING_TOP
-            addLineToPaths(
-                arr = line0,
-                count = line0Count,
-                charIndices = line0CharIdx,
-                localXs = line0LocalX,
-                yOffset = rowOffsetY,
-                isSinging = line0Singing,
-                isScattering = phase == Phase.SCATTERING_TOP,
-                scatterElapsedMs = if (phase == Phase.SCATTERING_TOP) elapsed else 0L,
-                kProgress = kProgress,
-                hasLyrics = hasLyrics,
-                bassPulse = bassPulse,
-                globalT = t,
-                sinB = sinB,
-                amp = amp,
-                frame = frame,
-                activeHue = activeHue
-            )
-        }
+        // ── 两遍扫描 + 合批提交 ───────────────────────────────
+        // 第一遍：统计每个子批次的点数与代表半径（`drawPoints` 的笔宽是**整批**的
+        //         ⇒ 必须先知道每批的半径才能写点：点的坐标含 `-半径` 的偏移）
+        // 第二遍：把点写进各子批次的区间
+        // 第三步：每个**非空**子批次一次 `drawPoints`
+        resetSubBatches()
 
-        // 绘制下行
-        if (line1Count > 0) {
-            val line1Singing = false // 下行永远不处于"正在唱"状态
-            val line1Coalescing = phase == Phase.SHIFTING
-            val line1CoalesceElapsed = if (line1Coalescing) elapsed else 0L
+        // 上行（正在唱 / 正在消散）
+        lineIsSinging = phase != Phase.SCATTERING_TOP
+        lineIsScattering = phase == Phase.SCATTERING_TOP
+        lineScatterElapsedMs = if (phase == Phase.SCATTERING_TOP) elapsed else 0L
+        lineIsCoalescing = false
+        lineCoalesceElapsedMs = 0L
+        lineYOffset = rowOffsetY
+        lineHasLyrics = hasLyrics
+        measureLine(line0Count, line0CharIdx, line0LocalX, 0)
+        finalizeSubBatches()
+        fillLine(line0, line0Count, line0LocalX, 0)
 
-            addLineToPaths(
-                arr = line1,
-                count = line1Count,
-                charIndices = line1CharIdx,
-                localXs = line1LocalX,
-                yOffset = rowOffsetY,
-                isSinging = line1Singing,
-                isScattering = false,
-                scatterElapsedMs = 0L,
-                kProgress = 0f,
-                hasLyrics = hasLyrics && line1Text.isNotBlank(),
-                bassPulse = bassPulse,
-                globalT = t,
-                sinB = sinB,
-                amp = amp,
-                frame = frame,
-                activeHue = activeHue,
-                isCoalescing = line1Coalescing,
-                coalesceElapsedMs = line1CoalesceElapsed
-            )
-        }
+        // 下行（永远不处于「正在唱」状态；SHIFTING 阶段逐字凝聚）
+        lineIsSinging = false
+        lineIsScattering = false
+        lineScatterElapsedMs = 0L
+        lineIsCoalescing = phase == Phase.SHIFTING
+        lineCoalesceElapsedMs = if (phase == Phase.SHIFTING) elapsed else 0L
+        lineYOffset = rowOffsetY
+        lineHasLyrics = hasLyrics && line1Text.isNotBlank()
+        measureLine(line1Count, line1CharIdx, line1LocalX, 1)
+        finalizeSubBatches()
+        fillLine(line1, line1Count, line1LocalX, 1)
 
-        // 实际绘制 Paths（暗 → 中 → 亮，Plus 混合）
-        // 暗档
-        drawPath(paths[1], VisualizerMath.hsl(200f, 0.3f, 0.7f),
-            alpha = 0.10f, blendMode = BlendMode.Plus)
-        drawPath(paths[0], VisualizerMath.hsl(200f, 0.25f, 0.65f),
-            alpha = 0.45f, blendMode = BlendMode.Plus)
-
-        // 中档
-        val midHue = VisualizerMath.hueGradient(200f, activeHue, 0.6f)
-        drawPath(paths[3], VisualizerMath.hsl(midHue, 0.75f, 0.7f),
-            alpha = 0.22f, blendMode = BlendMode.Plus)
-        drawPath(paths[2], VisualizerMath.hsl(midHue, 0.85f, 0.65f),
-            alpha = 0.60f, blendMode = BlendMode.Plus)
-
-        // 亮档（§B7-Q2：core 峰值 0.98 → 0.76，省下的亮度给外辉光 ⇒ 亮部仍有边界，不再"曝白"）
-        drawPath(paths[5], VisualizerMath.hsl(activeHue, 1.0f, 0.75f),
-            alpha = 0.26f + frame.pulse * 0.10f, blendMode = BlendMode.Plus)
-        drawPath(paths[4], VisualizerMath.hsl(activeHue, 1.0f, 0.7f),
-            alpha = 0.62f + frame.pulse * 0.14f, blendMode = BlendMode.Plus)
+        drawPointBatches(activeHue, frame.pulse)
     }
 
-    // ── 将一行粒子添加到 Path 中 ────────────────────────────
+    // ── 两遍扫描：统计 → 写点 ────────────────────────────────
 
-    private fun addLineToPaths(
-        arr: FloatArray,
+    /** 清空本帧的子批次统计（逐帧 ⇒ 只清计数，**不重新分配**） */
+    private fun resetSubBatches() {
+        for (i in subCount.indices) {
+            subCount[i] = 0
+            subSizeSum[i] = 0f
+            subRadius[i] = 0f
+            subOffset[i] = 0
+            subFill[i] = 0
+        }
+    }
+
+    /**
+     * 第一遍：统计每个子批次的**点数**与**代表半径**。
+     *
+     * ⛔ **不得**在这里写点：`drawPoints` 的 `strokeWidth` 是**整批**的，
+     *    而旧码是**逐粒子**的半径 ⇒ 必须先知道每批的半径（= 批内 `size` 的均值）才能写点。
+     *
+     * ⚠️ 分档依据是 `visibility`（**逐字**量）⇒ 「逐字消散 / 逐字凝聚」的粒度保留。
+     */
+    private fun measureLine(
         count: Int,
         charIndices: IntArray,
         localXs: FloatArray,
-        yOffset: Float,
-        isSinging: Boolean,
-        isScattering: Boolean,
-        scatterElapsedMs: Long,
-        kProgress: Float,
-        hasLyrics: Boolean,
-        bassPulse: Float,
-        globalT: Float,
-        sinB: Float,
-        amp: Float,
-        frame: AudioFrame,
-        activeHue: Float,
-        isCoalescing: Boolean = false,
-        coalesceElapsedMs: Long = 0L
+        lineIdx: Int
     ) {
+        if (count <= 0) return
+        val base = lineIdx * scratchStride
         for (i in 0 until count) {
-            val o = i * STRIDE
             val ci = charIndices[i]
-            val localX = localXs[i]
-
-            // 计算该字的可见度（消散/凝聚）
-            val visibility = when {
-                isScattering -> {
-                    val charDelay = ci * scatterPerCharMs
-                    val charElapsed = scatterElapsedMs - charDelay
-                    if (charElapsed <= 0) 1f
-                    else (1f - charElapsed.toFloat() / scatterFlyMs).coerceIn(0f, 1f)
-                }
-                isCoalescing -> {
-                    val charDelay = ci * coalescePerCharMs
-                    val charElapsed = coalesceElapsedMs - charDelay
-                    if (charElapsed <= 0) 0f
-                    else (charElapsed.toFloat() / coalesceArriveMs).coerceIn(0f, 1f)
-                }
-                else -> 1f
+            val visibility = visibilityOf(ci)
+            if (visibility <= 0.01f) {
+                tierScratch[base + i] = -1
+                continue
             }
-
-            if (visibility <= 0.01f) continue
-
-            // 卡拉OK亮度（仅正在唱的行）。
-            // ⛔ **不得以“性能”为由删除**（§13.5-D4 / §B7 专项评估）：实测每点仅 +4 比较 +4 乘除、
-            //    0 分配 0 JNI、`drawPath` 恒 6 次；删掉后统一取"正在唱"会让 oval 数 **+60%**（更慢），
-            //    统一取"待唱"则丢掉逐字推进感。它是"字色逐字变化"观感的唯一来源。
-            val brightness = when {
-                !hasLyrics -> 0.9f
-                !isSinging -> 0.25f + frame.energy * 0.08f  // 待唱行：暗
-                else -> {
-                    val dist = localX - kProgress
-                    when {
-                        dist < -0.02f -> 0.78f
-                        dist <= 0.02f -> 1.0f
-                        else -> 0.18f + frame.energy * 0.07f
-                    }
-                }
-            }
-
-            val tier = when {
-                brightness * visibility > 0.88f -> 2
-                brightness * visibility > 0.45f -> 1
-                else -> 0
-            }
-
-            // 整体呼吸：所有粒子用同一全局相位同步缩放（避免各粒子独立相位造成的“抖动感”）
+            val brightness = brightnessOf(localXs[i])
+            val tier = tierOf(brightness, visibility)
+            // 整体呼吸：所有粒子用同一全局相位同步缩放（避免各粒子独立相位造成的「抖动感」）
             // §B7-P3：`sinB` 已提到循环外；`baseSize` 恒为 1.0f（`sampleLine` 是唯一写入点）⇒ 内联
-            val breath = 1f + sinB * 0.10f * (0.25f + brightness * 0.75f)
-            val size = breath * breath * bassPulse * (0.85f + brightness * 0.4f) * visibility
+            val breath = 1f + frameSinB * 0.10f * (0.25f + brightness * 0.75f)
+            val size = breath * breath * frameBassPulse * (0.85f + brightness * 0.4f) * visibility
+            if (size < 0.3f) {
+                tierScratch[base + i] = -1
+                continue
+            }
+            val bucket = visibilityBucket(visibility)
+            tierScratch[base + i] = (tier * VIS_BUCKETS + bucket).toByte()
+            val core = subIndex(lineIdx, tier, LAYER_CORE, bucket)
+            subCount[core]++
+            subSizeSum[core] += size
+            if (tier >= 1) subCount[subIndex(lineIdx, tier, LAYER_GLOW, bucket)]++
+        }
+    }
 
+    /** 统计完一行后：算出各子批次的代表半径与在缓冲内的起点 */
+    private fun finalizeSubBatches() {
+        for (bufIdx in 0 until 12) {
+            var off = 0
+            for (b in 0 until VIS_BUCKETS) {
+                val sub = bufIdx * VIS_BUCKETS + b
+                subOffset[sub] = off
+                off += subCount[sub]
+                subRadius[sub] = if (subCount[sub] > 0) subSizeSum[sub] / subCount[sub] else 0f
+            }
+        }
+    }
+
+    /**
+     * 第二遍：把粒子写进各子批次的点缓冲。
+     *
+     * ⚠️ 几何逐像素对齐旧码的 `addOval`：
+     *   旧码圆心 = `(px - size, py - size)`、半径 = `size * 2` ⇒ 直径 `4 * size`；
+     *   ⇒ 这里把点放在 `(px - size, py - size)`、笔宽给 `4 * size`（`Cap.ROUND` ⇒ 实心圆盘）。
+     */
+    private fun fillLine(
+        arr: FloatArray,
+        count: Int,
+        localXs: FloatArray,
+        lineIdx: Int
+    ) {
+        if (count <= 0) return
+        val base = lineIdx * scratchStride
+        for (i in 0 until count) {
+            val code = tierScratch[base + i].toInt()
+            if (code < 0) continue
+            val tier = code shr VIS_BUCKET_BITS
+            val bucket = code and (VIS_BUCKETS - 1)
+            val core = subIndex(lineIdx, tier, LAYER_CORE, bucket)
+            val size = subRadius[core]
+            val o = i * STRIDE
             val px = arr[o + X]
             // 节奏性律动：所有粒子同步以低音（bass）驱动上下起伏，
             // 叠加一个依赖粒子横向位置的固定波相位，形成整行的规整波浪，
             // 鼓点（bass 峰值）到来时浮动幅度增大，节奏感强、不发散。
             // §B7-P3：`amp` 已提到循环外；此处只剩含逐点 `localX` 的那次 `sin`（提不了）
-            val floatY = sin(globalT * 2.0f + localX * 10f) * amp
-            val py = arr[o + Y] + yOffset + floatY
-
-            if (size < 0.3f) continue
-
-            val coreIdx = tier * 2
-            // T1.6.2（§四 G15）：float addOval 零 Rect 分配（本渲染器每帧上万次 oval，分配大头）。
-            // ⛔ 几何逐像素对齐旧码 `Rect(Offset(px - size, py - size), size * 2f)`：
-            //   圆心 = (px - size, py - size)、半径 = size*2 ⇒ l/t = center - r、r/b = center + r。
-            paths[coreIdx].asAndroidPath().addOval(
-                px - size - size * 2f, py - size - size * 2f,
-                px - size + size * 2f, py - size + size * 2f,
-                android.graphics.Path.Direction.CCW)
-
+            val floatY = sin(frameGlobalT * 2.0f + localXs[i] * 10f) * frameAmp
+            val py = arr[o + Y] + lineYOffset + floatY
+            writePoint(core, px - size, py - size)
             if (tier >= 1) {
-                val glowIdx = tier * 2 + 1
-                val glowR = size * (if (tier == 2) 2.2f else 1.4f)
-                // 同上：旧码圆心 (px - glowR, py - glowR)、半径 glowR*2
-                paths[glowIdx].asAndroidPath().addOval(
-                    px - glowR - glowR * 2f, py - glowR - glowR * 2f,
-                    px - glowR + glowR * 2f, py - glowR + glowR * 2f,
-                    android.graphics.Path.Direction.CCW)
+                val glow = subIndex(lineIdx, tier, LAYER_GLOW, bucket)
+                val glowR = size * if (tier == 2) GLOW_FACTOR_TIER2 else GLOW_FACTOR_TIER1
+                writePoint(glow, px - glowR, py - glowR)
             }
         }
+    }
+
+    /** 把一个点写进子批次的点缓冲（x, y 交替） */
+    private fun writePoint(sub: Int, x: Float, y: Float) {
+        val buf = pointBuffers[sub / VIS_BUCKETS]
+        val idx = (subOffset[sub] + subFill[sub]++) * 2
+        buf[idx] = x
+        buf[idx + 1] = y
+    }
+
+    /** 该粒子的可见度（消散 / 凝聚的逐字进度；稳态恒 1） */
+    private fun visibilityOf(ci: Int): Float = when {
+        lineIsScattering -> {
+            val charElapsed = lineScatterElapsedMs - ci * scatterPerCharMs
+            if (charElapsed <= 0) 1f
+            else (1f - charElapsed.toFloat() / scatterFlyMs).coerceIn(0f, 1f)
+        }
+        lineIsCoalescing -> {
+            val charElapsed = lineCoalesceElapsedMs - ci * coalescePerCharMs
+            if (charElapsed <= 0) 0f
+            else (charElapsed.toFloat() / coalesceArriveMs).coerceIn(0f, 1f)
+        }
+        else -> 1f
+    }
+
+    /**
+     * 卡拉OK亮度（仅正在唱的行）。
+     * ⛔ **不得以“性能”为由删除**（§13.5-D4 / §B7 专项评估）：它是「字色逐字变化」观感的唯一来源；
+     *    删掉后统一取「正在唱」会让亮点数 **+60%**（更慢），统一取「待唱」则丢掉逐字推进感。
+     */
+    private fun brightnessOf(localX: Float): Float = when {
+        !lineHasLyrics -> 0.9f
+        !lineIsSinging -> 0.25f + frameEnergy * 0.08f  // 待唱行：暗
+        else -> {
+            val dist = localX - frameKProgress
+            when {
+                dist < -0.02f -> 0.78f
+                dist <= 0.02f -> 1.0f
+                else -> 0.18f + frameEnergy * 0.07f
+            }
+        }
+    }
+
+    /** 亮度分档（0 / 1 / 2） */
+    private fun tierOf(brightness: Float, visibility: Float): Int = when {
+        brightness * visibility > 0.88f -> 2
+        brightness * visibility > 0.45f -> 1
+        else -> 0
+    }
+
+    /** 可见度分档（`drawPoints` 的笔宽是整批的 ⇒ 半径相近的粒子必须合成一批） */
+    private fun visibilityBucket(visibility: Float): Int = visibilityBucketOf(visibility)
+
+    /**
+     * 合批提交：每个**非空**子批次一次 `drawPoints`。
+     *
+     * ⚠️ 旧码是 6 次 `drawPath`（3 档 × 2 层，两行合并在同一条 path 里）；
+     *    新码按**行**分开（12 个缓冲），因为逐字消散 / 凝聚期间两行的半径分布差异极大
+     *    （合并会让「正在消散」那行的半径污染另一行）⇒ 代表半径必须按行分开统计。
+     */
+    private fun DrawScope.drawPointBatches(activeHue: Float, pulse: Float) {
+        val canvas = drawContext.canvas.nativeCanvas
+        val midHue = VisualizerMath.hueGradient(200f, activeHue, 0.6f)
+        // 每档（3 档 × 2 层）的最终颜色 —— 逐帧算一次（⛔ 零分配：复用成员 IntArray）
+        val argbs = batchArgbs
+        argbs[0] = argbWithAlpha(hslArgb(200f, 0.3f, 0.7f), 0.10f)                                  // 暗档 glow
+        argbs[1] = argbWithAlpha(hslArgb(200f, 0.25f, 0.65f), 0.45f)                                // 暗档 core
+        argbs[2] = argbWithAlpha(hslArgb(midHue, 0.75f, 0.7f), 0.22f)                               // 中档 glow
+        argbs[3] = argbWithAlpha(hslArgb(midHue, 0.85f, 0.65f), 0.60f)                              // 中档 core
+        argbs[4] = argbWithAlpha(hslArgb(activeHue, 1.0f, 0.75f), 0.26f + pulse * 0.10f)             // 亮档 glow
+        argbs[5] = argbWithAlpha(hslArgb(activeHue, 1.0f, 0.7f), 0.62f + pulse * 0.14f)              // 亮档 core
+
+        for (lineIdx in 0 until 2) {
+            for (tier in 0 until 3) {
+                // glow 在 core 之前（与旧码同序；`Plus` 是加法 ⇒ 顺序本不影响结果）
+                for (layer in 1 downTo 0) {
+                    if (layer == LAYER_GLOW && tier == 0) continue   // 暗档没有外辉光
+                    val bufIdx = (lineIdx * 3 + tier) * 2 + layer
+                    val buf = pointBuffers[bufIdx]
+                    if (buf.isEmpty()) continue
+                    val coreBufIdx = (lineIdx * 3 + tier) * 2 + LAYER_CORE
+                    for (b in 0 until VIS_BUCKETS) {
+                        val sub = bufIdx * VIS_BUCKETS + b
+                        val n = subCount[sub]
+                        if (n <= 0) continue
+                        val coreRadius = subRadius[coreBufIdx * VIS_BUCKETS + b]
+                        val radius = if (layer == LAYER_GLOW) {
+                            coreRadius * if (tier == 2) GLOW_FACTOR_TIER2 else GLOW_FACTOR_TIER1
+                        } else {
+                            coreRadius
+                        }
+                        pointPaint.strokeWidth = radius * 4f
+                        pointPaint.color = argbs[tier * 2 + layer]
+                        canvas.drawPoints(buf, subOffset[sub] * 2, n * 2, pointPaint)
+                    }
+                }
+            }
+        }
+    }
+
+    /** HSL 色的 ARGB（Compose `Color` → 原生 int；alpha 恒 255） */
+    private fun hslArgb(hue: Float, saturation: Float, lightness: Float): Int =
+        VisualizerMath.hsl(hue, saturation, lightness).toArgb()
+
+    /** 给 ARGB 套上 alpha（0..1） */
+    private fun argbWithAlpha(argb: Int, alpha: Float): Int {
+        val a = (alpha.coerceIn(0f, 1f) * 255f).toInt().coerceIn(0, 255)
+        return (a shl 24) or (argb and 0x00FFFFFF)
     }
 
     // ── 粒子物理更新 ────────────────────────────────────────
@@ -1009,6 +1304,99 @@ class LyricsDotMatrixRenderer : RendererFx() {
         private const val SIZE = 6
         private const val PHASE = 7
         private const val STRIDE = 8
+
+        // ── 点批次结构（3 档亮度 × 2 层 × 2 行 × 可见度分档）────────────
+
+        /** core 层（点本体） */
+        internal const val LAYER_CORE = 0
+
+        /** glow 层（外辉光） */
+        internal const val LAYER_GLOW = 1
+
+        /**
+         * **可见度分档数** —— `drawPoints` 的 `strokeWidth` 是**整批**的，
+         * 而旧码是**逐粒子**的半径 ⇒ 半径相近的粒子必须合成一批。
+         *
+         * ⚠️ 分档依据是 `visibility`（**逐字**量：消散 / 凝聚的逐字进度）⇒
+         *    「逐字消散 / 逐字凝聚」的粒度保留（16 档 ⇒ 半径步进 6.25%）。
+         */
+        internal const val VIS_BUCKETS = 16
+
+        /** 分档数的位宽（编码进 `tierScratch` 的一个字节里） */
+        internal const val VIS_BUCKET_BITS = 4
+
+        /** 子批次总数 = 2 行 × 3 档 × 2 层 × [VIS_BUCKETS] */
+        internal const val SUB_BATCHES = 2 * 3 * 2 * VIS_BUCKETS
+
+        /** 外辉光半径系数：亮档 */
+        internal const val GLOW_FACTOR_TIER2 = 2.2f
+
+        /** 外辉光半径系数：中档 */
+        internal const val GLOW_FACTOR_TIER1 = 1.4f
+
+        /**
+         * 可见度 → 分档（**纯函数**，门禁可直接调）。
+         *
+         * ⚠️ 必须**单调**且能区分不同的可见度 ⇒ 「逐字消散 / 逐字凝聚」的粒度才保留
+         *    （否则整行会一起缩放 ⇒ 逐字效果消失）。
+         *
+         * @param visibility 可见度（0..1）
+         */
+        internal fun visibilityBucketOf(visibility: Float): Int =
+            (visibility * VIS_BUCKETS).toInt().coerceIn(0, VIS_BUCKETS - 1)
+
+        /**
+         * 子批次索引（**纯函数**，门禁可直接调）。
+         *
+         * @param line 行号（0 = 上行，1 = 下行）
+         * @param tier 亮度档（0 / 1 / 2）
+         * @param layer 层（[LAYER_CORE] / [LAYER_GLOW]）
+         * @param bucket 可见度分档（0..[VIS_BUCKETS]-1）
+         */
+        internal fun subIndex(line: Int, tier: Int, layer: Int, bucket: Int): Int =
+            ((line * 3 + tier) * 2 + layer) * VIS_BUCKETS + bucket
+
+        /**
+         * 解析本帧的**行内进度**（**纯函数**，门禁可直接调）。
+         *
+         * - 覆盖的**行索引**与**屏上**那一行一致 ⇒ 用覆盖值（宿主的逐帧进度）；
+         * - 否则 ⇒ 回退到 `ctx.lyricLineProgress`（1 Hz）。
+         *
+         * ⚠️ 覆盖的行索引与屏上那一行**可能差一帧**（宿主推的是它自己的「当前行」，
+         *    而屏上那一行是本渲染器的 [displayedLineIndex]）⇒ 必须配对后才用。
+         *
+         * @param overrideLineIndex 覆盖所属的行索引（-1 = 无覆盖）
+         * @param overrideProgress 覆盖的行内进度
+         * @param singingLineIndex 屏上正在唱的那一行的索引
+         * @param fallbackProgress 回退值（1 Hz 的 `ctx.lyricLineProgress`）
+         */
+        internal fun resolveLyricProgress(
+            overrideLineIndex: Int,
+            overrideProgress: Float,
+            singingLineIndex: Int,
+            fallbackProgress: Float
+        ): Float {
+            if (overrideLineIndex < 0 || overrideLineIndex != singingLineIndex) {
+                return fallbackProgress.coerceIn(0f, 1f)
+            }
+            return overrideProgress.coerceIn(0f, 1f)
+        }
+
+        /**
+         * 由「行的起止时间 + 当前播放位置」算行内进度（**纯函数**，门禁可直接调）。
+         *
+         * ⚠️ 口径必须与 `computeLyricInfo` 一致（同一行的进度算法只能有一处）。
+         *
+         * @param startSec 行首时间（秒）
+         * @param endSec 行尾时间（秒）
+         * @param timeSec 当前播放位置（秒）
+         */
+        internal fun lineProgressOf(startSec: Double, endSec: Double, timeSec: Double): Float {
+            val span = endSec - startSec
+            if (span <= 0.0) return 1f
+            return ((timeSec - startSec) / span).coerceIn(0.0, 1.0).toFloat()
+        }
+
         /** 字号测量参考值：在参考字号下测字宽/行高，再换算成真实字号 */
         private const val REF_FONT = 100f
         /** 字号下限（屏高比例）：太小时字形笔画挤作一团难辨。⛔ 必须 ≤ 低档的 [fontMaxRatio]，否则 `coerceIn` 抛异常 */
@@ -1017,8 +1405,8 @@ class LyricsDotMatrixRenderer : RendererFx() {
         private const val MAX_FONT_S = 0.16f
 
         /**
-         * 每行粒子上限。⚠️ 本套 6 次 `drawPath` 的**提交次数已经是最优**，贵的是**椭圆个数**
-         * （= 粒子数 × (1~2 层)）—— 低画质下 3600×2 行最多 10,800 个互不相连的小椭圆，
+         * 每行粒子上限。⚠️ 本套的提交次数早已合批到位（每帧几十次 `drawPoints`），
+         * 贵的是**点个数**（= 粒子数 × (1~2 层)）—— 低画质下 3600×2 行最多 10,800 个点，
          * 而本机实测曲线是「≈500 个 ⇒ 7.6 fps / ≈24 个 ⇒ 59 fps」（§11.3.6 P-1，数字雨合并前后），
          * 所以低档**只能减点**，v1.47 真机低画质扫描里本套是全档最慢的一套（7 fps）。
          */
@@ -1027,7 +1415,7 @@ class LyricsDotMatrixRenderer : RendererFx() {
 
         /**
          * 宿主覆盖每行粒子上限时的**上界**（防呆：别把覆盖值写成天文数字）。
-         * ⛔ 覆盖值越大 ⇒ 每帧椭圆数越多 ⇒ 帧率越低（见 [CAP_HIGH] 的实测曲线）。
+         * ⛔ 覆盖值越大 ⇒ 每帧点数越多 ⇒ 帧率越低（见 [CAP_HIGH] 的实测曲线）。
          */
         internal const val MAX_PARTICLE_BUDGET = 12000
 
