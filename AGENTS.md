@@ -39,13 +39,15 @@ $env:JAVA_HOME = "C:\Program Files\Android\Android Studio\jbr"
 > 电视上若已装 debug 版（签名不同），`install -r` 会报 `INSTALL_FAILED_UPDATE_INCOMPATIBLE`，需先 `uninstall com.nasmusic.tv` 再安装。Release 切到独立签名（`release-key.jks`）后，旧的 debug 签名 release 包同理也需先卸载。
 
 > ⛔ **设备操作边界（所有者 2026-11-07 明示：「不要直接操作电视」）**
-> - **电视**（创维 9R54_G8S，`192.168.0.114:5555`）⇒ **只由所有者本人安装与验收**。
->   ⛔ 代理**不得**对它主动执行 `adb connect` / `install` / `input` / `screencap` / `shell` 等任何命令
->   （电视在客厅、是共享的 ⇒ 会打断别人；「装得上」不等于「该装」）。
->   需要电视上的证据时 ⇒ **请所有者去看/截图**，不要自己去取。
+> - **电视**（创维 9R54_G8S，`192.168.0.114:5555`）⇒ **代理不得自主操作**：
+>   ⛔ 不主动 `adb connect` / `install` / `input` / `screencap` / `shell`；
+>   ⛔ **不启动应用**（电视在客厅、是共享的 ⇒ 会打断别人；「装得上」不等于「该装」）。
+>   ✅ **唯一的例外**：所有者**明确要求**时，可以做**安装类**动作 ——
+>   本轮所有者明示「推送安装到电视上，但不要运行」⇒ 允许 `adb connect` + `install`，**仍然不启动**。
+>   ⛔ 需要电视上的**画面 / 帧率 / 交互**证据时 ⇒ **请所有者本人去看/操作/截图**，不要自己去取。
 > - **手机**（小米 22081212C，adb 序列号 `91846823`）⇒ 可用于**取证**
 >   （`screencap` / `dumpsys gfxinfo` / `logcat --pid`）；**导航与播放**仍以所有者操作为准。
-> - 代理可以做的：出包、把 APK 放到明确路径、告诉所有者装哪个文件。
+> - 代理可以做的：出包、把 APK 放到明确路径、在被要求时安装、告诉所有者装哪个文件。
 > - ⚠️ MIUI 手机有 `INSTALL_FAILED_USER_RESTRICTED` 拦截（见下文）⇒ 装包可能仍需所有者解锁一次。
 
 CI (`.github/workflows/build.yml`) has three jobs: **`build`** runs `assembleRelease` (push to `main`/`develop`, tags `v*`; PR to `main`), **`test`** runs `testDebugUnitTest`, and **`lint`** runs `lintDebug` — lint is now **blocking** (the `continue-on-error` was removed on 2026-09-14 after errors were driven to 0; 256 warnings remain and do not fail it). So a green CI means "compiles + unit tests pass + no new lint errors". The CI `build` job's signing step is **dual-mode + fail-fast** (v2.36.0 dual-mode; **v2.38.3 起 push/tag fail-fast**): if the repo has GitHub Secrets `SIGNING_KEYSTORE_BASE64` + `SIGNING_STORE_PASSWORD` + `SIGNING_KEY_ALIAS` + `SIGNING_KEY_PASSWORD`, it base64-decodes `release-key.jks` and signs with the real key (same APK as local release); the throwaway `ci-keystore.jks` fallback **only applies to `pull_request`** (fork PRs can't access secrets) — on `push`/`tag` a missing `SIGNING_KEYSTORE_BASE64` or `CRYPTO_PASSPHRASE` makes the workflow `exit 1` immediately (D5, 权限与签名统一方案 §14.4; guarded by `ReleaseSigningGateTest`). 发版前须配齐 5 个 repo secrets（含最易漏的 `CRYPTO_PASSPHRASE`，否则 push/tag 直接被 fail-fast 挡下）. Either way the `keystore.properties` it writes must include a `cryptoPassphrase` line, otherwise the `packageRelease` guard in `app/build.gradle.kts` fails the build. Local release builds read `keystore.properties` from the project root — `storeFile` is now a project-root-relative path (`release-key.jks`), and `app/build.gradle.kts` resolves it via `rootProject.file(...)` (not `project.file(...)`).
