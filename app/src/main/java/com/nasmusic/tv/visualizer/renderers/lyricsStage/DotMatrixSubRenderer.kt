@@ -47,8 +47,8 @@ class DotMatrixSubRenderer : LyricsSubRenderer {
     }
 
     override fun DrawScope.draw(frame: AudioFrame, ctx: RenderContext, lyrics: LyricsStagePayload) {
-        // ⚠️ 必须在 `delegate.draw` **之前**推：委托在绘制时就要用本帧的行内进度。
-        pushPerFrameProgress(lyrics)
+        // ⚠️ 必须在 `delegate.draw` **之前**推：委托在绘制时就要用本帧的行内进度与歌词时间线。
+        pushPerFrameLyrics(lyrics)
         with(delegate) { draw(frame, ctx) }
     }
 
@@ -72,13 +72,21 @@ class DotMatrixSubRenderer : LyricsSubRenderer {
     }
 
     /**
-     * 把**逐帧**的行内进度推给委托（E23 的渲染器）。
+     * 把**逐帧**的歌词数据推给委托（E23 的渲染器）：**歌词时间线** + 行内进度。
      *
      * ## 为什么必须逐帧（这是本子模式的一个真实缺陷）
      * `RenderContext.lyricLineProgress` 来自 `PlayerManager` 的 **1 Hz** 进度 StateFlow
      * ⇒ 卡拉OK 的逐字扫描**每秒才跳一次**（在 60 fps 的电视上就是「一格一格地亮」）。
+     * `RenderContext.lyricLineIndex` 同样是 **1 Hz** ⇒ **换行最坏要等 1 s 才被发现**。
+     *
      * 而 `LyricsStagePayload` 是**逐帧**更新的（`timeSec` = 逐帧读到的播放位置、
-     * `currentIndex` = 逐帧算出的当前行）⇒ 逐帧进度只有这里有。
+     * `currentIndex` = 逐帧算出的当前行）⇒ 逐帧数据只有这里有。
+     *
+     * ## ✅ 歌词时间线（2026-11-07 真机：「歌词速度跟不上速度」）
+     * 委托的「下一行顶上去」必须由**歌词时间线**驱动 ⇒ 歌词唱完就顶替，
+     * ⛔ 不再等上一行的消散跑完（那会拖住整整一秒多）。
+     * ⇒ 这里把 `currentIndex` / 当前行文本 / 下一行文本 / 当前行时长**逐帧**推过去
+     * （**全部是标量 ⇒ 零分配**）。
      *
      * ## ⚠️ 覆盖要**配对到屏上那一行**
      * 委托屏上那一行是它自己的行号（`delegate.singingLineIndex()`），
@@ -86,17 +94,28 @@ class DotMatrixSubRenderer : LyricsSubRenderer {
      * ⇒ 这里按**屏上那一行**去 `lines` 里取行首/行尾时间算进度，
      * 并用该行索引作为覆盖的归属行 ⇒ 委托只在归属行与屏上那一行一致时才应用覆盖。
      */
-    private fun pushPerFrameProgress(lyrics: LyricsStagePayload) {
-        val idx = delegate.singingLineIndex()
-        val line = lyrics.lines.getOrNull(idx)
-        if (line == null) {
+    private fun pushPerFrameLyrics(lyrics: LyricsStagePayload) {
+        val idx = lyrics.currentIndex
+        val cur = lyrics.lines.getOrNull(idx)
+        val next = lyrics.lines.getOrNull(idx + 1)
+        // ① 歌词时间线（**行切换由它驱动** ⇒ 不再等 1 Hz 的 `ctx.lyricLineIndex`）
+        delegate.setLyricTimeline(
+            sungIndex = idx,
+            sungText = cur?.fullText ?: "",
+            nextText = next?.fullText ?: "",
+            lineDurationSec = if (cur != null) cur.endTime - cur.startTime else 0.0
+        )
+        // ② 行内进度（卡拉OK 逐字扫描）
+        val onScreenIndex = delegate.singingLineIndex()
+        val onScreen = lyrics.lines.getOrNull(onScreenIndex)
+        if (onScreen == null) {
             delegate.clearLyricsProgressOverride()
             return
         }
         val progress = LyricsDotMatrixRenderer.lineProgressOf(
-            line.startTime, line.endTime, lyrics.timeSec
+            onScreen.startTime, onScreen.endTime, lyrics.timeSec
         )
-        delegate.setLyricsProgressOverride(idx, progress)
+        delegate.setLyricsProgressOverride(onScreenIndex, progress)
     }
 
     override fun onExit() {

@@ -31,9 +31,29 @@ import kotlin.math.sin
  * 动画流程：
  * 1. 初始：两行同时凝聚
  * 2. 第一行演唱（卡拉OK逐字点亮）
- * 3. 第一行唱完 → 从左到右逐字消散（稍慢）
- * 4. 第二行上移到第一行位置 + 新行从下方凝聚（从左到右逐字凝聚，稍慢）
- * 5. 循环
+ * 3. **歌词唱完（时间线换行）⇒ 立刻交棒**：第二行顶到第一行位置（[handoff]）
+ * 4. 交棒时：第一行化成「余烬」在原位逐字消散，**同时**第二行上移 ⇒ 两个动画并行
+ * 5. 上移结束：下行换成「下一句」并从下方凝聚（从左到右逐字凝聚）
+ * 6. 循环
+ *
+ * ## ✅ 时序规则（2026-11-07 真机：「歌词速度跟不上速度」）
+ *
+ * ### 病根：顶替（下一行顶上）被**上一行的消散**拖住
+ * 旧码的顶替条件是「`SCATTERING_TOP` 阶段的消散跑完」，而消散要
+ * `90·字数 + 600 ms`（8 字 ≈ 1.2 s、20 字 ≈ 2.3 s）⇒
+ * **下一行被上一行的消散拖住整整一秒多** ⇒ 歌词整体落后于音乐。
+ * 叠加 `ctx.lyricLineIndex` 是 **1 Hz** 的（换行最坏再迟 1 s）⇒ 最坏落后 ≈ 3 s。
+ *
+ * ### ✅ 新规则：**歌词时间线**驱动顶替，动画时长**按时间线摊算**
+ * - **顶替**：宿主逐帧推入的歌词时间线（`currentIndex` 变化 ⇒ 唱到下一句了）
+ *   ⇒ **一换行就顶替**（延迟 = 1 帧），⛔ **不再等消散结束**。
+ * - **消散**：不再是一段「挡住下一行」的阶段，而是**上移窗口里的余烬**
+ *   ⇒ 旧行的飞散与新行的上移**同时**发生 ⇒ 观感保留，⛔ 但不挡路。
+ * - **上移**时长 = 歌词行时长的 1/5（300–700 ms）⇒ 快歌快切、慢歌慢切。
+ * - **凝聚**：总时长 = `min(固定公式, 窗口 × 0.75)`，逐字延迟按**剩余窗口 ÷ 字数**均摊
+ *   ⇒ ① 顶上去的**必定是成形的一行**（§13 的 ③ 号回归不复发）；
+ *   ② 下行**不会永远处于「半散」状态** ⇒ 可见度不再铺满 16 档
+ *      ⇒ 每帧的 `drawPoints` 提交数从上百次回落到十几次（**帧成本的真凶**）。
  *
  * ## §B7 优化（T4.7）—— 用户要求「以性能优化为主；画面优化不得增加性能消耗」
  *
@@ -282,9 +302,8 @@ class LyricsDotMatrixRenderer : RendererFx() {
     // ── 状态机 ──────────────────────────────────────────────
     private enum class Phase {
         INIT_COALESCE,      // 初始：两行同时凝聚
-        STEADY,             // 稳定：第一行演唱中，第二行待机
-        SCATTERING_TOP,     // 第一行逐字消散
-        SHIFTING,           // 行上移 + 新行凝聚
+        STEADY,             // 稳态：上行在唱（卡拉OK逐字点亮），下行在下方
+        SHIFTING,           // 交棒：上行 = 新行上移中；下行 = 旧行余烬（消散中）
     }
     private var phase = Phase.INIT_COALESCE
     private var phaseStartMs = 0L
@@ -322,22 +341,83 @@ class LyricsDotMatrixRenderer : RendererFx() {
 
     // 动画时长
     private val initCoalesceMs = 1200L        // 初始两行凝聚（放慢，便于看清）
-    private val scatterPerCharMs = 90L   // 每字消散延迟
-    private val scatterFlyMs = 600L      // 单字飞散时长
-    private val shiftMs = 700L           // 行上移动画时长
-    private val coalescePerCharMs = 160L // 每字凝聚延迟（放慢）
-    private val coalesceArriveMs = 1200L // 单字凝聚到达时长（放慢）
 
-    // 即将进入的下下行文本（在 SHIFTING 阶段使用）
-    private var incomingNextText: String = ""
+    // ── 本行动画时长（**按歌词时间线摊算**，见 [applyCoalesceParams] / [handoff]）──
+    //
+    // ⛔⛔ 这些**不是常量**了：旧的固定公式（`160·字数 + 1200` / `90·字数 + 600`）
+    //    与歌词时间线**无关** ⇒ 一句 20+ 字、时长 3.5 s 的歌词**永远聚不完**
+    //    ⇒ 下行永远是「半散」的 ⇒ 可见度铺满 16 档 ⇒ 每帧上百次 `drawPoints`
+    //    ⇒ 帧成本暴涨（2026-11-07 真机：50 分位 9 ms → 22 ms）。
+    //
+    // ✅ 现在全部由 companion 的纯函数按**窗口 ÷ 字数**摊算（口径见那里的 KDoc）。
+    /** 下行凝聚的**逐字**延迟（毫秒）—— 按「可用窗口 ÷ 字数」摊算 */
+    private var coalescePerCharMs = 160L
+    /** 下行凝聚的**单字到达**时长（毫秒） */
+    private var coalesceArriveMs = 1200L
+    /** 下行凝聚的**总**时长（毫秒） */
+    private var coalesceTotalMs = 0L
+    /** 消散的**逐字**延迟（毫秒）—— 按「上移窗口 ÷ 字数」摊算 */
+    private var scatterPerCharMs = 90L
+    /** 单字飞散时长（毫秒） */
+    private var scatterFlyMs = 600L
+    /** 本行的上移（交棒）时长（毫秒）—— 按歌词行时长摊算 */
+    private var slideMs = 700L
+
+    // ── 宿主逐帧推入的歌词时间线（E53 歌词舞台子模式 0）──────────────
+    //
+    // ⛔⛔ **行切换必须由它驱动**，不能等 `ctx.lyricLineIndex`：
+    //    那个值来自 `PlayerManager` 的 **1 Hz** 进度 StateFlow
+    //    ⇒ 换行最坏要等 **1 s** 才被发现 ⇒ 歌词整体落后一整秒。
+    //
+    // ⚠️ 宿主（`DotMatrixSubRenderer`）手里有**逐帧**的 `LyricsStagePayload`
+    //    （`currentIndex` = 逐帧算出的当前行、`lines` = 整曲歌词行）⇒ 由它逐帧推给
+    //    本渲染器（**全部是标量 ⇒ 逐帧零分配**）。
+    /** 逐帧「正在唱」的行索引（-1 = 无歌词时间线 ⇒ 回退到 `RenderContext`） */
+    private var tlSungIndex = -1
+    /** 逐帧「正在唱」那一行的文本 */
+    private var tlSungText = ""
+    /** 逐帧「下一句」的文本 */
+    private var tlNextText = ""
+    /** 逐帧「正在唱」那一行的时长（毫秒；0 = 未知 ⇒ 用默认窗口） */
+    private var tlLineDurationMs = 0L
+    /** 上一帧是否有歌词（歌词是异步加载的 ⇒ 需要在「有↔无」时重新对齐） */
+    private var lastHasLyrics = false
+
+    /**
+     * 设置**逐帧**的歌词时间线（宿主 E53「歌词舞台」子模式 0 每帧调用一次）。
+     *
+     * ⛔ **行切换（顶替）由它驱动** ⇒ 歌词唱完就顶替，⛔ 不再等上一行的消散结束。
+     *
+     * @param sungIndex 逐帧算出的「正在唱」的行索引（-1 = 无歌词）
+     * @param sungText 该行的文本
+     * @param nextText 下一行的文本
+     * @param lineDurationSec 该行的时长（秒；≤ 0 = 未知）
+     */
+    internal fun setLyricTimeline(
+        sungIndex: Int,
+        sungText: String,
+        nextText: String,
+        lineDurationSec: Double
+    ) {
+        tlSungIndex = sungIndex
+        tlSungText = sungText
+        tlNextText = nextText
+        tlLineDurationMs = if (lineDurationSec > 0.0) (lineDurationSec * 1000.0).toLong() else 0L
+    }
+
+    /** 歌词时间线是否可用（宿主推过且有歌词） */
+    private val hasTimeline: Boolean get() = tlSungIndex >= 0
 
     /**
      * 下行「凝聚」动画的**起点**（= 下行被采样的时刻）。
      *
      * ⛔⛔ 凝聚进度必须按**本行自己的时间线**算，不能挂在 `phase == SHIFTING` 上：
-     *    上移阶段只有 700 ms，而凝聚需要 `160·字数 + 1200 ms`（8 字 ≈ 2.3 s）
+     *    上移阶段只有几百毫秒，而凝聚要 `160·字数 + 1200 ms`（8 字 ≈ 2.3 s）
      *    ⇒ 挂在阶段上 ⇒ 凝聚**永远走不完** ⇒ 行顶上去时是个没聚完的行
      *    ⇒ 用户看到「顶上去之后又聚了一遍」。
+     *
+     * ⚠️ 2026-11-07 起还有第二层：**凝聚总时长本身**也按「可用窗口 ÷ 字数」摊算
+     *    （见 [applyCoalesceParams]）⇒ 凝聚既走得完、又不会拖住下一行。
      */
     private var line1CoalesceStartMs = 0L
 
@@ -477,6 +557,15 @@ class LyricsDotMatrixRenderer : RendererFx() {
         boundCaption = null
         // 切歌/重进：凝聚时钟归零（下一帧按新行重新起算）
         line1CoalesceStartMs = 0L
+        // 切歌/重进：动画时长参数回到默认值（下一帧按新行的时间线重算）
+        coalescePerCharMs = FIXED_COALESCE_PER_CHAR_MS
+        coalesceArriveMs = FIXED_COALESCE_ARRIVE_MS
+        coalesceTotalMs = 0L
+        scatterPerCharMs = FIXED_SCATTER_PER_CHAR_MS
+        scatterFlyMs = FIXED_SCATTER_FLY_MS
+        slideMs = DEFAULT_SLIDE_MS
+        // 切歌/重进：歌词「有/无」状态复位（下一帧若与当前不符 ⇒ 重新对齐）
+        lastHasLyrics = false
     }
 
     protected override fun onExitContent() {
@@ -729,12 +818,18 @@ class LyricsDotMatrixRenderer : RendererFx() {
         //    只在**换行采样**时算一次（每行一次，不是每帧）⇒ 测量路径零成本。
         val fontCap = fontCapFor(ctx)
 
-        val lyricLine = ctx.currentLyricLine?.takeIf { it.isNotBlank() }
-        val nextLine = ctx.nextLyricLine?.takeIf { it.isNotBlank() }
+        // ── 歌词行文本与行号：**优先**用宿主的**逐帧**歌词时间线 ──────
+        //
+        // ⚠️ 回退路径（`ctx.currentLyricLine` / `ctx.lyricLineIndex`）是 **1 Hz** 的
+        //    ⇒ 换行最坏要等 1 s 才被发现 ⇒ 歌词整体落后一整秒。
+        //    宿主（E53「歌词舞台」子模式 0）手里有**逐帧**的 `LyricsStagePayload`
+        //    ⇒ 由它逐帧推给本渲染器（见 [setLyricTimeline]）。
+        val lyricLine = (if (hasTimeline) tlSungText else ctx.currentLyricLine)?.takeIf { it.isNotBlank() }
+        val nextLine = (if (hasTimeline) tlNextText else ctx.nextLyricLine)?.takeIf { it.isNotBlank() }
         val text = lyricLine ?: (ctx.caption?.takeIf { it.isNotBlank() } ?: "NASMusicTV")
         val nextText = nextLine ?: ""
         val hasLyrics = lyricLine != null
-        val currentIdx = ctx.lyricLineIndex
+        val currentIdx = if (hasTimeline) tlSungIndex else ctx.lyricLineIndex
 
         // 两行的 Y 中心位置：对称分布在垂直中心两侧，避开 0.5h 的干扰
         topY = h * 0.40f
@@ -759,6 +854,24 @@ class LyricsDotMatrixRenderer : RendererFx() {
             line1Text = ""
         }
 
+        // ── 歌词「有/无」切换：重新对齐（否则会一直停在占位标题上）──────
+        //
+        // ⚠️ 歌词是**异步加载**的 ⇒ 可能第一帧还没有、下一帧才来
+        //    ⇒ 必须在这里重新采样两行（否则屏上一直是占位标题）。
+        if (hasLyrics != lastHasLyrics) {
+            lastHasLyrics = hasLyrics
+            if (hasLyrics) {
+                if (currentIdx >= 0) resync(ctx, currentIdx, frame.timeMs, w, h)
+            } else {
+                displayedLineIndex = -1
+                phase = Phase.INIT_COALESCE
+                phaseStartMs = frame.timeMs
+                rowOffsetY = 0f
+                line0Text = ""
+                line1Text = ""
+            }
+        }
+
         if (displayedLineIndex < 0 && phase == Phase.INIT_COALESCE) {
             // 首次初始化
             if (lyricLine != null && currentIdx >= 0) {
@@ -772,6 +885,8 @@ class LyricsDotMatrixRenderer : RendererFx() {
                 initCoalesce(line0, line0Count, w, h)
                 initCoalesce(line1, line1Count, w, h)
                 line1CoalesceStartMs = frame.timeMs
+                // 凝聚参数按**可用窗口**摊算（窗口 = 本行时长；下行的凝聚必须在本行结束前走完）
+                applyCoalesceParams(line1Text, tlLineDurationMs)
                 phaseStartMs = frame.timeMs
             } else {
                 // 无歌词时显示标题作为占位
@@ -783,19 +898,26 @@ class LyricsDotMatrixRenderer : RendererFx() {
                 line1Count = 0
                 initCoalesce(line0, line0Count, w, h)
                 line1CoalesceStartMs = frame.timeMs
+                applyCoalesceParams(line1Text, 0L)
                 phaseStartMs = frame.timeMs
             }
         }
 
-        // 检测行切换（当实际播放行前进了 1 行或更多）
-        if (hasLyrics && currentIdx >= 0 && displayedLineIndex >= 0) {
-            val diff = currentIdx - displayedLineIndex
-            if (diff >= 1 && phase == Phase.STEADY) {
-                // 保存下下行文本（此时 ctx.nextLyricLine 是新当前行的下一行）
-                incomingNextText = nextText
-                // 开始消散第一行
-                phase = Phase.SCATTERING_TOP
-                phaseStartMs = frame.timeMs
+        // ── 检测行切换：**歌词时间线**换行 ⇒ 立刻交棒 ────────────────────
+        //
+        // ⛔⛔ 2026-11-07 真机：「歌词速度跟不上速度」——
+        //    旧码把顶替挂在**消散结束**上（消散要 `90·字数 + 600 ms`）
+        //    ⇒ **下一行被上一行的消散拖住**（8 字 ≈ 1.2 s、20 字 ≈ 2.3 s）。
+        // ✅ 现在：歌词唱完（时间线换行）**立刻**交棒 ⇒ 延迟 = 1 帧。
+        if (hasLyrics && currentIdx >= 0 && displayedLineIndex >= 0 &&
+            currentIdx != displayedLineIndex
+        ) {
+            if (currentIdx == displayedLineIndex + 1) {
+                handoff(currentIdx, frame.timeMs)
+            } else {
+                // ⚠️ 行号**跳**了（渲染器掉队 / 时间线异常）⇒ 重新对齐，
+                //    ⛔ 不能走交换：那会把**错的一行**顶上去。
+                resync(ctx, currentIdx, frame.timeMs, w, h)
             }
         }
 
@@ -814,38 +936,18 @@ class LyricsDotMatrixRenderer : RendererFx() {
             Phase.STEADY -> {
                 rowOffsetY = 0f
             }
-            Phase.SCATTERING_TOP -> {
-                // 计算消散总时长
-                val maxCharIdx = line0Text.length.coerceAtLeast(1) - 1
-                val totalScatterMs = maxCharIdx * scatterPerCharMs + scatterFlyMs
-                if (elapsed >= totalScatterMs) {
-                    // 消散完成，准备 SHIFTING
-                    // 1. 将原来的 line1（第二行）"提升"为新的 line0（第一行）
-                    promoteLine1ToLine0()
-                    // 2. 采样新行到 line1（从下方进入）
-                    line1Text = incomingNextText
-                    line1Count = sampleLine(incomingNextText, line1, line1CharIdx, line1LocalX,
-                        cap, w, fontFor(incomingNextText, w, h, fontCap), bottomY)
-                    if (line1Count > 0) {
-                        initCoalesce(line1, line1Count, w, h, fromBelow = true)
-                    }
-                    // ⛔ 凝聚时钟从**采样时刻**起算（与阶段无关）⇒ 凝聚一定能走完
-                    line1CoalesceStartMs = frame.timeMs
-                    displayedLineIndex++
-                    phase = Phase.SHIFTING
-                    phaseStartMs = frame.timeMs
-                }
-            }
             Phase.SHIFTING -> {
                 // 行上移进度：0 → 1
-                shiftProgress = (elapsed.toFloat() / shiftMs).coerceIn(0f, 1f)
+                shiftProgress = (elapsed.toFloat() / slideMs).coerceIn(0f, 1f)
                 // line0 从 bottomY 上移到 topY（偏移从 0 到 -rowGapPx）
                 rowOffsetY = -rowGapPx * easeOutCubic(shiftProgress)
 
-                if (elapsed >= shiftMs) {
-                    // 动画结束，实际调整粒子 Y 坐标
+                if (elapsed >= slideMs) {
+                    // 上移结束：粒子落到最终位置
                     applyLine0Shift()
                     rowOffsetY = 0f
+                    // 下行换成「下一句」并开始凝聚（旧行的余烬在此被覆盖掉）
+                    startNextLine(ctx, frame.timeMs, w, h)
                     phase = Phase.STEADY
                     phaseStartMs = frame.timeMs
                 }
@@ -859,8 +961,9 @@ class LyricsDotMatrixRenderer : RendererFx() {
         // ✅ 改成按**本行自己的时间线**推进 ⇒ 凝聚在下方**走完** ⇒ 顶上去时已经是成形的一行。
         val line1CoalesceElapsed =
             if (line1Count > 0) (frame.timeMs - line1CoalesceStartMs).coerceAtLeast(0L) else 0L
+        // ⚠️ 交棒阶段（`SHIFTING`）下行是**旧行的余烬**（在消散）⇒ 不走凝聚分支。
         val line1IsCoalescing =
-            line1Count > 0 && line1CoalesceElapsed < coalesceTotalMs(line1Text)
+            phase != Phase.SHIFTING && line1Count > 0 && line1CoalesceElapsed < coalesceTotalMs
 
         // ── 更新粒子 ────────────────────────────────────────
         updateLine0(frame, elapsed, w, h)
@@ -905,10 +1008,10 @@ class LyricsDotMatrixRenderer : RendererFx() {
         // 第三步：每个**非空**子批次一次 `drawPoints`
         resetSubBatches()
 
-        // 上行（正在唱 / 正在消散）
-        lineIsSinging = phase != Phase.SCATTERING_TOP
-        lineIsScattering = phase == Phase.SCATTERING_TOP
-        lineScatterElapsedMs = if (phase == Phase.SCATTERING_TOP) elapsed else 0L
+        // 上行（正在唱；交棒时是**刚顶上来**的新行，正在上移）
+        lineIsSinging = true
+        lineIsScattering = false
+        lineScatterElapsedMs = 0L
         lineIsCoalescing = false
         lineCoalesceElapsedMs = 0L
         lineYOffset = rowOffsetY
@@ -917,13 +1020,17 @@ class LyricsDotMatrixRenderer : RendererFx() {
         finalizeSubBatches()
         fillLine(line0, line0Count, line0LocalX, 0)
 
-        // 下行（永远不处于「正在唱」状态；**按本行时间线**逐字凝聚）
+        // 下行（稳态 = 下一句在凝聚；**交棒时 = 旧行的余烬在消散**）
+        //
+        // ⚠️ 余烬行留在**原位**（`lineYOffset = 0`）⇒ 旧行在原地化灰、
+        //    新行同时从下方升上来 ⇒ 两个动画并行，观感是「旧行化灰、新行顶上」。
+        val emberActive = phase == Phase.SHIFTING
         lineIsSinging = false
-        lineIsScattering = false
-        lineScatterElapsedMs = 0L
+        lineIsScattering = emberActive
+        lineScatterElapsedMs = if (emberActive) elapsed else 0L
         lineIsCoalescing = line1IsCoalescing
         lineCoalesceElapsedMs = line1CoalesceElapsed
-        lineYOffset = rowOffsetY
+        lineYOffset = if (emberActive) 0f else rowOffsetY
         lineHasLyrics = hasLyrics && line1Text.isNotBlank()
         measureLine(line1Count, line1CharIdx, line1LocalX, 1)
         finalizeSubBatches()
@@ -1169,31 +1276,9 @@ class LyricsDotMatrixRenderer : RendererFx() {
                 updateCoalescing(d, n, progress)
             }
             Phase.STEADY, Phase.SHIFTING -> {
-                // STEADY 和 SHIFTING 阶段，line0 都是稳定/演唱状态
-                //（SHIFTING 时 line0 是新提升上来的行，已经在目标位置附近了）
+                // STEADY：上行在唱；SHIFTING：上行是**刚顶上来**的新行
+                //（已在目标位置附近，只是整体在上移）⇒ 两种都是稳定吸附
                 updateHolding(d, n, frame, w, h)
-            }
-            Phase.SCATTERING_TOP -> {
-                // 逐字飞散
-                for (i in 0 until n) {
-                    val o = i * STRIDE
-                    val ci = line0CharIdx[i]
-                    val charDelay = ci * scatterPerCharMs
-                    val charElapsed = elapsedMs - charDelay
-                    if (charElapsed <= 0) {
-                        // 还没到这个字，保持稳定
-                        updateHoldingSingle(d, o, frame, w, h)
-                    } else {
-                        // 开始飞散
-                        val p = (charElapsed.toFloat() / scatterFlyMs).coerceIn(0f, 1f)
-                        d[o + VX] += rng.nextSigned() * 0.5f
-                        d[o + VY] += -0.15f + rng.nextSigned() * 0.3f
-                        d[o + VX] *= 0.98f
-                        d[o + VY] *= 0.985f
-                        d[o + X] += d[o + VX] * (1f + p * 0.6f)
-                        d[o + Y] += d[o + VY] * (1f + p * 0.6f)
-                    }
-                }
             }
         }
     }
@@ -1215,7 +1300,7 @@ class LyricsDotMatrixRenderer : RendererFx() {
                 val progress = (elapsedMs.toFloat() / initCoalesceMs).coerceIn(0f, 1f)
                 updateCoalescing(d, n, progress)
             }
-            Phase.STEADY, Phase.SCATTERING_TOP -> {
+            Phase.STEADY -> {
                 // ⛔⛔ 凝聚**未完成**时继续凝聚（不再用 `updateHolding` 硬吸附）
                 //    ⇒ 下行在下方**聚完** ⇒ 顶上去时已是成形的一行 ⇒ 不会「再聚一遍」。
                 if (isCoalescing) {
@@ -1225,7 +1310,46 @@ class LyricsDotMatrixRenderer : RendererFx() {
                 }
             }
             Phase.SHIFTING -> {
-                coalesceLine1(d, n, coalesceElapsedMs)
+                // ⚠️ 交棒阶段下行是**旧行的余烬** ⇒ 继续逐字飞散
+                //    ⇒ 旧行的消散与新行的上移**同时**发生，
+                //    ⛔ 但消散**不再挡住**下一行顶替（2026-11-07 真机：歌词跟不上速度）。
+                scatterLine(d, n, line1CharIdx, elapsedMs, frame, w, h)
+            }
+        }
+    }
+
+    /**
+     * 一行的**逐字飞散**（从左到右）。
+     *
+     * ⚠️ 逐字延迟与飞散时长**按上移窗口摊算**（见 [scatterPerCharFor]）
+     *    ⇒ 整行必定在窗口内化完 ⇒ 余烬不会「拖尾」到下一次交棒。
+     */
+    private fun scatterLine(
+        d: FloatArray,
+        n: Int,
+        charIndices: IntArray,
+        elapsedMs: Long,
+        frame: AudioFrame,
+        w: Float,
+        h: Float
+    ) {
+        for (i in 0 until n) {
+            val o = i * STRIDE
+            val ci = charIndices[i]
+            val charDelay = ci * scatterPerCharMs
+            val charElapsed = elapsedMs - charDelay
+            if (charElapsed <= 0) {
+                // 还没到这个字，保持稳定
+                updateHoldingSingle(d, o, frame, w, h)
+            } else {
+                // 开始飞散
+                val p = (charElapsed.toFloat() / scatterFlyMs).coerceIn(0f, 1f)
+                d[o + VX] += rng.nextSigned() * 0.5f
+                d[o + VY] += -0.15f + rng.nextSigned() * 0.3f
+                d[o + VX] *= 0.98f
+                d[o + VY] *= 0.985f
+                d[o + X] += d[o + VX] * (1f + p * 0.6f)
+                d[o + Y] += d[o + VY] * (1f + p * 0.6f)
             }
         }
     }
@@ -1259,9 +1383,31 @@ class LyricsDotMatrixRenderer : RendererFx() {
         }
     }
 
-    /** 一行「逐字凝聚」走完需要的总时长（**纯函数式**） */
-    private fun coalesceTotalMs(text: String): Long =
-        (text.length.coerceAtLeast(1) - 1) * coalescePerCharMs + coalesceArriveMs
+    /**
+     * 按**可用窗口**摊算本行（下行）的凝聚参数。
+     *
+     * ⛔⛔ 为什么不能再用固定公式（`160·字数 + 1200 ms`）：
+     *    那个节奏**与歌词时间线无关** ⇒ 一句 20+ 字、时长 3.5 s 的歌词要 4.4 s 才聚得完
+     *    ⇒ **永远聚不完** ⇒
+     *    ① 顶上去的是半成品（§13 的 ③ 号回归）；
+     *    ② 下行**永远处于「半散」状态** ⇒ 可见度铺满 16 档
+     *       ⇒ 每帧上百次 `drawPoints`（**帧成本的真凶**：50 分位 9 ms → 22 ms）。
+     *
+     * ✅ 新规则：总时长 = `min(固定公式, 窗口 × 0.75)`，逐字延迟与单字到达时长
+     *    按**剩余窗口 ÷ 字数**均摊 ⇒
+     *    ① 凝聚**必定在窗口内走完**（顶上去的是成形的一行）；
+     *    ② 逐字节奏与歌词本身的节奏同量级（字/秒）；
+     *    ③ 下行有相当一段时间是**完全成形**的 ⇒ 可见度回到单一档 ⇒ 提交数回落。
+     *
+     * @param text 下行文本（字数决定逐字节奏）
+     * @param windowMs 可用窗口（从**现在**到下一次交棒的毫秒数）
+     */
+    private fun applyCoalesceParams(text: String, windowMs: Long) {
+        val n = text.length.coerceAtLeast(1)
+        coalesceTotalMs = coalesceTotalFor(n, windowMs)
+        coalesceArriveMs = coalesceArriveFor(coalesceTotalMs)
+        coalescePerCharMs = coalescePerCharFor(n, coalesceTotalMs, coalesceArriveMs)
+    }
 
     private fun updateCoalescing(d: FloatArray, n: Int, progress: Float) {
         val accel = 0.012f + progress * 0.06f
@@ -1302,33 +1448,118 @@ class LyricsDotMatrixRenderer : RendererFx() {
     // ── 辅助函数 ────────────────────────────────────────────
 
     /**
+     * **交棒**：把**下行**顶到上行位置（歌词时间线换行时调用）。
+     *
+     * ## ⛔⛔ 顶替**不再等消散结束**（2026-11-07 真机：「歌词速度跟不上速度」）
+     *
+     * 旧码的顶替条件是「`SCATTERING_TOP` 的消散跑完」⇒ 消散要 `90·字数 + 600 ms`
+     * ⇒ **下一行被上一行的消散拖住整整一秒多** ⇒ 歌词整体落后于音乐。
+     * ✅ 现在：歌词时间线一换行就交棒 ⇒ 延迟 = 1 帧。
+     *
+     * ## 交棒时发生了什么
+     * 1. [promoteLine1ToLine0]：**交换**两行缓冲
+     *    ⇒ 上行 = 新行（**已成形**）、下行 = 旧行（**余烬**，继续消散）；
+     * 2. 上行开始**上移**（`SHIFTING`，时长 = 歌词行时长的 1/5）；
+     * 3. 下行（余烬）在同一段时间里**继续逐字飞散**
+     *    ⇒ 旧行化灰与新行上移**同时**发生，观感保留，⛔ 但消散不再挡路；
+     * 4. 上移结束时（[startNextLine]）下行换成「下一句」并开始凝聚。
+     *
+     * ⚠️ 余烬留在**原位**（不在下行的位置）⇒ 它靠自己的粒子坐标绘制。
+     */
+    private fun handoff(newIndex: Int, nowMs: Long) {
+        // ① 上移时长：按**歌词行时长**摊算（快歌 ⇒ 快切换；上限 700 ms）
+        slideMs = slideMsFor(tlLineDurationMs)
+        // ② 消散参数：按「上移窗口 ÷ 字数」摊算 ⇒ 旧行在窗口内化完（不留拖尾）
+        scatterFlyMs = scatterFlyFor(slideMs)
+        scatterPerCharMs = scatterPerCharFor(line0Text.length.coerceAtLeast(1), slideMs, scatterFlyMs)
+        // ③ 交棒：上行 ← 下行（成形的一行），下行 ← 旧行（余烬）
+        promoteLine1ToLine0()
+        // ④ 行号推进 + 进入上移阶段
+        displayedLineIndex = newIndex
+        phase = Phase.SHIFTING
+        phaseStartMs = nowMs
+        // ⑤ 上移期间的下行是余烬 ⇒ 凝聚时钟在此期间无意义（重置，避免陈旧值）
+        line1CoalesceStartMs = nowMs
+    }
+
+    /**
+     * **重新对齐**（歌词刚加载 / 行号跳变）。
+     *
+     * ⚠️ 不能走 [handoff] 的「交换」：那会把**错的一行**顶上去
+     *    ⇒ 这里直接按当前时间线重采两行，并回到初始凝聚。
+     */
+    private fun resync(ctx: RenderContext, newIndex: Int, nowMs: Long, w: Float, h: Float) {
+        val cap = line0.size / STRIDE
+        val fontCap = fontCapFor(ctx)
+        val cur = (if (hasTimeline) tlSungText else ctx.currentLyricLine) ?: ""
+        val next = (if (hasTimeline) tlNextText else ctx.nextLyricLine) ?: ""
+        displayedLineIndex = newIndex
+        line0Text = cur
+        line1Text = next
+        line0Count = sampleLine(cur, line0, line0CharIdx, line0LocalX, cap, w,
+            fontFor(cur, w, h, fontCap), topY)
+        line1Count = sampleLine(next, line1, line1CharIdx, line1LocalX, cap, w,
+            fontFor(next, w, h, fontCap), bottomY)
+        initCoalesce(line0, line0Count, w, h)
+        initCoalesce(line1, line1Count, w, h)
+        line1CoalesceStartMs = nowMs
+        applyCoalesceParams(line1Text, tlLineDurationMs)
+        rowOffsetY = 0f
+        phase = Phase.INIT_COALESCE
+        phaseStartMs = nowMs
+    }
+
+    /**
+     * 上移结束：下行换成「下一句」并开始凝聚。
+     *
+     * ⛔ 凝聚参数按**可用窗口**摊算：窗口 = 本行（正在唱的那一句）时长 − 上移时长
+     *    ⇒ 下一句必定在**本句唱完之前**聚完 ⇒ 顶上去的是成形的一行。
+     */
+    private fun startNextLine(ctx: RenderContext, nowMs: Long, w: Float, h: Float) {
+        val cap = line0.size / STRIDE
+        val fontCap = fontCapFor(ctx)
+        val text = (if (hasTimeline) tlNextText else ctx.nextLyricLine) ?: ""
+        line1Text = text
+        line1Count = sampleLine(text, line1, line1CharIdx, line1LocalX, cap, w,
+            fontFor(text, w, h, fontCap), bottomY)
+        if (line1Count > 0) {
+            initCoalesce(line1, line1Count, w, h, fromBelow = true)
+        }
+        // ⛔ 凝聚时钟从**采样时刻**起算（与阶段无关）⇒ 凝聚一定能走完
+        line1CoalesceStartMs = nowMs
+        applyCoalesceParams(line1Text, tlLineDurationMs - slideMs)
+    }
+
+    /**
      * 将 line1 提升为 line0（行切换时使用）。
-     * 复制所有粒子数据，TY 保持在下行位置（SHIFTING 阶段通过 rowOffsetY 做上移动画）。
      *
      * ## ⛔⛔ 提升前必须**把凝聚收尾**（吸附到目标位）
      *
      * 旧码直接复制 ⇒ 若下行还没聚完，被提升的这一行**带着半途的位置**顶上去
      * ⇒ 用户看到「顶上去之后又聚了一遍」。
      * ⇒ 这里先吸附（位置 = 目标、速度 = 0）⇒ 顶上去的**一定是成形的一行**。
+     *
+     * ## ✅ 实现改为「**交换**两行缓冲」而不是「复制」
+     *
+     * 复制会把旧行**直接抹掉** ⇒ 旧行的飞散（余烬）就没了。
+     * ⇒ 交换：上行 ← 下行（成形的新行），下行 ← 旧行（余烬，继续消散）
+     * ⇒ **两个动画并行**，且 ⛔ 顶替不再被消散拖住（2026-11-07 真机）。
      */
     private fun promoteLine1ToLine0() {
-        // ① 凝聚收尾：吸附到目标位（⛔ 不得在这里再聚一次）
-        for (i in 0 until line1Count) {
+        // ① 交换两行的缓冲（上行 ← 下行；下行 ← 旧行 = 余烬）
+        val tmpF = line0; line0 = line1; line1 = tmpF
+        val tmpI = line0CharIdx; line0CharIdx = line1CharIdx; line1CharIdx = tmpI
+        val tmpX = line0LocalX; line0LocalX = line1LocalX; line1LocalX = tmpX
+        val tmpC = line0Count; line0Count = line1Count; line1Count = tmpC
+        val tmpT = line0Text; line0Text = line1Text; line1Text = tmpT
+        // ② 凝聚收尾：吸附到目标位（⛔ 不得在这里再聚一次）
+        for (i in 0 until line0Count) {
             val o = i * STRIDE
-            line1[o + X] = line1[o + TX]
-            line1[o + Y] = line1[o + TY]
-            line1[o + VX] = 0f
-            line1[o + VY] = 0f
+            line0[o + X] = line0[o + TX]
+            line0[o + Y] = line0[o + TY]
+            line0[o + VX] = 0f
+            line0[o + VY] = 0f
         }
-        // 复制粒子数组
-        System.arraycopy(line1, 0, line0, 0, line1Count * STRIDE)
-        // 复制字索引
-        System.arraycopy(line1CharIdx, 0, line0CharIdx, 0, line1Count)
-        // 复制 localX
-        System.arraycopy(line1LocalX, 0, line0LocalX, 0, line1Count)
-        // 复制计数和文字
-        line0Count = line1Count
-        line0Text = line1Text
     }
 
     /**
@@ -1577,5 +1808,102 @@ class LyricsDotMatrixRenderer : RendererFx() {
             val u = t.coerceIn(0f, 1f)
             return 1f - (1f - u) * (1f - u) * (1f - u)
         }
+
+        // ── 时序参数（**纯函数**，门禁与离线预览直接调）────────────────
+        //
+        // ⛔⛔ 这几个函数是本轮（2026-11-07）的核心：所有动画时长都改成
+        //    **按歌词时间线摊算**，而不是与歌词无关的固定公式。
+        //    固定公式 ⇒ 20+ 字的长句永远聚不完 ⇒ 下行永远「半散」
+        //    ⇒ 可见度铺满 16 档 ⇒ 每帧上百次 `drawPoints`（帧成本的真凶）。
+
+        /** 旧的固定公式：逐字凝聚延迟（毫秒）—— 只作为**上限**参与取小 */
+        internal const val FIXED_COALESCE_PER_CHAR_MS = 160L
+        /** 旧的固定公式：单字凝聚到达时长（毫秒）—— 只作为**上限**参与取小 */
+        internal const val FIXED_COALESCE_ARRIVE_MS = 1200L
+        /** 旧的固定公式：逐字消散延迟（毫秒）—— 只作为**上限**参与取小 */
+        internal const val FIXED_SCATTER_PER_CHAR_MS = 90L
+        /** 旧的固定公式：单字飞散时长（毫秒）—— 只作为**上限**参与取小 */
+        internal const val FIXED_SCATTER_FLY_MS = 600L
+
+        /** 凝聚占可用窗口的比例（其余留给「已成形的静止段」） */
+        internal const val COALESCE_WINDOW_FRACTION = 0.75f
+
+        /** 可用窗口的上下限（毫秒）—— 防止窗口过短/过长导致动画失真 */
+        internal const val MIN_COALESCE_WINDOW_MS = 600L
+        internal const val MAX_COALESCE_WINDOW_MS = 8000L
+        /** 凝聚总时长的下限（毫秒）—— 再短也看得见「聚」的过程 */
+        internal const val MIN_COALESCE_TOTAL_MS = 300L
+
+        /** 上移（交棒）时长的上下限（毫秒） */
+        internal const val MIN_SLIDE_MS = 300L
+        internal const val MAX_SLIDE_MS = 700L
+        /** 上移时长的缺省值（歌词时间线不可用时） */
+        internal const val DEFAULT_SLIDE_MS = 700L
+
+        /**
+         * 一行凝聚的**总**时长（**纯函数**）。
+         *
+         * = `min(固定公式, 窗口 × [COALESCE_WINDOW_FRACTION])`
+         *
+         * ⛔ 窗口不足时**必须**按窗口收缩 ⇒ 否则长句永远聚不完
+         *    ⇒ ① 顶上去的是半成品；② 下行永远「半散」⇒ 每帧上百次 `drawPoints`。
+         *
+         * @param charCount 本行字数
+         * @param windowMs 可用窗口（毫秒）
+         */
+        internal fun coalesceTotalFor(charCount: Int, windowMs: Long): Long {
+            val n = charCount.coerceAtLeast(1)
+            val fixed = (n - 1).toLong() * FIXED_COALESCE_PER_CHAR_MS + FIXED_COALESCE_ARRIVE_MS
+            val win = windowMs.coerceIn(MIN_COALESCE_WINDOW_MS, MAX_COALESCE_WINDOW_MS)
+            val capped = (win * COALESCE_WINDOW_FRACTION).toLong()
+            return fixed.coerceAtMost(capped).coerceAtLeast(MIN_COALESCE_TOTAL_MS)
+        }
+
+        /**
+         * 单字凝聚的**到达**时长（**纯函数**）：不超过总时长的一半。
+         *
+         * ⚠️ 到达时长占比过高 ⇒ 逐字延迟被压成 0 ⇒ 「逐字凝聚」退化成「整行一起出现」。
+         */
+        internal fun coalesceArriveFor(totalMs: Long): Long =
+            FIXED_COALESCE_ARRIVE_MS.coerceAtMost((totalMs / 2).coerceAtLeast(1L))
+
+        /**
+         * 逐字凝聚的**延迟**（**纯函数**）：剩余窗口按字数均摊。
+         *
+         * ⇒ 逐字节奏 = 字数 ÷ 凝聚总时长 ⇒ **与歌词本身的节奏同量级（字/秒）**。
+         */
+        internal fun coalescePerCharFor(charCount: Int, totalMs: Long, arriveMs: Long): Long {
+            val n = charCount.coerceAtLeast(1)
+            if (n <= 1) return 0L
+            return ((totalMs - arriveMs) / (n - 1)).coerceAtLeast(0L)
+        }
+
+        /**
+         * 单字飞散时长（**纯函数**）：上移窗口的 45%（下限 80 ms）。
+         *
+         * ⚠️ 必须**小于**上移窗口 ⇒ 余烬才会在窗口内化完，不拖到下一次交棒。
+         */
+        internal fun scatterFlyFor(windowMs: Long): Long =
+            (windowMs * 0.45f).toLong().coerceAtLeast(80L)
+
+        /**
+         * 逐字消散的**延迟**（**纯函数**）：窗口剩余按字数均摊。
+         *
+         * ⇒ 整行必定在窗口内化完 ⇒ 旧行的飞散**不挡**下一行顶替。
+         */
+        internal fun scatterPerCharFor(charCount: Int, windowMs: Long, flyMs: Long): Long {
+            val n = charCount.coerceAtLeast(1)
+            if (n <= 1) return 0L
+            return ((windowMs - flyMs) / (n - 1)).coerceAtLeast(0L)
+        }
+
+        /**
+         * 上移（交棒）时长（**纯函数**）：歌词行时长的 1/5，夹在 300–700 ms。
+         *
+         * ⇒ 快歌快切、慢歌慢切；且**恒定有界** ⇒ 余烬不会长期占着下行。
+         */
+        internal fun slideMsFor(lineDurationMs: Long): Long =
+            if (lineDurationMs <= 0L) DEFAULT_SLIDE_MS
+            else (lineDurationMs / 5).coerceIn(MIN_SLIDE_MS, MAX_SLIDE_MS)
     }
 }

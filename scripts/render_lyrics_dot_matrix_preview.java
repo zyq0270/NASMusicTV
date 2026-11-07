@@ -492,11 +492,20 @@ public class RenderLyricsDotMatrixPreview {
 
     public static void main(String[] args) throws Exception {
         String spec = args.length > 0 ? args[0] : "Microsoft YaHei";
+        boolean timelineOnly = args.length > 1 && args[1].contains("timeline");
         BASE = new Font(spec, Font.BOLD, 100);
         System.out.println("字体: " + BASE.getFontName());
 
         new File("logs_temp").mkdirs();
 
+        if (!timelineOnly) {
+            runStillImages();
+        }
+        runTimelineSimulation();
+    }
+
+    /** 旧的 still-image 对照（OLD / CURRENT / FIXED 三张 PNG + 并排图） */
+    static void runStillImages() throws Exception {
         final int W = 2712, H = 1220;                 // 小米 22081212C 横屏
         final int CAP = 7200;                          // E53 子模式 0（中/高档 ×2）
         final String LINE = "他等过你 已来不及";          // 屏上正在唱的那一行
@@ -526,9 +535,6 @@ public class RenderLyricsDotMatrixPreview {
         Sample sFix = sample(LINE, W, H, fontFix, CAP, K);
         drawBatched(cvFix, sFix, false, false);        // 新码：drawPoints 合批 + SrcOver
 
-        for (Canvas cv : new Canvas[]{cvOld, cvCur, cvFix}) {
-            // 顶部/底部留白由裁剪处理
-        }
         ImageIO.write(toImage(cvOld), "png", new File("logs_temp/dotmatrix_OLD.png"));
         ImageIO.write(toImage(cvCur), "png", new File("logs_temp/dotmatrix_CURRENT.png"));
         ImageIO.write(toImage(cvFix), "png", new File("logs_temp/dotmatrix_FIXED.png"));
@@ -538,6 +544,22 @@ public class RenderLyricsDotMatrixPreview {
         report("OLD   (Path 并集 + Plus)", sOld, cvOld, fontOld);
         report("CURRENT (drawPoints + Plus)", sCur, cvCur, fontCur);
         report("FIXED  (drawPoints + SrcOver)", sFix, cvFix, fontFix);
+
+        // ── 填充率成本量：光栅化面积（与**字号无关**，见 [rasterAreaPerFrame]）────
+        System.out.println();
+        System.out.println("=== 填充率成本量（每帧光栅化面积；点的半径**不随字号涨**）===");
+        System.out.printf("%-28s 字号=%6.1f  每行点数=%5d  代表半径=%.2f px  每帧面积=%9.0f px  @120fps=%6.1f Mpx/s%n",
+                "OLD (参考=全曲最长行)", fontOld, sOld.n, meanRadius(sOld),
+                rasterAreaPerFrame(sOld, 2), rasterAreaPerFrame(sOld, 2) * 120 / 1e6);
+        System.out.printf("%-28s 字号=%6.1f  每行点数=%5d  代表半径=%.2f px  每帧面积=%9.0f px  @120fps=%6.1f Mpx/s%n",
+                "CURRENT (参考=全曲最长行)", fontCur, sCur.n, meanRadius(sCur),
+                rasterAreaPerFrame(sCur, 2), rasterAreaPerFrame(sCur, 2) * 120 / 1e6);
+        System.out.printf("%-28s 字号=%6.1f  每行点数=%5d  代表半径=%.2f px  每帧面积=%9.0f px  @120fps=%6.1f Mpx/s%n",
+                "FIXED (参考=本行)", fontFix, sFix.n, meanRadius(sFix),
+                rasterAreaPerFrame(sFix, 2), rasterAreaPerFrame(sFix, 2) * 120 / 1e6);
+        System.out.println("⇒ 字号 85.8 → 195.2（2.27×）时，**每帧光栅化面积几乎不变**（点数与半径都没变）");
+        System.out.println("  ⇒ 「字号变大 ⇒ 每个点的面积 ×5.2 ⇒ 填充率 ×5」这条**不成立**（半径与字号无关）；");
+        System.out.println("  ⇒ 覆盖率的变化只来自**点的分布**（见 measure_lyrics_dot_matrix_density.java 的 34.5% / 62.8%）。");
 
         // ── 并排对照图（裁到文本行附近，纵向拼接）──────────────
         makeSideBySide(cvOld, cvCur, cvFix, "logs_temp/dotmatrix_compare.png");
@@ -549,6 +571,41 @@ public class RenderLyricsDotMatrixPreview {
                 label, font, s.n, coverage(s),
                 bb[0], bb[1], bb[1] - bb[0] + 1, 100.0 * (bb[1] - bb[0] + 1) / cv.w,
                 bb[2], bb[3], bb[3] - bb[2] + 1);
+    }
+
+    /**
+     * 一帧的**光栅化面积**估算（= 填充率的成本量）。
+     *
+     * ⛔⛔ **点的半径与字号无关**（生产代码：`size = breath² · bassPulse · (0.85+brightness·0.4) · visibility`
+     *    —— **没有任何字号项**；`drawPointBatches` 里 `strokeWidth = radius · 4` ⇒ 圆盘半径 = 2·size ≈ 2 px）。
+     * ⇒ 字号变大只改变**点的分布**，**不改变每个点的面积** ⇒ 光栅化面积不变。
+     *
+     * 本函数把「每帧要混合的像素数」算出来，用于把「填充率」与「滞后」两条线索**分开量化**。
+     *
+     * @param s        一行的采样结果
+     * @param lineRows 屏上同时存在的行数（2 行）
+     */
+    static double rasterAreaPerFrame(Sample s, int lineRows) {
+        double area = 0;
+        for (Particle p : s.particles) {
+            float size = p.size;
+            // core：`strokeWidth = radius·4` ⇒ 半径 = 2·size
+            area += Math.PI * (2.0 * size) * (2.0 * size);
+            if (p.tier >= 1) {
+                // glow：半径 × 1.4（中档）/ 2.2（亮档）
+                float f = (p.tier == 2) ? GLOW_FACTOR_TIER2 : GLOW_FACTOR_TIER1;
+                area += Math.PI * (2.0 * size * f) * (2.0 * size * f);
+            }
+        }
+        return area * lineRows;
+    }
+
+    /** 一行的代表半径（= 批内 size 均值；生产代码里就是 `strokeWidth/4`） */
+    static float meanRadius(Sample s) {
+        if (s.n == 0) return 0f;
+        float sum = 0f;
+        for (Particle p : s.particles) sum += p.size;
+        return sum / s.n;
     }
 
     /** 三张竖排拼接（各自裁到中间那行文字附近），便于一眼比对 */
@@ -566,5 +623,441 @@ public class RenderLyricsDotMatrixPreview {
         }
         g.dispose();
         ImageIO.write(out, "png", new File(path));
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    // ④ 时间线仿真（2026-11-07：歌词跟不上速度）
+    // ══════════════════════════════════════════════════════════════
+    //
+    // 复刻 `LyricsDotMatrixRenderer` 的**状态机**（两版时序），喂一条合成歌词时间线，
+    // 逐帧统计：
+    //   ① 每个行边界的「应顶替时刻（歌词时间线）」与「状态机实际顶替时刻」⇒ 延迟；
+    //   ② **同时存活的点数**（旧行 + 成形行 + 顶替行）—— 填充率的成本量；
+    //   ③ **非空子批次数**（= 每帧 `drawPoints` 的提交数）—— `strokeWidth` 是整批的，
+    //      可见度铺满 16 档 ⇒ 提交数从十几次涨到上百次 ⇒ **帧成本的真凶**。
+    //
+    // ⛔ 本脚本**复刻**生产逻辑（不是调用生产代码 —— 生产代码跑在 Android 上）。
+    //    改生产代码时**必须**同步本脚本，否则对照会说谎。
+
+    // ── 仿真参数（与生产常量一致）────────────────────────────────
+    static final int SIM_CAP = 7200;          // E53 子模式 0（中/高档 ×2）
+    static final long SIM_FRAME_MS = 8;       // 120 Hz ≈ 8.33 ms（取整）
+    static final long SIM_TICK_MS = 1000;     // `ctx.lyricLineIndex` 的 1 Hz 更新
+    static final long OLD_SCATTER_PER_CHAR = 90;
+    static final long OLD_SCATTER_FLY = 600;
+    static final long OLD_COALESCE_PER_CHAR = 160;
+    static final long OLD_COALESCE_ARRIVE = 1200;
+    static final long OLD_SHIFT_MS = 700;
+    static final long INIT_COALESCE_MS = 1200;
+    static final float COALESCE_WINDOW_FRACTION = 0.75f;
+    static final long MIN_COALESCE_WINDOW_MS = 600;
+    static final long MAX_COALESCE_WINDOW_MS = 8000;
+    static final long MIN_COALESCE_TOTAL_MS = 300;
+    static final long MIN_SLIDE_MS = 300;
+    static final long MAX_SLIDE_MS = 700;
+    static final long DEFAULT_SLIDE_MS = 700;
+
+    /** 生产 `coalesceTotalFor()` 的复刻 */
+    static long coalesceTotalFor(int chars, long windowMs) {
+        long fixed = (long) (chars - 1) * OLD_COALESCE_PER_CHAR + OLD_COALESCE_ARRIVE;
+        long win = Math.min(Math.max(windowMs, MIN_COALESCE_WINDOW_MS), MAX_COALESCE_WINDOW_MS);
+        long capped = (long) (win * COALESCE_WINDOW_FRACTION);
+        return Math.max(Math.min(fixed, capped), MIN_COALESCE_TOTAL_MS);
+    }
+
+    /** 生产 `coalesceArriveFor()` 的复刻 */
+    static long coalesceArriveFor(long totalMs) {
+        return Math.min(OLD_COALESCE_ARRIVE, Math.max(totalMs / 2, 1));
+    }
+
+    /** 生产 `coalescePerCharFor()` 的复刻 */
+    static long coalescePerCharFor(int chars, long totalMs, long arriveMs) {
+        if (chars <= 1) return 0;
+        return Math.max((totalMs - arriveMs) / (chars - 1), 0);
+    }
+
+    /** 生产 `scatterFlyFor()` 的复刻 */
+    static long scatterFlyFor(long windowMs) {
+        return Math.max((long) (windowMs * 0.45f), 80L);
+    }
+
+    /** 生产 `scatterPerCharFor()` 的复刻 */
+    static long scatterPerCharFor(int chars, long windowMs, long flyMs) {
+        if (chars <= 1) return 0;
+        return Math.max((windowMs - flyMs) / (chars - 1), 0);
+    }
+
+    /** 生产 `slideMsFor()` 的复刻 */
+    static long slideMsFor(long lineDurationMs) {
+        if (lineDurationMs <= 0) return DEFAULT_SLIDE_MS;
+        return Math.min(Math.max(lineDurationMs / 5, MIN_SLIDE_MS), MAX_SLIDE_MS);
+    }
+
+    /**
+     * **旧时序**的凝聚总时长（固定公式，与歌词时间线无关）。
+     *
+     * ⛔ 这就是 2026-11-07 之前的口径：`160·字数 + 1200 ms`
+     *    ⇒ 20+ 字的长句需要 4.4 s，而一句歌词只有 3.5 s
+     *    ⇒ **永远聚不完** ⇒ 下行永远是「半散」的
+     *    ⇒ 可见度铺满 16 档 ⇒ 每帧的 `drawPoints` 提交数居高不下。
+     */
+    static long oldCoalesceTotal(int chars) {
+        return (long) (Math.max(1, chars) - 1) * OLD_COALESCE_PER_CHAR + OLD_COALESCE_ARRIVE;
+    }
+
+    /** 合成歌词的一行 */
+    static final class SimLine {
+        final String text;
+        final long startMs, endMs;
+        final int chars;
+        SimLine(String text, long startMs, long endMs) {
+            this.text = text;
+            this.startMs = startMs;
+            this.endMs = endMs;
+            this.chars = Math.max(1, text.replace(" ", "").length());
+        }
+    }
+
+    /** 某一帧里一行的状态 */
+    static final class RowState {
+        int chars = 1;
+        /** 完全成形（可见度恒 1） */
+        boolean solid = true;
+        /** 凝聚中：自采样起经过的时间 / 逐字延迟 / 单字到达时长 */
+        long coalesceElapsed, coalescePerChar, coalesceArrive;
+        /** 消散中：自消散起经过的时间 / 逐字延迟 / 飞散时长 */
+        long scatterElapsed, scatterPerChar, scatterFly;
+        /** 是否在唱（决定亮度档数 ⇒ 子批次数：5 个 vs 1 个） */
+        boolean singing;
+
+        boolean scattering() { return scatterFly > 0; }
+        boolean coalescing() { return !solid && !scattering(); }
+    }
+
+    /** 一帧的统计量 */
+    static final class FrameStat {
+        double aliveDots;      // 存活点数（按可见度加权）
+        int subBatches;        // 非空子批次数（= drawPoints 提交数）
+    }
+
+    /** 一行的存活点数（按可见度加权） */
+    static double aliveOf(RowState r) {
+        if (r.chars <= 0) return 0;
+        if (r.solid) return SIM_CAP;
+        double per = (double) SIM_CAP / r.chars;
+        double sum = 0;
+        if (r.scattering()) {
+            for (int ci = 0; ci < r.chars; ci++) {
+                long e = r.scatterElapsed - (long) ci * r.scatterPerChar;
+                if (e <= 0) { sum += per; continue; }         // 还没开始消散 ⇒ 仍可见
+                float v = 1f - (float) e / r.scatterFly;
+                if (v <= 0.01f) continue;
+                sum += per * v;
+            }
+        } else {
+            for (int ci = 0; ci < r.chars; ci++) {
+                long e = r.coalesceElapsed - (long) ci * r.coalescePerChar;
+                if (e <= 0) continue;                          // 还没开始凝聚 ⇒ 不可见
+                float v = Math.min(1f, (float) e / r.coalesceArrive);
+                if (v <= 0.01f) continue;
+                sum += per * v;
+            }
+        }
+        return sum;
+    }
+
+    /** 一行的非空子批次数（= drawPoints 提交数） */
+    static int subBatchesOf(RowState r) {
+        if (r.chars <= 0) return 0;
+        if (r.solid) {
+            // 成形行：全部落在最后一个可见度档 ⇒ 每（档 × 层）一个子批次
+            //   在唱：3 档（暗/中/亮）×（core + 亮/中的 glow）= 5
+            //   不在唱：只有暗档 core = 1
+            return r.singing ? 5 : 1;
+        }
+        // 散开行：可见度铺在多个档上 ⇒ 每个非空档一个子批次（暗档只有 core）
+        boolean[] bucket = new boolean[VIS_BUCKETS];
+        if (r.scattering()) {
+            for (int ci = 0; ci < r.chars; ci++) {
+                long e = r.scatterElapsed - (long) ci * r.scatterPerChar;
+                float v = e <= 0 ? 1f : 1f - (float) e / r.scatterFly;
+                if (v <= 0.01f) continue;
+                bucket[visibilityBucketOf(v)] = true;
+            }
+        } else {
+            for (int ci = 0; ci < r.chars; ci++) {
+                long e = r.coalesceElapsed - (long) ci * r.coalescePerChar;
+                if (e <= 0) continue;
+                float v = Math.min(1f, (float) e / r.coalesceArrive);
+                if (v <= 0.01f) continue;
+                bucket[visibilityBucketOf(v)] = true;
+            }
+        }
+        int n = 0;
+        for (boolean b : bucket) if (b) n++;
+        return n;
+    }
+
+    /** 生产 `visibilityBucketOf()` 的复刻 */
+    static int visibilityBucketOf(float visibility) {
+        int b = (int) (visibility * VIS_BUCKETS);
+        return Math.min(Math.max(b, 0), VIS_BUCKETS - 1);
+    }
+
+    /** 合成歌词表：6 句，每句 3.5 s（逐字时间按字数均分） */
+    static SimLine[] buildSimLyrics() {
+        String[] texts = {
+            "他等过你 已来不及",
+            "我等过你好久好久不见你",
+            "就这样远走 留下我一个人",
+            "风吹过 花开又落",
+            "你说的话 我都记得",
+            "那么多年 谢谢你来过",
+        };
+        SimLine[] lines = new SimLine[texts.length];
+        long t = 0;
+        for (int i = 0; i < texts.length; i++) {
+            lines[i] = new SimLine(texts[i], t, t + 3500);
+            t += 3500;
+        }
+        return lines;
+    }
+
+    /** 一版时序的仿真结果 */
+    static final class SimResult {
+        String label;
+        long[] expectPromoteMs;   // 歌词时间线给出的应顶替时刻
+        long[] actualPromoteMs;   // 状态机实际顶替时刻
+        double peakAlive;
+        double avgAlive;
+        int peakSubBatches;
+        double avgSubBatches;
+        double frames;
+    }
+
+    /** 时序版本：true = 旧（消散挡路 + 1 Hz 检测），false = 新（时间线驱动） */
+    static SimResult simulate(SimLine[] lines, boolean oldTiming) {
+        SimResult res = new SimResult();
+        res.label = oldTiming ? "旧时序（消散挡路 + 1 Hz 检测）" : "新时序（歌词时间线驱动）";
+        int n = lines.length;
+        long lineDuration = lines[0].endMs - lines[0].startMs;
+        res.expectPromoteMs = new long[n - 1];
+        res.actualPromoteMs = new long[n - 1];
+
+        // ── 每个边界的「检测 / 顶替 / 上移结束」时刻 ──────────────
+        long[] detect = new long[n - 1];
+        long[] promote = new long[n - 1];
+        long[] shiftEnd = new long[n - 1];
+        for (int i = 0; i < n - 1; i++) {
+            long boundary = lines[i].endMs;
+            res.expectPromoteMs[i] = boundary;
+            if (oldTiming) {
+                // 旧：换行由 1 Hz 的 `ctx.lyricLineIndex` 发现（向上取整到秒）
+                detect[i] = ((boundary + SIM_TICK_MS - 1) / SIM_TICK_MS) * SIM_TICK_MS;
+                // 旧：顶替必须等消散跑完（90·字数 + 600 ms）
+                long scatter = (long) (lines[i].chars - 1) * OLD_SCATTER_PER_CHAR + OLD_SCATTER_FLY;
+                promote[i] = detect[i] + scatter;
+                shiftEnd[i] = promote[i] + OLD_SHIFT_MS;
+            } else {
+                // 新：逐帧发现 ⇒ 顶替发生在边界的下一帧
+                detect[i] = boundary;
+                promote[i] = ((boundary + SIM_FRAME_MS - 1) / SIM_FRAME_MS) * SIM_FRAME_MS;
+                shiftEnd[i] = promote[i] + slideMsFor(lineDuration);
+            }
+            res.actualPromoteMs[i] = promote[i];
+        }
+
+        // ── 逐帧统计 ─────────────────────────────────────────────
+        long totalMs = lines[n - 1].endMs;
+        double aliveSum = 0, subSum = 0, frames = 0;
+        double peakAlive = 0;
+        int peakSub = 0;
+        for (long t = 0; t <= totalMs; t += SIM_FRAME_MS) {
+            RowState top = new RowState();
+            RowState bottom = new RowState();
+
+            // 找到最近一次「顶替」的下标
+            int b = -1;
+            for (int i = 0; i < n - 1; i++) if (promote[i] <= t) b = i;
+
+            if (b < 0) {
+                // 初始：两行同时凝聚
+                top.chars = lines[0].chars;
+                bottom.chars = lines[1].chars;
+                top.solid = false; bottom.solid = false;
+                top.coalesceElapsed = t; bottom.coalesceElapsed = t;
+                if (oldTiming) {
+                    // 旧时序：凝聚走**固定公式**（与歌词时间线无关 ⇒ 常常走不完）
+                    top.coalesceArrive = OLD_COALESCE_ARRIVE;
+                    top.coalescePerChar = OLD_COALESCE_PER_CHAR;
+                    bottom.coalesceArrive = OLD_COALESCE_ARRIVE;
+                    bottom.coalescePerChar = OLD_COALESCE_PER_CHAR;
+                } else {
+                    long topTotal = coalesceTotalFor(top.chars, lineDuration);
+                    long botTotal = coalesceTotalFor(bottom.chars, lineDuration);
+                    top.coalesceArrive = coalesceArriveFor(topTotal);
+                    top.coalescePerChar = coalescePerCharFor(top.chars, topTotal, top.coalesceArrive);
+                    bottom.coalesceArrive = coalesceArriveFor(botTotal);
+                    bottom.coalescePerChar = coalescePerCharFor(bottom.chars, botTotal, bottom.coalesceArrive);
+                }
+                if (t >= INIT_COALESCE_MS) {
+                    // 初始凝聚结束 ⇒ 上行转成形（开始唱）
+                    top.solid = true;
+                    top.singing = true;
+                }
+            } else if (oldTiming) {
+                // 旧：消散阶段（顶替还没发生）
+                if (t < promote[b]) {
+                    top.chars = lines[b].chars;
+                    top.solid = false;
+                    top.scatterElapsed = t - detect[b];
+                    top.scatterPerChar = OLD_SCATTER_PER_CHAR;
+                    top.scatterFly = OLD_SCATTER_FLY;
+                    // 下行 = 下一句（早已采样 ⇒ 旧公式下大概率**还没聚完**）
+                    bottom.chars = lines[b + 1].chars;
+                    long sampleAt = (b == 0) ? 0 : promote[b - 1];
+                    long total = oldCoalesceTotal(bottom.chars);
+                    if (t - sampleAt >= total) {
+                        bottom.solid = true;
+                    } else {
+                        bottom.solid = false;
+                        bottom.coalesceElapsed = t - sampleAt;
+                        bottom.coalesceArrive = OLD_COALESCE_ARRIVE;
+                        bottom.coalescePerChar = OLD_COALESCE_PER_CHAR;
+                    }
+                } else {
+                    // 顶替之后：上行 = 顶上来的一行（成形、在唱），下行 = 再下一句（凝聚中）
+                    top.chars = lines[b + 1].chars;
+                    top.solid = true;
+                    top.singing = true;
+                    bottom.chars = (b + 2 < n) ? lines[b + 2].chars : 0;
+                    if (bottom.chars > 0) {
+                        long total = oldCoalesceTotal(bottom.chars);
+                        long sampleAt = promote[b];
+                        if (t - sampleAt >= total) {
+                            bottom.solid = true;
+                        } else {
+                            bottom.solid = false;
+                            bottom.coalesceElapsed = t - sampleAt;
+                            bottom.coalesceArrive = OLD_COALESCE_ARRIVE;
+                            bottom.coalescePerChar = OLD_COALESCE_PER_CHAR;
+                        }
+                    }
+                }
+            } else {
+                // 新：上移阶段（顶替已发生 ⇒ 顶替行在上移，旧行是余烬）
+                if (t < shiftEnd[b]) {
+                    top.chars = lines[b + 1].chars;
+                    top.solid = true;
+                    top.singing = true;
+                    bottom.chars = lines[b].chars;
+                    bottom.solid = false;
+                    bottom.scatterElapsed = t - promote[b];
+                    long fly = scatterFlyFor(slideMsFor(lineDuration));
+                    bottom.scatterFly = fly;
+                    bottom.scatterPerChar = scatterPerCharFor(bottom.chars, slideMsFor(lineDuration), fly);
+                } else {
+                    top.chars = lines[b + 1].chars;
+                    top.solid = true;
+                    top.singing = true;
+                    bottom.chars = (b + 2 < n) ? lines[b + 2].chars : 0;
+                    if (bottom.chars > 0) {
+                        long window = lineDuration - slideMsFor(lineDuration);
+                        long total = coalesceTotalFor(bottom.chars, window);
+                        long sampleAt = shiftEnd[b];
+                        if (t - sampleAt >= total) {
+                            bottom.solid = true;
+                        } else {
+                            bottom.solid = false;
+                            bottom.coalesceElapsed = t - sampleAt;
+                            bottom.coalesceArrive = coalesceArriveFor(total);
+                            bottom.coalescePerChar = coalescePerCharFor(bottom.chars, total, bottom.coalesceArrive);
+                        }
+                    }
+                }
+            }
+
+            double alive = aliveOf(top) + aliveOf(bottom);
+            int subs = subBatchesOf(top) + subBatchesOf(bottom);
+            aliveSum += alive; subSum += subs; frames++;
+            if (alive > peakAlive) peakAlive = alive;
+            if (subs > peakSub) peakSub = subs;
+        }
+        res.peakAlive = peakAlive;
+        res.avgAlive = aliveSum / frames;
+        res.peakSubBatches = peakSub;
+        res.avgSubBatches = subSum / frames;
+        res.frames = frames;
+        return res;
+    }
+
+    /** 时间线仿真（主入口） */
+    static void runTimelineSimulation() {
+        SimLine[] lines = buildSimLyrics();
+        SimResult oldRes = simulate(lines, true);
+        SimResult newRes = simulate(lines, false);
+
+        System.out.println();
+        System.out.println("=== ④ 时间线仿真（歌词时间线 = 6 句 × 3.5 s，逐字按字数均分） ===");
+        System.out.printf("每行粒子上限 %d（E53 子模式 0 中/高档 ×2），帧步长 %d ms（120 Hz）%n", SIM_CAP, SIM_FRAME_MS);
+        System.out.println();
+        System.out.printf("%-4s %-10s %-12s %-12s %-10s%n",
+                "边界", "应顶替(ms)", "旧: 实际(ms)", "旧: 延迟(ms)", "新: 实际(ms)");
+        for (int i = 0; i < lines.length - 1; i++) {
+            long expect = oldRes.expectPromoteMs[i];
+            System.out.printf("%-4d %-10d %-12d %-12d %-10d%n",
+                    i + 1, expect,
+                    oldRes.actualPromoteMs[i], oldRes.actualPromoteMs[i] - expect,
+                    newRes.actualPromoteMs[i]);
+        }
+        long oldMaxLag = 0, newMaxLag = 0;
+        for (int i = 0; i < lines.length - 1; i++) {
+            oldMaxLag = Math.max(oldMaxLag, oldRes.actualPromoteMs[i] - oldRes.expectPromoteMs[i]);
+            newMaxLag = Math.max(newMaxLag, newRes.actualPromoteMs[i] - newRes.expectPromoteMs[i]);
+        }
+        System.out.println();
+        System.out.printf("最大延迟：旧 = %d ms（≈ 消散时长 + 1 Hz 检测量化）%n", oldMaxLag);
+        System.out.printf("          新 = %d ms（≤ 1 帧 = %d ms）%n", newMaxLag, SIM_FRAME_MS);
+
+        System.out.println();
+        System.out.println("--- 同时存活点数（填充率的成本量）---");
+        System.out.printf("%-34s 峰值 %8.0f   平均 %8.0f   （上限 %d = 2 行）%n",
+                oldRes.label, oldRes.peakAlive, oldRes.avgAlive, SIM_CAP * 2);
+        System.out.printf("%-34s 峰值 %8.0f   平均 %8.0f   （上限 %d = 2 行）%n",
+                newRes.label, newRes.peakAlive, newRes.avgAlive, SIM_CAP * 2);
+
+        System.out.println();
+        System.out.println("--- 非空子批次数（= 每帧 drawPoints 提交数；strokeWidth 是整批的）---");
+        System.out.printf("%-34s 峰值 %4d   平均 %6.2f%n", oldRes.label, oldRes.peakSubBatches, oldRes.avgSubBatches);
+        System.out.printf("%-34s 峰值 %4d   平均 %6.2f%n", newRes.label, newRes.peakSubBatches, newRes.avgSubBatches);
+        System.out.println("（说明：旧时序的「下一句」永远聚不完 ⇒ 可见度铺满 16 档 ⇒ 提交数居高不下；");
+        System.out.println("  新时序的凝聚被**压进可用窗口** ⇒ 该行大部分时间是成形的 ⇒ 只占 1 档。）");
+
+        // 落一份 JSON 便于机器比对
+        try {
+            StringBuilder sb = new StringBuilder();
+            sb.append("{\n");
+            sb.append("  \"cap\": ").append(SIM_CAP).append(",\n");
+            sb.append("  \"lineDurationMs\": 3500,\n");
+            sb.append("  \"old\": {\"maxLagMs\": ").append(oldMaxLag)
+              .append(", \"peakAliveDots\": ").append((long) oldRes.peakAlive)
+              .append(", \"avgAliveDots\": ").append((long) oldRes.avgAlive)
+              .append(", \"peakSubBatches\": ").append(oldRes.peakSubBatches)
+              .append(", \"avgSubBatches\": ").append(String.format("%.2f", oldRes.avgSubBatches))
+              .append("},\n");
+            sb.append("  \"new\": {\"maxLagMs\": ").append(newMaxLag)
+              .append(", \"peakAliveDots\": ").append((long) newRes.peakAlive)
+              .append(", \"avgAliveDots\": ").append((long) newRes.avgAlive)
+              .append(", \"peakSubBatches\": ").append(newRes.peakSubBatches)
+              .append(", \"avgSubBatches\": ").append(String.format("%.2f", newRes.avgSubBatches))
+              .append("}\n}\n");
+            java.nio.file.Files.write(
+                java.nio.file.Paths.get("logs_temp/dotmatrix_timeline_sim.json"),
+                sb.toString().getBytes("UTF-8"));
+            System.out.println();
+            System.out.println("仿真摘要已写入 logs_temp/dotmatrix_timeline_sim.json");
+        } catch (Exception e) {
+            System.out.println("（仿真摘要写盘失败: " + e + "）");
+        }
     }
 }

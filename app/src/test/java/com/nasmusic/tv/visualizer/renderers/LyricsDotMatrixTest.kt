@@ -421,6 +421,94 @@ class LyricsDotMatrixTest {
         )
     }
 
+    // ══════════════ ⑳ 时序：顶替由**歌词时间线**驱动，不得被消散拖住 ══════════════
+
+    @Test
+    fun `⑳ 顶替不得挂在消散上 - 消散阶段必须消失 且必须由时间线驱动`() {
+        val body = classBody(codeOfE23(), "LyricsDotMatrixRenderer")
+        // ⛔ 旧码的顶替条件是「`SCATTERING_TOP` 的消散跑完」⇒ 下一行被消散拖住
+        //    （2026-11-07 真机：「歌词速度跟不上速度」）。
+        assertFalse(
+            "⛔ 不得再有以消散为门槛的阶段",
+            "SCATTERING_TOP" in body
+        )
+        // ✅ 顶替由**逐帧歌词时间线**驱动：行号一变就交棒
+        assertTrue(
+            "必须按行号变化触发交棒（时间线驱动）",
+            Regex("""currentIdx\s*!=\s*displayedLineIndex""").containsMatchIn(body)
+        )
+        assertTrue("必须存在交棒入口", "handoff(" in body)
+        // ✅ 宿主必须逐帧把时间线推给渲染器
+        val raw = readFile(renderersFile("LyricsDotMatrixRenderer.kt"))
+        assertTrue("必须有宿主逐帧推入歌词时间线的入口", "setLyricTimeline" in raw)
+        val host = readFile(
+            File(
+                mainSourceRoot(),
+                "com/nasmusic/tv/visualizer/renderers/lyricsStage/DotMatrixSubRenderer.kt"
+            )
+        )
+        assertTrue("宿主必须调用 setLyricTimeline（逐帧推时间线）", "setLyricTimeline" in host)
+    }
+
+    @Test
+    fun `⑳ 行为 - 凝聚必须走得完 且在窗口内 - 长句不得永远聚不完`() {
+        // 窗口 = 一句歌词的时长（毫秒）。下一句必须在本句结束前聚完
+        // ⇒ 「顶上去的是成形的一行」（§13 的 ③ 号回归不复发）。
+        val window = 3500L
+        for (chars in intArrayOf(4, 8, 12, 20, 30, 40)) {
+            val total = LyricsDotMatrixRenderer.coalesceTotalFor(chars, window)
+            assertTrue(
+                "chars=$chars：凝聚总时长 $total 必须 ≤ 窗口 $window（否则永远聚不完）",
+                total <= window
+            )
+            assertTrue("chars=$chars：凝聚总时长必须 ≥ 300 ms（看得见聚的过程）", total >= 300L)
+            // 逐字节奏：剩余窗口按字数均摊 ⇒ 逐字延迟 ≥ 0 且总时长自洽
+            val arrive = LyricsDotMatrixRenderer.coalesceArriveFor(total)
+            val perChar = LyricsDotMatrixRenderer.coalescePerCharFor(chars, total, arrive)
+            assertTrue("chars=$chars：到达时长必须 ≤ 总时长的一半", arrive * 2 <= total)
+            assertTrue("chars=$chars：逐字延迟不得为负", perChar >= 0L)
+            if (chars > 1) {
+                val span = (chars - 1).toLong() * perChar + arrive
+                assertTrue(
+                    "chars=$chars：逐字时间线总跨度 $span 必须 ≈ 总时长 $total",
+                    abs(span - total) <= (chars - 1)
+                )
+            }
+        }
+        // ⛔ 负向自证：**旧的固定公式**在同一批样本上必须违反窗口约束
+        //    （否则本门禁没有鉴别力 ⇒ 修与不修都过）。
+        for (chars in intArrayOf(20, 30, 40)) {
+            val oldFixed = (chars - 1).toLong() * 160L + 1200L
+            assertTrue(
+                "旧固定公式（chars=$chars ⇒ $oldFixed ms）必须超出窗口 $window",
+                oldFixed > window
+            )
+        }
+    }
+
+    @Test
+    fun `⑳ 行为 - 上移与消散必须有界 - 余烬不得拖尾到下一次交棒`() {
+        // 上移时长按歌词行时长摊算，且**恒定有界**
+        assertEquals("未知时长 ⇒ 缺省上移时长", 700L, LyricsDotMatrixRenderer.slideMsFor(0L))
+        assertEquals("3.5 s 的行 ⇒ 上移 700 ms（上限）", 700L, LyricsDotMatrixRenderer.slideMsFor(3500L))
+        assertEquals("1.5 s 的行 ⇒ 上移 300 ms（下限）", 300L, LyricsDotMatrixRenderer.slideMsFor(1500L))
+        assertTrue(
+            "任何行时长的上移都必须落在 [300, 700]",
+            LyricsDotMatrixRenderer.slideMsFor(99999L) in 300L..700L
+        )
+        // 消散（余烬）必须**在窗口内化完**：逐字延迟按字数均摊
+        for (chars in intArrayOf(4, 8, 20, 40)) {
+            val slide = LyricsDotMatrixRenderer.slideMsFor(3500L)
+            val fly = LyricsDotMatrixRenderer.scatterFlyFor(slide)
+            val perChar = LyricsDotMatrixRenderer.scatterPerCharFor(chars, slide, fly)
+            val span = if (chars > 1) (chars - 1).toLong() * perChar + fly else fly
+            assertTrue(
+                "chars=$chars：余烬的消散跨度 $span 必须 ≤ 上移窗口 $slide（否则拖尾）",
+                span <= slide
+            )
+        }
+    }
+
     // ══════════════ ⑲ 行间距必须与字号解耦 ══════════════
 
     @Test
