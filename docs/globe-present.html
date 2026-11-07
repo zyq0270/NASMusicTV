@@ -56,7 +56,8 @@
   行走: deer/rabbit 自带骨骼 Walk 剪辑,用 SkeletonUtils.clone + 每实例
     AnimationMixer 播放真实步态。giraffe/panda 的 GLB 只有「1 节点 + 1 mesh、
     0 骨骼」,没有任何可动子节点 ⇒ 程序化补两套动作:
-      ① gait 容器上的 AnimationClip(摇摆 / 点头 / 呼吸 / 轻微起伏);
+      ① gait 容器上的 AnimationClip(摇摆 / 点头 / 前后微摆;不动画
+         scale 与高度,保证尺寸恒定、脚底不离地);
       ② 网格的两个 relative morph target,按局部高度 + 左右/前后分组,
          让对角腿交替前后摆动( Influence 与 gait clip 同一时钟驱动)。
     树固定不动。动物沿 (u,v) 参数空间步进,以 elevation >= LAND_MIN
@@ -72,6 +73,9 @@
     v2 (2026-11-07) 树 10→30 且允许成片;无骨骼动物补程序化步态;
        行走与自转减速;按 footprint 计算贴地下沉量消除悬空;
        树叶由 alphaMode=BLEND 改 alphaTest 镂空,消除 30 棵时的半透明「幽灵树」
+    v2.1 (2026-11-07) 删除 gait 的 scale / 高度起伏轨道,模型尺寸恒定;
+       leg morph 改存绝对顶点位置,杜绝 clone 丢失 morphTargetsRelative 后
+       顶点被拉向原点造成的周期性「长大缩小」
 -->
 <div id="stage"></div>
 <div class="title"><h1>生态地球</h1><p>CARTOON GLOBE · 自动旋转演示</p></div>
@@ -436,15 +440,18 @@ function initApp() {
       var x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
       var leg = 1 - smooth01((y - y0) / h / 0.42);
       var phase = (x >= xm ? 1 : -1) * (z >= zm ? 1 : -1);
-      var dz = amp * leg * phase;
-      A[i * 3 + 2] = dz;
-      B[i * 3 + 2] = -dz;
-      A[i * 3] = B[i * 3] = amp * 0.12 * leg;   // 轻微侧向张合,更像迈步
+      var dz = amp * leg * phase, dx = amp * 0.12 * leg;
+      // 关键:morph target 必须存「绝对位置 = 原始顶点 + 位移」,不能只存 delta。
+      // SkeletonUtils.clone 不保证复制 mesh.morphTargetsRelative;一旦该标志
+      // 为 false,shader 按 (morphTarget - position) * influence 计算,
+      // 近零的 delta 会把顶点拉向原点 ⇒ 模型周期性「长大缩小」。
+      A[i * 3] = x + dx; A[i * 3 + 1] = y; A[i * 3 + 2] = z + dz;
+      B[i * 3] = x + dx; B[i * 3 + 1] = y; B[i * 3 + 2] = z - dz;
     }
     var aAttr = new THREE.Float32BufferAttribute(A, 3); aAttr.name = 'legFwdA';
     var bAttr = new THREE.Float32BufferAttribute(B, 3); bAttr.name = 'legFwdB';
     geo.morphAttributes.position = [aAttr, bAttr];
-    mesh.morphTargetsRelative = true;
+    mesh.morphTargetsRelative = false;
     mesh.updateMorphTargets();
   }
 
@@ -454,7 +461,7 @@ function initApp() {
       if (!o.isMesh || !o.geometry || !o.geometry.morphAttributes) return;
       var mp = o.geometry.morphAttributes.position;
       if (!mp || mp.length < 2) return;
-      o.morphTargetsRelative = true;
+      o.morphTargetsRelative = false;  // morph target 是绝对位置
       o.updateMorphTargets();          // clone 后重建独立的 influence 数组
       out.push(o);
     });
@@ -498,11 +505,12 @@ function initApp() {
     return outer;
   }
 
-  /* 无骨骼动物的程序化步态剪辑。作用在名为 'gait' 的容器上:
-     quaternion(摇摆/点头)、position(轻微起伏,幅度按 1/scale 换算成世界单位)、
-     scale(呼吸)。pivot 在底面中心 ⇒ 摇摆时脚不会飞离地面。 */
+  /* 无骨骼动物的程序化步态剪辑。作用在名为 'gait' 的容器上。
+     ⚠️ 只有 quaternion(摇摆/点头) 与 position.x(沿前进方向微摆):
+        不动画 scale ⇒ 模型尺寸恒定;不动画 position.y ⇒ 脚底始终贴地。
+     幅度按 1/scale 换算成世界单位。pivot 在底面中心 ⇒ 摇摆时脚不飞。 */
   function makeGaitClip(invScale, tag) {
-    var N = 24, dur = 1.0, times = [], q = [], p = [], sc = [], i;
+    var N = 24, dur = 1.0, times = [], q = [], p = [], i;
     var e = new THREE.Euler(), quat = new THREE.Quaternion();
     for (i = 0; i <= N; i++) {
       var t = i / N, ph = t * Math.PI * 2;
@@ -511,15 +519,11 @@ function initApp() {
             0.075 * Math.sin(ph), 'XYZ');
       quat.setFromEuler(e);
       q.push(quat.x, quat.y, quat.z, quat.w);
-      p.push(0.0009 * invScale * Math.sin(ph),
-             0.0012 * invScale * (0.5 + 0.5 * Math.sin(2 * ph)), 0);
-      var br = 1 + 0.012 * Math.sin(ph + 0.9);
-      sc.push(br, br, br);
+      p.push(0.0009 * invScale * Math.sin(ph), 0, 0);
     }
     return new THREE.AnimationClip('ProceduralGait_' + tag, dur, [
       new THREE.QuaternionKeyframeTrack('gait.quaternion', times, q),
-      new THREE.VectorKeyframeTrack('gait.position', times, p),
-      new THREE.VectorKeyframeTrack('gait.scale', times, sc)
+      new THREE.VectorKeyframeTrack('gait.position', times, p)
     ]);
   }
 
@@ -646,8 +650,13 @@ function initApp() {
         row.morph = [+inf[0].toFixed(3), +inf[1].toFixed(3)];
         row.gaitTime = +gw.gaitAction.time.toFixed(3);
         var gp = gw.inst.children[0];
-        if (gp) row.gaitQuat = [gp.quaternion.x, gp.quaternion.y, gp.quaternion.z, gp.quaternion.w]
-          .map(function (x) { return +x.toFixed(4); });
+        if (gp) {
+          row.gaitQuat = [gp.quaternion.x, gp.quaternion.y, gp.quaternion.z, gp.quaternion.w]
+            .map(function (x) { return +x.toFixed(4); });
+          row.gaitScale = +gp.scale.x.toFixed(6);
+        }
+        // 校对用:任何时刻都应恒定 ⇒ 模型大小不变
+        row.instScale = +gw.inst.scale.x.toFixed(6);
         break;
       }
       window.__globeDebug.motionTrace.push(row);
@@ -726,7 +735,7 @@ function initApp() {
       _basis.makeBasis(_right, _p0, _fwd);
       w.inst.quaternion.setFromRotationMatrix(_basis);
 
-      // 贴地:不再叠加 bob 起伏(那会让脚离地);起伏交给 gait clip / morph。
+      // 贴地:不再叠加 bob 起伏(那会让脚离地);步态由 gait 旋转 + leg morph 提供。
       // 半径用该模型按 footprint 算出的 groundR,平底与球面切平。
       w.inst.position.copy(_p0.multiplyScalar(w.inst.userData.groundR || SURF));
 
