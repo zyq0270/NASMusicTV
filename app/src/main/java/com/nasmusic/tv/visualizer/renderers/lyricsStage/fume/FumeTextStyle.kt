@@ -102,9 +102,12 @@ object FumeTextStyle {
      *
      * Folia：`resolveWordColor(wordText, theme.wordColors, theme.accentColor, { cjkMatchMode: 'bidirectional-contains' })`
      *
-     * Android：`theme.accentColor` ⇒ `ctx.palette.secondary`；
+     * Android：`theme.accentColor` ⇒ `LyricsStageColors.accent(ctx)`（**鲜艳蓝**的高亮色）；
      * `theme.wordColors` 在本仓不存在 ⇒ 词色表由调用方预先算好（[buildWordColorMap]），
      * 绘制期只查表，未命中即回落到 accent 色。
+     *
+     * ⚠️ 基础文字色走 `LyricsStageColors.baseText(ctx)`（近白），**不是** `palette.accent`
+     * （那在本仓恒为鲜艳蓝 ⇒ 满屏歌词会变成霓虹蓝）。
      */
     fun getActiveColor(wordText: String, accentArgb: Int, wordColorMap: Map<String, Int>): Int {
         if (wordColorMap.isEmpty()) return accentArgb

@@ -7,7 +7,6 @@ import android.graphics.Typeface
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
-import androidx.compose.ui.graphics.toArgb
 import com.nasmusic.tv.data.model.VisualQuality
 import com.nasmusic.tv.visualizer.AudioFrame
 import com.nasmusic.tv.visualizer.RenderContext
@@ -140,9 +139,9 @@ private fun lerpColor(a: Int, b: Int, t: Float): Int {
  *    没有 rem 基准的 padding 来源，按任务约定用 overscan 安全边距代替）
  *  - CSS `flex / flex-wrap / justify-content / align-items` → 本文件内的确定性流式排版
  *  - CSS `perspective` → 仅保留数值，不参与 2D 投影（见 `LineLayout.perspective` 的注释）
- *  - CSS `filter: blur(Npx)` → `Paint.setShadowLayer`（同色模糊副本）；
- *    ⛔ HW 加速下 `BlurMaskFilter`（MaskFilter）会让整条绘制被丢弃 ⇒ 不用它
- *  - CSS `text-shadow` / `drop-shadow` → `Paint.setShadowLayer`（`glowOuterPaint` / `glowInnerPaint`）
+ *  - CSS `filter: blur(Npx)` → ⛔ **不实现**（见下方「性能取舍」：Android 上没有零开销的高斯模糊）
+ *  - CSS `text-shadow` / `drop-shadow` → 缓存的**辉光位图**（`GlowWordHalo`：模糊只算一次，
+ *    逐帧一次 `drawBitmap`；两层辉光已烘进同一张位图）
  *  - framer-motion `tween`（默认缓动 `easeOut`）→ `UnitBezier(0, 0, 0.58, 1)`
  *  - framer-motion `easeInOut` → `UnitBezier(0.42, 0, 0.58, 1)`
  *  - framer-motion `spring(stiffness 200, damping 20)` → 逐帧数值积分（`Anim.stepSpring`）
@@ -160,12 +159,62 @@ private fun lerpColor(a: Int, b: Int, t: Float): Int {
  *    `wordSpacing = 0.7`、`avoidOverlap = false`。
  *  - `resolveLyricTextDirection`（RTL 检测）不在本仓 ⇒ 一律按 LTR 排版。
  *  - Folia 的 CJK 语义排版（`buildPostLyricLayoutUnits`）不在本仓 ⇒ `displayWords = line.words`。
- *  - `theme.wordColors` 不存在 ⇒ `resolveWordColor` 传「空」列表，回落色取 `ctx.palette.secondary`
- *    （Folia 的 `theme.accentColor`）；正文底色取 `ctx.palette.accent`（Folia 的 `theme.primaryColor`）。
+ *  - `theme.wordColors` 不存在 ⇒ `resolveWordColor` 传「空」列表，回落色取高亮色
+ *    （Folia 的 `theme.accentColor`）；正文底色取基础文字色（Folia 的 `theme.primaryColor`）。
+ *    ⚠️ 取色一律走**语义映射** `LyricsStageColors`：本仓 `ctx.palette.accent` **恒为鲜艳蓝**
+ *    （封面取色，`CoverPaletteProvider.kt:49`），拿它当基础文字色会让满屏歌词变成霓虹蓝。
+ *
+ * ## 性能取舍（与 Folia 的偏差 —— 均为「电视上卡顿」所迫）
+ *  - **逐字形辉光**：Folia 用合成器滤镜（GPU 免费）；Android 的 `Paint` 阴影是**逐次绘制的模糊**
+ *    ⇒ 一行 30 字形 × 外圈/内圈两遍 = **每帧 60 次文字模糊**。Folia 自己在 `wordGlow.ts:10-27`
+ *    记过 text-shadow 的代价（Chromium 字形缓存不断铸造 strike，Mac 上光栅线程每秒 160–220 ms）。
+ *    ⇒ 改用共享的**辉光位图缓存** `GlowWordHalo`：模糊每个 (字形, 字号, 颜色) 只算一次，
+ *    **命中路径零分配** ⇒ 逐帧直接 `obtain` 即可（未命中才真模糊一次），
+ *    逐帧只剩一次 `drawBitmap` + 改 alpha（强度靠贴图画笔的 alpha 动画；
+ *    半径不再随 peak 缩放 —— 见 `GlowWordHalo` 的 KDoc 说明）。
+ *    ⛔ **不要在版面构建期预烘位图**：那会把整行的模糊成本压到换行那一帧 ⇒ 换行卡顿。
+ *  - **正文模糊**（Folia 的 `filter: blur(Npx)`）：⛔ **不实现**。minSdk 22 下只有两种可能 ——
+ *    `Paint` 的阴影（逐帧一次文字模糊 ⇒ 与上面同一个卡顿）或 Android 的模糊遮罩
+ *    （硬件画布会把它整条丢弃）⇒ 两者都不可用。正文只保留颜色动画；
+ *    `blurAnim` 的状态机仍按 Folia 推进（只是不再参与绘制）。
+ *
+ * ## 真机踩坑：「重影字」（同一个字出现两次，一个偏小偏黄）
+ *  现象：GLOW_LINE 画面上某个字（例如「经」）出现了两次 —— 一次在词组里（正常大小），
+ *  一次**单独**出现、**偏小**且**偏黄**。
+ *  真因：**辉光笔漏设 `textSize`** ⇒ Android 用默认的 **12px** 画了一个小一号的字，
+ *  而辉光颜色当时取的是高亮色（黄）⇒ 看起来就是「多了一个字」。
+ *  ⚠️ **不是位置问题**：辉光与正文的原点**完全一致** ——
+ *    正文的绘制起点 = `cx − st.width/2`，辉光字形的绘制起点 = `cx − st.width/2 + graphemeX[gi]`
+ *    （`graphemeX[gi]` = 该字形在词内的累计前进量，用与正文**同一支** `textPaint` 量得），
+ *    两者的 `translate/rotate/scale` 也完全一样 ⇒ 字形本该**严丝合缝**地叠在正文的字上。
+ *  ⇒ 修法：辉光画笔的 `textSize` / `typeface` 必须与正文一致（`buildLayout` 里同步设置 +
+ *    `drawGlowPass` 里做自愈对齐）；辉光改用位图缓存后，字形由 `haloPaint` 渲染进位图，
+ *    尺寸天然跟正文一致。
+ *  ⚠️ **同一条时间轴上的两个现象**（截图里那个「单独的小黄字」）：
+ *    ① 辉光层是**逐字形扫过**的（`peak` 曲线），正文层是**整词淡入**的 ⇒ 扫到某个字形时，
+ *    正文里那个字可能还没淡进来 ⇒ **那一刻只有辉光的那一份可见**（它本身带字形 + 光晕）。
+ *    ② 所以辉光那份的**尺寸必须和正文那份一模一样**，否则它就长得像「多了一个小一号的字」。
+ *
+ * ## 换行宽度（`max-w-6xl`）与「文字被切掉」的兜底
+ *  - **换行阈值 = 1152px**（`maxLineWidthPx` = 72rem × 16），**不是画布宽**（见 `layoutFlow`）。
+ *    Folia 的结构（`classic/Visualizer.tsx:353/370`）是
+ *    「区域 `w-full h-[70vh] p-8`」→「行容器 `flex flex-wrap w-full max-w-6xl`」
+ *    ⇒ 换行宽度 = min(区域内容宽, 1152) —— 本仓 = min(画布宽 − 2×安全边距, 1152)，
+ *    1920 屏上两者都是 **1152**，连行块左边缘都一致（Folia 384 / 本仓 384）。
+ *    ⇒ 正常的一行**排完的宽度 ≤ 1152**，加上 active 档的放大（`configScale(≤1.3) × 1.4`）
+ *    也只到 ~1180 ⇒ **不会被切**（Folia 同样如此：`GLOW_WORD_ACTIVE_SCALE = 1.4`）。
+ *  - ⛔ **唯一会冲出屏幕的**：**比容器还宽的单个词** —— flex 换行断不开词内部的文本
+ *    （CSS 与本仓同理）。卡拉OK LRC 的「词」是两个 `<mm:ss.xx>` 标记之间的**整段文本**
+ *    （可能是一整句）⇒ 单个 flex item 就有 1000px+ ⇒ 连同 active 档的放大冲出屏幕被切。
+ *    Folia 靠 CJK 语义排版（`buildPostLyricLayoutUnits` → `Intl.Segmenter` 词级）把长句切成
+ *    词级单元来避免；**本仓没有那一层**（见文件头「与 Folia 的已知差异」）⇒
+ *    ⇒ 兜底：超宽词按比例缩到内容区以内（[WordState.fitScale]），
+ *    并把绘制中心夹回内容区（`wordCenterX`）—— **正常词恒为 1 ⇒ 画面完全不变**。
  *
  * ## 零分配
  *  `draw()` 内不新建 Paint / Path / 数组 / 字符串；所有逐词动画状态在换行时一次性建好，
  *  逐帧只改字段值。换行本身会重建布局（Folia 的 `useMemo` 也是如此），每行一次。
+ *  辉光位图由共享缓存 `GlowWordHalo` 持有（命中缓存 ⇒ 逐帧零位图分配；换效果时 `clear()` 回收）。
  */
 class GlowLineSubRenderer : LyricsSubRenderer {
 
@@ -248,11 +297,16 @@ class GlowLineSubRenderer : LyricsSubRenderer {
     // ⚠️ 辉光的半径 / 时间轴 / 峰值曲线常量已搬进共享的 `GlowWordGlow`
     //    （classic 与 partita 共用，与 Folia 的 `GlowWord.tsx:86-119` 一致）⇒ 此处不再保留副本。
 
-    /** 移植 wordGlow.ts:29 `DROP_SHADOW_RADIUS_SCALE` */
+    /**
+     * 移植 wordGlow.ts:29 `DROP_SHADOW_RADIUS_SCALE`。
+     *
+     * ⚠️ 辉光位图按 **peak = 1** 建 ⇒ 半径**不再随 peak 缩放**（Folia 的半径是随 peak 缩放的，
+     *    这是与上游的**已知偏差**，见 `GlowWordHalo` 的 KDoc）；强度改由贴图的 alpha 动画。
+     */
     private val dropShadowRadiusScale = 0.4f
 
-    /** 移植 wordGlow.ts:31 `DROP_SHADOW_INNER_ALPHA` */
-    private val dropShadowInnerAlpha = 0.7f
+    // ⚠️ 移植 wordGlow.ts:31 `DROP_SHADOW_INNER_ALPHA`（0.7）已**烘进** `GlowWordHalo` 的位图
+    //    （外圈满 alpha + 内圈 0.7 两层在**建缓存时**合成）⇒ 此处不再保留副本。
 
     /** 移植 GlowWord.tsx:137-140 副歌涟漪的动画参数 */
     private val rippleDuration = 0.5
@@ -429,6 +483,17 @@ class GlowLineSubRenderer : LyricsSubRenderer {
         var activeColor = 0
         var baseColor = 0
 
+        /**
+         * 「不许被切在屏幕外」的收缩系数（正常词恒为 1 ⇒ 画面不变）。
+         *
+         * ⛔ 只有**比容器还宽的单个词**才会 < 1：卡拉OK LRC 的「词」是两个 `<mm:ss.xx>`
+         *    标记之间的整段文本（可能是一整句）⇒ flex 换行**断不开它**（CSS 与本仓同理）
+         *    ⇒ 它会连同 active 档的放大（`configScale × 1.4`）一起冲出屏幕被切掉。
+         *    Folia 靠 CJK 语义排版（`buildPostLyricLayoutUnits`）把长句切成词级单元来避免，
+         *    本仓没有那一层 ⇒ 这里只做**兜底**：把超宽词按比例缩到内容区以内。
+         */
+        var fitScale = 1f
+
         // ── 行内位置（流式排版结果）──
         var rowX = 0f
         var rowTop = 0f
@@ -521,6 +586,15 @@ class GlowLineSubRenderer : LyricsSubRenderer {
         var graphemeX = FloatArray(0)
         var graphemeStart = DoubleArray(0)
         var graphemeEnd = DoubleArray(0)
+
+        /**
+         * 辉光的内 / 外圈半径（**版面期算一次** ⇒ 逐帧不必再算，也不必分配 `Pair`）。
+         *
+         * 位图按 **peak = 1** 建 ⇒ 半径不再随 peak 缩放（Folia 是随 peak 缩放的，
+         * 这是与上游的**已知偏差**，见 `GlowWordHalo` 的 KDoc）；强度改由贴图的 alpha 动画。
+         */
+        var glowInnerRadius = 0f
+        var glowOuterRadius = 0f
     }
 
     // ══════════════════════════════════════════════════════════════════
@@ -533,17 +607,18 @@ class GlowLineSubRenderer : LyricsSubRenderer {
         typeface = Typeface.DEFAULT_BOLD
     }
 
-    /** 辉光外圈（移植 wordGlow.ts:57 `drop-shadow(0 0 outer * 0.4px color)`） */
-    private val glowOuterPaint = Paint().apply {
-        isAntiAlias = true
+    /**
+     * 辉光位图的测量 / 渲染画笔。
+     *
+     * ⛔ 它的 `textSize` / `typeface` 必须与正文 [textPaint] **完全一致** ——
+     *    `GlowWordHalo` 用这支笔量尺寸、也用它把字形画进位图（否则量出来的宽度 ≠ 画出来的宽度）。
+     */
+    private val haloPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         typeface = Typeface.DEFAULT_BOLD
     }
 
-    /** 辉光内圈（移植 wordGlow.ts:56 `drop-shadow(0 0 inner * 0.4px color @0.7)`） */
-    private val glowInnerPaint = Paint().apply {
-        isAntiAlias = true
-        typeface = Typeface.DEFAULT_BOLD
-    }
+    /** 辉光位图的贴图画笔（逐帧只改 `alpha` ⇒ 强度动画；零分配） */
+    private val haloBlitPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
 
     /** 副歌涟漪（移植 GlowWord.tsx:135-136 `rounded-full border-1`） */
     private val ripplePaint = Paint().apply {
@@ -589,6 +664,8 @@ class GlowLineSubRenderer : LyricsSubRenderer {
     override fun onExit() {
         curLayout = null
         prevLayout = null
+        // 辉光位图是**共享缓存** ⇒ 退出效果时必须显式回收（否则位图泄漏到进程结束）
+        GlowWordHalo.clear()
     }
 
     /**
@@ -679,6 +756,8 @@ class GlowLineSubRenderer : LyricsSubRenderer {
         val pxFontSize = computePxFontSize(ctx.canvasSize.width, lineFontScale)
         layout.pxFontSize = pxFontSize
         textPaint.textSize = pxFontSize
+        // ⚠️ 辉光位图的画笔必须与正文**同字号同字体**（它负责量尺寸 + 把字形画进位图）
+        haloPaint.textSize = pxFontSize
 
         // ── 移植 classic/Visualizer.tsx:189 —— 逐词测量宽度 ──
         // （Folia 用 canvas 2D `measureText`；Android 用同一支 Paint 的 `measureText`）
@@ -707,8 +786,10 @@ class GlowLineSubRenderer : LyricsSubRenderer {
         }
 
         // ── 移植 classic/Visualizer.tsx:218-300 —— 逐词配置 ──
-        val baseColor = ctx.palette.accent.toArgb()
-        val activeFallback = ctx.palette.secondary.toArgb()
+        // ⚠️ 取色走**语义映射**（`LyricsStageColors`）：本仓 `ctx.palette.accent` 恒为鲜艳蓝
+        //    （封面取色）⇒ 拿它当基础文字色会让满屏歌词变成霓虹蓝。
+        val baseColor = LyricsStageColors.baseText(ctx)      // Folia `theme.primaryColor`
+        val activeFallback = LyricsStageColors.accent(ctx)    // Folia `theme.accentColor`
         val fallbackHex = argbToHex(activeFallback)
 
         var rowReachTop = 0f
@@ -723,7 +804,7 @@ class GlowLineSubRenderer : LyricsSubRenderer {
             st.width = wordWidths[i]
             st.baseColor = baseColor
             // 移植 classic/Visualizer.tsx:384 `resolveWordColor(word.text, theme.wordColors, theme.accentColor)`
-            // ⚠️ 本仓没有主题逐词配色表 ⇒ 传**空**列表 ⇒ 恒取回落到 `ctx.palette.secondary`。
+            // ⚠️ 本仓没有主题逐词配色表 ⇒ 传**空**列表 ⇒ 恒取回落到高亮色（Folia 的 accentColor）。
             val resolved = WordColoring.resolveWordColor(w.text, emptyList(), fallbackHex)
             st.activeColor = hexToArgb(resolved, activeFallback)
 
@@ -845,6 +926,11 @@ class GlowLineSubRenderer : LyricsSubRenderer {
 
         layout.words = states
 
+        // ── 辉光半径（版面期算一次；逐帧不再分配 `Pair`）──
+        val radii = glowRadiiFor(layout)
+        layout.glowInnerRadius = radii.first * dropShadowRadiusScale
+        layout.glowOuterRadius = radii.second * dropShadowRadiusScale
+
         // ── 字体度量（一次性） ──
         val fm = textPaint.fontMetrics
         val ascent = -fm.top
@@ -856,6 +942,20 @@ class GlowLineSubRenderer : LyricsSubRenderer {
         layout.baselineInRow = (layout.rowHeight - contentHeight) / 2f + ascent
 
         layoutFlow(layout, ctx)
+
+        // ── 安全网：超宽词不许被切在屏幕外（正常词恒为 1 ⇒ 画面不变）──
+        // ⚠️ 换行阈值是 `max-w-6xl` = 1152px（见 `layoutFlow`），**不是画布宽** ⇒
+        //    正常的一行排完的宽度 ≤ 1152，加上 active 档的放大也只到 ~1180 ⇒ 不会被切。
+        //    唯一会冲出去的是**比容器还宽的单个词**（卡拉OK LRC 的「词」= 两个时间戳标记之间的
+        //    整段文本）⇒ 换行断不开它 ⇒ 这里按内容区宽度把它缩到刚好放得下。
+        val safeContentWidth = layout.contentRight - layout.contentLeft
+        if (safeContentWidth > 0f) {
+            for (st in layout.words) {
+                // active 档的最大绘制倍率 = `config.scale × GLOW_WORD_ACTIVE_SCALE`（Folia 同值 1.4）
+                val maxDrawn = st.width * st.configScale * GLOW_WORD_ACTIVE_SCALE
+                st.fitScale = if (maxDrawn > safeContentWidth) safeContentWidth / maxDrawn else 1f
+            }
+        }
 
         // ── 容器入场动画（移植 glowWordTiming.ts:58-91，经 GlowWordCore.lineContainerMotion） ──
         val motion = GlowWordCore.lineContainerMotion(profile)
@@ -1338,7 +1438,8 @@ class GlowLineSubRenderer : LyricsSubRenderer {
         val lineOpacity = layout.opacityAnim.value
         if (lineOpacity <= 0.004f) return
         val lineScale = layout.scaleAnim.value
-        val lineBlur = layout.blurAnim.value
+        // ⚠️ `layout.blurAnim` 仍按 Folia 推进（状态机保留），但正文**不再做逐帧模糊**
+        //    （minSdk 22 下没有零开销的高斯模糊 ⇒ 见文件头「性能取舍」）。
 
         canvas.save()
         // 外层 70vh 容器：呼吸浮动（位移 + 绕容器中心的缩放）
@@ -1354,22 +1455,70 @@ class GlowLineSubRenderer : LyricsSubRenderer {
         drawRipplePass(canvas, layout, nowSec, lineOpacity)
 
         // ── 3. 正文层 ──
-        drawBodyPass(canvas, layout, lineOpacity, lineBlur)
+        drawBodyPass(canvas, layout, lineOpacity)
 
         canvas.restore()
     }
 
-    /** 移植 wordGlow.ts:94-167 —— 逐字形辉光层 */
+    /**
+     * 一个词在画布上的中心 x —— **辉光层与正文层必须用同一个值**（否则两层的字会错开）。
+     *
+     * @param drawScale 该词当前的绘制倍率（已含 [WordState.fitScale]）
+     *
+     * ⚠️ 顺带做一次**安全夹取**：词若比内容区还宽（卡拉OK LRC 把整句当成一个「词」，
+     *    换行断不开它），它会被切在屏幕外 ⇒ 这里把它夹回内容区（正常词是恒等变换 ⇒ 无副作用）。
+     */
+    private fun wordCenterX(layout: LineLayout, st: WordState, drawScale: Float): Float {
+        var cx = layout.blockLeft + st.rowX + st.width * 0.5f + st.xAnim.value
+        val half = st.width * drawScale * 0.5f
+        val minCx = layout.contentLeft + half
+        val maxCx = layout.contentRight - half
+        if (minCx <= maxCx) {
+            if (cx < minCx) cx = minCx
+            else if (cx > maxCx) cx = maxCx
+        } else {
+            // 词比内容区还宽（放不下）⇒ 居中（画出来仍会被切，但不会偏在一边）
+            cx = (layout.contentLeft + layout.contentRight) * 0.5f
+        }
+        return cx
+    }
+
+    /**
+     * 移植 wordGlow.ts:94-167 —— 逐字形辉光层。
+     *
+     * ⚠️ **实现替换（性能）**：Folia 用合成器滤镜（GPU 免费）；Android 的 `Paint` 阴影是
+     *    **逐次绘制的模糊** ⇒ 一行 30 个字形 × 外圈/内圈两遍 = 每帧 60 次文字模糊，
+     *    这就是电视上「卡顿」的主因（Folia 自己在 `wordGlow.ts:10-27` 记过同样的代价）。
+     * ⇒ 改用共享的**辉光位图缓存** [GlowWordHalo]：模糊每个 (字形, 字号, 颜色) 只算一次，
+     *    命中路径**零分配** ⇒ 逐帧直接 `obtain` 即可（未命中才真模糊一次）。
+     *    两层辉光（外圈满 alpha + 内圈 0.7）已烘进同一张位图 ⇒ 逐帧只剩**一次 `drawBitmap`**
+     *    + 改 alpha。
+     *
+     * ⚠️ **辉光与正文的原点必须一致**（否则同一个字看起来出现两次）：
+     *    两层共用 [wordCenterX] 与同一个 `scale`；字形的横向偏移用 `graphemeX[gi]`
+     *    （用与正文**同一支** `textPaint` 量得）⇒ 辉光字形严丝合缝地叠在正文的字上。
+     */
     private fun drawGlowPass(canvas: Canvas, layout: LineLayout, nowSec: Double, lineOpacity: Float) {
-        val radii = glowRadiiFor(layout)
+        // ⛔ **辉光画笔的字号/字体必须与正文完全一致**（真机踩过：辉光笔漏设 `textSize`
+        //    ⇒ 用 Android 默认的 12px 画了一个**小一号**的字，颜色还是高亮色
+        //    ⇒ 同一个字看起来出现了两次，一个偏小偏黄 —— 详见文件头的「重影字」记录）。
+        //    这里做**自愈**对齐（每帧两次比较，零分配），避免任何新增的排版路径再让它走偏。
+        if (haloPaint.textSize != textPaint.textSize) {
+            haloPaint.textSize = textPaint.textSize
+        }
+        if (haloPaint.typeface != textPaint.typeface) {
+            haloPaint.typeface = textPaint.typeface
+        }
+        val innerRadius = layout.glowInnerRadius
+        val outerRadius = layout.glowOuterRadius
         val words = layout.words
         for (i in words.indices) {
             val st = words[i]
             if (st.status == GlowWordStatus.WAITING) continue
 
-            val scale = st.scaleAnim.value
+            val scale = st.scaleAnim.value * st.fitScale
             val rotate = st.rotateAnim.value
-            val cx = layout.blockLeft + st.rowX + st.width * 0.5f + st.xAnim.value
+            val cx = wordCenterX(layout, st, scale)
             val cy = st.rowTop + layout.rowHeight * 0.5f + st.yAnim.value
             val baselineRel = layout.baselineInRow - layout.rowHeight * 0.5f
 
@@ -1384,20 +1533,17 @@ class GlowLineSubRenderer : LyricsSubRenderer {
                 if (peak <= 0.003f) continue
                 val alpha = (peak * lineOpacity * 255f).toInt().coerceIn(0, 255)
                 val gx = -st.width * 0.5f + layout.graphemeX[gi]
-                // 外圈（移植 wordGlow.ts:57 `drop-shadow(0 0 outer * 0.4 * peak px color)`）
-                glowOuterPaint.color = withAlpha(st.activeColor, alpha)
-                glowOuterPaint.setShadowLayer(
-                    radii.second * dropShadowRadiusScale * peak, 0f, 0f,
-                    withAlpha(st.activeColor, alpha),
+                // 辉光位图（命中缓存 ⇒ 零分配；未命中 ⇒ 这里才真模糊一次）
+                val halo = GlowWordHalo.obtain(
+                    layout.graphemeText[gi], haloPaint, st.activeColor, innerRadius, outerRadius,
+                ) ?: continue
+                haloBlitPaint.alpha = alpha
+                canvas.drawBitmap(
+                    halo.bitmap,
+                    gx + halo.originX,
+                    baselineRel + halo.originY,
+                    haloBlitPaint,
                 )
-                canvas.drawText(layout.graphemeText[gi], gx, baselineRel, glowOuterPaint)
-                // 内圈（文字本体透明 ⇒ 只留光晕；移植 wordGlow.ts:56 的 @0.7 透明度）
-                glowInnerPaint.color = withAlpha(st.activeColor, 0)
-                glowInnerPaint.setShadowLayer(
-                    radii.first * dropShadowRadiusScale * peak, 0f, 0f,
-                    withAlpha(st.activeColor, (alpha * dropShadowInnerAlpha).toInt().coerceIn(0, 255)),
-                )
-                canvas.drawText(layout.graphemeText[gi], gx, baselineRel, glowInnerPaint)
             }
 
             canvas.restore()
@@ -1442,12 +1588,18 @@ class GlowLineSubRenderer : LyricsSubRenderer {
         }
     }
 
-    /** 移植 glowWordVariants.ts:55-83 —— 正文层（颜色 + 模糊） */
+    /**
+     * 移植 glowWordVariants.ts:55-83 —— 正文层（颜色）。
+     *
+     * ⚠️ Folia 的 `filter: blur(Npx)`（waiting 词 10px / 离场 6–20px）在本仓**不实现**：
+     *    minSdk 22 下只有两条路 —— `Paint` 的阴影（**逐帧一次文字模糊** ⇒ 与辉光同一个卡顿）
+     *    或 Android 的模糊遮罩（硬件画布整条丢弃）⇒ 两者都不可用。
+     *    ⇒ 正文只保留颜色动画（`colorAnim`）；`blurAnim` 的状态机仍按 Folia 推进，只是不参与绘制。
+     */
     private fun drawBodyPass(
         canvas: Canvas,
         layout: LineLayout,
         lineOpacity: Float,
-        lineBlur: Float,
     ) {
         val words = layout.words
         for (i in words.indices) {
@@ -1458,17 +1610,10 @@ class GlowLineSubRenderer : LyricsSubRenderer {
             val color = st.colorAnim.value
             val alpha = (wordOpacity * 255f).toInt().coerceIn(0, 255)
             textPaint.color = withAlpha(color, alpha)
-            // CSS `filter: blur(Npx)` ⇒ Android 用同色阴影层近似（HW 加速下 MaskFilter 不可用）
-            val blur = st.blurAnim.value + lineBlur
-            if (blur > 0.05f) {
-                textPaint.setShadowLayer(blur, 0f, 0f, withAlpha(color, alpha))
-            } else {
-                textPaint.clearShadowLayer()
-            }
 
-            val scale = st.scaleAnim.value
+            val scale = st.scaleAnim.value * st.fitScale
             val rotate = st.rotateAnim.value
-            val cx = layout.blockLeft + st.rowX + st.width * 0.5f + st.xAnim.value
+            val cx = wordCenterX(layout, st, scale)
             val cy = st.rowTop + layout.rowHeight * 0.5f + st.yAnim.value
             val baselineRel = layout.baselineInRow - layout.rowHeight * 0.5f
 

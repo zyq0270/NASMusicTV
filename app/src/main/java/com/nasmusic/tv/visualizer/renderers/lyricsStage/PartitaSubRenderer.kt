@@ -1,13 +1,11 @@
 package com.nasmusic.tv.visualizer.renderers.lyricsStage
 
-import android.graphics.BlurMaskFilter
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Typeface
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
-import androidx.compose.ui.graphics.toArgb
 import com.nasmusic.tv.data.model.VisualQuality
 import com.nasmusic.tv.visualizer.AudioFrame
 import com.nasmusic.tv.visualizer.RenderContext
@@ -28,17 +26,25 @@ import kotlin.math.sin
 // 每个 chunk 带一条 L 形引导线，chunk 内的词走 classic GlowWord 的 waiting / active / passed 三态。
 //
 // 浏览器 → Android 的替换（全部记在此处）：
-//  ① framer-motion 的 variants → 本文件显式实现：容器（opacity / scale / x / y / rotate）与正文（颜色 / 模糊）。
+//  ① framer-motion 的 variants → 本文件显式实现：容器（opacity / scale / x / y / rotate）与正文（颜色）。
 //  ② framer-motion 的 `spring(stiffness 200, damping 20)` → 解析解（ζ = 0.7071、ω_d = 10）。
-//  ③ CSS `filter: blur(Npx)` → `BlurMaskFilter`（半径量化到 1px 档位，避免逐帧分配）。
-//     本仓已验证：`BlurMaskFilter` 只在**软件画布**上生效（见 QianliScrollRenderer 的注记），
-//     硬件画布上可能退化为无模糊 —— 这是已知偏差，不影响可读性。
-//  ④ CSS `box-shadow: 0 0 10px color` → `Paint.setShadowLayer(10, 0, 0, color)`。
+//  ③ CSS `filter: blur(Npx)` → **不实现**。⚠️ Android 硬件画布会整个丢弃 MaskFilter ⇒ CSS
+//     `filter: blur()` 无等价实现；这里不画（观感差异：等待态的字没有模糊）。
+//     （旧实现用软件画布专用的模糊滤镜：硬件画布上被丢弃，软件路径上会把整块绘制拖进软件层 ⇒ 更卡。）
+//  ④ CSS `drop-shadow()` / `text-shadow`（逐字形辉光）→ **辉光位图缓存**（`GlowWordHalo`）：
+//     辉光的形状只取决于「字形 + 字号 + 颜色 + 半径」，与时间无关；随时间变的只有强度
+//     ⇒ 模糊每个 (字形, 字号, 颜色) 只算一次，逐帧只剩一次位图贴图。
+//     ⚠️ 偏差：Folia 的半径随 peak 缩放，缓存位图只能固定半径 ⇒ 这里只随 peak 改 alpha。
 //  ⑤ Folia 的 `theme.animationIntensity` → NASMusicTV 无此设置，按画质档映射
 //     （LOW→calm / HIGH→chaotic / 其它→normal）。
 //  ⑥ Folia 的 `theme.wordColors`（关键词着色表）→ NASMusicTV 没有 ⇒ 传空列表，
-//     `getActiveColor` 恒等于 `theme.accentColor`（= `ctx.palette.secondary`）。
-//  ⑦ Folia 的 `theme.primaryColor` / `theme.accentColor` → `ctx.palette.accent` / `ctx.palette.secondary`。
+//     `getActiveColor` 恒等于 `theme.accentColor`（= `LyricsStageColors.accent(ctx)`）。
+//  ⑦ Folia 的 `theme.primaryColor`（基础文字色）/ `theme.accentColor`（高亮色）→
+//     `LyricsStageColors.baseText(ctx)` / `LyricsStageColors.accent(ctx)`（**按语义**对应，
+//     不是按名字对应 —— 本仓 `palette.accent` 恒为鲜艳蓝，当基础文字色会变成满屏霓虹蓝）。
+//  ⑧ CSS `box-shadow: 0 0 10px color`（引导线的辉光）→ **宽笔画 + 低 alpha 的近似辉光**
+//     （两道递减的粗描边）。⚠️ 逐帧的阴影模糊 = 每次绘制一次真实模糊 ⇒ 电视上卡顿
+//     ⇒ 引导线的几何 / 配色 / 过渡动画与上游完全一致，只有辉光的实现方式不同。
 class PartitaSubRenderer : LyricsSubRenderer {
 
     // ── Folia 常量 ────────────────────────────────────────────────────────────
@@ -106,6 +112,14 @@ class PartitaSubRenderer : LyricsSubRenderer {
         /** PartitaChunk.tsx:105 / :125 `box-shadow: 0 0 10px ...` */
         const val GUIDE_SHADOW_RADIUS = 10f
 
+        /**
+         * 引导线辉光的近似系数（宽笔画的实心带比高斯模糊更「实」⇒ 降 alpha 补偿）。
+         *
+         * ⚠️ 逐帧的阴影模糊（每次绘制一次真实模糊）在电视上是卡顿源 ⇒ 改成两道递减的粗描边。
+         */
+        const val GUIDE_GLOW_OUTER_ALPHA_SCALE = 0.18f
+        const val GUIDE_GLOW_INNER_ALPHA_SCALE = 0.30f
+
         /** PartitaChunk.tsx:105 垂直引导线阴影的 alpha 后缀 `45`（十六进制） */
         const val GUIDE_SHADOW_ALPHA_VERTICAL = 0x45
 
@@ -160,9 +174,6 @@ class PartitaSubRenderer : LyricsSubRenderer {
         const val WORD_BODY_PASSED_BLUR_FAST = 0.2
         const val WORD_BODY_PASSED_BLUR_NORMAL = 0.5
 
-        /** 模糊半径的量化档位（避免逐帧 new BlurMaskFilter） */
-        const val BLUR_STEPS = 11
-
         /** VisualizerPartita.tsx:213 列容器的最小高度 / 最小宽度 / 内边距 */
         const val COLUMN_MIN_HEIGHT = 384f
         const val COLUMN_MIN_WIDTH = 60.8f
@@ -178,24 +189,19 @@ class PartitaSubRenderer : LyricsSubRenderer {
     private val paintGuide = Paint(Paint.ANTI_ALIAS_FLAG)
 
     // ── 逐字形辉光层（移植 GlowWord.tsx:86-119 + wordGlow.ts）──
-    // 外圈 = 全透明度阴影；内圈 = 字形本体透明、只留光晕（半径按 DROP_SHADOW_RADIUS_SCALE 缩）。
-    private val glowOuterPaint = Paint(Paint.ANTI_ALIAS_FLAG)
-    private val glowInnerPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    // 辉光的**形状**只取决于「字形 + 字号 + 颜色 + 半径」⇒ 走位图缓存（`GlowWordHalo`），
+    // 逐帧只剩一次 `drawBitmap`（旧的逐字形文字模糊 = 每帧 N 次真实模糊 ⇒ 电视上卡顿）。
+    /** 辉光位图的**测量 + 渲染**画笔（必须与正文同字号、同字体 ⇒ 位图里的字形才与正文对齐） */
+    private val glowPaint = Paint(Paint.ANTI_ALIAS_FLAG)
 
-    /** 给 ARGB 颜色换透明度（不改 RGB） */
-    private fun withAlpha(color: Int, alpha: Int): Int =
-        (color and 0x00FFFFFF) or (alpha.coerceIn(0, 255) shl 24)
+    /** 辉光位图的贴图画笔（`alpha` 逐帧按 peak 变化 ⇒ 强度动画） */
+    private val glowBlitPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
 
     /** 词用粗体（Folia 的 `resolveThemeFontWeight(theme, 700)`） */
     private val typefaceBold = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
 
     /** 复用的字体度量（`Paint.fontMetrics` 每次取值都会 new ⇒ 逐帧路径必须用带参重载） */
     private val fontMetrics = Paint.FontMetrics()
-
-    /** 量化的模糊滤镜（半径 0..10px，每档一个） */
-    private val blurFilters: Array<BlurMaskFilter?> = Array(BLUR_STEPS) { index ->
-        if (index <= 0) null else BlurMaskFilter(index.toFloat(), BlurMaskFilter.Blur.NORMAL)
-    }
 
     // ── 运行时状态 ────────────────────────────────────────────────────────────
 
@@ -240,6 +246,8 @@ class PartitaSubRenderer : LyricsSubRenderer {
         exitingState = null
         activeLineIndex = -1
         activeLineStart = Double.NaN
+        // 辉光位图缓存是进程级的共享对象 ⇒ 退出效果时必须回收，否则位图泄漏
+        GlowWordHalo.clear()
     }
 
     // ── 换行检测与版面构建 ────────────────────────────────────────────────────
@@ -276,8 +284,10 @@ class PartitaSubRenderer : LyricsSubRenderer {
         state.groupStart = nowSec
         state.exitStart = -1.0
         state.intensity = intensityOf(ctx.quality)
-        state.baseColor = ctx.palette.accent.toArgb()
-        state.activeColor = ctx.palette.secondary.toArgb()
+        // ⚠️ 配色按**语义**对应（Folia 的 `theme.primaryColor` 是近白的基础文字色、
+        //    `theme.accentColor` 才是鲜艳蓝的高亮色），不是按名字对应 ⇒ 见 LyricsStageColors。
+        state.baseColor = LyricsStageColors.baseText(ctx)
+        state.activeColor = LyricsStageColors.accent(ctx)
 
         val result = PartitaLayout.buildSequentialColumns(
             line,
@@ -401,7 +411,12 @@ class PartitaSubRenderer : LyricsSubRenderer {
         }
 
         state.line = line
-        state.profile = GlowWordCore.resolveProfile(line)
+        val profile = GlowWordCore.resolveProfile(line)
+        state.profile = profile
+        // 辉光半径只取决于揭示模式 ⇒ 整行算一次（逐帧取会每次分配一个 Pair）
+        val glowRadii = GlowWordGlow.radiiFor(profile?.wordRevealMode ?: "normal")
+        state.glowInnerRadius = glowRadii.first * GlowWordGlow.DROP_SHADOW_RADIUS_SCALE
+        state.glowOuterRadius = glowRadii.second * GlowWordGlow.DROP_SHADOW_RADIUS_SCALE
         return state
     }
 
@@ -643,7 +658,6 @@ class PartitaSubRenderer : LyricsSubRenderer {
 
         paintGuide.style = Paint.Style.STROKE
         paintGuide.strokeWidth = 1f
-        paintGuide.maskFilter = null
         paintGuide.color = guideRgb or
             ((guideColorAlpha * alpha * guideAlpha).toInt().coerceIn(0, 255) shl 24)
 
@@ -665,27 +679,68 @@ class PartitaSubRenderer : LyricsSubRenderer {
             chunkWidth + GUIDE_HORIZONTAL_OFFSET - horizontalWidth
         }
 
-        // 垂直引导线的阴影（PartitaChunk.tsx:105，alpha 后缀 45）
+        // ── 引导线的辉光（Folia 的 `box-shadow: 0 0 10px ...`）──
         // ⚠️ CSS 里 box-shadow 属于元素的一部分 ⇒ 元素的 opacity 同样作用在阴影上。
+        // ⚠️ 但逐帧的阴影模糊 = 每次绘制一次真实模糊 ⇒ 电视上卡顿
+        //    ⇒ 改成「两道递减的粗描边」的近似辉光（几何 / 配色 / 过渡动画与上游一致）。
         if (chunk.status == GlowWordStatus.ACTIVE) {
-            val shadowA = ((activeColor ushr 24) and 0xFF) * GUIDE_SHADOW_ALPHA_VERTICAL / 255f * alpha * guideAlpha
-            val shadowColor = (activeColor and 0x00FFFFFF) or (shadowA.toInt().coerceIn(0, 255) shl 24)
-            paintGuide.setShadowLayer(GUIDE_SHADOW_RADIUS, 0f, 0f, shadowColor)
-        } else {
-            paintGuide.clearShadowLayer()
+            // 垂直引导线（alpha 后缀 45）
+            drawGuideGlow(
+                nc = nc,
+                x0 = verticalX,
+                y0 = verticalTop,
+                x1 = verticalX,
+                y1 = verticalBottom,
+                rgb = activeColor and 0x00FFFFFF,
+                shadowAlpha = ((activeColor ushr 24) and 0xFF) *
+                    GUIDE_SHADOW_ALPHA_VERTICAL / 255f * alpha * guideAlpha,
+            )
+            // 水平引导线（alpha 后缀 35 而不是 45）
+            drawGuideGlow(
+                nc = nc,
+                x0 = horizontalLeft,
+                y0 = horizontalY,
+                x1 = horizontalLeft + horizontalWidth * guideScale,
+                y1 = horizontalY,
+                rgb = activeColor and 0x00FFFFFF,
+                shadowAlpha = ((activeColor ushr 24) and 0xFF) *
+                    GUIDE_SHADOW_ALPHA_HORIZONTAL / 255f * alpha * guideAlpha,
+            )
         }
-        nc.drawLine(verticalX, verticalTop, verticalX, verticalBottom, paintGuide)
 
-        // 水平引导线的阴影（PartitaChunk.tsx:125，alpha 后缀 35 而不是 45）
-        if (chunk.status == GlowWordStatus.ACTIVE) {
-            val shadowA = ((activeColor ushr 24) and 0xFF) * GUIDE_SHADOW_ALPHA_HORIZONTAL / 255f * alpha * guideAlpha
-            val shadowColor = (activeColor and 0x00FFFFFF) or (shadowA.toInt().coerceIn(0, 255) shl 24)
-            paintGuide.setShadowLayer(GUIDE_SHADOW_RADIUS, 0f, 0f, shadowColor)
-        } else {
-            paintGuide.clearShadowLayer()
-        }
+        // 清晰的那一道（宽度 1px）
+        paintGuide.strokeWidth = 1f
+        paintGuide.color = guideRgb or
+            ((guideColorAlpha * alpha * guideAlpha).toInt().coerceIn(0, 255) shl 24)
+        nc.drawLine(verticalX, verticalTop, verticalX, verticalBottom, paintGuide)
         nc.drawLine(horizontalLeft, horizontalY, horizontalLeft + horizontalWidth * guideScale, horizontalY, paintGuide)
-        paintGuide.clearShadowLayer()
+    }
+
+    /**
+     * 画一道**近似辉光**的引导线（代替逐帧的阴影模糊）。
+     *
+     * 两道递减的粗描边（外圈更宽更淡、内圈更窄更亮）⇒ 观感接近 `box-shadow` 的柔光，
+     * 但**没有逐帧的真实模糊**（电视上那才是卡顿主因）。
+     */
+    private fun drawGuideGlow(
+        nc: Canvas,
+        x0: Float,
+        y0: Float,
+        x1: Float,
+        y1: Float,
+        rgb: Int,
+        shadowAlpha: Float,
+    ) {
+        if (shadowAlpha <= 0.5f) return
+        paintGuide.strokeWidth = 1f + GUIDE_SHADOW_RADIUS * 2f
+        paintGuide.color = rgb or
+            ((shadowAlpha * GUIDE_GLOW_OUTER_ALPHA_SCALE).toInt().coerceIn(0, 255) shl 24)
+        nc.drawLine(x0, y0, x1, y1, paintGuide)
+        paintGuide.strokeWidth = 1f + GUIDE_SHADOW_RADIUS
+        paintGuide.color = rgb or
+            ((shadowAlpha * GUIDE_GLOW_INNER_ALPHA_SCALE).toInt().coerceIn(0, 255) shl 24)
+        nc.drawLine(x0, y0, x1, y1, paintGuide)
+        paintGuide.strokeWidth = 1f
     }
 
     /**
@@ -735,7 +790,8 @@ class PartitaSubRenderer : LyricsSubRenderer {
         paintWord.typeface = typefaceBold
         paintWord.textSize = state.fontSizePx
         paintWord.letterSpacing = 0f
-        paintWord.maskFilter = blurFilters[blurStepIndex(wordState.bodyBlur)]
+        // ⚠️ 正文**不画模糊**：Android 硬件画布会整个丢弃 MaskFilter ⇒ CSS `filter: blur()`
+        //    无等价实现（观感差异：等待态的字没有模糊）⇒ 状态仍在，但不再应用到画笔。
         val bodyAlpha = ((wordState.bodyColor ushr 24) and 0xFF) * alpha
         paintWord.color = (wordState.bodyColor and 0x00FFFFFF) or
             (bodyAlpha.toInt().coerceIn(0, 255) shl 24)
@@ -753,12 +809,11 @@ class PartitaSubRenderer : LyricsSubRenderer {
         //    （body 层带 `z-10`）⇒ 辉光是垫在字下面的一圈光晕。
         drawGlowLayer(
             nc, wordState, profile, baselineY, wordLeft, groupAlpha, activeColor, timeSec,
-            state.fontSizePx,
+            state.fontSizePx, state.glowInnerRadius, state.glowOuterRadius,
         )
 
         nc.drawText(wordState.text, wordLeft, baselineY, paintWord)
         nc.restore()
-        paintWord.maskFilter = null
     }
 
     /**
@@ -766,6 +821,17 @@ class PartitaSubRenderer : LyricsSubRenderer {
      *
      * Folia 的这层与 `classic` 共用（两者都渲染 `<GlowWord>`）⇒ 本仓也共用
      * （数学部分见 `GlowWordGlow`）。
+     *
+     * ## 为什么是「位图缓存」而不是逐字形模糊
+     * Folia 用合成器滤镜（`drop-shadow()`）—— GPU 上免费。
+     * Android 最接近的 `Paint` 阴影 API 是**逐次绘制的真实模糊** ⇒ 一行 30 个字形
+     * × 外圈/内圈两遍 = **每帧 60 次文字模糊** ⇒ 电视上必卡（Folia 自己在
+     * `wordGlow.ts:10-27` 记过 text-shadow 的代价：Chromium 光栅线程每秒 160–220 ms）。
+     *
+     * ⇒ 走 `GlowWordHalo` 的**辉光位图缓存**：模糊每个 (字形, 字号, 颜色) 只算一次，
+     * 逐帧只剩**一次 `drawBitmap`**（两层辉光已经烘焙进那张位图里）。
+     * ⚠️ 与上游的偏差：Folia 的半径随 peak 缩放，缓存位图只能固定半径
+     * ⇒ 这里改成**只随 peak 改 alpha**（半径取 peak = 1 的最大值）。
      */
     private fun drawGlowLayer(
         nc: Canvas,
@@ -777,6 +843,8 @@ class PartitaSubRenderer : LyricsSubRenderer {
         activeColor: Int,
         timeSec: Double,
         fontSizePx: Float,
+        innerRadius: Float,
+        outerRadius: Float,
     ) {
         val texts = wordState.graphemeTexts
         if (texts.isEmpty()) return
@@ -785,13 +853,13 @@ class PartitaSubRenderer : LyricsSubRenderer {
         val count = minOf(texts.size, timings.size)
         if (count == 0) return
 
-        val radii = GlowWordGlow.radiiFor(profile.wordRevealMode)
         val displayDuration = GlowWordCore.displayDuration(word, profile)
 
-        glowOuterPaint.typeface = typefaceBold
-        glowOuterPaint.textSize = fontSizePx
-        glowInnerPaint.typeface = typefaceBold
-        glowInnerPaint.textSize = fontSizePx
+        // 辉光位图的**测量 + 渲染**画笔：必须与正文同字号、同字体
+        // （否则位图里的字形宽度 / 基线与正文对不上）。
+        glowPaint.typeface = typefaceBold
+        glowPaint.textSize = fontSizePx
+        glowPaint.letterSpacing = 0f
 
         for (g in 0 until count) {
             val timing = timings[g]
@@ -810,40 +878,27 @@ class PartitaSubRenderer : LyricsSubRenderer {
             if (!GlowWordGlow.isVisible(peak)) continue
 
             val alpha = GlowWordGlow.alphaOf(peak, groupAlpha)
+            if (alpha <= 0) continue
             val gx = wordLeft + wordState.graphemeOffsets[g]
 
-            // 外圈（移植 wordGlow.ts:57 `drop-shadow(0 0 outer * 0.4 * peak px color)`）
-            glowOuterPaint.color = withAlpha(activeColor, alpha)
-            glowOuterPaint.setShadowLayer(
-                radii.second * GlowWordGlow.DROP_SHADOW_RADIUS_SCALE * peak,
-                0f,
-                0f,
-                withAlpha(activeColor, alpha),
-            )
-            nc.drawText(texts[g], gx, baselineY, glowOuterPaint)
+            // 辉光位图（外圈 + 内圈两层已经烘焙好；命中缓存 ⇒ 零模糊开销）
+            // ✅ `GlowWordHalo.obtain` 的命中路径**零分配**（数组 + 线性比对，不拼字符串键）
+            //    ⇒ 逐帧直接调用即可，不必在版面构建期预烘（那会带来换行时的模糊卡顿）。
+            val halo = GlowWordHalo.obtain(
+                char = texts[g],
+                paint = glowPaint,
+                color = activeColor,
+                innerRadiusPx = innerRadius,
+                outerRadiusPx = outerRadius,
+            ) ?: continue
 
-            // 内圈（字形本体透明 ⇒ 只留光晕；移植 wordGlow.ts:56 的 @0.7 透明度）
-            glowInnerPaint.color = withAlpha(activeColor, 0)
-            glowInnerPaint.setShadowLayer(
-                radii.first * GlowWordGlow.DROP_SHADOW_RADIUS_SCALE * peak,
-                0f,
-                0f,
-                withAlpha(
-                    activeColor,
-                    (alpha * GlowWordGlow.DROP_SHADOW_INNER_ALPHA).toInt().coerceIn(0, 255),
-                ),
-            )
-            nc.drawText(texts[g], gx, baselineY, glowInnerPaint)
+            // 强度动画 = 贴图 alpha（半径固定，见上文的偏差说明）
+            glowBlitPaint.alpha = alpha
+            nc.drawBitmap(halo.bitmap, gx + halo.originX, baselineY + halo.originY, glowBlitPaint)
         }
     }
 
     // ── 小工具 ───────────────────────────────────────────────────────────────
-
-    private fun blurStepIndex(blurPx: Float): Int {
-        if (blurPx <= 0.05f) return 0
-        val idx = Math.round(blurPx).toInt()
-        return if (idx >= BLUR_STEPS) BLUR_STEPS - 1 else idx
-    }
 
     /** 漂浮动画的循环相位（0..1） */
     private fun floatPhase(state: PartitaState, timeSec: Double): Float {
@@ -880,6 +935,10 @@ class PartitaSubRenderer : LyricsSubRenderer {
         var descent = 0f
         var baseColor = 0
         var activeColor = 0
+        /** 辉光内圈半径（整行算一次 ⇒ 逐帧零分配） */
+        var glowInnerRadius = 0f
+        /** 辉光外圈半径（整行算一次 ⇒ 逐帧零分配） */
+        var glowOuterRadius = 0f
         var totalGraphemes = 0
         var innerWidth = 0f
         var innerHeight = 0f
@@ -1114,6 +1173,13 @@ class PartitaSubRenderer : LyricsSubRenderer {
         var bodyColorDuration = 0.2
         /** 0 = 默认（easeOut）/ 1 = linear / 2 = easeInOut */
         var bodyColorEase = 0
+        /**
+         * 正文模糊半径（Folia 的 `filter: blur(Npx)`，glowWordVariants.ts:55-83）。
+         *
+         * ⚠️ Android 硬件画布会整个丢弃 MaskFilter ⇒ CSS `filter: blur()` 无等价实现；
+         * 这里不画（观感差异：等待态的字没有模糊）。
+         * ⇒ 状态与动画仍然保留（属于移植的状态机），只是**不再应用到画笔**。
+         */
         var bodyBlur = 0f
         var bodyBlurFrom = 0f
         var bodyBlurTo = 0f

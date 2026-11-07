@@ -122,6 +122,14 @@ app/src/main/assets/globe/package-lock.json
 #    原文不进 git，只作本机对账基线（docs/archive/e51-lofi-city-plan.md §2 第二条纪律、§9 P1）。
 #    在 main 源集之外 ⇒ Gradle 不打包；护栏是 `LofiUpstreamHygieneTest`（.gitignore 挡不住打包）。
 app/src/lofi-upstream/
+# E51/E52「私有分支物化覆盖层」—— `feat/e51-private`（⛔ 从不 push）的物化副本：
+#   ovl/app/src/main/java/... （E51/E52 的 Kotlin 源码）+ ovl/app/src/main/assets/... （e52_highway 资产）
+# ⛔ 与 app/src/lofi-upstream/ 同性质：上游衍生源码**不可再分发** ⇒ 绝不能进仓
+#    （origin 是 public 仓库 ⇒ 一旦提交就是泄漏）。
+# ✅ 2026-11-07 从「仓库外」迁到「仓库树内」（所有者裁定）：跟项目在一起、看得见，
+#    不会像项目外的陌生目录那样被当成无关物删掉。同步脚本会**新建**这个目录。
+#    护栏是 `PrivateOverlayDriftGateTest`（.gitignore 挡不住提交 ⇒ 真正的护栏是门禁 + 纪律）。
+/app/src/e51-overlay/
 # box-agent 会话产物目录（`<日期>-<会话ID前8位>`，自动生成在项目根，不入仓）
 # 例：2026-09-13-384e30ce/ —— 由 agent 运行时创建，内含 output/tasks/… 截图等
 20??-??-??-????????/

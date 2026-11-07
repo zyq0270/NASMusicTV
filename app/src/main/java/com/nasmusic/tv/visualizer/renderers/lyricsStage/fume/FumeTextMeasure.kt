@@ -578,6 +578,12 @@ object FumeTextMeasure {
      *
      * 8 次二分；候选字号 = 区间中点 × lyricsFontScale × densityScale ×（hero 时再乘 heroScale）；
      * 找不到放得下的字号 ⇒ 回落到区间下端 × 同样的缩放。
+     *
+     * ⚠️ **单位**：`width`（= 列宽）与返回的 `fontPx` 都以**世界单位**计
+     *     （本仓 = 画布设备像素）。二分区间上界（body 30 / hero 58）是**绝对**常量
+     *     ⇒ 世界单位一旦被缩小（早前用 dp ⇒ 视口 = 画布 / `density`），
+     *     同样的 `fontPx` 相对屏幕就大 `density` 倍 ⇒ 整版文字过大、行宽跑出画面。
+     *     详见 `FullViewSubRenderer` 的文件头。
      */
     fun chooseSingleLineFontPx(
         measures: FumeLineMeasures,

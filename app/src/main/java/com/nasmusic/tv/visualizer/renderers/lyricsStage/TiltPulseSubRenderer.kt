@@ -6,7 +6,6 @@ import android.graphics.Typeface
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
-import androidx.compose.ui.graphics.toArgb
 import com.nasmusic.tv.visualizer.AudioFrame
 import com.nasmusic.tv.visualizer.RenderContext
 import com.nasmusic.tv.visualizer.renderers.lyricsStage.tilt.TiltLayout
@@ -466,8 +465,13 @@ class TiltPulseSubRenderer : LyricsSubRenderer {
 
         // VisualizerTilt.tsx:646 —— flex-col / items-center / justify-center
         var segTop = centerY - state.totalHeight / 2f
-        val normalArgb = ctx.palette.accent.toArgb()
-        val tiltArgb = ctx.palette.secondary.toArgb()
+        // 移植 VisualizerTilt.tsx:357-368 `getColors()` 的**默认**分支：
+        //   `{ normal: theme.primaryColor, tilt: theme.accentColor }`
+        // ⇒ `normal`（常规行正文）= 基础文字色；`tilt`（倾斜行高亮）= 高亮色。
+        // ⚠️ 配色按**语义**对应（Folia 的 `theme.primaryColor` 是近白的基础文字色，
+        //    `theme.accentColor` 才是鲜艳蓝的高亮色）⇒ 见 LyricsStageColors。
+        val normalArgb = LyricsStageColors.baseText(ctx)
+        val tiltArgb = LyricsStageColors.accent(ctx)
 
         for (i in segments.indices) {
             val seg = segments[i]

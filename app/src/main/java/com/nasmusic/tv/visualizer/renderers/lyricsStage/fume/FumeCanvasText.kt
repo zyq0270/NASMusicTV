@@ -32,6 +32,21 @@ import kotlin.math.pow
  *  - `context.fillRect` ⇒ `Canvas.drawRect(l, t, r, b, paint)`。
  *  - `buildTextStyleKey(...)`（用来判断「同一批字形是否同色」）⇒ Android 改成
  *    **直接比较三个字段**（填充色 / 辉光半径 / 辉光色）⇒ 逐帧零字符串分配。
+ *
+ * ## 配色：按**语义**对应 Folia 的主题色
+ *  本文件**不读 `ctx.palette`**（所有颜色都是调用方以 ARGB `Int` 传进来的）⇒
+ *  这里只约定各颜色槽的**角色**，具体取值由调用方按下面的对应关系填：
+ *  - `params.primaryColor` = 基础文字色（Folia 的 `theme.primaryColor`，近白）
+ *    ⇒ 调用方填 `LyricsStageColors.baseText(ctx)`；用于逐字形的正文底色。
+ *  - `params.accentColor` = 高亮色（Folia 的 `theme.accentColor`，鲜艳蓝）
+ *    ⇒ 调用方填 `LyricsStageColors.accent(ctx)`；用于活动行的行辉光。
+ *  - `fillStyle`（静态快照的填充色）= 基础文字色（同上）。
+ *  - `block.activeColors`（逐词激活色）= 高亮色的**回落**色
+ *    （Folia：`resolveWordColor(word.text, theme.wordColors, theme.accentColor)`）
+ *    ⇒ 本仓没有逐词配色表 ⇒ 恒为 `LyricsStageColors.accent(ctx)`。
+ *
+ *  ⚠️ 页面底色（`ctx.palette.background`）**不在**本文件的职责内 ——
+ *     它由 [com.nasmusic.tv.visualizer.renderers.lyricsStage.FullViewSubRenderer] 填整块底色。
  */
 object FumeCanvasText {
 
@@ -129,7 +144,8 @@ object FumeCanvasText {
      *
      * ⚠️ Folia 返回 `{ canvas, padding }`；**Android 返回 `StaticSnapshot(bitmap, padding)`**。
      *
-     * @param fillStyle 文字填充色（ARGB，含 alpha）
+     * @param fillStyle 文字填充色（ARGB，含 alpha）—— 角色是**基础文字色**
+     *                   （= Folia 的 `theme.primaryColor`）
      * @param shadowBlur 辉光半径（0 = 无辉光）
      * @param shadowColor 辉光色（ARGB）
      * @param rasterScale 快照的光栅密度（每个世界单位几个像素）
@@ -237,6 +253,9 @@ object FumeCanvasText {
      * 逐字形打印的那一块：行辉光、逐字形的颜色与辉光、打印印章。
      *
      * @param canvas 已处于世界坐标系下的画布（调用方已套好相机变换）
+     * @param params 活块参数 —— 颜色槽的角色：
+     *                 `primaryColor` = 基础文字色、`accentColor` = 高亮色
+     *                 （取值由调用方按 `LyricsStageColors` 的语义映射填入）
      */
     fun drawFumeLiveBlock(
         canvas: Canvas,

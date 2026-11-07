@@ -23,7 +23,7 @@ $env:JAVA_HOME = "C:\Program Files\Android\Android Studio\jbr"
 ```
 
 > ⭐ **Local builds default to WITH E51「像素城市」** (owner ruling, 2026-10-29) — always pass `-Plofi.city=true`.
-> The E51 sources are **not in the repo** (⛔ they are upstream translations with no license grant — see the E51 ruling below); they come from the out-of-repo overlay `D:/hxzhang/MyGithubSoftware/NASMusicTV-e51-local/src`, mounted by `~/.gradle/init.d/10-nasmusic-e51-local.gradle` (this init script exists only on this machine).
+> The E51 sources are **not tracked in git** (⛔ they are upstream translations with no license grant — see the E51 ruling below); they live in the **in-tree, gitignored** overlay `app/src/e51-overlay/` (the repo already uses the same pattern for `app/src/lofi-upstream/` and `app/src/globe-upstream/`), mounted by `~/.gradle/init.d/10-nasmusic-e51-local.gradle` (this init script exists only on this machine).
 > The guard in `app/build.gradle.kts` **fails the build** when the switch is on but neither the overlay nor the branch sources are present ⇒ a missing overlay fails loudly instead of silently producing a "theme present, effect is the generic fallback" fake package.
 > CI / public builds keep `lofi.city` off (no E51 byte ever reaches GitHub).
 > ⛔ A package built with E51 is **local-only**: never push / tag / release it.
@@ -256,8 +256,9 @@ JAVA_HOME="C:/Program Files/Android/Android Studio/jbr" \
 
   ⭐ **本地构建携带隐藏分支效果 / GitHub 构建不含**（所有者 2026-11-04 明示）
     「**在 `main` 分支上本地编译时，也要携带隐藏分支的效果；推送到 GitHub 上编译时，不包含隐藏分支效果。**」
-    实现 = **仓库外覆盖层** + **仅本机的 Gradle 初始化脚本**（两者都不在版本库里，⛔ 不外泄）：
-    · 覆盖层：`D:/hxzhang/MyGithubSoftware/NASMusicTV-e51-local/src/ovl/app/src/{main/java,main/assets}/...`
+    实现 = **仓库树内但被 gitignore 的覆盖层** + **仅本机的 Gradle 初始化脚本**（两者都不进版本库，⛔ 不外泄）：
+    · 覆盖层：`app/src/e51-overlay/ovl/app/src/{main/java,main/assets}/...`
+      （2026-11-07 从仓库**外**迁入仓库**内**；仓库里已有同样的先例：`app/src/lofi-upstream/`、`app/src/globe-upstream/`）
       （E51 源码 + E52 源码 + `e52_highway/` 资产），由 `python scripts/sync_private_overlay.py`
       从本地分支 `feat/e51-private`（⛔ 从不推送）同步而来 ⇒ 覆盖层天然不外泄。
     · 初始化脚本：`~/.gradle/init.d/10-nasmusic-e51-local.gradle`（**仅本机**）把覆盖层挂成

@@ -200,12 +200,12 @@ data class PassedTextStyle(
 
 ```kotlin
 // visualizer/renderers/lyricsStage/LyricsStageMode.kt
-enum class LyricsStageMode(val displayName: String) {
-    DOT_MATRIX("歌词点阵"),
-    GLOW_LINE("逐字行光"),
-    FULL_VIEW("全屏纵览"),
-    TILT_PULSE("倾斜律动"),
-    PARTITA("分栏引导"),
+enum class LyricsStageMode(@StringRes val displayNameRes: Int) {
+    DOT_MATRIX(R.string.lyrics_stage_mode_dot_matrix),
+    GLOW_LINE(R.string.lyrics_stage_mode_glow_line),
+    FULL_VIEW(R.string.lyrics_stage_mode_full_view),
+    TILT_PULSE(R.string.lyrics_stage_mode_tilt_pulse),
+    PARTITA(R.string.lyrics_stage_mode_partita),
     ;
 
     companion object {
@@ -227,7 +227,7 @@ enum class LyricsStageMode(val displayName: String) {
 
 1. `RenderContext.update()` 已有 **16 个位置参数**，再加字段会让三个调用点全部变长；
 2. ⛔ **本机私有分支的覆盖层会遮蔽同名文件** —— `RenderContext.kt` 在
-   `NASMusicTV-e51-local` 覆盖层里有一份 ⇒ 本地构建用的是**覆盖层那份**。
+   `app/src/e51-overlay` 覆盖层里有一份 ⇒ 本地构建用的是**覆盖层那份**。
    改仓库那份 ⇒ 本地编译与 CI 编译**行为分叉**（本地少了新字段 ⇒ 直接编译失败）。
 
 ⇒ 改为：歌词数据由 `VisualizerStage` **每帧直接推给** `LyricsStageRenderer`。
@@ -269,9 +269,15 @@ if (cur is LyricsStageRenderer) {
 
 `LyricsLine` → `LyricLine` 的转换实现 `LyricsStageBridge.buildLines(lyrics)`：
 - 行开始时间 = `LyricsLine.time / 1000`；行结束时间 = **下一行的 `time`**（没有则 `+3s` 兜底）
-- 逐词时间戳：按位置与切出的词一一对应；词的**结束时间取下一个词的开始时间**
+- **有逐词时间戳时：以解析器的词表为准**（2026-11-07 修正）——
+  一条 `WordTimestamp` ⇒ 一个词，词文本与词开始时间都取自条目本身；
+  词的**结束时间取下一个词的开始时间**
   （本仓的 `WordTimestamp` 只有 `startMs`、无结束时间），
   与 Folia `buildLineRenderHints` 里 `getLastWordEndTime` 的兜底一致
+- ⛔ **不再把整行切成单字后按位置与时间戳配对**（旧实现的错）：
+  词数（字数）多于时间戳条数时，后面的词只能拿均分兜底，词文本也被切成单字 ⇒ 时间全错、文本全错。
+  下游「倾斜律动」用 `words` 反查每段的起止时间 ⇒ 起点恒为 0 ⇒ `computeVisibleIndex` 永不推进
+  ⇒ 每段 alpha 恒为 0 ⇒ **全屏黑**（真机已复现）
 - 无逐词时间戳时：按行级时间在词之间均分
 - `renderHints` 由 `LyricRenderHints.buildLineRenderHints(line)` 推导
 
@@ -280,17 +286,27 @@ if (cur is LyricsStageRenderer) {
 
 > ⚠️ `VisualQuality` 枚举定义在 `AppSettings.kt`（第 586 行起），**不在**独立的 `VisualQuality.kt` 文件中。
 
-### 2.4 调色板字段名（⚠️ 与原方案不同）
+### 2.4 调色板字段名（⛔ **按语义对应，不按名字对应**）
 
 本仓的 `CoverPalette` 只有三个成员 —— **没有** `primaryColor` / `accentColor`：
 
-| Folia | 本仓 | 说明 |
+| Folia | 本仓（**语义对应**） | 说明 |
 |---|---|---|
-| `theme.primaryColor` | `ctx.palette.accent` | 基础文字色 |
-| `theme.accentColor` | `ctx.palette.secondary` | 高亮 / 激活色 |
+| `theme.primaryColor`（`#f8fafc` 亮色主题） | `LyricsStageColors.baseText(ctx)`（从背景提亮的近白） | 基础文字色 |
+| `theme.accentColor`（`#2563eb`） | `LyricsStageColors.accent(ctx)` = `ctx.palette.accent` | 高亮 / 激活色 |
+| `theme.secondaryColor` | `LyricsStageColors.secondary(ctx)` = `ctx.palette.secondary` | 次级强调色 |
 | （背景） | `ctx.palette.background` | 页面底色 |
 
+> ⛔ **旧映射是错的**（2026-11-07 修正）：旧表格里的
+> `theme.primaryColor -> ctx.palette.accent` 是**按名字**对应，而本仓的
+> `CoverPalette.accent` **恒为鲜艳蓝**（`CoverPaletteProvider.kt:49`：
+> `hsl(195°, 100%, litMain)`）⇒ 把它当「基础文字色」就是满屏霓虹蓝；
+> 而 `theme.accentColor -> ctx.palette.secondary`（`hsl(60°,100%,litSub)` = 黄）又把高亮色换成了黄色。
+> ⇒ 现在改成**按语义**：基础文字色→近白，高亮色→鲜艳蓝。
+
 > 本仓**没有** Folia 的 `theme.wordColors`（关键词配色表）⇒ `resolveWordColor(...)`
+> 一律传**空列表** + 回落色 = 高亮色，逐词配色的**算法**仍完整移植。
+> ⛔ 这是与上游的**可见差异**（Folia 会按词文本哈希出不同的高亮色）。
 > 一律传**空列表** + 回落色 `ctx.palette.secondary`，逐词配色的**算法**仍完整移植。
 
 ---
@@ -597,8 +613,8 @@ class GlowLineSubRenderer : LyricsSubRenderer {
                     y = ((r - 0.5) * 15).toFloat(),
                     rotate = 0f,
                     scale = 1.5f,
-                    baseColor = ctx.palette.primaryColor.toArgb(),
-                    activeColor = resolveWordColor(word.text, ctx.palette.accentColor, ctx.palette.primaryColor).toArgb(),
+                    baseColor = LyricsStageColors.baseText(ctx),
+                    activeColor = resolveWordColor(word.text, LyricsStageColors.accent(ctx), LyricsStageColors.baseText(ctx)).toArgb(),
                     passedRotate = 0f,
                     marginRightPx = 3 * 16f,  // 3rem
                 )
@@ -619,7 +635,7 @@ class GlowLineSubRenderer : LyricsSubRenderer {
             }
 
             // 移植 :384 — resolveWordColor 逐词配色
-            val activeColor = resolveWordColor(word.text, ctx.palette.accentColor, ctx.palette.primaryColor)
+            val activeColor = resolveWordColor(word.text, LyricsStageColors.accent(ctx), LyricsStageColors.baseText(ctx))
 
             WordLayout(
                 word = word,
@@ -627,7 +643,7 @@ class GlowLineSubRenderer : LyricsSubRenderer {
                 y = yOffset,
                 rotate = rotate,
                 scale = scale.toFloat(),
-                baseColor = ctx.palette.primaryColor.toArgb(),
+                baseColor = LyricsStageColors.baseText(ctx),
                 activeColor = activeColor.toArgb(),
                 passedRotate = passedRotate,
                 marginRightPx = marginRightPx,
@@ -826,15 +842,23 @@ fun springValue(
 }
 ```
 
-#### blur 效果映射
+#### 轴光（glow）效果映射（⛔ **改用位图缓存**）
 
-CSS `filter: blur(Npx)` 是对整个元素做高斯模糊。
-Android 的 `Paint.setShadowLayer(blur, 0, 0, color)` 是阴影模糊，视觉不完全等价。
-差异：CSS blur 模糊整个元素（包括内部），Android shadowLayer 只在元素下方画阴影。
+CSS `filter: blur(Npx)` / `drop-shadow()` 是对整个元素做高斯模糊。
+Android 没有等价物：`Paint.setShadowLayer` 是**逐次绘制的模糊**（每个字形都要重新模糊一次）。
 
-**应对方案**：用多层 `drawText` 叠加近似：
-- 先画一层带 `shadowLayer` 的文本（辉光层）
-- 再画一层纯色文本（正文层）
+> Folia 自己在 `wordGlow.ts:10-27` 记过这价格：文字下阴影让 Chromium 反复铸造字形缓存，
+> Mac 上实测光染线程每秒耗掉 **160–220 ms**。
+> ⇒ **逐字形 `setShadowLayer` 就是电视上卡顿的主因**（一行 30 个字形 × 外圈/内圈两遍 = 每帧 60 次文字模糊）。
+
+**实作（`GlowWordHalo`）**：轴光的**形状**只取决于「字形 + 字号 + 颜色 + 半径」，与时间无关；
+随时间变的只有**强度**（Folia 的 peak）。
+⇒ 把它做成**缓存的轴光位图**（模糊只算一次），逐帧只做一次 `drawBitmap` + alpha。
+
+- 缓存命中路径**零分配**（数组 + 线性比对，不拼 String 键）⇒ 可以逐帧调用
+- ⛔ **不 `recycle()`**：渲染器可能跨帧持有 `Entry`（离场动画还在画上一行）⇒
+  回收后再画会抛「trying to use a recycled bitmap」
+- ⛔ **强度用 alpha 调制**（上游是半径随 peak 缩放）—— 观感接近但不是逐位相同
 
 ---
 
@@ -2069,7 +2093,7 @@ class TiltPulseSubRenderer : LyricsSubRenderer {
         val bassBoost = frame.bass  // 0..1
         val centerY = ctx.canvasSize.height / 2f
         val normalColor = Color.White.copy(alpha = 0.85f)
-        val tiltColor = ctx.palette.accentColor
+        val tiltColor = LyricsStageColors.accent(ctx)
 
         var segIdx = 0
         var yCursor = centerY - (segments.size * fontSize * 1.3f) / 2f
@@ -2362,9 +2386,9 @@ class PartitaSubRenderer : LyricsSubRenderer {
 
             // ── 绘制引导线（移植 PartitaChunk.tsx:95-182）──
             if (chunk.isStaggeredLeft) {
-                drawGuideLine(centerX + chunk.config.x, yOffset, chunkOpacity, ctx.palette.accentColor)
+                drawGuideLine(centerX + chunk.config.x, yOffset, chunkOpacity, LyricsStageColors.accent(ctx))
             } else {
-                drawGuideLine(centerX + chunk.config.x, yOffset, chunkOpacity, ctx.palette.accentColor)
+                drawGuideLine(centerX + chunk.config.x, yOffset, chunkOpacity, LyricsStageColors.accent(ctx))
             }
 
             // ── 绘制词（复用 GlowWordCore 词级动画）──

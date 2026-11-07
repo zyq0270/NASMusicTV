@@ -791,7 +791,7 @@ G18 原判据是"全帧 SSIM ≥ 0.92 且 MAE ≤ 2.0"，而 **0.92 是按「同
    （warmup 60 帧实测 85.7 ms/帧）⇒ **shader 变体必须在加载期预热**（进主题时一次性编译好全部变体），
    否则**第一次进新地形会冻屏数秒**。⇒ 新增门禁 **G31：进主题到首帧 < 1.5 s**（预热在进主题时同步做）。
 2. **⚠️ E51 覆盖层会遮蔽仓库文件**（`~/.gradle/init.d/10-nasmusic-e51-local.gradle` 挂入
-   `D:/hxzhang/MyGithubSoftware/NASMusicTV-e51-local/src/ovl`）：
+   `app/src/e51-overlay/ovl`）：
    覆盖层里含 **仓库同名文件的副本** ⇒ **Kotlin 任务层以覆盖层那份为准** ⇒ 改了仓库那份而没改覆盖层那份，
    **本地构建等于没改**（CI/公开构建没有覆盖层，反而能编过 ⇒ 本地与 CI 行为分叉）。
    ⇒ 本轮被遮蔽的三份：`VisualizerRendererFactory.kt` / `VisualizerStage.kt` / `RenderContext.kt`

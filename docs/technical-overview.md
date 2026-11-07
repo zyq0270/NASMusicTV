@@ -18294,8 +18294,8 @@ GitHub runner 上这两样都不存在 ⇒ 公开构建与 CI 完全不受影响
 
 #### 二、三层机制
 
-1. **私有覆盖层**（仓库外，本机）
-   `D:/hxzhang/MyGithubSoftware/NASMusicTV-e51-local/src/ovl/app/src/{main/java,main/assets}/...`
+1. **私有覆盖层**（仓库**树内**，但被 `.gitignore` 挡住；本机）
+   `app/src/e51-overlay/ovl/app/src/{main/java,main/assets}/...`
    · 内容 = 隐藏分支 `feat/e51-private` 的 E51 源码（80 文件）+ E52 源码（56 文件）
      + `e52_highway/` 资产（108 文件 / 8.5 MiB）
    · 由 `python scripts/sync_private_overlay.py` 同步（源 = 当前工作树，或本地分支 ref）
@@ -18375,8 +18375,9 @@ GitHub runner 上这两样都不存在 ⇒ 公开构建与 CI 完全不受影响
 - 改：`app/build.gradle.kts`、`AGENTS.md`、`data/model/AppSettings.kt`、`visualizer/VisualizerRenderer.kt`、
   `visualizer/VisualizerRendererFactory.kt`、`res/values/strings.xml`、
   `data/model/VisualizerThemeTest.kt`、`visualizer/renderers/StarrySkyTest.kt`
-- 仓库外（本机，不入库）：`~/.gradle/init.d/10-nasmusic-e51-local.gradle`、
-  `D:/hxzhang/MyGithubSoftware/NASMusicTV-e51-local/src/**`
+- 不入库（本机 / 被 `.gitignore` 挡住）：`~/.gradle/init.d/10-nasmusic-e51-local.gradle`、
+  `app/src/e51-overlay/**`
+  ⛔ origin 是 **public** 仓库 ⇒ 上游衍生源码绝不能进仓；护栏是 `PrivateOverlayDriftGateTest`
 
 ### 10.281 v2.39.11 ｜ E50「千里江山」：移植 `shan-shui-inf` 的水墨山水长卷（2026-11-05）
 
@@ -19360,7 +19361,7 @@ CSS:  最终色 = p × (1 − α + α·c/255)
 #### 3. 关键架构决策：歌词数据**不走 `RenderContext`**
 
 ⛔ `RenderContext.update()` 有 16 个位置参数，且**本机私有分支的覆盖层会遮蔽同名文件**
-（`RenderContext.kt` 出现在 `NASMusicTV-e51-local` 覆盖层里 ⇒ 本地构建用的是覆盖层那份）。
+（`RenderContext.kt` 出现在 `app/src/e51-overlay` 覆盖层里 ⇒ 本地构建用的是覆盖层那份）。
 改它 ⇒ 本地编译与 CI 编译行为分叉。
 
 ⇒ 改为：**`VisualizerStage` 每帧把 `LyricsStagePayload` 直接推给 `LyricsStageRenderer`**
@@ -19422,3 +19423,102 @@ CSS:  最终色 = p × (1 − α + α·c/255)
 子模式 0 的粒子数按效果自己的档位表（E23 的 `capacityForTier`），⛔ 不读 `ctx.quality.maxParticles`。
 子模式 2（全屏纵览）需要整曲版面 + 相机变换 ⇒ **只在 HIGH 档提供**，
 非 HIGH 档由 `LyricsStageRenderer.createSubRenderer` 降级为 GLOW_LINE。
+
+#### 8. 真机回归修复（2026-11-07）
+
+真机首测（四张截图）暴露了多个缺陷。下面每一项都是「定位到具体根因后修复」。
+⛔ 不是调参：几个不同的病根如出一述，但表现形式相似（都是「字不对 / 字不对位」）。
+
+##### 8.1 配色：按**语义**对应，不按名字对应
+
+| 角色 | 旧（错） | 新 |
+|---|---|---|
+| 基础文字色 | `ctx.palette.accent` | `LyricsStageColors.baseText(ctx)`（从背景提亮的近白） |
+| 高亮 / 激活色 | `ctx.palette.secondary` | `LyricsStageColors.accent(ctx)` = `ctx.palette.accent`（鲜艳蓝） |
+
+根因：本仓 `CoverPalette.accent` **恒为鲜艳蓝**（`CoverPaletteProvider.kt:49`：`hsl(195°, 100%, litMain)`）、
+`secondary` **恒为黄**（`hsl(60°, 100%, litSub)`）⇒ 按名字对应就得到「霓虹蓝正文 + 黄色高亮」。
+Folia 的 `theme.primaryColor` 是近白（`#f8fafc`）、`theme.accentColor` 才是蓝（`#2563eb`）⇒ 改成按语义对应。
+新增 `LyricsStageColors` 作为唯一取色入口。
+
+##### 8.2 「倾斜律动」黑屏：词级时间戳被按位置配给了逐字切碎的词
+
+`LyricsStageBridge.buildWords` 旧实现把**整行切成单字**，再把解析器的**词级**时间戳**按位置**配给这些字。
+但本仓的 `WordTimestamp` **自带词文本**（例如「曾经」@0ms、「真的」@400ms）⇒ 配对后时间全错、文本全错。
+
+下游链：「倾斜律动」用 `TiltLayout.findSegmentWordRange(...)` 把段映射到 `line.words`，
+段的起始时间取 `segWords.first().startTime` ⇒ 段起点恒为 0 ⇒ `computeVisibleIndex(...)` 里的
+`timeSec >= segmentStarts[i] - LEAD` 永不成立 ⇒ `visibleIndex = -1` ⇒ 每段 alpha 恒为 0 ⇒ **整屏黑**。
+
+修复：有逐词时间戳时以**解析器的词表为准**（一条 `WordTimestamp` ⇒ 一个词，文本与开始时间均取自条目本身）；
+无时间戳时才回退到逐字切分 + 均分。
+门禁：`tilt/TiltSegmentTimingTest`（行 → 词 → 段 → 段起始时间整条链，含「行开始 0.1 s 后至少有一段可见」的黑屏判据）。
+
+##### 8.3 卡顿：「全屏纵览」用 dp 当世界单位 ⇒ 每个 Folia 绝对常量都大了 `density` 倍
+
+Folia 的世界单位是 **CSS px**（DPR = 1），而本仓的移植用了 **dp**（视口 = 画布 / `density`）。
+Folia 布局/相机链上的常量都是**绝对的世界单位**（纸宽 920–2400、目标行高 64–124、相机缩放 0.88–2.2、字号上限 30/58）
+⇒ 世界单位缩小一倍，文字就相对屏幕大一倍，且**相机缩放的上限 2.2 永远达不到** ⇒ 可见窗口只剩 1.05 个列宽 ⇒
+相机横扫（Folia 的「打印头」跟随）把活动行从两侧切掉。
+
+修复：世界单位改为**画布设备像素**（Folia 在 DPR 1 下的 CSS px），视口 = 画布尺寸、
+相机变换不再除 `density`、`deviceScale = camera.scale`。另补上 Folia `useFumeCanvasStage.ts:97` 的 `syncFumeCameraToArticle(...)`
+（移植时从未调用 ⇒ 相机从未初始化到版面中心、也未被夹到版面边界）。
+
+数值对账（1920×1080 画布、density 2、中文）：
+
+| | 旧（世界=dp） | 新（世界=设备像素） | Folia @ DPR 1 |
+|---|---|---|---|
+| 屏上字号 | 119.7 px | **65.8 px** | 65.8 px |
+| 15 字行宽 | 占宽度 94%（跑出） | **51%** | 51% |
+| 相机缩放 | 2.00（上限 2.2 不可达） | **2.20** | 2.20 |
+| 可见窗口 ÷ 列宽 | 1.05 ⇒ 活动行被切 | **1.48 ⇒ 活动行完整** | 1.48 |
+
+⛔ 其余两个子模式（「逐字行光」「分栏引导」）的 `rem`/`vw` 本来就是按**设备像素**换算的
+（即 DPR 1 语义）⇒ 三个子模式现在的单位一致。
+
+##### 8.4 轴光：逐字形 `setShadowLayer` → 位图缓存
+
+Folia 用合成器的 `drop-shadow()`（GPU 上免费）。Android 最接近的 `Paint.setShadowLayer` 是**逐次绘制的模糊**
+（每个字形都要重新模糊一次）。Folia 自己在 `wordGlow.ts:10-27` 记过这价格（Mac 上光染线程每秒 160–220 ms）。
+一行 30 字形 × 外圈/内圈两遍 = **每帧 60 次文字模糊** ⇒ 电视上卡顿的主因。
+
+新增 `GlowWordHalo`（轴光位图缓存）：
+- 轴光的**形状**只取决于「字形 + 字号 + 颜色 + 半径」⇒ 模糊只算一次，逐帧只做一次 `drawBitmap` + alpha；
+- 缓存命中路径**零分配**（数组 + 线性比对，不拼 String 键）⇒ 可以逐帧调用；
+- ⛔ **不 `recycle()`**：渲染器可能跨帧持有 `Entry`（离场动画还在画上一行）
+  ⇒ 回收后再画会抛「trying to use a recycled bitmap」。
+
+同时删除 `BlurMaskFilter`（硬件画布**整个丢弃**它 ⇒ CSS `filter: blur()` 从未被渲染；
+软件路径反而会把整块绘制拖进软件层）。
+
+⛔ **已知偏差**：位图缓存的半径固定在 peak=1，**强度改用 alpha 调制**（Folia 是半径随 peak 缩放）
+—— 观感接近，但不是逐位相同。
+
+【「逐字行光」的【重影字】（真机截图里那个孤立的小黄字）】两个原因分开说：
+
+1. **位置错位**：辉光层与正文层现在走**同一个辅助函数** `wordCenterX(layout, st, scale)`、
+   同一个 `scale = st.scaleAnim.value * st.fitScale`、同一个基线 `st.rowTop` ⇒ 两层的坐标系完全一致；
+   字形在词内的横向偏移用**同一支** `textPaint` 量出的 `graphemeX[gi]` ⇒ 辉光那份副本落在正文那个字上。
+2. **字号不一致**（实测的主因）：`haloPaint` 的 `textSize` 并**没有**跟随 `textPaint`
+   ⇒ 一直留在 Android 的默认值 **12 px** ⇒ 辉光副本比正文**小一圈** ⇒ 看起来像一个多余的小字。
+   现在绘制弧里每帧自愈（两次比较、零分配）把 `haloPaint` 的字号/字体对齐到 `textPaint`。
+
+⛔ **辉光副本与正文的揭示时序差**（Folia 同样有，不是本仓的 bug）：
+Folia 的外圈 `drop-shadow` 层是用**字形本体**以全 alpha 画出来的（下面叠的是模糊），
+而正文层是**整词一次性揭示**⇒ 在逐字形扫过的那一小窗口里，
+只看得见辉光副本、正文还没揭示 ⇒ **形成一个「遮屏」的字形**。
+它是无害的（如果两份副本同尺寸）—— 上面第 2 点修正后就是同尺寸了。
+
+【还没修的一个差】：辉光的两个半径原来是每帧用 `glowRadiiFor(layout)` 算的，而该函数返回 `Pair`
+⇒ **每帧一个分配**；现改为在 `buildLayout` 里算好存进 layout（两个 float）⇒ 辉光路径真正零分配。
+
+##### 8.5 私有覆盖层：从仓库**外**迁入仓库**内**（所有者裁定 2026-11-07）
+
+覆盖层原在仓库**外**（`D:/hxzhang/MyGithubSoftware/NASMusicTV-e51-local/src`）⇒ 放在项目目录外的东西会被当成「与项目无关」而被删掉。
+已迁入 `app/src/e51-overlay/`（**仓库树内** + `.gitignore` 的 `/app/src/e51-overlay/`）——
+仓库里已有同样的先例：`app/src/lofi-upstream/`、`app/src/globe-upstream/`。
+
+- `scripts/sync_private_overlay.py`：路径改为**仓库相对**；缓存不存在时**自动建目录**（之前直接退出）；
+- `~/.gradle/init.d/10-nasmusic-e51-local.gradle`（仅本机）：`OVERLAY` 指向新路径；
+- 保护栏：`PrivateOverlayDriftGateTest`（`--check` 当前 0 漂移）。

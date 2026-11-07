@@ -202,7 +202,18 @@ object FumeCamera {
         return out
     }
 
-    /** 移植 fumeCamera.ts:142-149 `resolveCameraScaleForBlock` */
+    /**
+     * 移植 fumeCamera.ts:142-149 `resolveCameraScaleForBlock`
+     *
+     * 目标：让被聚焦块的**行高**落在视口短边的 `0.115`（夹在 64..124 之间），
+     * 相机缩放再夹在 0.88..2.2。
+     *
+     * ⚠️ **单位**：视口与行高必须与版面同一世界单位（本仓 = 画布设备像素）。
+     *    `64..124` 与 `0.88..2.2` 都是**绝对**常量 ⇒ 视口一旦被缩小（早前用 dp，
+     *    视口 = 画布 / `density`），上限 2.2 就永远够不到 ⇒ 文字相对屏幕被放大 `density` 倍，
+     *    且可见窗口窄到只剩一个列宽 ⇒ 相机横扫时活动行被切掉。
+     *    详见 `FullViewSubRenderer` 的文件头。
+     */
     fun resolveCameraScaleForBlock(
         block: FumeTypes.FumeBlock,
         viewport: FumeTypes.ViewportSize,
@@ -381,7 +392,13 @@ object FumeCamera {
     /**
      * 移植 fumeCamera.ts:308-341 `resolveFocusBlock`
      *
-     * 相机该关注的块：优先当前歌词行；否则最后一个已渲染的行；否则最后一个已有打印内容的块。
+     * 相机该关注的块：优先当前歌词行（`blockBySourceLineIndex`，**不是**整版、**不是**上一块）；
+     * 否则最后一个已渲染的行；否则最后一个已有打印内容的块。
+     *
+     * ⚠️ 焦点**点**由 `resolveSmoothBlockFocusPoint` 给出 —— 它跟的是**打印头**
+     *     （逐字打印到哪儿，相机就跟到哪儿），不是整行的中点；
+     *     「活动行完整可见」靠的是**可见窗口比列宽宽**（见 [resolveCameraScaleForBlock]
+     *     与 `FullViewSubRenderer` 的文件头），而不是靠把相机对准行中点。
      */
     fun resolveFocusBlock(
         article: FumeTypes.FumeArticleLayout,

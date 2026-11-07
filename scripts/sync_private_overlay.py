@@ -4,10 +4,10 @@
 
 为什么需要这个脚本
 ------------------
-本机（仅本机！）有一个**私有覆盖层**（在仓库之外）：
+本机（仅本机！）有一个**私有覆盖层**（在仓库**树内**，但被 `.gitignore` 挡住）：
 
-    D:/hxzhang/MyGithubSoftware/NASMusicTV-e51-local/src/ovl/app/src/main/java/com/nasmusic/tv/...
-    D:/hxzhang/MyGithubSoftware/NASMusicTV-e51-local/src/ovl/app/src/main/assets/...
+    app/src/e51-overlay/ovl/app/src/main/java/com/nasmusic/tv/...
+    app/src/e51-overlay/ovl/app/src/main/assets/...
 
 `~/.gradle/init.d/10-nasmusic-e51-local.gradle` 把它加成 app 模块 main 源集的额外源目录
 （Kotlin 源码走 java 源目录、资产走 assets 源目录），并在 **Kotlin 编译任务层**排除仓库里
@@ -55,8 +55,6 @@ import sys
 import tempfile
 
 # ── 覆盖层位置 ──────────────────────────────────────────────────────────────
-DEFAULT_OVERLAY_ROOT = r'D:\hxzhang\MyGithubSoftware\NASMusicTV-e51-local\src'
-
 # 覆盖层里 java 包根相对「源目录根」的位置（多一层 ovl/ ⇒ init 脚本的排除模式命不中覆盖层）
 OVERLAY_JAVA_REL = os.path.join('ovl', 'app', 'src', 'main', 'java')
 OVERLAY_ASSETS_REL = os.path.join('ovl', 'app', 'src', 'main', 'assets')
@@ -64,6 +62,16 @@ OVERLAY_ASSETS_REL = os.path.join('ovl', 'app', 'src', 'main', 'assets')
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 REPO_JAVA = os.path.join(REPO_ROOT, 'app', 'src', 'main', 'java', 'com', 'nasmusic', 'tv')
 REPO_ASSETS = os.path.join(REPO_ROOT, 'app', 'src', 'main', 'assets')
+
+# 覆盖层**放在仓库树内**（2026-11-07 从仓库外迁入；所有者裁定）。
+#
+# ⚠️ **必须 gitignore**（见 .gitignore 的 `/app/src/e51-overlay/`）：
+#    它是 `feat/e51-private`（⛔ 从不 push）的**物化副本**，内含**不可再分发**的上游衍生源码
+#    ⇒ 一旦被提交进公开仓库（origin 是 public）就是泄漏。
+#    仓库里已有同样的先例：`app/src/lofi-upstream/`、`app/src/globe-upstream/`。
+#
+# ✅ 放树内的好处：它跟项目在一起、看得见、不会像「项目外的陌生目录」那样被误当成无关物删掉。
+DEFAULT_OVERLAY_ROOT = os.path.join(REPO_ROOT, 'app', 'src', 'e51-overlay')
 
 PRIVATE_REF = 'feat/e51-private'
 
@@ -193,9 +201,17 @@ def main(argv):
     check_only = '--check' in argv
     ov = overlay_root()
     if not os.path.isdir(ov):
-        print('覆盖层不存在：%s' % ov)
-        print('（没有覆盖层的机器 —— CI / 别人的机器 —— 不需要同步）')
-        return 2  # 2 = 无法比较（不是漂移）
+        if check_only:
+            print('覆盖层不存在：%s' % ov)
+            print('（没有覆盖层的机器 —— CI / 别人的机器 —— 不需要同步）')
+            return 2  # 2 = 无法比较（不是漂移）
+        # 同步模式：覆盖层在**仓库树内**（2026-11-07 迁入）⇒ 缺失就建出来。
+        try:
+            os.makedirs(ov)
+            print('覆盖层不存在，已新建：%s' % ov)
+        except Exception as exc:
+            print('❌ 无法创建覆盖层目录 %s：%s' % (ov, exc))
+            return 2
 
     src_java, src_assets, src_desc = _source_roots()
     if src_java is None:

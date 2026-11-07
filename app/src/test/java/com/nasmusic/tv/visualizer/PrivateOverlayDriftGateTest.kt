@@ -10,7 +10,7 @@ import java.util.concurrent.TimeUnit
  *
  * ## 为什么要它
  *
- * 本机有一个**仓库之外**的覆盖层（`.../NASMusicTV-e51-local/src/ovl/app/src/...`），
+ * 本机有一个**仓库树内、但被 `.gitignore` 挡住**的覆盖层（`app/src/e51-overlay/ovl/app/src/...`），
  * 由 `~/.gradle/init.d/10-nasmusic-e51-local.gradle` 挂成 app 模块的额外源目录，
  * 并在 **Kotlin 编译任务层**与仓库里那几份同名文件二选一地排除：
  *

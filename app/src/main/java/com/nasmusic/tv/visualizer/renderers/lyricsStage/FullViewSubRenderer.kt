@@ -44,13 +44,26 @@ import kotlin.math.roundToInt
  *    见下方「版面」的说明。
  *
  * ## 浏览器 API → Android 等价物
- *  - `window.devicePixelRatio` ⇒ Compose 的 `Density.density`（设备 px / dp）。
- *    Folia 的「世界单位」是 CSS px ⇒ 本仓的世界单位取 **dp**（1 dp = 1 世界单位），
- *    画布是设备 px ⇒ 相机变换里要乘 `density`。
+ *  - **世界单位 = 画布设备像素**（1 设备 px = 1 世界单位）⇒ 视口 = 画布尺寸，
+ *    **不除以 `density`**。这与 Folia 的 CSS px 一一对应（DPR = 1 时两者是同一个东西）。
+ *    ⛔ **2026-11-07 修正（本次缺陷的根因）**：先前取 **dp** 当世界单位
+ *    （视口 = 画布 / `density`），等价于模拟「DPR = `density`」的浏览器
+ *    ⇒ 视口被缩小 `density` 倍；而 Folia 的**绝对常量全都以世界单位计**
+ *    （纸宽 920..2400、目标行高 64..124、相机缩放 0.88..2.2、字号上限 30）
+ *    ⇒ 它们相对屏幕被放大 `density` 倍，后果有三条：
+ *    ① 字号 ≈ 屏幕高的 11%（Folia ≈ 6%）⇒ 「太大、邻行淹没画面」；
+ *    ② 相机缩放的**上限 2.2 永远够不到**（只到 2.0）⇒ 可见窗口只有 1.05 个列宽，
+ *       相机横扫时**活动行被左右切掉**；
+ *    ③ 15 字行占屏宽 94%、20 字行占 105% ⇒ 直接跑出画面。
+ *    改回设备像素后与 Folia（DPR = 1）逐值相同：可见窗口 = 1.48 个列宽
+ *    ⇒ 活动行永远完整可见（这正是「活动行应当完整、邻行只露一部分」的来源）。
+ *  - `window.devicePixelRatio` ⇒ **只**用于静态快照的光栅密度（`clamp(density, 1, 2)`），
+ *    不参与版面与相机（Folia 的 DPR 也只乘在画布变换上，不进版面公式）。
  *  - `document.createElement('canvas')` + `ctx.drawImage` ⇒ `android.graphics.Bitmap` + `Canvas.drawBitmap`。
  *  - `requestAnimationFrame` ⇒ Compose 的逐帧 `draw` 回调（本仓每帧调一次）。
  *  - `performance.now()` ⇒ `ctx.nowMs`（帧时间，单调）。
- *  - `ctx.setTransform(dpr, …)` ⇒ 相机变换里乘 `density`。
+ *  - `ctx.setTransform(dpr, …)` ⇒ Android 画布本身就是设备像素 ⇒ 相当于 DPR = 1
+ *    ⇒ **不乘 `density`**。
  *
  * ## 版面（Folia 的 `fumeArticleLayout.ts`）
  *  Folia 的版面构建包含一次「列数 × 密度」的二分搜索（8 次迭代 × 最多 4 种列数），
@@ -58,6 +71,19 @@ import kotlin.math.roundToInt
  *  本移植把它固定为「列数 = Folia 的 `maxColumns` 规则、密度 = 1.0」，
  *  其余全部照抄：纸宽、边距、列间距、块变体（hero/body）、字号选择、行高、块间距与摆放规则。
  *  ⚠️ 整曲歌词的版面在**首次需要时**构建一次（换歌时重建），构建期间会测量每一行的文字。
+ *
+ * ## 与 Folia 的偏差清单（有意保留，逐条记原因）
+ *  ① **版面搜索固定**（`columns = maxColumns`、`densityScale = 1.0`）：
+ *     Folia 的搜索只影响「整张报纸的高度」（构图），不影响任何视觉常量；
+ *     但 `densityScale` 会整体放大字号（候选字号 = 中点 × `densityScale`），
+ *     固定成 1.0 ⇒ 字号比 Folia 搜索出的结果**偏小**，方向是安全的（不会过大）。
+ *     代价：报纸高度不再逼近 `viewportHeight * 2.45`（只影响纵向留白多少，不影响横向裁切）。
+ *  ② **背景层未移植**（Folia 的 `FumeBackground` 几何背景）：本子模式只画整块底色。
+ *     与本次「字号 / 相机」缺陷无关，另案。
+ *  ③ **世界单位 = 设备像素**（见上节）：Folia 的 CSS px 在 DPR = 1 时与设备像素同值，
+ *     本仓画布本身就是设备像素 ⇒ 取 DPR = 1 是唯一自洽的映射。
+ *     ⚠️ 副作用（已知并接受）：4K 画布（3840×2160）上 Folia 的纸宽上限 2400 会生效，
+ *     字号仍是 ~66 px（屏幕高的 3%）——这与 Folia 在同尺寸浏览器窗口里的表现一致。
  *
  * ## 零分配
  *  `draw` 逐帧不新建 Paint / Bitmap / 数组 / 字符串；相机状态、时序对象、图层缓冲、
@@ -286,6 +312,9 @@ class FullViewSubRenderer : LyricsSubRenderer {
     /** 复用的视口尺寸（逐帧复用） */
     private val viewport = FumeTypes.ViewportSize(0f, 0f)
 
+    /** 复用的版面视口尺寸（版面构建期复用；与 [viewport] 同单位 = 画布设备像素） */
+    private val layoutViewport = FumeTypes.ViewportSize(0f, 0f)
+
     /** 复用的全景机位（逐帧复用） */
     private val overviewCamera = FumeTypes.CameraViewTarget(0f, 0f, 1f)
 
@@ -339,7 +368,7 @@ class FullViewSubRenderer : LyricsSubRenderer {
     /**
      * 移植 useFumeCanvasStage.ts:101-289 的每帧循环。
      *
-     * @param density 设备 px / dp（Folia 的 `devicePixelRatio`）。
+     * @param density 设备 px / dp（**只**用于静态快照的光栅密度；版面与相机的世界单位是设备像素）。
      */
     private fun DrawScope.renderStage(
         frame: AudioFrame,
@@ -373,8 +402,9 @@ class FullViewSubRenderer : LyricsSubRenderer {
         }
 
         // ── 相机步进（移植 useFumeCanvasStage.ts:155-168）────────────────
-        viewport.width = ctx.canvasSize.width / density
-        viewport.height = ctx.canvasSize.height / density
+        // ⚠️ 视口 = **画布设备像素**（世界单位），不除以 `density`（见文件头）。
+        viewport.width = ctx.canvasSize.width
+        viewport.height = ctx.canvasSize.height
         FumeCamera.resolveArticleOverviewCamera(current, viewport, overviewCamera)
 
         cameraInput.article = current
@@ -408,10 +438,11 @@ class FullViewSubRenderer : LyricsSubRenderer {
 
             native.save()
             native.translate(ctx.canvasSize.width * 0.5f, ctx.canvasSize.height * 0.5f)
-            native.scale(density * screenScale * contentScale, density * screenScale * contentScale)
+            // ⚠️ 世界单位 = 设备像素 ⇒ 相机缩放直接乘（不再乘 `density`，见文件头）。
+            native.scale(screenScale * contentScale, screenScale * contentScale)
             native.translate(-camera.x, -camera.y)
 
-            drawBlocks(native, current, camera, viewport, time, now, density, ctx)
+            drawBlocks(native, current, camera, viewport, time, now, ctx)
 
             native.restore()
         }
@@ -423,8 +454,6 @@ class FullViewSubRenderer : LyricsSubRenderer {
 
     /**
      * 移植 useFumeCanvasStage.ts:233-282 —— 逐块绘制。
-     *
-     * @param density 设备 px / dp。
      */
     private fun drawBlocks(
         native: Canvas,
@@ -433,7 +462,6 @@ class FullViewSubRenderer : LyricsSubRenderer {
         viewport: FumeTypes.ViewportSize,
         time: Double,
         now: Long,
-        density: Float,
         ctx: RenderContext,
     ) {
         // 移植 useFumeCanvasStage.ts:209 —— 辉光基准
@@ -444,9 +472,11 @@ class FullViewSubRenderer : LyricsSubRenderer {
         )
 
         // 移植 useFumeCanvasStage.ts:210-212 —— 活块参数
+        // ⚠️ 配色按**语义**对应（Folia 的 `theme.primaryColor` = 基础文字色、
+        //    `theme.accentColor` = 高亮色），不是按名字对应 ⇒ 见 LyricsStageColors。
         liveParams.time = time
-        liveParams.primaryColor = ctx.palette.accent.toArgb()
-        liveParams.accentColor = ctx.palette.secondary.toArgb()
+        liveParams.primaryColor = LyricsStageColors.baseText(ctx)
+        liveParams.accentColor = LyricsStageColors.accent(ctx)
         liveParams.glowIntensity = glowIntensity
         liveParams.activeGlowBoost = glowBases.activeGlowBoost
         liveParams.passedGlowBase = glowBases.passedGlowBase
@@ -454,7 +484,7 @@ class FullViewSubRenderer : LyricsSubRenderer {
 
         // 移植 useFumeCanvasStage.ts:211-218 —— 静态图层的输入
         staticLayerInput.time = time
-        staticLayerInput.primaryColor = ctx.palette.accent.toArgb()
+        staticLayerInput.primaryColor = LyricsStageColors.baseText(ctx)
         staticLayerInput.passedGlowBase = glowBases.passedGlowBase
         staticLayerInput.passedFadeDuration = passedFadeDuration
         staticLayerInput.overviewTextRestoreProgress = cameraResult.overviewTextRestoreProgress
@@ -465,7 +495,8 @@ class FullViewSubRenderer : LyricsSubRenderer {
 
         // 移植 useFumeCanvasStage.ts:222-231 —— 活块的可见区域
         val margin = liveRasterMargin / camera.scale
-        liveFrame.deviceScale = camera.scale * density
+        // ⚠️ 世界单位 = 设备像素 ⇒ 每个世界单位对应 `camera.scale` 个设备纹素。
+        liveFrame.deviceScale = camera.scale
         liveFrame.visibleLeft = camera.x - viewport.width * 0.5f / camera.scale - margin
         liveFrame.visibleTop = camera.y - viewport.height * 0.5f / camera.scale - margin
         liveFrame.visibleRight = camera.x + viewport.width * 0.5f / camera.scale + margin
@@ -573,7 +604,7 @@ class FullViewSubRenderer : LyricsSubRenderer {
      * 构建整曲的版面（移植 `fumeArticleLayout.ts` 的构建部分）。
      *
      * @param lines 整曲歌词行。
-     * @param density 设备 px / dp（快照的光栅密度）。
+     * @param density 设备 px / dp（**只**用于快照的光栅密度）。
      */
     private fun rebuildArticle(
         lines: List<LyricLine>,
@@ -587,13 +618,15 @@ class FullViewSubRenderer : LyricsSubRenderer {
 
         if (lines.isEmpty()) {
             article = null
+            // 移植 useFumeCanvasStage.ts:97 —— 没有版面 ⇒ 相机复位
+            FumeCameraStep.syncFumeCameraToArticle(cameraState, null)
             return
         }
 
-        val viewport = FumeTypes.ViewportSize(
-            ctx.canvasSize.width / density,
-            ctx.canvasSize.height / density,
-        )
+        // ⚠️ 版面视口 = **画布设备像素**（世界单位），不除以 `density`（见文件头）。
+        layoutViewport.width = ctx.canvasSize.width
+        layoutViewport.height = ctx.canvasSize.height
+        val viewport = layoutViewport
 
         // 移植 fumeArticleLayout.ts:499-503
         val paperWidth = FumeMath.clamp(
@@ -749,7 +782,10 @@ class FullViewSubRenderer : LyricsSubRenderer {
                     fontPx = fontPx,
                     lineHeight = lineHeight,
                     measures = measures,
-                    accentArgb = ctx.palette.secondary.toArgb(),
+                    // 移植 fumeTextStyle.ts:84-88 —— 逐词激活色的**回落**色
+                    // （Folia：`resolveWordColor(word.text, theme.wordColors, theme.accentColor)`
+                    //  ⇒ 回落色是 `theme.accentColor`，不是 `theme.secondaryColor`）。
+                    accentArgb = LyricsStageColors.accent(ctx),
                 ),
             )
         }
@@ -795,6 +831,11 @@ class FullViewSubRenderer : LyricsSubRenderer {
         // 唱过文字的淡出时长与全景时刻只跟版面有关 ⇒ 在这里算一次
         passedFadeDuration = FumeTextStyle.resolveFumePassedFadeDuration(lines, textHoldRatio)
         overviewStartTime = resolveOverviewStartTime(lines)
+
+        // 移植 useFumeCanvasStage.ts:97 —— 版面换了就把相机放到版面上
+        // （新的版面 ⇒ 相机落到版面中心；已有的相机 ⇒ 夹在版面范围内）。
+        // ⚠️ Folia 在 effect 体内调一次（版面变化时），不在每帧调。
+        FumeCameraStep.syncFumeCameraToArticle(cameraState, article)
     }
 
     /** 版面构建用的一行 */
@@ -891,6 +932,8 @@ class FullViewSubRenderer : LyricsSubRenderer {
 
     /**
      * 移植 fumeArticleLayout.ts:373-436 —— 一个块的全部渲染细节。
+     *
+     * @param accentArgb 逐词激活色的**回落**色（= Folia 的 `theme.accentColor`，即高亮色）。
      */
     private fun buildBlock(
         entry: LineEntry,
