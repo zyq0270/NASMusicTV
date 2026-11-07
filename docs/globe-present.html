@@ -10,7 +10,8 @@
   html, body { width: 100%; height: 100%; overflow: hidden;
     background: radial-gradient(circle at 50% 30%, #4f9fd4 0%, #2a6fa8 55%, #103f66 100%);
     font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; }
-  #stage { position: fixed; inset: 0; }
+  #sky { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 0; pointer-events: none; }
+  #stage { position: fixed; inset: 0; z-index: 1; }
   #stage canvas { display: block; width: 100% !important; height: 100% !important; }
   .title { position: fixed; top: 14px; left: 0; right: 0; text-align: center; pointer-events: none; z-index: 20; }
   .title h1 { font-size: 22px; font-weight: 900; color: #fff; letter-spacing: 4px; text-shadow: 0 2px 10px rgba(10,60,110,.55); }
@@ -91,7 +92,21 @@
        保证所有物种都出现;新动物统一 height=0.115 并复用骨骼 Walk 动画
     v4 (2026-11-07) 树 30→150(5 倍);新增 pickForestSpots() 森林簇分配:
        14 个中心 + 每簇密集撒点、簇内无最小间距,体现堆积成林的效果
+    v5 (2026-11-07) 纯视觉美化(明确不加交互):
+      A 接触阴影贴片 / elevation 复用为 bumpMap + 海陆 roughnessMap /
+        海岸浪花线 / 地球纹理 480x240→768x384
+        (1024x512 实测生成 2.8s,首屏太慢;降到 768x384 + elevationP() 后仅 0.4s);
+      B 独立 LCG 星空 / 双层 fresnel 大气 / 双层反向云 + 地表云影 /
+        多层太阳光晕与光斑;
+      C 鸟群改 40 个 Sprite 三帧扇翅并挂 tiltPivot / 树只旋转不缩放的
+        微摆 / 动物走走停停(腿频同步) / 森林上方漂浮光点。
+      星空 / 光点一律走独立 LCG,不消耗全局 rand ⇒ 不干扰落点采样;
+      但纹理分辨率变化会改变 grass/forest 候选池大小,落点仍可复现、
+      全部在陆地贴地,与 v4 的具体坐标不同。
+      硬约束不变:15 种动物 19 只 + 150 棵树、全部陆地贴地、
+      动画过程零缩放、无 CSP / 贴图异常。
 -->
+<canvas id="sky"></canvas>
 <div id="stage"></div>
 <div class="title"><h1>生态地球</h1><p>CARTOON GLOBE · 自动旋转演示</p></div>
 <div class="loading" id="loading"><h2>生态地球</h2><p>正在唤醒绿色星球…</p></div>
@@ -169,24 +184,30 @@ function surfaceDir(u, v) {
 }
 
 /* ---------- procedural cartoon earth texture ---------- */
-var W = 480, H = 240;
-function elevation(u, v) {
-  var p = spherePoint(u, v);
+var W = 768, H = 384;    // v5: 480x240→768x384;1024x512 实测生成要 2.8s,首屏太慢
+function elevationP(p) {
   var e1 = fbm3(p[0] * 1.6 + 0.37, p[1] * 1.6 + 0.11, p[2] * 1.6 + 0.53, 5);
   var e2 = fbm3(p[0] * 4.3 + 1.2, p[1] * 4.3 + 2.4, p[2] * 4.3 + 3.7, 4);
   var e3 = fbm3(p[0] * 9.0 + 0.6, p[1] * 9.0 + 3.1, p[2] * 9.0 + 5.2, 3);
   return clamp01(0.46 + e1 * 0.34 + e2 * 0.12 + e3 * 0.08);
 }
+function elevation(u, v) { return elevationP(spherePoint(u, v)); }
 function createEarthTexture() {
+  var t0 = performance.now();
   var cv = document.createElement('canvas'); cv.width = W; cv.height = H;
   var ctx = cv.getContext('2d');
   var img = ctx.createImageData(W, H), data = img.data;
+  // A2 地形凹凸 / A3 海陆粗糙度:与颜色图同一次循环生成,零额外噪声计算
+  var bumpCv = document.createElement('canvas'); bumpCv.width = W; bumpCv.height = H;
+  var bumpCtx = bumpCv.getContext('2d'), bumpImg = bumpCtx.createImageData(W, H), bd = bumpImg.data;
+  var roughCv = document.createElement('canvas'); roughCv.width = W; roughCv.height = H;
+  var roughCtx = roughCv.getContext('2d'), roughImg = roughCtx.createImageData(W, H), rd = roughImg.data;
   var grass = [], forest = [];
   for (var py = 0; py < H; py++) {
     var v = py / H;
     for (var px = 0; px < W; px++) {
       var u = px / W, i = (py * W + px) * 4;
-      var sp = spherePoint(u, v), e = elevation(u, v);
+      var sp = spherePoint(u, v), e = elevationP(sp);
       var det = fbm3(sp[0] * 20 + 7.7, sp[1] * 20 + 3.3, sp[2] * 20 + 9.9, 3);
       var sh = fbm3(sp[0] * 6 + 0.2, sp[1] * 6 + 4.4, sp[2] * 6 + 2.8, 3);
       var r, g, b;
@@ -224,25 +245,50 @@ function createEarthTexture() {
         var pt = clamp01((pe - polar) / 0.03);
         r = lerp(r, 235, pt); g = lerp(g, 244, pt); b = lerp(b, 250, pt);
       }
+      // A4 海岸浪花线:只贴着 e=0.46 的窄带,宽了会变成一整圈白沙滩
+      if (e < 0.46) {
+        var coast = clamp01((e - 0.447) / 0.013);
+        r = lerp(r, 226, coast * 0.55);
+        g = lerp(g, 244, coast * 0.55);
+        b = lerp(b, 242, coast * 0.55);
+      }
       data[i] = r; data[i + 1] = g; data[i + 2] = b; data[i + 3] = 255;
+      // 海陆权重:两张辅助图都必须平滑过渡,否则 bump 会在海岸拉出硬亮边
+      var landT = clamp01((e - 0.44) / 0.06);
+      // bumpMap:海面平坦,陆地按高度 + 细节噪声起伏
+      var bv = 26 + landT * clamp01(0.30 + (e - 0.46) * 1.75 + det * 0.16) * 209;
+      bd[i] = bd[i + 1] = bd[i + 2] = bv; bd[i + 3] = 255;
+      // roughnessMap 走 G 通道:海面略光滑(柔和高光),陆地哑光
+      var rv = lerp(112, 240, landT);
+      rd[i] = rd[i + 1] = rd[i + 2] = rv; rd[i + 3] = 255;
     }
   }
   ctx.putImageData(img, 0, 0);
+  bumpCtx.putImageData(bumpImg, 0, 0);
+  roughCtx.putImageData(roughImg, 0, 0);
   var tex = new THREE.CanvasTexture(cv);
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.wrapS = THREE.RepeatWrapping;
-  return { texture: tex, grass: grass, forest: forest };
+  var bumpTex = new THREE.CanvasTexture(bumpCv);
+  bumpTex.wrapS = THREE.RepeatWrapping;
+  var roughTex = new THREE.CanvasTexture(roughCv);
+  roughTex.wrapS = THREE.RepeatWrapping;
+  console.log('[globe-present] earth texture ' + W + 'x' + H + ' generated in ' +
+              (performance.now() - t0).toFixed(0) + 'ms');
+  return { texture: tex, bump: bumpTex, rough: roughTex, grass: grass, forest: forest };
 }
 
 /* ---------- cloud texture ---------- */
-function createCloudTexture() {
+function createCloudTexture(seedOffset) {
+  var off = seedOffset || 0;
   var cw = 384, ch = 192, cv = document.createElement('canvas');
   cv.width = cw; cv.height = ch;
   var ctx = cv.getContext('2d'), img = ctx.createImageData(cw, ch), data = img.data;
   for (var py = 0; py < ch; py++) { for (var px = 0; px < cw; px++) {
     var u = px / cw, v = py / ch;
     var sp = spherePoint(u, v);
-    var n = fbm3(sp[0] * 3 + 0.8, sp[1] * 3 + 1.7, sp[2] * 3 + 2.6, 5) * 0.7 + fbm3(sp[0] * 9 + 4.2, sp[1] * 9 + 2.3, sp[2] * 9 + 5.9, 3) * 0.3;
+    var n = fbm3(sp[0] * 3 + 0.8 + off, sp[1] * 3 + 1.7 + off, sp[2] * 3 + 2.6 + off, 5) * 0.7 +
+            fbm3(sp[0] * 9 + 4.2 + off, sp[1] * 9 + 2.3 + off, sp[2] * 9 + 5.9 + off, 3) * 0.3;
     var cl = clamp01((n + 0.22) / 0.5);
     var latBand = 1 - Math.abs(v - 0.5) * 1.5;
     var a = cl * cl * (0.7 + latBand * 0.3);
@@ -265,22 +311,88 @@ function sunSpriteTex() {
   ctx.fillStyle = g; ctx.fillRect(0, 0, s, s);
   var t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; return t;
 }
-function birdTex() {
+function birdTex(phase) {
+  // C11 三帧翅膀姿态:0 平展 / 1 上扬 / 2 下压
+  var lift = phase === 1 ? -0.17 : phase === 2 ? 0.13 : 0;
   var s = 64, cv = document.createElement('canvas'); cv.width = s; cv.height = s;
   var ctx = cv.getContext('2d');
   ctx.fillStyle = 'rgba(255,255,255,0.95)';
   ctx.beginPath();
   ctx.moveTo(s * 0.5, s * 0.44);
-  ctx.quadraticCurveTo(s * 0.3, s * 0.62, s * 0.08, s * 0.56);
-  ctx.quadraticCurveTo(s * 0.32, s * 0.68, s * 0.5, s * 0.48);
-  ctx.quadraticCurveTo(s * 0.68, s * 0.68, s * 0.92, s * 0.56);
-  ctx.quadraticCurveTo(s * 0.7, s * 0.62, s * 0.5, s * 0.44);
+  ctx.quadraticCurveTo(s * 0.3, s * (0.62 + lift), s * 0.08, s * (0.56 + lift));
+  ctx.quadraticCurveTo(s * 0.32, s * (0.68 + lift), s * 0.5, s * 0.48);
+  ctx.quadraticCurveTo(s * 0.68, s * (0.68 + lift), s * 0.92, s * (0.56 + lift));
+  ctx.quadraticCurveTo(s * 0.7, s * (0.62 + lift), s * 0.5, s * 0.44);
   ctx.closePath(); ctx.fill();
   var t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; return t;
 }
 
+/* ---------- v5 视觉工具:接触阴影 / 柔光 / 星空 ---------- */
+var _glowTex = null, _shadowTex = null;
+function glowTex() {
+  if (_glowTex) return _glowTex;
+  var s = 128, cv = document.createElement('canvas'); cv.width = cv.height = s;
+  var ctx = cv.getContext('2d');
+  var g = ctx.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, s / 2);
+  g.addColorStop(0, 'rgba(255,255,255,1)');
+  g.addColorStop(0.25, 'rgba(255,255,255,0.70)');
+  g.addColorStop(0.60, 'rgba(255,255,255,0.18)');
+  g.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, s, s);
+  _glowTex = new THREE.CanvasTexture(cv);
+  _glowTex.colorSpace = THREE.SRGBColorSpace;
+  return _glowTex;
+}
+function contactShadowTex() {
+  if (_shadowTex) return _shadowTex;
+  var s = 128, cv = document.createElement('canvas'); cv.width = cv.height = s;
+  var ctx = cv.getContext('2d');
+  var g = ctx.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, s / 2);
+  g.addColorStop(0, 'rgba(10,26,18,0.62)');
+  g.addColorStop(0.42, 'rgba(10,26,18,0.30)');
+  g.addColorStop(0.78, 'rgba(10,26,18,0.08)');
+  g.addColorStop(1, 'rgba(10,26,18,0)');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, s, s);
+  _shadowTex = new THREE.CanvasTexture(cv);
+  _shadowTex.colorSpace = THREE.SRGBColorSpace;
+  return _shadowTex;
+}
+/* 星空用独立 LCG,绝不消耗全局 rand() ⇒ 动物/树落点与 v4 完全一致,可复现 */
+function drawStarfield(cv) {
+  var seed = 9137;
+  function sr() { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 4294967296; }
+  var dpr = Math.min(window.devicePixelRatio || 1, 2);
+  var w = window.innerWidth, h = window.innerHeight;
+  cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr);
+  var ctx = cv.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+  var band = ctx.createLinearGradient(0, 0, w, h);
+  band.addColorStop(0, 'rgba(120,170,255,0)');
+  band.addColorStop(0.45, 'rgba(150,190,255,0.09)');
+  band.addColorStop(0.62, 'rgba(190,210,255,0.05)');
+  band.addColorStop(1, 'rgba(120,170,255,0)');
+  ctx.fillStyle = band; ctx.fillRect(0, 0, w, h);
+  var n = Math.round(w * h / 5200);
+  for (var i = 0; i < n; i++) {
+    var x = sr() * w, y = sr() * h, r = 0.35 + sr() * 1.25, a = 0.22 + sr() * 0.70;
+    ctx.fillStyle = 'rgba(255,255,255,' + a.toFixed(2) + ')';
+    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+    if (r > 1.30) {
+      ctx.strokeStyle = 'rgba(205,228,255,' + (a * 0.32).toFixed(2) + ')';
+      ctx.lineWidth = 0.6;
+      ctx.beginPath();
+      ctx.moveTo(x - r * 3, y); ctx.lineTo(x + r * 3, y);
+      ctx.moveTo(x, y - r * 3); ctx.lineTo(x, y + r * 3);
+      ctx.stroke();
+    }
+  }
+}
+
 /* ---------- scene ---------- */
 function initApp() {
+  var skyCanvas = document.getElementById('sky');
+  if (skyCanvas) drawStarfield(skyCanvas);
   var stage = document.getElementById('stage');
   var renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
@@ -306,41 +418,123 @@ function initApp() {
   scene.add(tiltPivot);
 
   var earthRes = createEarthTexture();
-  var earthMat = new THREE.MeshStandardMaterial({ map: earthRes.texture, roughness: 0.92 });
+  // A2 地形凹凸 + A3 海洋高光:同一份 elevation 派生的两张灰度图
+  var earthMat = new THREE.MeshStandardMaterial({
+    map: earthRes.texture,
+    bumpMap: earthRes.bump, bumpScale: 0.012,
+    roughnessMap: earthRes.rough, roughness: 1.0, metalness: 0.0
+  });
   var earth = new THREE.Mesh(new THREE.SphereGeometry(1, 64, 64), earthMat);
   tiltPivot.add(earth);
 
-  var cloudMat = new THREE.MeshLambertMaterial({ map: createCloudTexture(), transparent: true, opacity: 0.5, depthWrite: false });
+  // B8 双层云反向慢速 ⇒ 视差;第三层把云纹当 alpha,在地表投一层很淡的暗斑
+  var cloudTexA = createCloudTexture(0), cloudTexB = createCloudTexture(11.3);
+  var cloudMat = new THREE.MeshLambertMaterial({ map: cloudTexA, transparent: true, opacity: 0.38, depthWrite: false });
   var clouds = new THREE.Mesh(new THREE.SphereGeometry(1.07, 44, 36), cloudMat);
+  clouds.renderOrder = 3;
   tiltPivot.add(clouds);
+  var cloudMat2 = new THREE.MeshLambertMaterial({ map: cloudTexB, transparent: true, opacity: 0.17, depthWrite: false });
+  var clouds2 = new THREE.Mesh(new THREE.SphereGeometry(1.095, 40, 32), cloudMat2);
+  clouds2.rotation.y = 0.9;
+  clouds2.renderOrder = 4;
+  tiltPivot.add(clouds2);
+  var cloudShadow = new THREE.Mesh(
+    new THREE.SphereGeometry(1.002, 48, 36),
+    new THREE.MeshBasicMaterial({ map: cloudTexA, color: 0x18324c, transparent: true,
+                                  opacity: 0.07, depthWrite: false })
+  );
+  cloudShadow.renderOrder = 1;
+  tiltPivot.add(cloudShadow);
 
-  var atmoMat = new THREE.ShaderMaterial({
-    vertexShader: 'varying vec3 vN; void main(){ vN = normalize(normalMatrix * normal); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
-    fragmentShader: 'varying vec3 vN; void main(){ float i = pow(0.58 - dot(vN, vec3(0.0,0.0,1.0)), 2.0); gl_FragColor = vec4(0.42,0.7,1.0,1.0) * i; }',
-    blending: THREE.AdditiveBlending, side: THREE.BackSide, transparent: true, depthWrite: false
-  });
-  tiltPivot.add(new THREE.Mesh(new THREE.SphereGeometry(1.24, 64, 64), atmoMat));
+  // B7 双层 fresnel 大气:贴边 FrontSide 球,只在地球轮廓处发亮。
+  //   ⚠️ BackSide + 半径 1.10/1.26 会让整个圆盘泛蓝并在球轮廓处留下明显
+  //      硬边(实测像给地球套了玻璃罩),不可用。FrontSide 中心 f≈0 完全
+  //      透明、边缘 f→1,且半径紧贴 1.0 ⇒ 看起来就是一圈自然的蓝色描边。
+  var atmoVert = [
+    'varying vec3 vN; varying vec3 vV;',
+    'void main(){',
+    '  vec4 mv = modelViewMatrix * vec4(position,1.0);',
+    '  vN = normalize(normalMatrix * normal);',
+    '  vV = normalize(-mv.xyz);',
+    '  gl_Position = projectionMatrix * mv;',
+    '}'
+  ].join('\n');
+  var atmoFrag = [
+    'varying vec3 vN; varying vec3 vV;',
+    'uniform vec3 uColor; uniform float uPower; uniform float uGain;',
+    'void main(){',
+    '  float d = clamp(dot(normalize(vN), normalize(vV)), 0.0, 1.0);',
+    '  float f = pow(1.0 - d, uPower);',
+    '  gl_FragColor = vec4(uColor * f * uGain, f * 0.85);',
+    '}'
+  ].join('\n');
+  function atmoLayer(radius, color, power, gain, order) {
+    var mat = new THREE.ShaderMaterial({
+      vertexShader: atmoVert, fragmentShader: atmoFrag,
+      uniforms: { uColor: { value: new THREE.Color(color) },
+                  uPower: { value: power }, uGain: { value: gain } },
+      blending: THREE.AdditiveBlending, side: THREE.FrontSide,
+      transparent: true, depthWrite: false
+    });
+    var mesh = new THREE.Mesh(new THREE.SphereGeometry(radius, 64, 64), mat);
+    mesh.renderOrder = order;      // 0 = 透明层最底,不盖住云 / 阴影 / 模型
+    tiltPivot.add(mesh);
+  }
+  atmoLayer(1.018, 0x59b4ff, 3.2, 0.55, 0);
+  atmoLayer(1.055, 0x8f9bff, 4.2, 0.16, 0);
 
   var sunSprite = new THREE.Sprite(new THREE.SpriteMaterial({
     map: sunSpriteTex(), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending
   }));
   sunSprite.position.set(3.2, 4.6, 6); sunSprite.scale.setScalar(3);
+  sunSprite.renderOrder = 8;
   scene.add(sunSprite);
+  // B9 多层柔光 + 三枚淡彩光斑(简化 lens flare)
+  var halo = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: sunSprite.material.map, transparent: true, depthWrite: false,
+    blending: THREE.AdditiveBlending, opacity: 0.30
+  }));
+  halo.position.copy(sunSprite.position); halo.scale.setScalar(7.5);
+  halo.renderOrder = 8;
+  scene.add(halo);
+  var flareSpec = [
+    { k: 0.55, s: 0.30, c: 0x9fd8ff, o: 0.20 },
+    { k: 0.30, s: 0.16, c: 0xffd9a0, o: 0.16 },
+    { k: -0.18, s: 0.42, c: 0xbfe4ff, o: 0.12 }
+  ];
+  for (var fi = 0; fi < flareSpec.length; fi++) {
+    var flare = flareSpec[fi];
+    var flSprite = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: glowTex(), color: flare.c, transparent: true, depthWrite: false,
+      blending: THREE.AdditiveBlending, opacity: flare.o
+    }));
+    flSprite.position.set(3.2 * flare.k, 4.6 * flare.k, 6 * flare.k);
+    flSprite.scale.setScalar(flare.s);
+    flSprite.renderOrder = 8;
+    scene.add(flSprite);
+  }
 
-  // birds
-  var BC = 40, birdP = new Float32Array(BC * 3), birdData = [];
+  // C11 鸟群重做:40 个独立 Sprite(原 Points 是静止方形点、不会扇翅、
+  //    也没挂到 tiltPivot)。三张纹理按相位切换 ⇒ 翅膀上下扇动。
+  var BC = 40, birdData = [], birdMats = [], birdSprites = [];
+  for (var bf = 0; bf < 3; bf++) {
+    birdMats.push(new THREE.SpriteMaterial({
+      map: birdTex(bf), transparent: true, depthWrite: false, opacity: 0.78
+    }));
+  }
   for (var bi = 0; bi < BC; bi++) {
     birdData.push({
-      r: 1.15 + rand() * 0.4, lat: (rand() - 0.5) * 1.0,
+      r: 1.10 + rand() * 0.30, lat: (rand() - 0.5) * 1.0,
       speed: (0.16 + rand() * 0.3) * (rand() > 0.5 ? 1 : -1),
-      ph: rand() * Math.PI * 2, bob: 0.02 + rand() * 0.03, bf: 0.9 + rand() * 1.5
+      ph: rand() * Math.PI * 2, bob: 0.02 + rand() * 0.03,
+      bf: 0.9 + rand() * 1.5, size: 0.055 + rand() * 0.035
     });
+    var bsp = new THREE.Sprite(birdMats[0]);
+    bsp.scale.set(birdData[bi].size * 1.6, birdData[bi].size, 1);
+    bsp.renderOrder = 7;
+    tiltPivot.add(bsp);
+    birdSprites.push(bsp);
   }
-  var birdGeo = new THREE.BufferGeometry();
-  birdGeo.setAttribute('position', new THREE.Float32BufferAttribute(birdP, 3));
-  scene.add(new THREE.Points(birdGeo, new THREE.PointsMaterial({
-    size: 0.05, map: birdTex(), transparent: true, depthWrite: false, sizeAttenuation: true
-  })));
 
   /* ---------- spacing helper: 全球均匀散布 ---------- */
   function angularDist(a, b) {
@@ -716,6 +910,15 @@ function initApp() {
      改为「落点先按固定顺序预分配 → 每个模型加载完立刻单独摆放」:
      先到的小模型几秒内就出现,分布依旧可复现(不依赖网络到达顺序)。
   --------------------------------------------------------------- */
+  // A1 接触阴影:一份共享纹理 + 一份共享几何,169 个贴片几乎零成本。
+  //    贴片略高于球面(R+0.0035),否则会被半径 1.0 的地表挡住。
+  var shadowTex = contactShadowTex();
+  var shadowGeo = new THREE.PlaneGeometry(1, 1);
+  var shadowMat = new THREE.MeshBasicMaterial({
+    map: shadowTex, transparent: true, depthWrite: false, opacity: 0.72
+  });
+  var treeSways = [];                       // C12 树的微摆状态
+  var _swayE = new THREE.Euler(), _swayQ = new THREE.Quaternion();
   var outGroup = new THREE.Group();
   tiltPivot.add(outGroup);
   var debugMode = location.search.indexOf('debug=1') >= 0;
@@ -776,6 +979,34 @@ function initApp() {
     return { spec: spec, spots: spots };
   });
 
+  /* C14 氛围光点:森林簇上方漂浮的落叶 / 萤火虫。
+     用独立 LCG(不动全局 rand)并挂 outGroup ⇒ 随地球自转始终跟着森林。 */
+  var treePlan = null;
+  for (var tpi = 0; tpi < plans.length; tpi++)
+    if (plans[tpi].spec.name === 'tree') treePlan = plans[tpi];
+  var PN = 150, pPos = new Float32Array(PN * 3), pData = [], pseed = 4421;
+  function pr() { pseed = (Math.imul(pseed, 1664525) + 1013904223) >>> 0; return pseed / 4294967296; }
+  for (var pj = 0; pj < PN; pj++) {
+    var base = (treePlan && treePlan.spots.length)
+      ? treePlan.spots[Math.floor(pr() * treePlan.spots.length)] : { u: 0.5, v: 0.5 };
+    var du = (pr() - 0.5) * 0.02, dv = (pr() - 0.5) * 0.02;
+    var pd = surfaceDir((base.u + du + 1) % 1,
+                        Math.min(0.9, Math.max(0.1, base.v + dv)));
+    var prad = 1.02 + pr() * 0.075;
+    pData.push({ x: pd[0] * prad, y: pd[1] * prad, z: pd[2] * prad,
+                 ph: pr() * Math.PI * 2, amp: 0.004 + pr() * 0.010,
+                 sp: 0.5 + pr() * 1.2 });
+    pPos[pj * 3] = pData[pj].x; pPos[pj * 3 + 1] = pData[pj].y; pPos[pj * 3 + 2] = pData[pj].z;
+  }
+  var pGeo = new THREE.BufferGeometry();
+  pGeo.setAttribute('position', new THREE.Float32BufferAttribute(pPos, 3));
+  var pPoints = new THREE.Points(pGeo, new THREE.PointsMaterial({
+    size: 0.018, map: glowTex(), color: 0xfff0b8, transparent: true,
+    depthWrite: false, blending: THREE.AdditiveBlending, sizeAttenuation: true
+  }));
+  pPoints.renderOrder = 2;
+  outGroup.add(pPoints);
+
   var okCount = 0, doneCount = 0;
   var statusEl = document.getElementById('status');
   function setStatus(text) { if (statusEl) statusEl.textContent = text; }
@@ -797,15 +1028,25 @@ function initApp() {
   --------------------------------------------------------------- */
   var _p0 = new THREE.Vector3(), _p1 = new THREE.Vector3(),
       _fwd = new THREE.Vector3(), _right = new THREE.Vector3(),
+      _zAxis = new THREE.Vector3(0, 0, 1),
       _basis = new THREE.Matrix4();
 
   function stepWalkers(dt, now) {
     for (var i = 0; i < walkers.length; i++) {
       var w = walkers[i];
       w.heading += (rand() - 0.5) * dt * 0.35;     // 缓慢随机游荡
+      // C13 走走停停:随机进入 1.2~4s 原地张望,腿频同步降下来(不缩放)
+      if (w.idle > 0) {
+        w.idle -= dt;
+        if (w.act) w.act.timeScale = w.baseRate * 0.12;
+      } else {
+        w.pauseIn -= dt;
+        if (w.pauseIn <= 0) { w.idle = 1.2 + rand() * 2.8; w.pauseIn = 4 + rand() * 8; }
+        if (w.act) w.act.timeScale = w.baseRate;
+      }
       var lat = (0.5 - w.v) * Math.PI;
       var cosLat = Math.max(0.3, Math.cos(lat));
-      var step = w.speed * dt;
+      var step = w.idle > 0 ? 0 : w.speed * dt;
 
       function tryAt(h) {
         var u = (w.u + Math.cos(h) * step / cosLat + 1) % 1;
@@ -843,6 +1084,12 @@ function initApp() {
       // 贴地:不再叠加 bob 起伏(那会让脚离地);步态由 gait 旋转 + leg morph 提供。
       // 半径用该模型按 footprint 算出的 groundR,平底与球面切平。
       w.inst.position.copy(_p0.multiplyScalar(w.inst.userData.groundR || SURF));
+      // A1 阴影贴片跟着走:法线随落点变化,始终平贴球面
+      if (w.shadow) {
+        var sn = _p0.clone().normalize();
+        w.shadow.position.copy(sn).multiplyScalar(R + 0.0035);
+        w.shadow.quaternion.setFromUnitVectors(_zAxis, sn);
+      }
 
       // 程序化腿部迈步:与 gait clip 共用同一个 action.time,相位严格同步
       if (w.morphs && w.gaitAction) {
@@ -879,9 +1126,28 @@ function initApp() {
           heading: rand() * Math.PI * 2,
           speed: WALK_SPEED * (0.7 + rand() * 0.6),
           phase: rand() * Math.PI * 2,
-          faceYaw: (rand() - 0.5) * 0.6
+          faceYaw: (rand() - 0.5) * 0.6,
+          pauseIn: 3 + rand() * 7, idle: 0, act: null
         };
+        w.baseRate = STEP_RATE * (w.speed / WALK_SPEED);
         walkers.push(w);
+      }
+
+      // A1 接触阴影:独立于模型缩放(模型 s≈0.02,贴片必须按世界尺寸算)
+      var shN = new THREE.Vector3().copy(inst.position).normalize();
+      var shW = Math.min(0.17, Math.max(0.045,
+        Math.max(inst.userData.size.x, inst.userData.size.z) * info.scale * 1.40));
+      var sh = new THREE.Mesh(shadowGeo, shadowMat);
+      sh.scale.set(shW, shW, 1);
+      sh.position.copy(shN).multiplyScalar(R + 0.0035);
+      sh.quaternion.setFromUnitVectors(_zAxis, shN);
+      sh.renderOrder = 2;
+      outGroup.add(sh);
+      if (w) w.shadow = sh;
+      // C12 树保存初始朝向,每帧只叠加 quaternion 摆动(绝不改 scale / position)
+      if (!spec.walk) {
+        treeSways.push({ inst: inst, base: inst.quaternion.clone(),
+                         phase: rand() * Math.PI * 2 });
       }
 
       // 每个实例独立 mixer:12 只带骨骼动物播 Walk,6 只无骨骼动物播程序化步态
@@ -893,6 +1159,7 @@ function initApp() {
         act.setLoop(THREE.LoopRepeat, Infinity);
         // 位移慢了腿也要慢,否则会原地打滑
         act.timeScale = STEP_RATE * (w ? w.speed / WALK_SPEED : 1);
+        if (w) w.act = act;
         act.time = rand() * useClip.duration;
         act.play();
         animMixers.push(mixer);
@@ -961,23 +1228,46 @@ function initApp() {
     // earth spin (8 deg/s) + clouds drift
     earth.rotation.y += dt * SPIN_RATE;
     clouds.rotation.y += dt * CLOUD_RATE;
+    clouds2.rotation.y -= dt * CLOUD_RATE * 0.55;   // B8 反向慢速 ⇒ 双层视差
+    cloudShadow.rotation.y = clouds.rotation.y * 0.96;
     outGroup.rotation.y = earth.rotation.y;   // 模型跟着地球自转,始终踩在陆地上
+
+    // C12 树随风微摆:只叠加 quaternion,不动 scale / position
+    var swayT = now * 0.001;
+    for (var ti = 0; ti < treeSways.length; ti++) {
+      var ts = treeSways[ti], a = swayT * 1.05 + ts.phase;
+      _swayE.set(Math.sin(a) * 0.016, 0, Math.sin(a * 0.77 + 1.3) * 0.021);
+      _swayQ.setFromEuler(_swayE);
+      ts.inst.quaternion.copy(ts.base).multiply(_swayQ);
+    }
 
     // 骨骼腿部动画 + 沿陆地游走
     for (var mi = 0; mi < animMixers.length; mi++) animMixers[mi].update(dt);
     stepWalkers(dt, now);
 
-    // birds orbit at different lat/lon
-    var arr = birdGeo.attributes.position.array;
+    // C11 鸟群绕地轴飞 + 三帧扇翅(Sprite 始终朝向相机)
     for (var bi = 0; bi < BC; bi++) {
       var b = birdData[bi];
       b.ph += dt * b.speed / b.r;
       var la = b.lat;
-      arr[bi*3]   = Math.cos(b.ph) * Math.cos(la) * b.r;
-      arr[bi*3+1] = Math.sin(la) * b.r + (Math.sin(now*0.002 + bi) * b.bob);
-      arr[bi*3+2] = Math.sin(b.ph) * Math.cos(la) * b.r;
+      birdSprites[bi].position.set(
+        Math.cos(b.ph) * Math.cos(la) * b.r,
+        Math.sin(la) * b.r + Math.sin(now * 0.002 + bi) * b.bob,
+        Math.sin(b.ph) * Math.cos(la) * b.r
+      );
+      var frm = Math.floor((now * 0.001 * b.bf + bi * 0.37) * 3) % 3;
+      birdSprites[bi].material = birdMats[frm];
     }
-    birdGeo.attributes.position.needsUpdate = true;
+
+    // C14 森林上方的漂浮光点
+    var parr = pGeo.attributes.position.array, pt = now * 0.001;
+    for (var pj = 0; pj < PN; pj++) {
+      var q = pData[pj], pv = Math.sin(pt * q.sp + q.ph);
+      parr[pj * 3]     = q.x + pv * q.amp;
+      parr[pj * 3 + 1] = q.y + Math.cos(pt * q.sp * 0.8 + q.ph) * q.amp * 1.6;
+      parr[pj * 3 + 2] = q.z + pv * q.amp * 0.7;
+    }
+    pGeo.attributes.position.needsUpdate = true;
 
     renderer.render(scene, camera);
     requestAnimationFrame(frame);
@@ -988,6 +1278,7 @@ function initApp() {
   function onResize() {
     var w = window.innerWidth, h = window.innerHeight;
     renderer.setSize(w, h);
+    if (skyCanvas) drawStarfield(skyCanvas);
     camera.aspect = w / h;
     // 窄视口(竖屏)水平视野不足,地球边缘连同站在边缘的模型会被裁掉。
     // 按 aspect 把相机拉远,保证半径约 1.22 的范围完整入画。
