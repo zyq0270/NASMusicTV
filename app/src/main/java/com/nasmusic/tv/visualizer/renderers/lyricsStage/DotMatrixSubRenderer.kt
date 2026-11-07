@@ -53,6 +53,25 @@ class DotMatrixSubRenderer : LyricsSubRenderer {
     }
 
     /**
+     * ## ⛔⛔ 换行**不得**重新进入（2026-11-07 真机：顶上去之后又聚了一遍）
+     *
+     * `LyricsSubRenderer.onLineChanged` 的**默认实现 = 再走一遍 [onEnter]**
+     * ⇒ 本渲染器若不覆写，**每换一行**都会被重新 `onEnter` ⇒
+     * `LyricsDotMatrixRenderer.onEnterContent` 把状态机复位成
+     * `INIT_COALESCE` + `displayedLineIndex = -1` ⇒
+     * 下一帧**重新采样当前行 + 重新 `initCoalesce`** ⇒
+     * **「粒子聚成文字」的特效每换一行就重放一次**（用户实测：顶上去之后又聚了一遍）。
+     *
+     * ✅ 本渲染器**自己**管行切换（散开 → 顶替 → 上移，见委托的状态机），
+     * 且**行/字的排版不依赖外部重建** ⇒ 换行时**什么都不用做** ⇒ 覆写为空实现。
+     *
+     * ⚠️ 千万不要改成调用 `delegate.onEnter(ctx)`：那正是上面的病根。
+     */
+    override fun onLineChanged(ctx: RenderContext, lyrics: LyricsStagePayload) {
+        // 空实现（见 KDoc）：行切换由委托自己的状态机负责。
+    }
+
+    /**
      * 把**逐帧**的行内进度推给委托（E23 的渲染器）。
      *
      * ## 为什么必须逐帧（这是本子模式的一个真实缺陷）

@@ -352,6 +352,87 @@ class LyricsDotMatrixTest {
         assertTrue("onExitContent 必须释放点缓冲", "pointBuffers[i] = FloatArray(0)" in exit)
     }
 
+    // ══════════════ ⑯ 字号规则：必须**按本行**算（2026-11-07 真机：文字太小）══════════════
+
+    @Test
+    fun `⑯ 字号必须按本行算 - 短行不得被全曲最长行拖小`() {
+        // 生产纯函数（⛔ 门禁直接调 ⇒ 不复制算法）
+        val short = LyricsDotMatrixRenderer.fontSizeFor(
+            refAdvance = 900f, refLineHeight = 140f, w = 2712f, h = 1220f, cap = 3600
+        )
+        val long = LyricsDotMatrixRenderer.fontSizeFor(
+            refAdvance = 3800f, refLineHeight = 140f, w = 2712f, h = 1220f, cap = 3600
+        )
+        assertTrue("短行的字号必须大于长行的字号：short=$short long=$long", short > long)
+        // 上限 = 屏高 16%（档位默认 cap）
+        assertEquals("短行必须顶到上限（屏高 16%）", 1220f * 0.16f, short, 0.01f)
+        // 下限 = 屏高 5%（可读性底线）
+        assertEquals("长行必须被夹到下限（屏高 5%）", 1220f * 0.05f, long, 0.01f)
+        // ⛔ 负向自证：旧规则（拿全曲最长行当参考）会把短行压到长行那个字号
+        val oldRuleShort = LyricsDotMatrixRenderer.fontSizeFor(
+            refAdvance = 3800f, refLineHeight = 140f, w = 2712f, h = 1220f, cap = 3600
+        )
+        assertTrue(
+            "旧规则（参考=全曲最长行）必须比新规则小 —— 否则本门禁没有鉴别力：" +
+                "old=$oldRuleShort new=$short",
+            oldRuleShort < short
+        )
+        // 高度约束：行高 ≤ 屏高 40%（极宽的参考行时由高度约束接手）
+        val wide = LyricsDotMatrixRenderer.fontSizeFor(
+            refAdvance = 100f, refLineHeight = 140f, w = 2712f, h = 1220f, cap = 3600
+        )
+        assertTrue("极短的参考行不得超过上限：$wide", wide <= 1220f * 0.16f + 0.01f)
+    }
+
+    // ══════════════ ⑰ 合批绘制不得用加色混合（实心白块）══════════════
+
+    @Test
+    fun `⑰ 合批绘制不得用加色混合 - 重叠点会累加成实心白块`() {
+        val body = classBody(codeOfE23(), "LyricsDotMatrixRenderer")
+        // ⛔ 加色混合：合批后一次绘制里有上千个圆盘 ⇒ 重叠处 α 累加 ⇒ 过曝成纯白
+        assertFalse("⛔ 不得使用 BlendMode.PLUS", "BlendMode.PLUS" in body)
+        assertFalse("⛔ 不得使用 PorterDuff.Mode.ADD", "Mode.ADD" in body)
+        assertFalse("⛔ 不得再持有 PorterDuffXfermode", "PorterDuffXfermode" in body)
+        assertFalse("⛔ 不得再持有 android.graphics.BlendMode", "graphics.BlendMode" in body)
+        // 负向自证：旧写法必须被判据抓到
+        assertTrue(
+            "负向：旧写法（加色混合）必须被抓到",
+            "BlendMode.PLUS" in OLD_SNIPPET_PLUS_BLEND
+        )
+    }
+
+    // ══════════════ ⑱ 凝聚必须走得完（顶上去之后不得再聚一遍）══════════════
+
+    @Test
+    fun `⑱ 下行凝聚不得挂在 SHIFTING 阶段上 - 否则永远聚不完`() {
+        val body = classBody(codeOfE23(), "LyricsDotMatrixRenderer")
+        // ⛔ 凝聚开关不得由阶段决定（上移阶段只有 700 ms，而凝聚要 2 s+）
+        assertFalse(
+            "⛔ 凝聚开关不得由 `phase == SHIFTING` 决定",
+            Regex("""lineIsCoalescing\s*=\s*phase\s*==""").containsMatchIn(body)
+        )
+        assertTrue("必须按下行采样时刻起算凝聚时钟", "line1CoalesceStartMs" in body)
+        // 提升（顶替）前必须把凝聚收尾 ⇒ 顶上去的必须是成形的一行
+        val promote = funBody(body, "promoteLine1ToLine0")
+        assertTrue("promoteLine1ToLine0 必须能切出来（空转自证）", promote.isNotEmpty())
+        assertTrue(
+            "提升前必须把粒子吸附到目标位（否则顶上去的是半成品 ⇒ 又聚一遍）",
+            "TX" in promote && "TY" in promote
+        )
+    }
+
+    // ══════════════ ⑲ 行间距必须与字号解耦 ══════════════
+
+    @Test
+    fun `⑲ 行间距必须与字号解耦 - 字号一小两行就挤成一团`() {
+        val body = classBody(codeOfE23(), "LyricsDotMatrixRenderer")
+        assertFalse(
+            "⛔ 行间距不得再用 `字号 * 1.4`（字号一小两行就重叠）",
+            Regex("""lineHeightPx""").containsMatchIn(body)
+        )
+        assertTrue("必须用固定的行间距（屏高 20%）", "rowGapPx" in body)
+    }
+
     // ═══════════════════ 负向 N1/N2/N3：源码判据必须能抓到旧写法 ═══════════════════
 
     @Test
@@ -425,6 +506,13 @@ class LyricsDotMatrixTest {
             px - size - size * 2f, py - size - size * 2f,
             px - size + size * 2f, py - size + size * 2f,
             android.graphics.Path.Direction.CCW)
+    """.trimIndent()
+
+    /** 旧的加色混合写法（负向样本；**只**用于证明判据能抓到它） */
+    private val OLD_SNIPPET_PLUS_BLEND = """
+        private fun applyPlusBlendApi29(paint: AndroidPaint) {
+            paint.blendMode = android.graphics.BlendMode.PLUS
+        }
     """.trimIndent()
 
     /** 切出 `class <name>` 的类体（到下一个顶层 class / 文件尾） */

@@ -3,11 +3,7 @@ package com.nasmusic.tv.visualizer.renderers
 import android.graphics.Bitmap
 import android.graphics.Canvas as AndroidCanvas
 import android.graphics.Paint as AndroidPaint
-import android.graphics.PorterDuff
-import android.graphics.PorterDuffXfermode
 import android.graphics.Typeface
-import android.os.Build
-import androidx.annotation.RequiresApi
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.toArgb
@@ -136,6 +132,24 @@ import kotlin.math.sin
  *
  * ## ⛔ 卡拉OK 逐字亮度分档必须保留（§13.5-D4）
  * 它不是性能瓶颈，删了反而更慢 —— 详见 [brightnessOf] 内的守卫注释。
+ *
+ * ## ✅ 三处真机回归修复（2026-11-07，小米 22081212C / 2712×1220 横屏）
+ *
+ * ### ① 文字太小 ⇒ 字号改为**按本行**算（[fontFor] / [fontSizeFor]）
+ *
+ * 旧规则用**全曲最长行**当参考 ⇒ 一句长歌词把**整首歌**的字号压到下限
+ * （实测 61 px = 屏高 5% ⇒ 一行字只占屏宽 18.7%）。新规则「本行占满屏宽 80%」
+ * ⇒ 短行 195 px（占屏宽 ~60%）、长行自动变小但**完整**（不会被截成「…」）。
+ *
+ * ### ② 实心白块 ⇒ 混合模式改回 **SrcOver**（[pointPaint]）
+ *
+ * 合批后「一个绘制里有上千个圆盘」；加色混合 ⇒ 重叠处 α 累加 ⇒ 过曝成纯白。
+ * 旧码是 `Path` 并集、每层只混合一次 ⇒ 颜色是档位色。改回 SrcOver ⇒ 与旧码同语义。
+ *
+ * ### ③ 「顶上去之后又聚了一遍」⇒ 凝聚时钟按**本行时间线** + 提升前收尾
+ *
+ * 旧码把凝聚挂在 `phase == SHIFTING`（只有 700 ms）⇒ 凝聚永远走不完 ⇒
+ * 顶上去的是个半成品。改见 [line1CoalesceStartMs] 与 [promoteLine1ToLine0]。
  */
 class LyricsDotMatrixRenderer : RendererFx() {
 
@@ -212,50 +226,32 @@ class LyricsDotMatrixRenderer : RendererFx() {
     // ── 画笔（构造期成员 ⇒ 逐帧零分配）───────────────────────────
 
     /**
-     * ⭐ 唯一一份加色混合模式对象（`Paint.setXfermode` 不拷贝，复用安全）。
-     * ⛔ 必须在 [pointPaint] **之前**声明（Kotlin 按声明顺序初始化）。
-     */
-    private val plusXfermode = PorterDuffXfermode(PorterDuff.Mode.ADD)
-
-    /**
      * ⭐ 逐点合批的**唯一**画笔（`drawPoints` 用）。
      *
      * ⚠️ `strokeWidth` = 点的**直径**（旧码 `addOval` 的半径是 `2 * size` ⇒ 直径 `4 * size`），
      *    `Cap.ROUND` ⇒ 每个点画成一个**实心圆盘** ⇒ 与旧码逐像素等价。
      * ⛔ `Style.STROKE` 是必需的：`drawPoints` 只有在**描边**画笔下才按
      *    `strokeWidth` 画圆点（填充画笔画的是 1~2 px 的小方块）。
+     *
+     * ## ⛔⛔ 混合模式必须是**默认的 SrcOver**（2026-11-07 真机：实心白块）
+     *
+     * 旧码（`fbcfd5f`）把上千个椭圆塞进 **6 条 `Path`** ⇒ `drawPath` 对每条路径
+     * **填一次** ⇒ 一层只混合一次 ⇒ 笔画是**并集**、颜色是**档位色**。
+     *
+     * 合批后是「每个点一次 `drawPoints`」⇒ 一次绘制里有**上千个圆盘**：
+     * - **加色混合（`BlendMode.Plus`）** ⇒ 每个圆盘都往目标像素**加一次** ⇒
+     *   重叠处 α 累加 ⇒ 直接**过曝成纯白** ⇒ 「点阵」糊成**实心白块**；
+     * - **SrcOver（默认）** ⇒ 重叠处取**最上面那个** ⇒ 与旧码的「并集填一次」等价 ⇒
+     *   保留档位色 ⇒ **点阵的颗粒感回来**。
+     *
+     * ⛔ 因此**不得**再设 `xfermode` / `blendMode`（加色）。
+     * ⛔ 亮度补偿：旧码的「core + glow 相加」在 SrcOver 下变成「core 盖住 glow」
+     *   ⇒ 笔画略暗一档 ⇒ 由 [drawPointBatches] 的「先 glow 后 core」顺序保住外辉光环。
      */
     private val pointPaint = AndroidPaint().apply {
         style = AndroidPaint.Style.STROKE
         strokeCap = AndroidPaint.Cap.ROUND
         isAntiAlias = true
-        applyPlusBlend(this)
-    }
-
-    /**
-     * 把画笔设成「加色混合」——**逐档复刻** Compose 的 `BlendMode.Plus` 映射：
-     * API 29+ ⇒ `android.graphics.BlendMode.PLUS`；API < 29 ⇒ `PorterDuff.Mode.ADD`。
-     *
-     * ⛔ **不得**统一只用 `PorterDuff.Mode.ADD`：旧码走的是 Compose 的映射，
-     *    两档的硬件加速行为**不一定**等价 ⇒ 必须逐档一致（画面才不变）。
-     */
-    private fun applyPlusBlend(paint: AndroidPaint) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            applyPlusBlendApi29(paint)
-        } else {
-            paint.xfermode = plusXfermode
-        }
-    }
-
-    /**
-     * API 29+ 的加色混合。
-     *
-     * ⚠️ `android.graphics.BlendMode` 是 **API 29** 才有的类 ⇒ 必须隔离在
-     * `@RequiresApi` 方法里（否则老设备会在**类校验期**就炸，而不是等到执行到这里）。
-     */
-    @RequiresApi(Build.VERSION_CODES.Q)
-    private fun applyPlusBlendApi29(paint: AndroidPaint) {
-        paint.blendMode = android.graphics.BlendMode.PLUS
     }
 
     // ── 本帧共享量（逐帧刷新；只在本渲染器内使用）─────────────────
@@ -303,15 +299,26 @@ class LyricsDotMatrixRenderer : RendererFx() {
     // 行偏移（用于行移动动画，0=正常位置，-1=上移一行）
     private var rowOffsetY = 0f  // 像素偏移量
 
-    // 行高（像素）
-    private var lineHeightPx = 0f
-    private var fontSizePx = 0f
-    // 字号缓存键：字体大小只依赖最长行(整曲常量)与画布尺寸，尺寸/歌词不变时整首歌只算一次
-    private var cachedFontW = 0f
-    private var cachedFontH = 0f
-    private var cachedLongest: String? = null
+    // 行间距（像素）：**固定**为屏高 20%（与字号无关）
+    //
+    // ⚠️ 旧码用 `字号 * 1.4` 当行距 ⇒ 字号一小两行就挤成一团、字号一大两行就重叠。
+    //    行距是**版面**量、字号是**排版**量 ⇒ 必须解耦。
+    private var rowGapPx = 0f
     private var topY = 0f    // 上行 Y 中心
     private var bottomY = 0f // 下行 Y 中心
+
+    /**
+     * 字号测量用的画笔（**成员** ⇒ 测量路径零分配；只在换行时用一次）。
+     *
+     * ⚠️ 测量必须用**固定参考字号** [REF_FONT]：字宽与行高都是字号的线性量，
+     *    先在参考字号下量、再折算 ⇒ 换行时重算一次即可（不必每帧量）。
+     */
+    private val measurePaint = AndroidPaint().apply {
+        isAntiAlias = false
+        textSize = REF_FONT
+        typeface = Typeface.DEFAULT_BOLD
+        isFakeBoldText = true
+    }
 
     // 动画时长
     private val initCoalesceMs = 1200L        // 初始两行凝聚（放慢，便于看清）
@@ -323,6 +330,16 @@ class LyricsDotMatrixRenderer : RendererFx() {
 
     // 即将进入的下下行文本（在 SHIFTING 阶段使用）
     private var incomingNextText: String = ""
+
+    /**
+     * 下行「凝聚」动画的**起点**（= 下行被采样的时刻）。
+     *
+     * ⛔⛔ 凝聚进度必须按**本行自己的时间线**算，不能挂在 `phase == SHIFTING` 上：
+     *    上移阶段只有 700 ms，而凝聚需要 `160·字数 + 1200 ms`（8 字 ≈ 2.3 s）
+     *    ⇒ 挂在阶段上 ⇒ 凝聚**永远走不完** ⇒ 行顶上去时是个没聚完的行
+     *    ⇒ 用户看到「顶上去之后又聚了一遍」。
+     */
+    private var line1CoalesceStartMs = 0L
 
     // 每行粒子数上限：高/中档取最高密度，低档必须降（见 companion 的 capacityForTier）
     private fun capacityFor(ctx: RenderContext): Int = effectiveCapacity(capacityForTier(ctx.quality))
@@ -412,49 +429,27 @@ class LyricsDotMatrixRenderer : RendererFx() {
         fontBudgetCap(capacityForTier(ctx.quality), capacityFor(ctx))
 
     // ── 自适应字号 ──────────────────────────────────────────
-    // 规则（用户需求）：
-    //   1. 找全曲最长的一句歌词（取实际文本，而非仅字数，测量更准）
-    //   2. 字号 = 让这一句占满屏幕宽度 80% 时的字号
-    //   3. 约束：字体整体高度 ≤ 屏幕高度 40%（预留两行显示空间）
-    //   4. 硬性区间 [MIN, MAX]：字号过大→粒子太稀→文字空洞，故上限随该档粒子数收缩
-    private fun computeFontSize(
-        ctx: RenderContext,
-        w: Float,
-        h: Float,
-        cap: Int
-    ): Float {
-        // 优先用整曲最长行；无歌词时回退到当前文本 / 标题
-        val longest = ctx.longestLyricLine
-            ?.takeIf { it.isNotBlank() }
-            ?: ctx.currentLyricLine?.takeIf { it.isNotBlank() }
-            ?: ctx.caption?.takeIf { it.isNotBlank() }
-
-        val paint = AndroidPaint().apply {
-            isAntiAlias = false
-            textSize = REF_FONT // 用固定参考字号测量，得每 px 折合跨度
-            typeface = Typeface.DEFAULT_BOLD
-            isFakeBoldText = true
-        }
-        val fm = paint.fontMetrics
-        val refLineHeight = fm.bottom - fm.top      // 参考字号下的行高
-        val refGlyphAdvance = if (longest.isNullOrEmpty()) REF_FONT else {
-            paint.measureText(longest).coerceAtLeast(REF_FONT * 0.1f)
-        }
-
-        // 宽度约束：占满屏宽 80%
-        val fontFromWidth = REF_FONT * (w * 0.80f) / refGlyphAdvance
-        // 高度约束：行高 ≤ 屏幕高 40%
-        val fontFromHeight = REF_FONT * (h * 0.40f) / refLineHeight
-
-        val base = minOf(fontFromWidth, fontFromHeight)
-        // 硬性区间夹稳，防止极端长/短歌词 + 粒子稀释导致文字空洞
-        // MIN_FONT_S/MAX_FONT_S 是屏高比例，须乘以 h 换算成真实字号
-        // ⚠️ 上限随 `cap` 收缩（[fontMaxRatio]）：本套的开销是**椭圆个数**（= cap），
-        //    与提交次数无关 ⇒ 低档只能减点；减点若不同步缩字号，同样多的点摊到更大的字上
-        //    就会「文字空洞」，正是上面第 4 条要避免的情形。下限 [MIN_FONT_S] 是**可读性**
-        //    底线，与密度无关 ⇒ 不随 cap 收缩。
-        // ⚠️ 调用方必须传 [fontBudgetCap]（**不是**实际粒子数）：加密度时字号不得跟着涨。
-        return base.coerceIn(h * MIN_FONT_S, h * fontMaxRatio(cap))
+    // 规则（**按本行**算 ⇒ 每行都占满屏宽 80%）：
+    //   1. 用**本行文本**在参考字号下量出字宽 → 折算出「占满屏宽 80%」的字号；
+    //   2. 约束：行高 ≤ 屏高 40%（预留两行显示空间）；
+    //   3. 硬性区间 [MIN, MAX]：字号过大→粒子太稀→文字空洞，故上限随该档粒子数收缩。
+    //
+    // ## ⛔⛔ 为什么**不能**用「全曲最长行」当参考（2026-11-07 真机：文字太小了）
+    //
+    // 旧码的参考行是 `ctx.longestLyricLine`（全曲**最长**的一句）⇒
+    // 「最长行占满屏宽 80%」把**所有**行都按那一句的字号缩小 ⇒
+    // 只要歌里有一句特别长的，整首歌的字幕就都是**蚂蚁大小**：
+    // - 旧截图那首歌的最长行 12 字 ⇒ 字号顶到**上限** `0.16·h = 195 px`（大）；
+    // - 新截图那首歌的最长行 ≈38 字 ⇒ 字号压到**下限** `0.05·h = 61 px`（小，实测 508 px/屏宽 18.7%）。
+    //
+    // ⇒ 改成「**按本行**算」后：短行自己占满屏宽 80%（大），长行自己占满 80%（小但完整），
+    //   **任何一行都不会被别的行拖小、也不会被截断成「…」**（宽度约束按行成立 ⇒ 必然放得下）。
+    private fun fontFor(text: String, w: Float, h: Float, cap: Int): Float {
+        if (text.isBlank()) return h * MIN_FONT_S
+        val fm = measurePaint.fontMetrics
+        val refLineHeight = (fm.bottom - fm.top).coerceAtLeast(1f)
+        val refAdvance = measurePaint.measureText(text).coerceAtLeast(REF_FONT * 0.1f)
+        return fontSizeFor(refAdvance, refLineHeight, w, h, cap)
     }
 
     protected override fun onEnterContent(ctx: RenderContext) {
@@ -480,10 +475,8 @@ class LyricsDotMatrixRenderer : RendererFx() {
         rowOffsetY = 0f
         boundSongId = null
         boundCaption = null
-        // 切歌/重进：重置字号缓存，下一帧用新歌最长行重算一次
-        cachedFontW = 0f
-        cachedFontH = 0f
-        cachedLongest = null
+        // 切歌/重进：凝聚时钟归零（下一帧按新行重新起算）
+        line1CoalesceStartMs = 0L
     }
 
     protected override fun onExitContent() {
@@ -731,21 +724,10 @@ class LyricsDotMatrixRenderer : RendererFx() {
         val h = size.height
         val cap = line0.size / STRIDE
 
-        // ── 自适应字体大小（缓存）─────────────────────────────
-        // 字号只依赖最长行(整曲常量)与画布尺寸，尺寸/歌词不变时整首歌只算一次，
-        // 不再每帧 new Paint + measureText（用户需求：字体大小整首歌不变，无需重复计算）
-        val longestKey = ctx.longestLyricLine?.takeIf { it.isNotBlank() }
-            ?: ctx.currentLyricLine?.takeIf { it.isNotBlank() }
-            ?: ctx.caption?.takeIf { it.isNotBlank() }
-        if (w != cachedFontW || h != cachedFontH || longestKey != cachedLongest) {
-            // ⚠️ 传 [fontBudgetCap]（**不是**实际粒子数）：加密度时字号**不得**跟着涨，
-            //    否则新增的粒子被摊到更大的字上 ⇒ 密度不增反降（实测 44.6% → 36.3%）。
-            fontSizePx = computeFontSize(ctx, w, h, fontCapFor(ctx))
-            lineHeightPx = fontSizePx * 1.4f
-            cachedFontW = w
-            cachedFontH = h
-            cachedLongest = longestKey
-        }
+        // ── 自适应字号 ──────────────────────────────────────
+        // ⚠️ 字号**按行**算（见 [fontFor]）：每一行各自占满屏宽 80% ⇒ 短行不会被长行拖小。
+        //    只在**换行采样**时算一次（每行一次，不是每帧）⇒ 测量路径零成本。
+        val fontCap = fontCapFor(ctx)
 
         val lyricLine = ctx.currentLyricLine?.takeIf { it.isNotBlank() }
         val nextLine = ctx.nextLyricLine?.takeIf { it.isNotBlank() }
@@ -757,6 +739,8 @@ class LyricsDotMatrixRenderer : RendererFx() {
         // 两行的 Y 中心位置：对称分布在垂直中心两侧，避开 0.5h 的干扰
         topY = h * 0.40f
         bottomY = h * 0.60f
+        // 行间距：**固定** = 两行中心之差（与字号解耦 ⇒ 字号再小两行也不挤、再大也不叠）
+        rowGapPx = bottomY - topY
 
         // ── 状态切换逻辑 ────────────────────────────────────
         // 切歌重置：renderer 实例由 swapper 跨歌曲复用（不会重新 onEnter），
@@ -781,19 +765,24 @@ class LyricsDotMatrixRenderer : RendererFx() {
                 displayedLineIndex = currentIdx
                 line0Text = text
                 line1Text = nextText
-                line0Count = sampleLine(text, line0, line0CharIdx, line0LocalX, cap, w, fontSizePx, topY)
-                line1Count = sampleLine(nextText, line1, line1CharIdx, line1LocalX, cap, w, fontSizePx, bottomY)
+                line0Count = sampleLine(text, line0, line0CharIdx, line0LocalX, cap, w,
+                    fontFor(text, w, h, fontCap), topY)
+                line1Count = sampleLine(nextText, line1, line1CharIdx, line1LocalX, cap, w,
+                    fontFor(nextText, w, h, fontCap), bottomY)
                 initCoalesce(line0, line0Count, w, h)
                 initCoalesce(line1, line1Count, w, h)
+                line1CoalesceStartMs = frame.timeMs
                 phaseStartMs = frame.timeMs
             } else {
                 // 无歌词时显示标题作为占位
                 displayedLineIndex = 0
                 line0Text = text
                 line1Text = ""
-                line0Count = sampleLine(text, line0, line0CharIdx, line0LocalX, cap, w, fontSizePx, topY)
+                line0Count = sampleLine(text, line0, line0CharIdx, line0LocalX, cap, w,
+                    fontFor(text, w, h, fontCap), topY)
                 line1Count = 0
                 initCoalesce(line0, line0Count, w, h)
+                line1CoalesceStartMs = frame.timeMs
                 phaseStartMs = frame.timeMs
             }
         }
@@ -836,10 +825,12 @@ class LyricsDotMatrixRenderer : RendererFx() {
                     // 2. 采样新行到 line1（从下方进入）
                     line1Text = incomingNextText
                     line1Count = sampleLine(incomingNextText, line1, line1CharIdx, line1LocalX,
-                        cap, w, fontSizePx, bottomY)
+                        cap, w, fontFor(incomingNextText, w, h, fontCap), bottomY)
                     if (line1Count > 0) {
                         initCoalesce(line1, line1Count, w, h, fromBelow = true)
                     }
+                    // ⛔ 凝聚时钟从**采样时刻**起算（与阶段无关）⇒ 凝聚一定能走完
+                    line1CoalesceStartMs = frame.timeMs
                     displayedLineIndex++
                     phase = Phase.SHIFTING
                     phaseStartMs = frame.timeMs
@@ -848,8 +839,8 @@ class LyricsDotMatrixRenderer : RendererFx() {
             Phase.SHIFTING -> {
                 // 行上移进度：0 → 1
                 shiftProgress = (elapsed.toFloat() / shiftMs).coerceIn(0f, 1f)
-                // line0 从 bottomY 上移到 topY（偏移从 0 到 -lineHeightPx）
-                rowOffsetY = -lineHeightPx * easeOutCubic(shiftProgress)
+                // line0 从 bottomY 上移到 topY（偏移从 0 到 -rowGapPx）
+                rowOffsetY = -rowGapPx * easeOutCubic(shiftProgress)
 
                 if (elapsed >= shiftMs) {
                     // 动画结束，实际调整粒子 Y 坐标
@@ -861,9 +852,19 @@ class LyricsDotMatrixRenderer : RendererFx() {
             }
         }
 
+        // ── 下行的「凝聚」进度（**从采样时刻起算**，与阶段无关）────
+        // ⛔⛔ 旧码用 `phase == SHIFTING` 当凝聚开关 ⇒ 凝聚只在**上移那 700 ms**里推进，
+        //    之后被硬生生掐断（可见度直接跳到 1、位置被 `updateHolding` 硬吸附）
+        //    ⇒ 行「顶上去」时看到的其实是一个**没聚完**的行 ⇒ 视觉上就是「又聚了一遍」。
+        // ✅ 改成按**本行自己的时间线**推进 ⇒ 凝聚在下方**走完** ⇒ 顶上去时已经是成形的一行。
+        val line1CoalesceElapsed =
+            if (line1Count > 0) (frame.timeMs - line1CoalesceStartMs).coerceAtLeast(0L) else 0L
+        val line1IsCoalescing =
+            line1Count > 0 && line1CoalesceElapsed < coalesceTotalMs(line1Text)
+
         // ── 更新粒子 ────────────────────────────────────────
         updateLine0(frame, elapsed, w, h)
-        updateLine1(frame, elapsed, w, h)
+        updateLine1(frame, elapsed, w, h, line1CoalesceElapsed, line1IsCoalescing)
 
         // ── 批量绘制 ────────────────────────────────────────
         // 行内进度：**优先**用宿主持有的**逐帧**覆盖（E53 歌词舞台推入），
@@ -916,12 +917,12 @@ class LyricsDotMatrixRenderer : RendererFx() {
         finalizeSubBatches()
         fillLine(line0, line0Count, line0LocalX, 0)
 
-        // 下行（永远不处于「正在唱」状态；SHIFTING 阶段逐字凝聚）
+        // 下行（永远不处于「正在唱」状态；**按本行时间线**逐字凝聚）
         lineIsSinging = false
         lineIsScattering = false
         lineScatterElapsedMs = 0L
-        lineIsCoalescing = phase == Phase.SHIFTING
-        lineCoalesceElapsedMs = if (phase == Phase.SHIFTING) elapsed else 0L
+        lineIsCoalescing = line1IsCoalescing
+        lineCoalesceElapsedMs = line1CoalesceElapsed
         lineYOffset = rowOffsetY
         lineHasLyrics = hasLyrics && line1Text.isNotBlank()
         measureLine(line1Count, line1CharIdx, line1LocalX, 1)
@@ -1095,6 +1096,14 @@ class LyricsDotMatrixRenderer : RendererFx() {
      * ⚠️ 旧码是 6 次 `drawPath`（3 档 × 2 层，两行合并在同一条 path 里）；
      *    新码按**行**分开（12 个缓冲），因为逐字消散 / 凝聚期间两行的半径分布差异极大
      *    （合并会让「正在消散」那行的半径污染另一行）⇒ 代表半径必须按行分开统计。
+     *
+     * ## ⛔ 合成顺序：**先所有辉光、再所有本体**（SrcOver 的画家算法）
+     *
+     * 旧码的加色混合是**顺序无关**的（加法可交换）⇒ 旧顺序（暗→亮，glow 在 core 前）
+     * 在加色下看不出差别。改成 SrcOver 后**顺序就有意义了**：
+     * 若按旧顺序（逐档 glow→core）画，亮档的辉光会**盖在**中档的本体上（发灰）。
+     * ⇒ 这里改成「先把三层辉光画完，再把三层本体画完」⇒ 本体永远在最上层、
+     *   辉光只在本体之外露出一圈 ⇒ 与旧观感一致。
      */
     private fun DrawScope.drawPointBatches(activeHue: Float, pulse: Float) {
         val canvas = drawContext.canvas.nativeCanvas
@@ -1109,9 +1118,9 @@ class LyricsDotMatrixRenderer : RendererFx() {
         argbs[5] = argbWithAlpha(hslArgb(activeHue, 1.0f, 0.7f), 0.62f + pulse * 0.14f)              // 亮档 core
 
         for (lineIdx in 0 until 2) {
-            for (tier in 0 until 3) {
-                // glow 在 core 之前（与旧码同序；`Plus` 是加法 ⇒ 顺序本不影响结果）
-                for (layer in 1 downTo 0) {
+            // layer：1 = glow（先画）、0 = core（后画）⇒ 本体永远压住辉光
+            for (layer in 1 downTo 0) {
+                for (tier in 0 until 3) {
                     if (layer == LAYER_GLOW && tier == 0) continue   // 暗档没有外辉光
                     val bufIdx = (lineIdx * 3 + tier) * 2 + layer
                     val buf = pointBuffers[bufIdx]
@@ -1127,6 +1136,7 @@ class LyricsDotMatrixRenderer : RendererFx() {
                         } else {
                             coreRadius
                         }
+                        // ⚠️ `strokeWidth` = 点的**直径**（`Cap.ROUND` ⇒ 半径 = 直径/2 = 2×半径）
                         pointPaint.strokeWidth = radius * 4f
                         pointPaint.color = argbs[tier * 2 + layer]
                         canvas.drawPoints(buf, subOffset[sub] * 2, n * 2, pointPaint)
@@ -1188,7 +1198,14 @@ class LyricsDotMatrixRenderer : RendererFx() {
         }
     }
 
-    private fun updateLine1(frame: AudioFrame, elapsedMs: Long, w: Float, h: Float) {
+    private fun updateLine1(
+        frame: AudioFrame,
+        elapsedMs: Long,
+        w: Float,
+        h: Float,
+        coalesceElapsedMs: Long,
+        isCoalescing: Boolean
+    ) {
         val d = line1
         val n = line1Count
         if (n == 0) return
@@ -1199,34 +1216,52 @@ class LyricsDotMatrixRenderer : RendererFx() {
                 updateCoalescing(d, n, progress)
             }
             Phase.STEADY, Phase.SCATTERING_TOP -> {
-                updateHolding(d, n, frame, w, h)
+                // ⛔⛔ 凝聚**未完成**时继续凝聚（不再用 `updateHolding` 硬吸附）
+                //    ⇒ 下行在下方**聚完** ⇒ 顶上去时已是成形的一行 ⇒ 不会「再聚一遍」。
+                if (isCoalescing) {
+                    coalesceLine1(d, n, coalesceElapsedMs)
+                } else {
+                    updateHolding(d, n, frame, w, h)
+                }
             }
             Phase.SHIFTING -> {
-                // 逐字凝聚（从左到右）
-                for (i in 0 until n) {
-                    val o = i * STRIDE
-                    val ci = line1CharIdx[i]
-                    val charDelay = ci * coalescePerCharMs
-                    val charElapsed = elapsedMs - charDelay
-                    if (charElapsed <= 0) {
-                        // 还没到这个字，保持在起始位置不动
-                        // （已经在 initCoalesce 中设置了起始位置）
-                    } else {
-                        // 开始凝聚
-                        val p = (charElapsed.toFloat() / coalesceArriveMs).coerceIn(0f, 1f)
-                        val accel = 0.01f + p * 0.05f
-                        val drag = 0.82f + p * 0.08f
-                        d[o + VX] += (d[o + TX] - d[o + X]) * accel + rng.nextSigned() * 0.3f
-                        d[o + VY] += (d[o + TY] - d[o + Y]) * accel + rng.nextSigned() * 0.3f
-                        d[o + VX] *= drag
-                        d[o + VY] *= drag
-                        d[o + X] += d[o + VX]
-                        d[o + Y] += d[o + VY]
-                    }
-                }
+                coalesceLine1(d, n, coalesceElapsedMs)
             }
         }
     }
+
+    /**
+     * 下行的**逐字凝聚**（从左到右）。
+     *
+     * @param coalesceElapsedMs 自下行被采样起经过的时间（**与阶段无关**）
+     */
+    private fun coalesceLine1(d: FloatArray, n: Int, coalesceElapsedMs: Long) {
+        for (i in 0 until n) {
+            val o = i * STRIDE
+            val ci = line1CharIdx[i]
+            val charDelay = ci * coalescePerCharMs
+            val charElapsed = coalesceElapsedMs - charDelay
+            if (charElapsed <= 0) {
+                // 还没到这个字，保持在起始位置不动
+                // （已经在 initCoalesce 中设置了起始位置）
+            } else {
+                // 开始凝聚
+                val p = (charElapsed.toFloat() / coalesceArriveMs).coerceIn(0f, 1f)
+                val accel = 0.01f + p * 0.05f
+                val drag = 0.82f + p * 0.08f
+                d[o + VX] += (d[o + TX] - d[o + X]) * accel + rng.nextSigned() * 0.3f
+                d[o + VY] += (d[o + TY] - d[o + Y]) * accel + rng.nextSigned() * 0.3f
+                d[o + VX] *= drag
+                d[o + VY] *= drag
+                d[o + X] += d[o + VX]
+                d[o + Y] += d[o + VY]
+            }
+        }
+    }
+
+    /** 一行「逐字凝聚」走完需要的总时长（**纯函数式**） */
+    private fun coalesceTotalMs(text: String): Long =
+        (text.length.coerceAtLeast(1) - 1) * coalescePerCharMs + coalesceArriveMs
 
     private fun updateCoalescing(d: FloatArray, n: Int, progress: Float) {
         val accel = 0.012f + progress * 0.06f
@@ -1269,8 +1304,22 @@ class LyricsDotMatrixRenderer : RendererFx() {
     /**
      * 将 line1 提升为 line0（行切换时使用）。
      * 复制所有粒子数据，TY 保持在下行位置（SHIFTING 阶段通过 rowOffsetY 做上移动画）。
+     *
+     * ## ⛔⛔ 提升前必须**把凝聚收尾**（吸附到目标位）
+     *
+     * 旧码直接复制 ⇒ 若下行还没聚完，被提升的这一行**带着半途的位置**顶上去
+     * ⇒ 用户看到「顶上去之后又聚了一遍」。
+     * ⇒ 这里先吸附（位置 = 目标、速度 = 0）⇒ 顶上去的**一定是成形的一行**。
      */
     private fun promoteLine1ToLine0() {
+        // ① 凝聚收尾：吸附到目标位（⛔ 不得在这里再聚一次）
+        for (i in 0 until line1Count) {
+            val o = i * STRIDE
+            line1[o + X] = line1[o + TX]
+            line1[o + Y] = line1[o + TY]
+            line1[o + VX] = 0f
+            line1[o + VY] = 0f
+        }
         // 复制粒子数组
         System.arraycopy(line1, 0, line0, 0, line1Count * STRIDE)
         // 复制字索引
@@ -1289,8 +1338,8 @@ class LyricsDotMatrixRenderer : RendererFx() {
     private fun applyLine0Shift() {
         for (i in 0 until line0Count) {
             val o = i * STRIDE
-            line0[o + TY] -= lineHeightPx
-            line0[o + Y] -= lineHeightPx
+            line0[o + TY] -= rowGapPx
+            line0[o + Y] -= rowGapPx
         }
     }
 
@@ -1398,11 +1447,41 @@ class LyricsDotMatrixRenderer : RendererFx() {
         }
 
         /** 字号测量参考值：在参考字号下测字宽/行高，再换算成真实字号 */
-        private const val REF_FONT = 100f
+        internal const val REF_FONT = 100f
         /** 字号下限（屏高比例）：太小时字形笔画挤作一团难辨。⛔ 必须 ≤ 低档的 [fontMaxRatio]，否则 `coerceIn` 抛异常 */
         internal const val MIN_FONT_S = 0.05f
         /** 字号上限（屏高比例）：超过则粒子太稀、文字空洞。⚠️ 实际取 [fontMaxRatio]，随粒子数收缩 */
         private const val MAX_FONT_S = 0.16f
+
+        /**
+         * **字号规则**（**纯函数**）—— 门禁与离线渲染器直接调 ⇒ 不复制算法。
+         *
+         * 公式（三项约束取中间值，再夹进硬区间）：
+         * ```
+         * fontFromWidth  = REF_FONT * (w * 0.80) / refAdvance     // 本行占满屏宽 80%
+         * fontFromHeight = REF_FONT * (h * 0.40) / refLineHeight  // 行高 ≤ 屏高 40%
+         * font           = clamp(min(fontFromWidth, fontFromHeight), h*MIN_FONT_S, h*fontMaxRatio(cap))
+         * ```
+         *
+         * ⚠️ `refAdvance` / `refLineHeight` 必须是**参考字号 [REF_FONT] 下**量出来的值
+         *    （本行文本的字宽 / 行高）⇒ 换行时量一次即可。
+         *
+         * @param refAdvance 本行文本在 [REF_FONT] 下的字宽（px）
+         * @param refLineHeight 参考字号下的行高（px）
+         * @param cap 字号上限所用的**预算档**（见 [fontBudgetCap]；加密度时传档位默认）
+         */
+        internal fun fontSizeFor(
+            refAdvance: Float,
+            refLineHeight: Float,
+            w: Float,
+            h: Float,
+            cap: Int
+        ): Float {
+            val fontFromWidth = REF_FONT * (w * 0.80f) / refAdvance.coerceAtLeast(REF_FONT * 0.1f)
+            val fontFromHeight = REF_FONT * (h * 0.40f) / refLineHeight.coerceAtLeast(1f)
+            val base = minOf(fontFromWidth, fontFromHeight)
+            return base.coerceIn(h * MIN_FONT_S, h * fontMaxRatio(cap))
+        }
 
         /**
          * 每行粒子上限。⚠️ 本套的提交次数早已合批到位（每帧几十次 `drawPoints`），

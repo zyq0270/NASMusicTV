@@ -24649,6 +24649,32 @@ docs/archive/e52-highway-webgl-preview.html:3697-3699
   （cap 3600 ⇒ 3522 点 / 覆盖率 34.5%；cap 7200 ⇒ 7122 点 / 覆盖率 62.8%）
   ⇒ 合批改造**未动采样**、未降密度。
 
+##### 9.1 真机复测发现的三处视觉回归与修复（2026-11-07 第二轮）
+
+> 上面那轮「合批 + 逐帧」改造**性能上是赚的**（点阵子模式 30.2 fps → **83.5 fps**，
+> janky 3.23%、50 分位 9ms、App 进程日志全清），但**真机复测暴露三处视觉回归**，本小节记录其根因与修法。
+
+| 症状 | 根因 | 修法 |
+|---|---|---|
+| **文字太小**（约屏宽 11%，上一轮 25%） | 字号按**全曲最长行**（26 字）做宽度约束 ⇒ 只要歌里有一句特别长的，**整首歌的字幕都被压成蚂蚁大小** | 字号改为**按本行算**（`fontFor` / `fontSizeFor`）：每行各自占满屏宽 80% ⇒ 短行不被长行拖小，长行也完整不溢出 |
+| **点阵糊成实心白块** | 合批后一次 `drawPoints` 里上千个圆盘**互相重叠**，而画笔用**加色混合**（`BlendMode.Plus` / `PorterDuff.ADD`）⇒ 重叠处 α **累加过曝** | **去掉加色混合**（改默认 `SrcOver`）⇒ 重叠处取最上层 ⇒ 与旧码「并集填一次」等价，颗粒感回来；顺带删掉 API 29 的 `BlendMode` 依赖 |
+| **行顶上去后重复播放「粒子聚成文字」** | ① `LyricsSubRenderer.onLineChanged` 的**默认实现 = 再走一遍 `onEnter`** ⇒ 状态机被复位（`INIT_COALESCE` + `displayedLineIndex = -1`）⇒ 每换一行重放聚形；② 凝聚进度挂在 `phase == SHIFTING`（只有 700 ms）⇒ **永远聚不完**，顶上去的是半成品 | ① `DotMatrixSubRenderer` 覆写 `onLineChanged` 为**空实现**（行切换交给委托自己的状态机）；② 凝聚改按**本行自己的时间线**（`line1CoalesceStartMs`）推进 ⇒ 顶上去时已是**成形**的一行 |
+
+⚠️ **离线视觉证明的做法与它的边界**：`scripts/render_lyrics_dot_matrix_preview.java`
+（host 端 JDK 单文件程序，从仓库根运行）用 **AWT** 复刻三档形态 ⇒ OLD（Path 并集 + Plus）/
+CURRENT（drawPoints + Plus）/ FIXED（drawPoints + SrcOver），输出 `logs_temp/dotmatrix_*.png`
+⇒ **CURRENT 那张确实复现了「小字号 + 实心白块」** ⇒ 离线可证明。
+⚠️ 但 **AWT 不是 Skia** ⇒ 抗锯齿/字形度量只能作**近似**；且**真 Skia 渲染**在 Robolectric 里做不到
+（`Robolectric 4.11.1` 的 NATIVE 图形模式在**类初始化期**就抛异常 ⇒ 本仓先例：
+`QianliUpstreamNativeLookTest.kt` 已因此删除）⇒ **真机是唯一可信的最终判据**。
+⇒ 配套的 `LyricsDotMatrixPreviewTest.kt` **已删除**（`java.awt.*` / `javax.imageio.*`
+**在 Android 上不存在** ⇒ 放进 Android 单测源集根本编不过），改由上面的 host 端脚本承担。
+
+📌 **新增门禁**（`LyricsDotMatrixTest`，均带**负向自证**）：字号必须**按行**算（短行 > 长行；
+短行顶到上限 16% 屏高、长行夹到下限 5%；旧规则会被判据抓住）· 合批绘制**不得**出现
+`BlendMode.PLUS` / `Mode.ADD` / `PorterDuffXfermode` / `graphics.BlendMode` · 凝聚**不得**挂在
+`SHIFTING` 阶段（必须按下行采样时刻起算，且 `promoteLine1ToLine0` 必须在位）· 行间距与字号**解耦**。
+
 ### 10.345 v2.39.13 —— E23「歌词点阵」退役为**独立主题**（被 E53「歌词舞台」的子模式 0 吸收）（2026-11-07）
 
 #### 一、决策
