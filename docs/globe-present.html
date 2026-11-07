@@ -188,6 +188,27 @@
       (NDC 高 0.26),resize 时重算 ⇒ 横屏 / 竖屏 / 近方形都完整入画,
       既不压标题也不与地球重叠。每帧只改 position 做极慢漂移,零缩放。
       debug hook 追加 moon.ndc / aspect / onScreen 作为可见性金标准。
+    v6.1e (2026-11-07) 修「四季和昼夜看不到」:
+      V1 根因:旧太阳方向 (3,4,6) 几乎正对相机(+Z),正面圆盘 dot≈0.84
+      全是白昼,晨昏线落在球背面;环境光 0.75 + 半球光 0.7 又把暗部提亮,
+      城市灯火(3400 个 1~2px 点、亮度 1.35)只在左下边沿零星露出。
+      ① SUN_DIR 改侧光 (1,0.45,0.55) 并提前定义,供 sunLight /
+         nightLayer / nightShade / oceanLayer 共用(单一数据源);
+         环境光 0.75→0.42、半球光 0.7→0.45、太阳 2.2→2.4 拉开明暗;
+      ② 新增 nightShade 贴地压暗层(半径 1.0025):夜半球压深蓝
+         alpha 0.62、晨昏带透暖橙霞光,renderOrder 1 在灯火之下;
+      ③ 城市灯火 3400→6500 点、点径 0.6~2.1→1.0~3.2px、
+         alpha 0.30~0.92→0.55~1.0、shader 亮度 1.35→2.6、闪烁加深。
+      V2 根因:四组色温最大偏差仅 ±7%、树冠只吃 35%、96s 一轮,
+      肉眼无法察觉。④ 色差拉到 ±20%(春嫩绿/夏暖黄/秋橙红/冬冷蓝),
+      树冠系数 0.35→0.9,周期 96s→60s(每季 15s),太阳亮度同步 ±12%;
+      ⑤ 新增 ?season=0|1|2|3 钉档参数(精确参数匹配)与
+      debug hook season.index/sf/pinned/tint/leaf 作为四季色差金标准;
+      ⑥ 首轮截图复核发现仅乘 earthMat.color 仍偏含蓄(饱和绿贴图 + ACES
+         压缩),补强:树冠改用独立 LEAF 季节色(春嫩绿/夏浓绿/秋金橙/
+         冬冷灰蓝),大气光晕同步按 tint 染色 ⇒ 四季一眼可辨。
+      硬约束不变:15 种动物 19 只 + 150 棵树、全部陆地贴地、
+      动画过程零缩放、无交互、无 CSP / 贴图异常。
 -->
 <canvas id="sky"></canvas>
 <canvas id="fx"></canvas>
@@ -324,7 +345,7 @@ var CONFIG = {
   loadConcurrency: 4, maxPixelRatio: 2,
   lowFps: 26, highFps: 50, qualityWindow: 2.5,
   // 新视觉
-  seasonPeriod: 96, meteorMin: 4.0, meteorMax: 9.0,
+  seasonPeriod: 60, meteorMin: 4.0, meteorMax: 9.0,
   shadowCap: 256, footprintLife: 6.5, footprintEvery: 0.55
 };
 window.__globeConfig = CONFIG;
@@ -767,14 +788,14 @@ function makeCityTexture() {
   var seed = 5521, cls = ELEV.cls;
   function sr() { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 4294967296; }
   if (cls) {
-    for (var i = 0; i < 3400; i++) {
+    for (var i = 0; i < 6500; i++) {
       var px = Math.floor(sr() * W), py = Math.floor(sr() * H);
       var c = cls[py * W + px];
       if (!(c === 2 || c === 3 || c === 6)) continue;
       if (Math.abs(py / H - 0.5) > 0.39) continue;
-      var r = 0.6 + sr() * 1.5;
+      var r = 1.0 + sr() * 2.2;
       ctx.fillStyle = 'rgba(255,' + (176 + Math.floor(sr() * 64)) + ',' +
-                      (86 + Math.floor(sr() * 76)) + ',' + (0.30 + sr() * 0.62).toFixed(2) + ')';
+                      (86 + Math.floor(sr() * 76)) + ',' + (0.55 + sr() * 0.45).toFixed(2) + ')';
       ctx.fillRect(px, py, r, r);
     }
   }
@@ -905,10 +926,15 @@ async function initApp() {
   camera.position.set(0, 0.55, CONFIG.camDist);
   camera.lookAt(0, 0, 0);
 
-  var ambientLight = new THREE.AmbientLight(0xffffff, 0.75);
-  var hemiLight = new THREE.HemisphereLight(0xd8f0ff, 0x8fae66, 0.7);
-  var sunLight = new THREE.DirectionalLight(0xfff3d6, 2.2);
-  sunLight.position.set(3, 4, 6);
+  /* V1 昼夜(v6.1e):旧太阳方向 (3,4,6) 几乎正对相机,正面圆盘全白昼,
+     晨昏线跑到球背面 ⇒ 用户反馈「昼夜看不到」。改成右侧偏上的侧光,
+     让晨昏线穿过正面圆盘;同时压低环境光/半球光、略提太阳光拉开明暗。
+     SUN_DIR 同时供 nightLayer / nightShade / oceanLayer 使用,单一数据源。 */
+  var SUN_DIR = new THREE.Vector3(1, 0.45, 0.55).normalize();
+  var ambientLight = new THREE.AmbientLight(0xffffff, 0.42);
+  var hemiLight = new THREE.HemisphereLight(0xd8f0ff, 0x8fae66, 0.45);
+  var sunLight = new THREE.DirectionalLight(0xfff3d6, 2.4);
+  sunLight.position.copy(SUN_DIR).multiplyScalar(10);
   scene.add(ambientLight); scene.add(hemiLight); scene.add(sunLight);
 
   // tilted axis + spin
@@ -926,7 +952,6 @@ async function initApp() {
   var earth = new THREE.Mesh(new THREE.SphereGeometry(1, 64, 64), earthMat);
   tiltPivot.add(earth);
 
-  var SUN_DIR = new THREE.Vector3(3, 4, 6).normalize();
   /* V1 昼夜分界 + 城市灯火:世界法线与太阳方向的点积决定昼/夜,
      只在夜面叠暖色灯点。挂在 earth 下 ⇒ 随地球自转,灯点固定在城市上。 */
   var nightLayer = new THREE.Mesh(
@@ -947,10 +972,10 @@ async function initApp() {
         'varying vec2 vUv; varying vec3 vWN;',
         'void main(){',
         '  float d = dot(normalize(vWN), normalize(uSun));',
-        '  float night = 1.0 - smoothstep(-0.25, 0.20, d);',
+        '  float night = 1.0 - smoothstep(-0.20, 0.16, d);',
         '  vec3 c = texture2D(tLights, vUv).rgb;',
-        '  float tw = 0.88 + 0.12 * sin(uTime * 1.6 + vUv.x * 120.0 + vUv.y * 55.0);',
-        '  gl_FragColor = vec4(c * night * tw * 1.35, 1.0);',
+        '  float tw = 0.72 + 0.28 * sin(uTime * 1.6 + vUv.x * 120.0 + vUv.y * 55.0);',
+        '  gl_FragColor = vec4(c * night * tw * 2.6, 1.0);',
         '}'
       ].join('\n'),
       transparent: true, depthWrite: false, blending: THREE.AdditiveBlending
@@ -958,6 +983,36 @@ async function initApp() {
   );
   nightLayer.renderOrder = 2;
   earth.add(nightLayer);
+  /* V1 夜面压暗层(v6.1e):仅靠灯光衰减夜面仍偏亮,加一层贴地深的半透明
+     冷蓝把夜半球压暗,晨昏带透出一道暖橙霞光;城市灯火 additive 叠在其上,
+     于是「昼亮 / 晨昏暖 / 夜暗且有灯点」一眼可辨。半径 1.0025 紧贴地表,
+     不会像大气体那样留下玻璃罩硬边;depthWrite=false 不遮挡动物和树。 */
+  var nightShade = new THREE.Mesh(
+    new THREE.SphereGeometry(1.0025, 64, 64),
+    new THREE.ShaderMaterial({
+      uniforms: { uSun: { value: SUN_DIR } },
+      vertexShader: [
+        'varying vec3 vWN;',
+        'void main(){',
+        '  vWN = normalize(mat3(modelMatrix) * normal);',
+        '  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);',
+        '}'
+      ].join('\n'),
+      fragmentShader: [
+        'uniform vec3 uSun; varying vec3 vWN;',
+        'void main(){',
+        '  float d = dot(normalize(vWN), normalize(uSun));',
+        '  float night = 1.0 - smoothstep(-0.20, 0.16, d);',
+        '  float twilight = smoothstep(-0.30, -0.02, d) * (1.0 - smoothstep(0.02, 0.30, d));',
+        '  vec3 col = mix(vec3(0.04,0.08,0.20), vec3(0.95,0.45,0.18), twilight * 0.55);',
+        '  gl_FragColor = vec4(col, night * 0.62);',
+        '}'
+      ].join('\n'),
+      transparent: true, depthWrite: false
+    })
+  );
+  nightShade.renderOrder = 1;
+  earth.add(nightShade);
   /* V4 海面流动高光:海陆掩膜 + 太阳半程镜面 + 两组滚动正弦波纹,
      只在昼面的海上出光,UV 随时间流动 ⇒ 不是静止的一层白。 */
   var oceanLayer = new THREE.Mesh(
@@ -2266,6 +2321,7 @@ async function initApp() {
      连续 qualityWindow 秒低于 lowFps 才降档,高于 highFps 更久才升档,
      避免来回抖动。?quality=0|1|2 可钉住档位便于校对截图。 */
   var qPin = /quality=([012])/.exec(location.search);
+  var seasonPin = /(?:^|[?&])season=([0123])(?:&|$)/.exec(location.search);
   var qualityLevel = 0, _qHold = 0;
   function applyQuality(lv) {
     lv = Math.max(0, Math.min(2, lv));
@@ -2333,26 +2389,39 @@ async function initApp() {
         panicPts.push(tornadoes[pz0].group.position.clone().normalize());
     var mt = now * 0.000018;
     positionMoon(mt);
-    // V2 四季:四组色温平滑插值,只乘材质 color,不改几何 / 尺寸 / 落点
+    // V2 四季(v6.1e):色差从 ±7% 拉到 ±20%,周期 96s→60s,
+    // 树冠改用独立季节色(春嫩绿/夏浓绿/秋金橙/冬冷灰蓝)、大气光晕同步染色,
+    // 只改材质 color,不改几何 / 尺寸 / 落点。?season=0|1|2|3 可钉档校对。
     var sec = now * 0.001;
-    var ST = [[1.00, 1.03, 0.97], [0.98, 1.00, 0.95],
-              [1.07, 0.97, 0.86], [0.97, 1.00, 1.06]];
-    var sf = ((sec / CONFIG.seasonPeriod) % 1) * 4;
+    var ST = [[0.94, 1.12, 0.94], [1.10, 1.06, 0.80],
+              [1.18, 0.84, 0.66], [0.82, 0.94, 1.20]];
+    var LEAF = [[1.00, 1.10, 0.92], [0.90, 1.05, 0.82],
+                [1.28, 0.72, 0.42], [0.72, 0.86, 1.05]];
+    var sf = seasonPin ? Number(seasonPin[1]) : ((sec / CONFIG.seasonPeriod) % 1) * 4;
     var si0 = Math.floor(sf) % 4, si1 = (si0 + 1) % 4, st = smooth01(sf - Math.floor(sf));
     var tintR = lerp(ST[si0][0], ST[si1][0], st),
         tintG = lerp(ST[si0][1], ST[si1][1], st),
         tintB = lerp(ST[si0][2], ST[si1][2], st);
+    var leafR = lerp(LEAF[si0][0], LEAF[si1][0], st),
+        leafG = lerp(LEAF[si0][1], LEAF[si1][1], st),
+        leafB = lerp(LEAF[si0][2], LEAF[si1][2], st);
     earthMat.color.setRGB(tintR, tintG, tintB);
+    atmoGlow.material.color.setRGB(lerp(1, tintR, 0.55),
+                                   lerp(1, tintG, 0.55),
+                                   lerp(1, tintB, 0.55));
     for (var sm = 0; sm < treeTintMats.length; sm++) {
       var tm = treeTintMats[sm];
       if (!tm.color) continue;
       if (!tm.userData.__sr) tm.userData.__sr = [tm.color.r, tm.color.g, tm.color.b];
       var bc = tm.userData.__sr;
-      tm.color.setRGB(bc[0] * lerp(1, tintR, 0.35),
-                      bc[1] * lerp(1, tintG, 0.35),
-                      bc[2] * lerp(1, tintB, 0.35));
+      tm.color.setRGB(bc[0] * leafR, bc[1] * leafG, bc[2] * leafB);
     }
-    sunLight.intensity = 2.2 * (0.95 + 0.05 * Math.cos(sec / CONFIG.seasonPeriod * Math.PI * 2));
+    sunLight.intensity = 2.4 * (0.88 + 0.12 * Math.cos(sf / 4 * Math.PI * 2));
+    window.__globeDebug.season = {
+      index: si0, sf: +sf.toFixed(2), pinned: !!seasonPin,
+      tint: [+tintR.toFixed(3), +tintG.toFixed(3), +tintB.toFixed(3)],
+      leaf: [+leafR.toFixed(3), +leafG.toFixed(3), +leafB.toFixed(3)]
+    };
     nightLayer.material.uniforms.uTime.value = sec;
     oceanLayer.material.uniforms.uTime.value = sec;
     updateFootprints(now);
