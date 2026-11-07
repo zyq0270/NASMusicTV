@@ -144,4 +144,67 @@ class TiltLayoutTest {
         assertEquals(0, start)
         assertEquals(1, end)
     }
+
+    /**
+     * 门禁：**每一行都必须至少有一段是倾斜段**。
+     *
+     * ⛔ 上游的挑选没有兜底（`finalTiltIndex = -1`）⇒ 候选为空时整行没有倾斜段
+     * ⇒ 那行既不上下错落、也不变蓝 ⇒ 看起来就是**一行常规白字**
+     * （真机反馈，2026-11-07）。本仓改为**兜底保证每行至少一段倾斜**。
+     */
+    @Test
+    fun `every line has at least one tilted segment`() {
+        val texts = listOf(
+            "曾经真的以为人生就这样了",
+            "是命运的安排也好",
+            "鬼迷心窍",
+            "我曾经跨过山和大海",
+            "编曲：Jenny Chin",
+            "这是一句很长很长的歌词用来触发多段拆分的场景看看效果对不对",
+        )
+        var checked = 0
+        for (text in texts) {
+            for (seed in 0L..40L) {
+                val result = TiltLayout.buildTiltLayout(
+                    fullText = text,
+                    lineSeed = seed.toDouble(),
+                    splitProbability = 0.75,
+                    tiltStyleProbability = 0.35,
+                    fontScale = 1f,
+                    availableWidth = 1200f,
+                    measure = { s, _ -> s.length * 40f },
+                )
+                assertTrue(
+                    "「$text」 seed=$seed 没有任何倾斜段 ⇒ 该行不会错落、也不会变蓝",
+                    result.segments.any { it.isTilt },
+                )
+                checked++
+            }
+        }
+        assertTrue("checked=$checked", checked > 100)
+    }
+
+    /**
+     * 负向自证：**上游那套选择逻辑下，确实有很多行没有倾斜段**
+     * ⇒ 否则上面那条门禁就没有区分力（会阻止回退到无兜底的状态）。
+     */
+    @Test
+    fun `negative self proof - upstream logic would leave many lines without a tilted segment`() {
+        var linesWithoutTilt = 0
+        var total = 0
+        for (seed in 0L..200L) {
+            val segCount = TiltLayout.determineLineCount(13, seed.toDouble(), 0.75)
+            var candidates = 0
+            for (i in 0 until segCount) {
+                if (TiltLayout.seededRandom(seed.toDouble(), 100 + i) < 0.35) candidates++
+            }
+            total++
+            if (candidates == 0) linesWithoutTilt++
+        }
+        assertTrue(
+            "上游逻辑下无倾斜段的行数应很多（实测 $linesWithoutTilt/$total），" +
+                "否则上面那条门禁没有区分力",
+            linesWithoutTilt > 20,
+        )
+    }
 }

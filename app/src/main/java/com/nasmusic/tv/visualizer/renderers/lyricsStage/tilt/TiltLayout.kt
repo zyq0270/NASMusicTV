@@ -290,6 +290,18 @@ object TiltLayout {
         var finalTiltIndex = -1
         if (candidates.isNotEmpty()) {
             finalTiltIndex = candidates[(seededRandom(lineSeed, 200) * candidates.size).toInt()]
+        } else if (mergedSegments.isNotEmpty()) {
+            // ⚠️ **与上游的偏差（2026-11-07，所有者裁定）**：上游在这里留 -1
+            //    （`finalTiltIndex = -1`）⇒ **整行没有倾斜段** ⇒ 该行既不上下错落、也不变蓝，
+            //    看起来就是**一行常规白字** ⇒ 完全体现不出「倾斜 / 律动」这个效果的本质。
+            //    而上游每段只有 `tiltStyleProbability`（0.35）的概率进候选 ⇒
+            //    **单段行 65% 无倾斜段、两段 42%、三段 28%** ⇒ 多数行其实都不倾斜。
+            //    ⇒ 兜底：**保证每行至少有一段是倾斜段**（用同一条伪随机序列挑 ⇒ 仍然逐行确定、
+            //    同一 seed 必得同一结果，不引入任何额外随机性）。
+            //    ⛔ 这**不是**上游行为，属已记录的设计偏差（见 technical-overview §10.282）。
+            finalTiltIndex =
+                (seededRandom(lineSeed, 200) * mergedSegments.size).toInt()
+                    .coerceIn(0, mergedSegments.size - 1)
         }
 
         var offsetAccum = 0
