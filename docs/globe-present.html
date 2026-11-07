@@ -109,6 +109,18 @@
       星空 / 光点一律走独立 LCG,不消耗全局 rand ⇒ 不干扰落点采样;
       但纹理分辨率变化会改变 grass/forest 候选池大小,落点仍可复现、
       全部在陆地贴地,与 v4 的具体坐标不同。
+       ⑯ 统一的「季节推进权重」seasonW:本季前 70% 保持本季参数,
+          季末 30% 连续过渡到下一季。之前是跨【整季】lerp 的 ⇒ 每季参数只在
+          季初那一瞬间成立,余下时间都在往下一季漂 ⇒ 季节感被稀释,也让「雪融化」与
+          「树变绿」的时序对不上。现在地面与树的颜色切换发生在同一刻。
+       ⑰ 草地只有两档:【原贴图绿】与【枯黄】,
+          由单一强度 grassYellowK 连续插值,强度归零时露出的就是原贴图 ⇒ 与春季逐像素一致,
+          不会跳变。之前把「颜色」与「强度」分开插值 ⇒ 夏秋交界颜色瞬间跳变、
+          冬春交界露出平涂深绿后又跳回贴图浅绿(用户 2026-11-07 实测反馈)。
+       ⑱ 树叶四季都换色:春淡绿 / 夏深绿 / 秋黄橙红深红 / 冬冷蓝灰。
+          之前夏季是【不换色】(使用原贴图绿) ⇒ 夏天看起来和春天一样淡。
+       ⑲ 顺序约束:顺序上必须不能用量化的上下文变量。
+          本轮修复了 seasonW 定义位于使用之后的顺序错误(var 提升 ⇒ undefined ⇒ NaN ⇒ 全部变量为 null)。
       硬约束不变:15 种动物 19 只 + 150 棵树、全部陆地贴地、
       动画过程零缩放、无 CSP / 贴图异常。
     v5.1 (2026-11-07) 两处视觉/行为修正:
@@ -207,6 +219,55 @@
       ⑥ 首轮截图复核发现仅乘 earthMat.color 仍偏含蓄(饱和绿贴图 + ACES
          压缩),补强:树冠改用独立 LEAF 季节色(春嫩绿/夏浓绿/秋金橙/
          冬冷灰蓝),大气光晕同步按 tint 染色 ⇒ 四季一眼可辨。
+    V6.3 四季返工(2026-11-07,实测驱动):
+       ① 根因一:季节「出现强度」用 sin(π*(sf-季号)),sin 在季号边界恒为 0
+          ⇒ ?season=3 的冬天强度是 0,雪花/积雪永远看不见。
+          改为与 tint 同一套线性插值,钉档 season=N 即纯净第 N 季。
+       ② 根因二:材质名是复数 "NormalTree_Leaves" —— "Leaves" 不含子串
+          "Leaf"(L-e-a-v ≠ L-e-a-f)⇒ /leaf/ 正则全部落空,树冠一个都
+          识别不到(10 个材质全被当成树干)。正则改为接受 leaf/leaves。
+       ③ 根因三:乘法染色(color *= tint)无法把绿叶贴图变成冷蓝灰/正红,
+          绿通道压不下去 ⇒ 冬天是「深绿」不是「冷蓝灰」。
+          改为 onBeforeCompile 注入:取贴图亮度当明暗、季节色当色相,
+          二者相乘;树冠材质另给 customProgramCacheKey(否则树皮会复用
+          树叶的着色器而被一起换色)。
+       ④ 夏季草地开花:落点改取自 earthRes.grass 候选池(此前是随机经纬度
+          ⇒ 花会开在海里/沙漠/树上),并加 0.030 rad 最小间距避免扎堆;
+          颜色用高饱和红/粉/紫/橙/黄 + 少量白;材质加 toneMapped:false
+          (ACES 会把小花点的饱和度压成白色);数量 72→900、尺寸 0.033→0.042。
+       ⑤ 冬季积雪:新增半径 1.0012 的球壳 + alphaMap 陆地掩膜
+          (cls=0 是海);陆地像素必须完全不透明(alphaTest 丢弃海洋),
+          否则下方的绿色草地透出来、冬天大陆不是全白。
+       ⑥ 秋季落叶飘落每帧抛 "tang.normalize is not a function"
+          (cross() 返回普通数组,没有 .normalize())⇒ 改为手动除以模长。
+       ⑦ 花朵每帧更新时硬加 Y 分量 ⇒ 花被推离球面,改为沿法线方向浮动。
+       ⑧ 积雪延迟曲线:秋冬交界的前 25% 过渡带保持 0,避免深秋就下雪。
+       ⑨ 夜面城市灯火按用户要求先关掉(CONFIG.nightLights=false,
+          换成全黑纹理;夜面压暗与晨昏霞光保留)。
+       ⑩ 花量按季节调整:春 0.06(几乎无) / 夏 1.0 / 秋 0.55 / 冬 0。
+       ⑪ 花朵昼夜变暗:点云材质不吃场景灯光 ⇒ 自己按「世界法线·太阳方向」
+          求昼夜系数,再压暗顶点色(去饱和 80% + 亮度压到 28% + 偏冷蓝)。
+          法线变换不用 matrixWorld(旧写法的 Matrix3.getNormalMatrix 算出全 NaN,
+          反而拆成 Rz(tilt)·Ry(earthRot) 解析式自算,不依赖渲染器的更新时序)。
+       ⑫ ⚠⚠⚠ Float32BufferAttribute 是【复制】数组的(内部 new Float32Array(array)),
+       ⑬ 秋冬交界的合成顺序(用户 2026-11-07 明确指出):
+          必须是 over 合成(底层草地色 + 上层雪),不能是「二选一」。
+          「二选一」(snowA > a 就换成雪)会让草地黄的 alpha 先掉、透出下面的绿
+          ⇒ 看起来「黄跳变成绿,再逐渐变白」。正确做法:草地底色也逐季插值(秋黄→冬绿),
+          这个变化被逐渐增加的白色盖住 ⇒ 只看到「连续变白」;冬春交界雪消融后
+          ⇒ 白色连续显出绿色。
+       ⑭ 秋天草地变黄:用一层「陆地季节色层」的 alphaMap 实现,只染 cls=2/6 的草地
+          (沙漠 cls=1 / 森林 cls=3 / 岩石 cls=4 不变色),避免沙漠和草地混成一块。
+       ⑮ 冬秋交界的出现要【集中在交界】:直线插值会让深秋(sf=2.07)就有一半积雪
+          ⇒ 季节感错位。改用「末尾过渡带」:只有 st 接近 1 那一小段才渐变,
+          带内用 smooth01 加速(仍是连续函数 ⇒ 不会突变)。
+          不是引用 ⇒ 直接改自己的 fCol/fPos/nPos/lPos 对 GPU 无效,
+          表现是「花朵昼夜不变暗」、「雪花不飘落」、「落叶不飘落」。
+          正确做法:反查 geo.attributes.position.array / .color.array 写它们
+          (原 C14 光点就是用 pGeo.attributes.position.array 反查的)。
+          求昼夜系数,再压暗顶点色(去饱和 80% + 亮度压到 28% + 偏冷蓝)。
+          法线变换不用 matrixWorld(旧写法的 Matrix3.getNormalMatrix 算出全 NaN,
+          反而拆成 Rz(tilt)·Ry(earthRot) 解析式自算,不依赖渲染器的更新时序。
       硬约束不变:15 种动物 19 只 + 150 棵树、全部陆地贴地、
       动画过程零缩放、无交互、无 CSP / 贴图异常。
 -->
@@ -323,6 +384,11 @@ function spherePoint(u, v) {
   var th = u * Math.PI * 2, ph = v * Math.PI, sp = Math.sin(ph);
   return [Math.sin(th) * sp, Math.cos(ph), Math.cos(th) * sp];
 }
+function cross(a, b) {   // R3 叉积(返回新数组)
+  return [a[1] * b[2] - a[2] * b[1],
+          a[2] * b[0] - a[0] * b[2],
+          a[0] * b[1] - a[1] * b[0]];
+}
 
 /* ---------- P8: 所有可调参数集中在这里 ----------
    页面内各处的 var 只是热路径短别名(值全部来自 CONFIG),调参只改这一处。
@@ -344,11 +410,100 @@ var CONFIG = {
   // 加载 / 画质
   loadConcurrency: 4, maxPixelRatio: 2,
   lowFps: 26, highFps: 50, qualityWindow: 2.5,
+  /* V6.3 夜面城市灯火开关(用户 2026-11-07 要求先关掉):
+   false ⇒ 夜面不点灯,只保留夜面压暗与晨昏霞光。 */
+  nightLights: false,
   // 新视觉
   seasonPeriod: 60, meteorMin: 4.0, meteorMax: 9.0,
-  shadowCap: 256, footprintLife: 6.5, footprintEvery: 0.55
+  shadowCap: 200, footprintLife: 6.5, footprintEvery: 0.55,
+  snowCap: 900, leafCap: 150, flowerCap: 900
 };
 window.__globeConfig = CONFIG;
+
+/* ---------- V6.3 四季参数表 ----------
+   索引 0=春 1=夏 2=秋 3=冬。每季一组参数,按季节进度线性插值。
+   ⚠️ 此前四季的「出现强度」用 sin(π*(sf-季号)) 计算,而 sin 在季号
+      边界恰好为 0 ⇒ 冬季一开始(season=3)强度就是 0,雪花/积雪永远
+      看不见(2026-11-07 用户实测「加了?season=3,冬天没下雪」)。
+      现在改成与 tint 同一套插值 ⇒ 钉档 season=N 就是纯净的第 N 季。
+   - ground: 地球贴图 tint(乘法)
+   - bark:   树干 tint(乘法,棕色系)
+   - flowers/snowGround/snowFall/leafFall: 0..1 的出现强度
+   树冠色不在这里 —— 见 LEAF_SEASON(它是「绝对色」不是乘法系数)。 */
+/* 草地底色的两个端点(线性空间):
+   GRASS_YELLOW = 秋天枯草色;GRASS_GREEN = 常绿色。
+   两者之间的推进由 grassGreenK 控制 —— 只在雪完全盖住之后才走,
+   保证用户看到的是「黄 → 连续变白」,而不是「黄 → 变绿 → 再变白」。 */
+var GRASS_YELLOW = [0.72, 0.60, 0.26];
+var SEASON_PARAMS = [
+  { ground: [0.94, 1.14, 0.94], bark: [1.00, 1.02, 0.96],
+    snowGround: 0.00, grassYellow: 0.00,
+    flowers: 0.06, snowFall: 0.00, leafFall: 0.00 },
+  { ground: [1.06, 1.05, 0.90], bark: [1.00, 1.00, 1.00],
+    snowGround: 0.00, grassYellow: 0.00,
+    flowers: 1.00, snowFall: 0.00, leafFall: 0.00 },
+  { ground: [1.22, 0.88, 0.58], bark: [1.08, 0.94, 0.78],
+    snowGround: 0.00, grassYellow: 1.00,
+    flowers: 0.55, snowFall: 0.00, leafFall: 1.00 },
+  { ground: [0.76, 0.90, 1.18], bark: [0.78, 0.86, 0.99],
+    snowGround: 1.00, grassYellow: 0.00,
+    flowers: 0.00, snowFall: 1.00, leafFall: 0.00 }
+];
+
+/* ---------- V6.3 树冠换色(保留贴图明暗,只换色相) ----------
+   乘法染色(color *= tint)无法把绿色叶贴图变成冷蓝灰/正红 ——
+   绿通道永远压不下去(2026-11-07 用户实测「冬天变深绿」)。
+   改成 shader:取贴图亮度当明暗、季节色当色相,两者相乘。
+   uLeafMix=0 ⇒ 完全保留原贴图色(夏季 = 现在的树颜色)。
+   ⚠️ 必须给叶子材质单独 customProgramCacheKey:树皮与树叶的 defines
+      完全相同 ⇒ 默认缓存键相同 ⇒ 树皮会复用树叶的着色器而被一起换色。 */
+var LEAF_SEASON = {
+  spring: 0x9fd97a,                                        // 淡绿
+  summer: 0x4f7a2e,                                        // 深绿(盛夏,比贴图原绿更沉)
+  winter: 0x6f7f96,                                        // 冷蓝灰(深)
+  // 每个树形的秋色(黄 → 橙 → 红 → 深红 → 亮黄),同一片林子里就有黄树与红树
+  autumn: [0xe8b53a, 0xdc8a2e, 0xc23b2a, 0x8f2318, 0xf0d05a]
+};
+function isLeafMaterial(mat) {
+  /* ⚠️ 材质名是复数 "NormalTree_Leaves" —— "Leaves" 并不包含子串 "Leaf"
+      (L-e-a-v ≠ L-e-a-f)⇒ 用 /leaf/ 会全部落空、树冠一个都识别不出来。
+      这里同时接受 leaf / leaves / foliage / canopy。 */
+  return !!(mat && mat.name && /leaf|leav|foliage|canopy/i.test(mat.name));
+}
+function patchLeafMaterial(mat, partIndex) {
+  var u = { tint: { value: new THREE.Color(1, 1, 1) },
+            mix:  { value: 0 },
+            lum:  { value: 0.40 } };   // 叶贴图平均线性亮度,用于明暗归一
+  mat.userData.seasonU = u;
+  // 该树形的四季色:春夏冬用全局季色,秋季用树形专属色
+  mat.userData.leafColor = [
+    new THREE.Color(LEAF_SEASON.spring),
+    new THREE.Color(LEAF_SEASON.summer),
+    new THREE.Color(LEAF_SEASON.autumn[partIndex % LEAF_SEASON.autumn.length]),
+    new THREE.Color(LEAF_SEASON.winter)
+  ];
+  // ⚠️ 四季都换色:春淡绿 / 夏深绿 / 秋黄橙红深红 / 冬冷蓝灰。
+  //    之前夏季是 [1,0,1,1](不换色)⇒ 夏天看起来跟春天一样淡。
+  mat.userData.leafMix = [1, 1, 1, 1];
+  mat.onBeforeCompile = function (shader) {
+    shader.uniforms.uLeafTint = u.tint;
+    shader.uniforms.uLeafMix = u.mix;
+    shader.uniforms.uLeafLum = u.lum;
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>',
+        '#include <common>\nuniform vec3 uLeafTint;\nuniform float uLeafMix;\nuniform float uLeafLum;')
+      .replace('#include <map_fragment>',
+        '#include <map_fragment>\n' +
+        '  if ( uLeafMix > 0.0 ) {\n' +
+        '    float lum = dot( diffuseColor.rgb, vec3(0.2126, 0.7152, 0.0722) );\n' +
+        '    float k = clamp( lum / max(0.05, uLeafLum), 0.30, 2.6 );\n' +
+        '    diffuseColor.rgb = mix( diffuseColor.rgb, uLeafTint * k, uLeafMix );\n' +
+        '  }');
+  };
+  mat.customProgramCacheKey = function () { return 'treeLeafSeason'; };
+  mat.color.setRGB(1, 1, 1);      // 颜色全部交给 uLeafTint,避免二次相乘
+  mat.needsUpdate = true;
+}
 
 /* ---------- P3: elevation 网格查表 ----------
    旧实现每次调用都要跑 fbm3 的 5+4+3 个八度;walkers / tornado / 森林撒点
@@ -673,6 +828,7 @@ function birdTex(phase) {
 
 /* ---------- v5 视觉工具:接触阴影 / 柔光 / 星空 ---------- */
 var _glowTex = null, _shadowTex = null;
+var _snowTex = null, _leafTex = null, _flowerTex = null;
 function glowTex() {
   if (_glowTex) return _glowTex;
   var s = 128, cv = document.createElement('canvas'); cv.width = cv.height = s;
@@ -700,6 +856,62 @@ function contactShadowTex() {
   _shadowTex = new THREE.CanvasTexture(cv);
   _shadowTex.colorSpace = THREE.SRGBColorSpace;
   return _shadowTex;
+}
+/* V6.2 冬季雪花:一个小圆点 + 微蓝晕,独立缓存 */
+function snowTex() {
+  if (_snowTex) return _snowTex;
+  var s = 48, cv = document.createElement('canvas');
+  cv.width = cv.height = s;
+  var ctx = cv.getContext('2d');
+  var c = s / 2;
+  var g = ctx.createRadialGradient(c, c, 1, c, c, s * 0.47);
+  g.addColorStop(0, 'rgba(255,255,255,1)');
+  g.addColorStop(0.55, 'rgba(226,240,255,0.75)');
+  g.addColorStop(1, 'rgba(190,220,255,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, s, s);
+  _snowTex = new THREE.CanvasTexture(cv);
+  _snowTex.colorSpace = THREE.SRGBColorSpace;
+  return _snowTex;
+}
+/* V6.2 秋季落叶:一小团暖橙,用 Independent Points 撒下 */
+function leafTex() {
+  if (_leafTex) return _leafTex;
+  var s = 48, cv = document.createElement('canvas');
+  cv.width = cv.height = s;
+  var ctx = cv.getContext('2d');
+  ctx.fillStyle = 'rgba(230,135,45,0.95)';
+  ctx.beginPath();
+  ctx.moveTo(s * 0.5, s * 0.10);
+  ctx.quadraticCurveTo(s * 0.78, s * 0.30, s * 0.70, s * 0.80);
+  ctx.quadraticCurveTo(s * 0.50, s * 0.95, s * 0.30, s * 0.80);
+  ctx.quadraticCurveTo(s * 0.22, s * 0.30, s * 0.5, s * 0.10);
+  ctx.closePath();
+  ctx.fill();
+  _leafTex = new THREE.CanvasTexture(cv);
+  _leafTex.colorSpace = THREE.SRGBColorSpace;
+  return _leafTex;
+}
+/* V6.3 夏季花朵:一颗实心小圆点(用户要求「用各种颜色的小点代替」)。
+   颜色由 PointsMaterial 的 vertexColors 提供 ⇒ 一张白贴图即可着色。 */
+function flowerTex() {
+  if (_flowerTex) return _flowerTex;
+  var s = 32, cv = document.createElement('canvas');
+  cv.width = cv.height = s;
+  var ctx = cv.getContext('2d');
+  var c = s / 2;
+  // 中心实心 + 边缘轻微羽化,避免像素锯齿
+  var g = ctx.createRadialGradient(c, c, 0, c, c, c);
+  g.addColorStop(0, 'rgba(255,255,255,1)');
+  g.addColorStop(0.72, 'rgba(255,255,255,1)');
+  g.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.arc(c, c, c, 0, Math.PI * 2);
+  ctx.fill();
+  _flowerTex = new THREE.CanvasTexture(cv);
+  _flowerTex.colorSpace = THREE.SRGBColorSpace;
+  return _flowerTex;
 }
 /* 星空用独立 LCG,绝不消耗全局 rand() ⇒ 动物/树落点与 v4 完全一致,可复现 */
 function drawStarfield(cv) {
@@ -815,6 +1027,36 @@ function makeOceanMaskTexture() {
   }
   ctx.putImageData(img, 0, 0);
   var t = new THREE.CanvasTexture(cv); t.wrapS = THREE.RepeatWrapping;
+  return t;
+}
+/* V6.3 陆地季节色层掩膜,与地球贴图同 UV ⇒ 色层严丝合缝盖在陆地上。
+   数据源同 makeOceanMaskTexture:ELEV.cls,cls=0 是海,其余都是陆地。
+   通道约定(自定义 shader 用,不是 alphaMap):
+     R = 草地权重(0..1)  cls=2 草 / cls=6 高草 ⇒ 秋天只染草地
+     G = 陆地权重(0..1)  任意陆地 ⇒ 冬天整块陆地都盖雪
+     B = 高程(0..1)      高处冬天雪更厚、秋天岩石更多
+   ⚠️ 早期版本用 alphaMap + alphaTest:0.5 ⇒ 阈值处「整块大陆突然出现/消失」,
+      用户实测反馈「秋冬交界积雪突然出现、然后再逐渐变白;冬春交界突然消失」。
+      根因:alphaTest 是硬阈值,而 opacity 又从 0.35 起步 ⇒ 两段式突变。
+      现在改成纯渐变(alpha 由权重连续插值),杜绝突变。 */
+function makeLandSeasonMaskTexture() {
+  var cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+  var ctx = cv.getContext('2d');
+  var img = ctx.createImageData(W, H), d = img.data, cls = ELEV.cls, eg = ELEV.data;
+  for (var i = 0; i < W * H; i++) {
+    var c = cls ? cls[i] : 0;
+    var land = c === 0 ? 0 : 1;
+    var grass = (c === 2 || c === 6) ? 1 : 0;
+    var e = eg ? eg[i] : 0;
+    var hNorm = clamp01((e - 0.46) / 0.34);       // 海平面 0.46 → 陆地最高
+    d[i * 4]     = Math.round(grass * 255);        // R = 草地
+    d[i * 4 + 1] = Math.round(land * 255);         // G = 陆地
+    d[i * 4 + 2] = Math.round(hNorm * 255);        // B = 高程
+    d[i * 4 + 3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+  var t = new THREE.CanvasTexture(cv);
+  t.wrapS = THREE.RepeatWrapping;   // 数据纹理,不能做 sRGB 解码
   return t;
 }
 /* V3 月亮:柔光 + 环形山,普通混合(不像太阳那样过曝) */
@@ -952,7 +1194,106 @@ async function initApp() {
   var earth = new THREE.Mesh(new THREE.SphereGeometry(1, 64, 64), earthMat);
   tiltPivot.add(earth);
 
-  /* V1 昼夜分界 + 城市灯火:世界法线与太阳方向的点积决定昼/夜,
+  /* V6.3 陆地季节色层:一个比地表略大的球壳,按季节给陆地染色。
+     · 冬季:整块陆地盖白(积雪),海洋不着色
+     · 秋季:草地变黄(只染 cls=2/6 的草地,森林/岩石保留原色)
+     挂在 earth 下 ⇒ 随地球自转,色层始终盖在同一块陆地上。
+     半径 1.0012 ⇒ 刚好浮在地表之上,不会被 bumpMap 的法线扰动穿帮。
+     ⚠️ 用自定义 shader 而非 alphaMap + alphaTest:
+        alphaTest 是硬阈值 ⇒ 阈值处「整块大陆突然出现/消失」
+        (用户实测:秋冬交界积雪突然出现、冬春交界突然消失)。
+        这里 alpha 由掩膜权重 × 季节强度【连续】插值 ⇒ 全程无突变。 */
+  var landSeason = new THREE.Mesh(
+    new THREE.SphereGeometry(1.0012, 64, 64),
+    new THREE.ShaderMaterial({
+      uniforms: {
+        tMask: { value: makeLandSeasonMaskTexture() },
+        tEarth: { value: earthRes.texture },   // 原地表贴图(取亮度做细节)
+        uGrassColor: { value: new THREE.Color(0x8f8f4a) },  // 当前季节草地色(逐季插值)
+        uSnowColor: { value: new THREE.Color(0xf4f8ff) },    // 冬天积雪色(微冷白)
+        uGrassAmt: { value: 0 },     // 草地染色强度(秋天=1,其它季=0)
+        uSnowAmt: { value: 0 },      // 积雪强度
+        uSun: { value: SUN_DIR }
+      },
+      vertexShader: [
+        'varying vec2 vUv; varying vec3 vWN;',
+        'void main(){',
+        '  vUv = uv;',
+        '  vWN = normalize(mat3(modelMatrix) * normal);',
+        '  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);',
+        '}'
+      ].join('\n'),
+      fragmentShader: [
+        'uniform sampler2D tMask; uniform sampler2D tEarth;',
+        'uniform vec3 uGrassColor; uniform vec3 uSnowColor;',
+        'uniform float uGrassAmt; uniform float uSnowAmt;',
+        'uniform vec3 uSun;',
+        'varying vec2 vUv; varying vec3 vWN;',
+        'void main(){',
+        '  vec3 m = texture2D(tMask, vUv).rgb;',
+        '  float grass = m.r, land = m.g, hNorm = m.b;',
+        '  // 原地表贴图的亮度(保留纹理细节,别涂成一片死色)',
+        '  vec3 earth = texture2D(tEarth, vUv).rgb;',
+        '  float elum = dot(earth, vec3(0.299, 0.587, 0.114));',
+        '  // 积雪:整块陆地都盖,高处更厚;细节用地表亮度调制',
+        '  // ⚠️ 雪的 alpha 必须【完全不透明】(land=1 时就是 1):',
+        '  //    留一点透明(0.8)就会让底下的草地黄/绿透出来 ⇒ 交界处又看到色变。',
+        '  //    高低起伏改成调制【颜色】而不是 alpha。',
+        '  float snowA = land * uSnowAmt;',
+        '  float snowDetail = (0.86 + 0.30 * elum) * (0.93 + 0.09 * hNorm);',
+        '  // 草地染色强度(秋天把草地染黄;其它季=0 ⇒ 露出本来的绿)',
+        '  float grassA = grass * uGrassAmt;',
+        '  // 草地色保留原贴图的明暗(有纹理,不与沙滩糊成一片)',
+        '  float grassDetail = 0.78 + 0.44 * elum;',
+        '  if (grassA <= 0.002 && snowA <= 0.002) discard;',
+        '  // ⚠️ 合成顺序至关重要(用户 2026-11-07 明确指出):',
+        '  //   底层 = 草地色(随季节连续插值:秋天黄 → 冬天绿)',
+        '  //   上层 = 雪(连续插值)',
+        '  //   用 over 合成让白色【连续地盖住】底色 ⇒',
+        '  //     秋冬交界:黄 → 连续变白(底下的黄→绿变化被白盖住,看不见)',
+        '  //     冬春交界:白 → 连续显出绿色。',
+        '  //   若用「二选一」(snowA > a 就换成雪),草地黄的 alpha 会先掉、',
+        '  //   透出下面的绿 ⇒ 看起来「黄跳变成绿,再逐渐变白」(实测反馈)。',
+        '  vec3 gCol = uGrassColor * grassDetail;',
+        '  vec3 sCol = uSnowColor * snowDetail;',
+        '  vec3 col;',
+        '  float a;',
+        '  if (snowA > 0.0) {',
+        '    // 雪在上层:草地按被覆盖比例残留,雪按比例替换',
+        '    float sc = clamp(snowA, 0.0, 1.0);',
+        '    float gA = grassA * (1.0 - sc);',
+        '    float w = gA + sc;',
+        '    col = (gCol * gA + sCol * sc) / max(w, 1e-4);',
+        '    a = w;',
+        '  } else {',
+        '    col = gCol;',
+        '    a = grassA;',
+        '  }',
+        '  if (a <= 0.002) discard;',
+        '  // 受光:与地表同一套光照口径(昼面亮、夜面暗),避免白得刺眼',
+        '  float d = dot(normalize(vWN), normalize(uSun));',
+        '  float day = 0.55 + 0.45 * smoothstep(-0.30, 0.45, d);',
+        '  gl_FragColor = vec4(col * day, min(a, 1.0));',
+        '}'
+      ].join('\n'),
+      transparent: true, depthWrite: false
+    })
+  );
+  landSeason.renderOrder = 1;
+  landSeason.visible = false;
+  earth.add(landSeason);
+
+  /* V6.3 全黑纹理:给夜面灯火当「关掉」的替身,
+   保留 nightLayer 的着色器与调用点,改回一行即可恢复灯火。 */
+function makeBlackTexture() {
+  var cv = document.createElement('canvas'); cv.width = cv.height = 4;
+  var ctx = cv.getContext('2d');
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, 4, 4);
+  var t = new THREE.CanvasTexture(cv);
+  t.colorSpace = THREE.SRGBColorSpace; t.wrapS = THREE.RepeatWrapping;
+  return t;
+}
+/* V1 昼夜分界 + 城市灯火:世界法线与太阳方向的点积决定昼/夜,
      只在夜面叠暖色灯点。挂在 earth 下 ⇒ 随地球自转,灯点固定在城市上。 */
   var nightLayer = new THREE.Mesh(
     new THREE.SphereGeometry(1.003, 64, 64),
@@ -982,6 +1323,12 @@ async function initApp() {
     })
   );
   nightLayer.renderOrder = 2;
+  // V6.3 用户要求:夜面城市灯火先去掉(2026-11-07)。
+  //   保留 nightShade(夜面压暗 + 晨昏霞光)—— 那不是「灯光」,是昼夜分界。
+  //   只需把 tLights 换成全黑纹理即可,代码与数据都还在,改回一行即可恢复。
+  if (!CONFIG.nightLights) {
+    nightLayer.material.uniforms.tLights.value = makeBlackTexture();
+  }
   earth.add(nightLayer);
   /* V1 夜面压暗层(v6.1e):仅靠灯光衰减夜面仍偏亮,加一层贴地深的半透明
      冷蓝把夜半球压暗,晨昏带透出一道暖橙霞光;城市灯火 additive 叠在其上,
@@ -1640,7 +1987,8 @@ async function initApp() {
      树冠微摆由 writeTreeMatrix() 每帧重写矩阵实现,绝不改 scale 数值。 */
   var treeSways = [];                       // 树的微摆记录(现在是实例槽位)
   var treeInstances = [], treeCursor = [], treeInstanceCount = 0;
-  var treeTintMats = [];                   // V2 四季着色用
+  var treeTintMats = [];                   // V2 四季着色用(树干)
+  var treeLeafMats = [];                   // V6.3 树冠(换色相)
   var _treeDummy = new THREE.Object3D();
   var _swayE = new THREE.Euler(), _swayQ = new THREE.Quaternion();
   function buildTreeBatches(parts) {
@@ -1654,10 +2002,16 @@ async function initApp() {
         var g = o.geometry.clone();
         g.applyMatrix4(o.matrixWorld);
         var m = o.material.clone();
+        // V6.3:叶子材质按「树形索引」分季色(5 种树形 → 5 种秋色)
+        if (isLeafMaterial(m)) patchLeafMaterial(m, vi);
         meshes.push({ geo: g, mat: m });
       });
       groups.push(meshes);
-      for (var q = 0; q < meshes.length; q++) treeTintMats.push(meshes[q].mat);
+      for (var q = 0; q < meshes.length; q++) {
+        var mm = meshes[q].mat;
+        if (isLeafMaterial(mm)) treeLeafMats.push(mm);
+        else treeTintMats.push(mm);
+      }
     }
     return groups;
   }
@@ -1758,6 +2112,9 @@ async function initApp() {
   window.__globeDebug = { models: 0, done: 0, instances: debugRows,
                           stats: {}, quality: 0, baked: !!earthRes.baked,
                           csp: CSP, config: CONFIG };
+  // V6.3 观测钩子:暴露树冠材质状态,便于核对「换色是否真的生效」
+  window.__globeDebug.leafMats = treeLeafMats;
+  window.__globeDebug.barkMats = treeTintMats;
   if (debugMode) {
     // 校对用:每 0.5s 记一次第一只动物的球面坐标与动画时钟,用来证明
     // 位置在变(走来走去)、mixer.time 在推进(骨骼动画在播)
@@ -1837,6 +2194,167 @@ async function initApp() {
   }));
   pPoints.renderOrder = 2;
   outGroup.add(pPoints);
+
+  /* V6.2 四季视觉增位:冬季雪花 / 秋季落叶 / 夏季花朵。
+     全部挂在 outGroup ⇒ 随地球自转,始终对应地表。
+     独立 LCG 不消耗全局 rand() ⇒ 动物/树落点不变。
+     只改 opacity / position,绝不改 scale(零缩放约束)。 */
+  // ① 雪花(冬季可见,缓慢坠落,贴地后重置悬空)
+  var SNOW = CONFIG.snowCap;
+  var nPos = new Float32Array(SNOW * 3), nData = [];
+  var nseed = 8137;
+  function nr() { nseed = (Math.imul(nseed, 1664525) + 1013904223) >>> 0; return nseed / 4294967296; }
+  for (var ni = 0; ni < SNOW; ni++) {
+    var nu = nr(), nv = 0.15 + nr() * 0.70;
+    var ndir = surfaceDir((nu + 1) % 1, nv);
+    var brad = 1.03 + nr() * 0.18;
+    nData.push({ u: nu, v: nv, radius: brad, phase: nr() * Math.PI * 2, speed: 0.35 + nr() * 0.70 });
+    nPos[ni * 3]     = ndir[0] * brad;
+    nPos[ni * 3 + 1] = ndir[1] * brad;
+    nPos[ni * 3 + 2] = ndir[2] * brad;
+  }
+  var snowGeo = new THREE.BufferGeometry();
+  snowGeo.setAttribute('position', new THREE.Float32BufferAttribute(nPos, 3));
+  // ⚠️ Float32BufferAttribute 会【复制】数组 ⇒ 必须反查 GPU 真正在用的
+  //    buffer,否则每帧写 nPos 对 GPU 无效 ⇒ 雪花根本不会飘。
+  var snowPosBuf = snowGeo.attributes.position.array;
+  var snowPts = new THREE.Points(snowGeo, new THREE.PointsMaterial({
+    size: 0.014, map: snowTex(), color: 0xffffff, transparent: true,
+    depthWrite: false, blending: THREE.AdditiveBlending, sizeAttenuation: true
+  }));
+  snowPts.frustumCulled = false;
+  snowPts.renderOrder = 2;
+  snowPts.visible = false;
+  outGroup.add(snowPts);
+
+  // ② 落叶(秋季可见,自高处飘落)
+  var LEAF = CONFIG.leafCap;
+  var lPos = new Float32Array(LEAF * 3), lData = [];
+  var lseed = 8267;
+  function lr() { lseed = (Math.imul(lseed, 1664525) + 1013904223) >>> 0; return lseed / 4294967296; }
+  for (var li = 0; li < LEAF; li++) {
+    var lu = lr(), lv = 0.15 + lr() * 0.70;
+    var ldir = surfaceDir((lu + 1) % 1, lv);
+    var lrad = 1.06 + lr() * 0.15;
+    lData.push({ u: lu, v: lv, radius: lrad, phase: lr() * Math.PI * 2,
+                 speed: 0.80 + lr() * 1.30 });
+    lPos[li * 3]     = ldir[0] * lrad;
+    lPos[li * 3 + 1] = ldir[1] * lrad;
+    lPos[li * 3 + 2] = ldir[2] * lrad;
+  }
+  var leafGeo = new THREE.BufferGeometry();
+  leafGeo.setAttribute('position', new THREE.Float32BufferAttribute(lPos, 3));
+  var leafPosBuf = leafGeo.attributes.position.array;   // 同上:反查 GPU buffer
+  var leafPts = new THREE.Points(leafGeo, new THREE.PointsMaterial({
+    size: 0.030, map: leafTex(), color: 0xffa44a, transparent: true,
+    depthWrite: false, blending: THREE.AdditiveBlending, sizeAttenuation: true
+  }));
+  leafPts.frustumCulled = false;
+  leafPts.renderOrder = 2;
+  leafPts.visible = false;
+  outGroup.add(leafPts);
+
+  /* ③ 花朵(夏季可见):各种颜色的小圆点,撒在真正的草地上。
+     ⚠️ 落点必须取自 earthRes.grass 候选池(草地区域的像素),
+        不能用随机经纬度 —— 否则花会开在海里、沙漠、树上。
+     花点贴着地表(半径 1.004,比草面略高一点点,避免与地表 z-fighting),
+        随地球自转 ⇒ 始终开在同一片草地上。
+     ⚠️ 昼夜:V6.3 用户要求「夜晚下花朵变暗变淡,转到白天恢复鲜艳」。
+        PointsMaterial 不吃场景灯光 ⇒ 必须自己按「法线·太阳方向」
+        求昼夜系数,再据此压暗顶点色。
+        法线要转到世界空间再点积(花在 outGroup 里随地球自转,
+        而 SUN_DIR 是世界空间的)。 */
+  var FLOW = CONFIG.flowerCap;
+  var fPos = new Float32Array(FLOW * 3), fCol = new Float32Array(FLOW * 3), fData = [];
+  var fBase = new Float32Array(FLOW * 3);   // 基准色(未按昼夜调制)
+  /* 花色:只保留在绿色草地上对比强烈的颜色。
+     ⚠️ 白/浅绿在草地上几乎看不见(截图里一片白点但分不出颜色),
+        蓝色也偏暗 ⇒ 这里用饱和的红/粉/紫/橙/黄,少量白作点缀。
+     ⚠️ 颜色是【线性】空间的乘算系数 ⇒ 要得到想要的显示色,
+        线性值要比 sRGB 直觉值更饱和(否则 ACES 之后发白)。 */
+  var FLOWER_COLS = [
+    [1.00, 0.05, 0.12],   // 玫红
+    [1.00, 0.62, 0.04],   // 橙
+    [0.80, 0.10, 0.90],   // 紫
+    [1.00, 0.18, 0.55],   // 粉
+    [1.00, 0.80, 0.06],   // 金黄
+    [0.85, 0.04, 0.02],   // 朱红
+    [1.00, 1.00, 1.00],   // 白(点缀)
+    [1.00, 0.36, 0.02]    // 橙黄
+  ];
+  var fseed = 1863;
+  function fr() { fseed = (Math.imul(fseed, 1664525) + 1013904223) >>> 0; return fseed / 4294967296; }
+  var grassPool = earthRes.grass && earthRes.grass.length ? earthRes.grass : null;
+  var fPts2 = [];   // 已选花点(用于最小间距判定)
+  var _fdDbuf = [];                              // 调试:d 分布缓冲
+  for (var fi = 0; fi < FLOW; fi++) {
+    // 有草地候选池 ⇒ 从池里随机取(真正的草地);否则退回经纬度 + 陆地校验
+    var fu, fv, ok = false;
+    if (grassPool) {
+      var gp = grassPool[Math.floor(fr() * grassPool.length)];
+      fu = gp.u; fv = gp.v; ok = true;
+    } else {
+      for (var tr2 = 0; tr2 < 12 && !ok; tr2++) {
+        fu = fr(); fv = 0.15 + fr() * 0.70;
+        if (elevation(fu, fv) >= LAND_MIN) ok = true;
+      }
+      if (!ok) { fu = 0.5; fv = 0.5; }
+    }
+    // 最小间距:纯随机会让花聚成一坨、其余草地光秃。
+    // 角距阈值 0.030 rad ⇒ 屏幕上约 20px 间距,看起来是「一片花海」。
+    for (var t2 = 0; t2 < 6 && fPts2.length; t2++) {
+      var tooClose = false;
+      for (var q2 = 0; q2 < fPts2.length; q2++) {
+        var d2 = fPts2[q2];
+        var du = fu - d2.u, dv = fv - d2.v;
+        if (du * du + dv * dv < 0.030 * 0.030) { tooClose = true; break; }
+      }
+      if (!tooClose) break;
+      // 太近 ⇒ 换一个草地像素重试
+      var gp2 = grassPool ? grassPool[Math.floor(fr() * grassPool.length)] : null;
+      if (gp2) { fu = gp2.u; fv = gp2.v; }
+    }
+    fPts2.push({ u: fu, v: fv });
+    var fdir = surfaceDir((fu + 1) % 1, fv);
+    var frad = 1.004;                        // 贴着草地表面
+    fData.push({ u: fu, v: fv, baseH: frad, phase: fr() * Math.PI * 2, speed: 0.40 + fr() * 1.0,
+                 nx: fdir[0], ny: fdir[1], nz: fdir[2] });   // 局部法线(昼夜判定用)
+    fPos[fi * 3]     = fdir[0] * frad;
+    fPos[fi * 3 + 1] = fdir[1] * frad;
+    fPos[fi * 3 + 2] = fdir[2] * frad;
+    // 配色按序号轮转(而非纯随机)⇒ 8 种颜色均匀分布,不会某色扎堆
+    var col = FLOWER_COLS[fi % FLOWER_COLS.length];
+    fBase[fi * 3]     = col[0];
+    fBase[fi * 3 + 1] = col[1];
+    fBase[fi * 3 + 2] = col[2];
+    fCol[fi * 3]     = col[0];
+    fCol[fi * 3 + 1] = col[1];
+    fCol[fi * 3 + 2] = col[2];
+  }
+  var flGeo = new THREE.BufferGeometry();
+  flGeo.setAttribute('position', new THREE.Float32BufferAttribute(fPos, 3));
+  flGeo.setAttribute('color', new THREE.Float32BufferAttribute(fCol, 3));
+  /* ⚠️⚠️ three.js 的 Float32BufferAttribute(array,size) 内部是
+        `new Float32Array(array)` ⇒ 【复制】一份,不是引用!
+        所以直接改 fCol / fPos 不会影响 GPU 缓冲区 —— 必须写
+        geo.attributes.xxx.array(那是 GPU 真正在用的那块)。
+        (原 C14 光点就是用 pGeo.attributes.position.array 反查的,
+         见 frame() 里的 parr;2026-11-07 花朵昼夜不生效即此坑。)
+        这里把两块 buffer 反查出来缓存,后续每帧直接写它们。 */
+  var flPosBuf = flGeo.attributes.position.array;
+  var flColBuf = flGeo.attributes.color.array;
+  var flPts = new THREE.Points(flGeo, new THREE.PointsMaterial({
+    size: 0.042, map: flowerTex(), vertexColors: true, transparent: true,
+    depthWrite: false, blending: THREE.NormalBlending, sizeAttenuation: true,
+    // ⚠️ 必须 toneMapped:false —— 场景开了 ACESFilmicToneMapping,
+    //    小而亮的点经色调映射后饱和度被压掉,粉/橙/紫全变成接近白
+    //    (2026-11-07 用户实测「大多是白色或相近颜色」)。
+    toneMapped: false
+  }));
+  flPts.frustumCulled = false;
+  flPts.renderOrder = 2;
+  flPts.visible = false;
+  outGroup.add(flPts);
 
   /* v5.2 龙卷风:3 个槽位,间歇性出现(用户要求「偶尔出现的」)。
      - 周期 38~60s,其中只有约 32% 时间可见:0.58~0.64 淡入、
@@ -2389,22 +2907,87 @@ async function initApp() {
         panicPts.push(tornadoes[pz0].group.position.clone().normalize());
     var mt = now * 0.000018;
     positionMoon(mt);
-    // V2 四季(v6.1e):色差从 ±7% 拉到 ±20%,周期 96s→60s,
-    // 树冠改用独立季节色(春嫩绿/夏浓绿/秋金橙/冬冷灰蓝)、大气光晕同步染色,
-    // 只改材质 color,不改几何 / 尺寸 / 落点。?season=0|1|2|3 可钉档校对。
+    // V6.3 四季:
+    //   · 地球 tint / 树干 tint:按 SEASON_PARAMS 线性插值(与贴图同源)。
+    //   · 树冠:shader 换色相(春淡绿 / 夏原色 / 秋黄橙红深红 / 冬冷蓝灰),
+    //     每种树形一个秋色 ⇒ 同一片林子里就有黄树与红树。
+    //   · 花朵(夏) / 积雪层(冬) / 落叶(秋) / 雪花(冬) 的出现强度同源插值。
+    //   · 只改材质 color / opacity / position,不改几何 / 尺寸 / 落点。
     var sec = now * 0.001;
-    var ST = [[0.94, 1.12, 0.94], [1.10, 1.06, 0.80],
-              [1.18, 0.84, 0.66], [0.82, 0.94, 1.20]];
-    var LEAF = [[1.00, 1.10, 0.92], [0.90, 1.05, 0.82],
-                [1.28, 0.72, 0.42], [0.72, 0.86, 1.05]];
     var sf = seasonPin ? Number(seasonPin[1]) : ((sec / CONFIG.seasonPeriod) % 1) * 4;
     var si0 = Math.floor(sf) % 4, si1 = (si0 + 1) % 4, st = smooth01(sf - Math.floor(sf));
-    var tintR = lerp(ST[si0][0], ST[si1][0], st),
-        tintG = lerp(ST[si0][1], ST[si1][1], st),
-        tintB = lerp(ST[si0][2], ST[si1][2], st);
-    var leafR = lerp(LEAF[si0][0], LEAF[si1][0], st),
-        leafG = lerp(LEAF[si0][1], LEAF[si1][1], st),
-        leafB = lerp(LEAF[si0][2], LEAF[si1][2], st);
+    var P0 = SEASON_PARAMS[si0], P1 = SEASON_PARAMS[si1];
+    var SNOW_BLEND = 0.30;          // 过渡带占一季的比例(末尾 30%)
+    var seasonW = (function () {
+      var w = (st - (1 - SNOW_BLEND)) / SNOW_BLEND;
+      if (w <= 0) return 0;
+      if (w >= 1) return 1;
+      return smooth01(w);
+    })();
+
+
+    var tintR = lerp(P0.ground[0], P1.ground[0], seasonW),
+        tintG = lerp(P0.ground[1], P1.ground[1], seasonW),
+        tintB = lerp(P0.ground[2], P1.ground[2], seasonW);
+    var barkR = lerp(P0.bark[0], P1.bark[0], seasonW),
+        barkG = lerp(P0.bark[1], P1.bark[1], seasonW),
+        barkB = lerp(P0.bark[2], P1.bark[2], seasonW);
+    // ⚠️ 全部用【连续】插值:si0 是当前季、si1 是下一季,st 是过渡进度。
+    //    用户实测要求「秋冬/冬春交界不能突变」⇒ 任何一项都不能加硬阈值。
+    var flowersK = lerp(P0.flowers, P1.flowers, seasonW);
+    var snowGroundK = lerp(P0.snowGround, P1.snowGround, seasonW);
+    var snowFallK = lerp(P0.snowFall, P1.snowFall, seasonW);
+    var leafFallK = lerp(P0.leafFall, P1.leafFall, seasonW);
+    var grassYellowK = lerp(P0.grassYellow, P1.grassYellow, seasonW);
+    // ⚠️ 积雪的出现要【集中在秋冬交界】,而不是提前半个秋季就开始下雪。
+    //    sf 在 [si0, si0+1) 内,st = sf - si0 从 0 递增到 1,
+    //    所以 st→1 才是【本季末尾 = 正在向下一季过渡】。
+    //    改用「末尾过渡带」:只有 st 接近 1 那一小段才渐变,
+    //    带内用 smooth01 加速(仍是连续函数 ⇒ 不会突变)。
+    function edgeBlend(from, to) {
+      // st=0 → from(本季恒定值);st→1 → to(下一季的值)
+      var w = (st - (1 - SNOW_BLEND)) / SNOW_BLEND;
+      if (w <= 0) return from;
+      if (w >= 1) return to;
+      return lerp(from, to, smooth01(w));
+    }
+    // ⚠️ 统一的「季节推进权重」:本季前 70% 保持本季参数,
+    //    季末 30% 连续过渡到下一季。
+    //    之前地球 tint / 树色 / 草地色是跨【整季】lerp 的 ⇒ 每季参数只在
+    //    季初那一瞬间成立,其余时间都在往下一季漂 ⇒ 季节感被稀释,
+    //    也会让「雪融化」与「树变绿」的时序对不上。
+    //    统一成「本季保持 + 季末过渡」后,四季各有稳定的表现期,
+    //    且地面与树的颜色切换发生在同一时刻。
+    // ⚠️ 草地「黄→绿」必须【等雪完全盖住之后】才推进(用户 2026-11-07 明确指出):
+    //    之前草地色是跨整季 lerp(秋黄→冬绿)⇒ 深秋时草地已经在变绿,
+    //    叠上渐渐泛白的雪 ⇒ 看到的是「先黄变绿,再逐渐变白」,顺序反了。
+    //    正确:黄色一直保持 ⇒ 白色连续盖上来(黄→白);
+    //          雪覆盖满后,底色才在白色遮盖下悄悄变绿(看不见);
+    //          冬春交界雪消融 ⇒ 白色连续显出绿色。
+    //    grassGreenK = 底色由黄转绿的进度,只在雪覆盖率高时推进。
+    // ⚠️ 草地黄化强度 grassYellowK:
+    //   0 = 完全露出【原贴图】的绿色(与春夏完全一致)
+    //   1 = 完全变成枯黄
+    //   之前把「颜色」和「强度」分开插值,导致夏秋交界颜色瞬间跳变、
+    //   冬春交界露出平涂深绿后又跳回贴图浅绿(用户 2026-11-07 实测反馈)。
+    //   现在颜色只有【原贴图绿】与【枯黄】两档,由这一个强度连续插值,
+    //   强度归零时露出的就是原贴图 ⇒ 与春季逐像素一致,不会有跳变。
+    if (si0 === 2) {                // 秋:末尾才开始积雪;草地保持枯黄
+      snowGroundK = edgeBlend(0, 1);
+      snowFallK = edgeBlend(0, 1);
+      grassYellowK = 1;
+    } else if (si0 === 3) {         // 冬:末尾开始消融
+      snowGroundK = edgeBlend(1, 0);
+      snowFallK = edgeBlend(1, 0);
+      // 冬季前 35%(雪已全覆盖)把黄化撤掉 ⇒ 白色遮盖下底色变绿(看不见),
+      // 等雪融化时露出的已经是原贴图绿 ⇒ 冬春交界连续显绿,无跳变。
+      grassYellowK = 1 - smooth01(clamp01(st / 0.35));
+    } else if (si0 === 1) {         // 夏:末尾草地开始变黄(与秋季颜色连续)
+      grassYellowK = edgeBlend(0, 1);
+      snowGroundK = 0; snowFallK = 0;
+    } else {                        // 春:无雪无黄
+      snowGroundK = 0; snowFallK = 0; grassYellowK = 0;
+    }
     earthMat.color.setRGB(tintR, tintG, tintB);
     atmoGlow.material.color.setRGB(lerp(1, tintR, 0.55),
                                    lerp(1, tintG, 0.55),
@@ -2412,16 +2995,196 @@ async function initApp() {
     for (var sm = 0; sm < treeTintMats.length; sm++) {
       var tm = treeTintMats[sm];
       if (!tm.color) continue;
-      if (!tm.userData.__sr) tm.userData.__sr = [tm.color.r, tm.color.g, tm.color.b];
-      var bc = tm.userData.__sr;
-      tm.color.setRGB(bc[0] * leafR, bc[1] * leafG, bc[2] * leafB);
+      tm.color.setRGB(barkR, barkG, barkB);
+    }
+    // V6.3 树冠换色:沿用原来的插值方式(在两季之间 lerp),
+    //   只是把「乘法染色」换成「保留亮度的色相替换」——
+    //   否则绿叶贴图乘任何系数都还是绿的,冬天变不成冷蓝灰。
+    //   秋季每种树形一个专属色 ⇒ 同一片林子里有黄树也有红树。
+    if (window.__globeDebug) {
+      window.__globeDebug.leafMats = treeLeafMats;
+      window.__globeDebug.barkMats = treeTintMats;
+    }
+    for (var lmi = 0; lmi < treeLeafMats.length; lmi++) {
+      var lm = treeLeafMats[lmi], su = lm.userData.seasonU;
+      if (!su || !lm.userData.leafColor) continue;
+      var lc = lm.userData.leafColor, lmx = lm.userData.leafMix;
+      var lr0 = lc[si0], lr1 = lc[si1];
+      // ⚠️ 用 seasonW(本季保持 + 季末过渡),不是整季 lerp:
+      //   整季 lerp 会让「夏→秋的绿转黄」分散到整个夏季,
+      //   看上去一直是渐变、季节感很弱(用户反馈)。
+      //   seasonW ⇒ 夏季稳定是深绿,秋末才开始转黄/红。
+      su.tint.value.setRGB(
+        lerp(lr0.r, lr1.r, seasonW), lerp(lr0.g, lr1.g, seasonW),
+        lerp(lr0.b, lr1.b, seasonW));
+      su.mix.value = lerp(lmx[si0], lmx[si1], seasonW);
     }
     sunLight.intensity = 2.4 * (0.88 + 0.12 * Math.cos(sf / 4 * Math.PI * 2));
     window.__globeDebug.season = {
       index: si0, sf: +sf.toFixed(2), pinned: !!seasonPin,
       tint: [+tintR.toFixed(3), +tintG.toFixed(3), +tintB.toFixed(3)],
-      leaf: [+leafR.toFixed(3), +leafG.toFixed(3), +leafB.toFixed(3)]
+      bark: [+barkR.toFixed(3), +barkG.toFixed(3), +barkB.toFixed(3)],
+      flowersK: +flowersK.toFixed(2), snowGroundK: +snowGroundK.toFixed(2),
+      snowFallK: +snowFallK.toFixed(2), leafFallK: +leafFallK.toFixed(2),
+      grassYellowK: +grassYellowK.toFixed(2)
     };
+    // ① 雪花:冬季可见,缓慢坠落;贴地后重置悬空
+    if (snowPts) {
+      snowPts.visible = snowFallK > 0.01;
+      if (snowPts.visible) {
+        snowPts.material.opacity = Math.min(1, snowFallK * 1.4);
+        for (var si = 0; si < SNOW; si++) {
+          var sd = nData[si];
+          sd.radius -= dt * sd.speed * 0.12;
+          if (sd.radius < 1.015) {
+            sd.radius = 1.03 + nr() * 0.18;
+            sd.u = nr();
+            sd.v = 0.15 + nr() * 0.70;
+          }
+          var nsd = surfaceDir((sd.u + 1) % 1, sd.v);
+          var nbob = Math.sin(now * 0.001 * 0.6 + sd.phase) * 0.006;
+          snowPosBuf[si * 3]     = nsd[0] * (sd.radius + nbob);
+          snowPosBuf[si * 3 + 1] = nsd[1] * (sd.radius + nbob);
+          snowPosBuf[si * 3 + 2] = nsd[2] * (sd.radius + nbob);
+        }
+        snowGeo.attributes.position.needsUpdate = true;
+      }
+    }
+    // ② 落叶:秋季可见,从高处飘落向地面;贴地后重悬空,循环往复
+    if (leafPts) {
+      leafPts.visible = leafFallK > 0.01;
+      if (leafPts.visible) {
+        leafPts.material.opacity = Math.min(1, leafFallK * 1.5);
+        for (var li2 = 0; li2 < LEAF; li2++) {
+          var ld = lData[li2];
+          ld.radius -= dt * ld.speed * 0.20;
+          if (ld.radius < 1.015) {
+            ld.radius = 1.06 + lr() * 0.15;
+            ld.u = lr();
+            ld.v = 0.15 + lr() * 0.70;
+          }
+          var lsd = surfaceDir((ld.u + 1) % 1, ld.v);
+          var lbob = Math.sin(now * 0.002 * ld.speed + ld.phase) * 0.020;
+          // 使落叶有轻微横向漂移(在切面方向)
+          // ⚠️ cross() 返回普通数组(不是 Vector3)⇒ 没有 .normalize(),
+          //    必须手动除以模长,否则每帧抛 "tang.normalize is not a function"
+          var tang = cross(surfaceDir((ld.u + 0.01 + 1) % 1, ld.v), lsd);
+          var tlen = Math.sqrt(tang[0] * tang[0] + tang[1] * tang[1] + tang[2] * tang[2]);
+          if (tlen > 1e-9) { tang[0] /= tlen; tang[1] /= tlen; tang[2] /= tlen; }
+          else { tang[0] = 0; tang[1] = 0; tang[2] = 0; }
+          var lx = tang[0] * lbob, ly = tang[1] * lbob, lz = tang[2] * lbob;
+          leafPosBuf[li2 * 3]     = lsd[0] * ld.radius + lx;
+          leafPosBuf[li2 * 3 + 1] = lsd[1] * ld.radius + ly;
+          leafPosBuf[li2 * 3 + 2] = lsd[2] * ld.radius + lz;
+        }
+        leafGeo.attributes.position.needsUpdate = true;
+      }
+    }
+    // ③ 花朵:夏季可见,悬于草地上方,轻轻上下浮动
+    if (flPts) {
+      flPts.visible = flowersK > 0.01;
+      if (flPts.visible) {
+        flPts.material.opacity = Math.min(1, flowersK * 1.2);
+        // V6.3 昼夜:夜面花朵变暗变淡,转回白天恢复鲜艳。
+        //   PointsMaterial 不吃场景灯光 ⇒ 自己按「世界法线·太阳方向」求昼夜系数。
+        //   法线要先从 outGroup 局部空间转到世界空间(花随地球自转,
+        //   而 SUN_DIR 是世界空间的)。
+        //   判定口径与 nightLayer 一致:night = 1 - smoothstep(-0.20, 0.16, d)
+        if (outGroup.matrixWorld) {
+          // 法线变换:outGroup 只有「Z 轴倾斜(tiltPivot)+ Y 轴自转」两个旋转,
+          // 直接解析算比取 matrixWorld 更稳(也不依赖渲染器的更新时序)。
+          //   world = Rz(tilt) · Ry(earthRot) · local   (列向量约定)
+          var _er = earth.rotation.y;
+          var _ct = Math.cos(CONFIG.tilt), _st = Math.sin(CONFIG.tilt);
+          var _ce = Math.cos(_er), _se = Math.sin(_er);
+          // 展开后 local(lx,ly,lz) → world 的三个分量系数
+          var _m00 = _ct * _ce,  _m01 = -_st,      _m02 = _ct * _se;
+          var _m10 = _st * _ce,  _m11 = _ct,       _m12 = _st * _se;
+          var _m20 = -_se,       _m21 = 0,         _m22 = _ce;
+          var _dR = 0, _dG = 0, _dB = 0, _dN = 0, _nR = 0, _nG = 0, _nB = 0, _nN = 0;
+          for (var fi2 = 0; fi2 < FLOW; fi2++) {
+            var fd = fData[fi2];
+            var wnx = _m00 * fd.nx + _m01 * fd.ny + _m02 * fd.nz;
+            var wny = _m10 * fd.nx + _m11 * fd.ny + _m12 * fd.nz;
+            var wnz = _m20 * fd.nx + _m21 * fd.ny + _m22 * fd.nz;
+            var d = wnx * SUN_DIR.x + wny * SUN_DIR.y + wnz * SUN_DIR.z;
+            // 夜面(朝向背离太阳)系数高;晨昏带平滑过渡
+            var nightF = 1.0 - smooth01((d + 0.20) / 0.36);
+            // ⚠️ 幅度必须够大才看得出来:之前只混 55% 到灰蓝,
+            //    算下来夜面亮度还有 ~0.56 ⇒ 看着只是「稍微暗一点」。
+            //    现在夜面:去饱和 80% + 亮度压到 28%(红)/32%(绿)/48%(蓝)
+            //    ⇒ 明显变暗变淡、且偏冷蓝(与夜面压暗层的冷蓝一致)。
+            var br = fBase[fi2 * 3], bg = fBase[fi2 * 3 + 1], bb = fBase[fi2 * 3 + 2];
+            var lum = br * 0.299 + bg * 0.587 + bb * 0.114;
+            var k = nightF;
+            // ⚠️ 写 flColBuf(不是 fCol):后者是 Float32BufferAttribute 复制出来的
+            //    独立数组,写它对 GPU 无效 ⇒ 花朵昼夜调制会完全不生效。
+            flColBuf[fi2 * 3]     = lerp(br, lum, k * 0.80) * lerp(1.0, 0.28, k);
+            flColBuf[fi2 * 3 + 1] = lerp(bg, lum, k * 0.80) * lerp(1.0, 0.32, k);
+            flColBuf[fi2 * 3 + 2] = lerp(bb, lum * 1.15, k * 0.80) * lerp(1.0, 0.48, k);
+            // 数值采样(昼/夜两组的平均色)⇒ 可在控制台核对是否真的变暗
+            if (nightF < 0.35) { _dR += flColBuf[fi2 * 3]; _dG += flColBuf[fi2 * 3 + 1]; _dB += flColBuf[fi2 * 3 + 2]; _dN++; }
+            else if (nightF > 0.65) { _nR += flColBuf[fi2 * 3]; _nG += flColBuf[fi2 * 3 + 1]; _nB += flColBuf[fi2 * 3 + 2]; _nN++; }
+          }
+          if (window.__globeDebug) {
+            window.__globeDebug.flowerLight = {
+              day: _dN ? [+(_dR / _dN).toFixed(3), +(_dG / _dN).toFixed(3), +(_dB / _dN).toFixed(3)] : null,
+              night: _nN ? [+(_nR / _nN).toFixed(3), +(_nG / _nN).toFixed(3), +(_nB / _nN).toFixed(3)] : null,
+              dayN: _dN, nightN: _nN
+            };
+          }
+          // 调试:d 的分布 + 昼/夜平均色(核对昼夜调制是否真的生效)
+          if (window.__globeDebug) {
+            var _db = _fdDbuf; _fdDbuf = [];
+            for (var fi4 = 0; fi4 < FLOW; fi4++) {
+              var fd4 = fData[fi4];
+              var dx4 = _m00 * fd4.nx + _m01 * fd4.ny + _m02 * fd4.nz;
+              var dy4 = _m10 * fd4.nx + _m11 * fd4.ny + _m12 * fd4.nz;
+              var dz4 = _m20 * fd4.nx + _m21 * fd4.ny + _m22 * fd4.nz;
+              _db.push(dx4 * SUN_DIR.x + dy4 * SUN_DIR.y + dz4 * SUN_DIR.z);
+            }
+            _db.sort(function (a, b) { return a - b; });
+            var _qn = _db.length;
+            window.__globeDebug.flowerD = _qn ? {
+              min: +_db[0].toFixed(3), max: +_db[_qn - 1].toFixed(3),
+              p25: +_db[Math.floor(_qn * 0.25)].toFixed(3),
+              p50: +_db[Math.floor(_qn * 0.5)].toFixed(3),
+              p75: +_db[Math.floor(_qn * 0.75)].toFixed(3),
+              len: _qn
+            } : { len: 0 };
+          }
+        }
+        for (var fi3 = 0; fi3 < FLOW; fi3++) {
+          var fd3 = fData[fi3];
+          // 沿球面法线方向轻微起伏(不能加 Y 分量:那会把花推离球面)
+          var fb3 = Math.sin(now * 0.002 * fd3.speed + fd3.phase) * 0.004;
+          var fdir3 = surfaceDir((fd3.u + 1) % 1, fd3.v);
+          var fr3 = fd3.baseH + fb3;
+          flPosBuf[fi3 * 3]     = fdir3[0] * fr3;
+          flPosBuf[fi3 * 3 + 1] = fdir3[1] * fr3;
+          flPosBuf[fi3 * 3 + 2] = fdir3[2] * fr3;
+        }
+        flGeo.attributes.position.needsUpdate = true;
+        flGeo.attributes.color.needsUpdate = true;
+      }
+    }
+    // ④ 陆地季节色层:冬天盖雪(整块陆地)、秋天草地变黄(只染草地)
+    //    强度全部由季节进度连续插值 ⇒ 交界处平滑过渡,无突变。
+    if (landSeason) {
+      var snowA = snowGroundK, grassA = grassYellowK;
+      landSeason.visible = (snowA > 0.002 || grassA > 0.002);
+      if (landSeason.visible) {
+        var lsu = landSeason.material.uniforms;
+        lsu.uSnowAmt.value = snowA;
+        lsu.uGrassAmt.value = grassA;
+        // 草地底色也逐季插值:秋(枯黄)→ 冬(常绿)。
+        // 秋冬交界时这层黄→绿的变化被逐渐增加的白色盖住 ⇒ 只看到「连续变白」;
+        // 冬春交界雪消融后 ⇒ 白色连续显出绿色。
+        // 草地底色:黄 → 绿,由 grassGreenK 控制(只在雪盖满后推进)
+        // 草地色只有一档(枯黄);强度=0 时 shader 直接露出原贴图绿
+        lsu.uGrassColor.value.setRGB(GRASS_YELLOW[0], GRASS_YELLOW[1], GRASS_YELLOW[2]);
+      }
+    }
     nightLayer.material.uniforms.uTime.value = sec;
     oceanLayer.material.uniforms.uTime.value = sec;
     updateFootprints(now);
