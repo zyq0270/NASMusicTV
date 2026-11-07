@@ -113,6 +113,25 @@
       ② 长颈鹿改为朝头的方向前进:orient_probe.html 实测头顶顶点
          100% 在局部 +X(其它物种在 +Z),MODELS 加 facing:-π/2,
          stepWalkers 右乘局部 Y 旋转把 +X 摆到前进轴。
+    v5.2 (2026-11-07) 增加 3 个间歇性龙卷风(用户:「偶尔出现的」):
+      程序化 LatheGeometry 双层漏斗 + 螺旋云纹 CanvasTexture +
+      4 球云帽 + 贴地尘埃环,全部无外部资源。
+      生命周期:周期 38~60s,仅 0.58~0.90 相位可见(淡入/持续/淡出),
+      三个相位错开、0 号开场落点锁定正面半球(否则首个龙卷风在球背面
+      看不见)、每轮换陆地落点,并在可见期间沿陆地缓慢行进
+      (与 walkers 同一套 u/v 步进,撞海岸 / 极区转向);只改 opacity /
+      visible / position / quaternion,不缩放;独立 LCG 不消耗全局 rand
+      ⇒ 169 个原有实例落点不变。
+      ?debug=1 的 tornadoTrace 记录可见数量起伏与 (u,v) 位移作为金标准。
+    v5.2c (2026-11-07) 按反馈再调龙卷风:
+      ① 高度 0.30→0.19、顶部半径收窄(用户「太高了」);
+      ② 新增 swirl 子 Group 整团公转 + 三层漏斗差速反向旋转 +
+         更强 UV 滚动,与沿陆地位移叠加 ⇒「一边旋转一边运动」;
+      ③ 三层漏斗(含更宽更淡的雾壳)+ 4 云帽 + 3 雾团 +
+         更宽上下淡出 + 灰蓝暗部条纹 ⇒「更加雾化」而非硬边锥体;
+      开场相位改到 0.66(完整可见段),保证打开页面就能看到;
+    v5.2e: 落点额外避开森林簇(树点 1/4 抽样 + 0.14 rad 约束),
+      让灰白雾团落在开阔陆地,不与绿色树冠混成一团。
 -->
 <canvas id="sky"></canvas>
 <div id="stage"></div>
@@ -395,6 +414,51 @@ function drawStarfield(cv) {
       ctx.stroke();
     }
   }
+}
+
+/* ---------- v5.2 龙卷风纹理(纯程序化,不引入外部资源) ---------- */
+function tornadoTex() {
+  var w = 256, h = 256, cv = document.createElement('canvas');
+  cv.width = w; cv.height = h;
+  var ctx = cv.getContext('2d');
+  var img = ctx.createImageData(w, h), d = img.data;
+  for (var y = 0; y < h; y++) {
+    for (var x = 0; x < w; x++) {
+      var u = x / w, v = y / h;
+      // 斜向螺旋条纹:相位沿高度递进 ⇒ UV 横向滚动时看起来在旋转
+      var band = 0.5 + 0.5 * Math.sin((u * 4 - v * 6) * Math.PI * 2);
+      var flake = 0.5 + 0.5 * Math.sin(u * Math.PI * 18 + v * 13) *
+                         Math.sin(v * Math.PI * 10 - u * 9);
+      // 更雾化:较低的峰值 alpha + 云絮噪声 + 更宽的上下淡出(不要硬边锥体);
+      // 但保留灰蓝暗部条纹,否则叠在浅绿/浅蓝地表上会完全看不见。
+      var a = 0.10 + band * 0.34 + flake * 0.22;
+      a *= Math.min(1, Math.min(v, 1 - v) * 4.0);
+      var shade = 0.25 + band * 0.75, i = (y * w + x) * 4;
+      d[i]     = 92 + 140 * shade;       // 暗灰蓝 → 亮白(暗部再深一点)
+      d[i + 1] = 118 + 122 * shade;
+      d[i + 2] = 150 + 102 * shade;
+      d[i + 3] = Math.min(255, a * 255);
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  var t = new THREE.CanvasTexture(cv);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.wrapS = THREE.RepeatWrapping;
+  t.wrapT = THREE.ClampToEdgeWrapping;
+  return t;
+}
+function dustTex() {
+  var s = 128, cv = document.createElement('canvas'); cv.width = cv.height = s;
+  var ctx = cv.getContext('2d');
+  var g = ctx.createRadialGradient(s / 2, s / 2, s * 0.04, s / 2, s / 2, s * 0.5);
+  g.addColorStop(0, 'rgba(190,210,228,0)');
+  g.addColorStop(0.32, 'rgba(190,210,228,0.42)');
+  g.addColorStop(0.68, 'rgba(176,198,220,0.16)');
+  g.addColorStop(1, 'rgba(176,198,220,0)');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, s, s);
+  var t = new THREE.CanvasTexture(cv);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
 }
 
 /* ---------- scene ---------- */
@@ -1031,6 +1095,157 @@ function initApp() {
   pPoints.renderOrder = 2;
   outGroup.add(pPoints);
 
+  /* v5.2 龙卷风:3 个槽位,间歇性出现(用户要求「偶尔出现的」)。
+     - 周期 38~60s,其中只有约 32% 时间可见:0.58~0.64 淡入、
+       0.64~0.82 持续、0.82~0.90 淡出,其余隐藏。
+     - 三个相位错开:0 号一打开就快出现、2 号正在消散,之后变成偶尔出现。
+     - 每轮换一个陆地落点 ⇒ 不总在同一处。
+     - 只改 opacity / visible / quaternion,绝不改 scale(延续零缩放约束)。
+     - 独立 LCG,不消耗全局 rand ⇒ 动物 / 树落点完全不变。
+     - 挂 outGroup ⇒ 随地球自转,始终立在陆地上。 */
+  var TORNADO_COUNT = 3, TORNADO_H = 0.19;   // v5.2c: 嫌太高,降到约树(0.15)的 1.3 倍
+  // ⚠️ 不能复用 _upAxis:它声明在 stepWalkers 之前(更靠后),var 提升后此处
+  //    是 undefined,setFromUnitVectors 读 .dot() 会让整个 initApp 崩掉。
+  var _tornadoUp = new THREE.Vector3(0, 1, 0);
+  var tSeed = 20261107;
+  function tr() {
+    tSeed = (Math.imul(tSeed, 1664525) + 1013904223) >>> 0;
+    return tSeed / 4294967296;
+  }
+  var animalPts = [], treePts = [];
+  for (var api = 0; api < plans.length; api++) {
+    var isTree = plans[api].spec.name === 'tree';
+    // 树有 150 棵且簇状聚集,只取 1/4 做粗粒度避让就够了,
+    // 避免 150×1200 次全量球面距离把初始化拖慢。
+    var stride = isTree ? 4 : 1, dst = isTree ? treePts : animalPts;
+    for (var apj = 0; apj < plans[api].spots.length; apj += stride)
+      dst.push(plans[api].spots[apj]);
+  }
+  function pickTornadoSpot(existing, frontOnly) {
+    var fallback = null;
+    for (var tries = 0; tries < 1200; tries++) {
+      var u = tr(), v = 0.16 + tr() * 0.68;
+      if (elevation(u, v) < 0.52) continue;       // 陆地内部,避开海岸
+      // 开场那个槽位必须在正面(surfaceDir 的 z 分量 > 0.38),
+      // 否则用户打开页面时龙卷风正好在球背面,完全看不见。
+      if (frontOnly && surfaceDir(u, v)[2] < 0.38) continue;
+      var p = { u: u, v: v }, good = true;
+      for (var ai = 0; ai < animalPts.length; ai++)
+        if (angularDist(p, animalPts[ai]) < 0.20) { good = false; break; }
+      if (!good) continue;
+      // 落在开阔陆地,别把灰白雾团盖在绿色树冠上(会看成「树开花」)
+      for (var tpi2 = 0; tpi2 < treePts.length; tpi2++)
+        if (angularDist(p, treePts[tpi2]) < 0.14) { good = false; break; }
+      if (!good) continue;
+      for (var ei = 0; ei < existing.length; ei++)
+        if (angularDist(p, existing[ei]) < 0.45) { good = false; break; }
+      if (good) return p;
+      if (!fallback) fallback = p;
+    }
+    return fallback || { u: 0.5, v: 0.42 };
+  }
+  var tSpots = [];
+  for (var tsi = 0; tsi < TORNADO_COUNT * 6; tsi++)
+    tSpots.push(pickTornadoSpot(tSpots, tsi === 0));
+
+  // 漏斗轮廓:底窄顶宽。内外两层用不同几何(不用 scale),避免任何缩放动画
+  function funnelGeo(scaleR, scaleH) {
+    var pts = [];
+    for (var i = 0; i <= 12; i++) {
+      var t = i / 12;
+      pts.push(new THREE.Vector2((0.010 + 0.034 * Math.pow(t, 1.45)) * scaleR,
+                                 t * TORNADO_H * scaleH));
+    }
+    return new THREE.LatheGeometry(pts, 28);
+  }
+  var funnelInner = funnelGeo(1.0, 1.0), funnelOuter = funnelGeo(1.35, 1.08);
+  var funnelHaze  = funnelGeo(1.70, 1.14);         // ③ 更宽更淡的雾壳
+  var capGeo = new THREE.IcosahedronGeometry(0.026, 0);
+  var puffGeo = new THREE.IcosahedronGeometry(0.019, 0);   // ③ 沿高度的雾团
+  var dustShared = dustTex(), tornadoTexShared = tornadoTex();
+  function placeTornado(gr, n, p) {
+    var dir = surfaceDir(p.u, p.v);
+    n.set(dir[0], dir[1], dir[2]);
+    gr.position.copy(n).multiplyScalar(R + 0.001);
+    gr.quaternion.setFromUnitVectors(_tornadoUp, n);   // 局部 +Y 对齐球面法线
+  }
+  // 0 号一打开就处于完整可见的持续段(此前 0.56 在低帧率 headless 下
+  //    26s 都还没淡入完,截图看不到任何龙卷风),2 号正在消散。
+  var initPhases = [0.66, 0.10, 0.84];
+  var tornadoes = [];
+  for (var tk = 0; tk < TORNADO_COUNT; tk++) {
+    var grp = new THREE.Group(), nrm = new THREE.Vector3();
+
+    var texA = tornadoTexShared.clone(); texA.needsUpdate = true;
+    var texB = tornadoTexShared.clone(); texB.needsUpdate = true;
+    var texC = tornadoTexShared.clone(); texC.needsUpdate = true;
+    texB.offset.x = 0.37; texC.offset.x = 0.71;
+    // ② swirl 子 Group:整团漏斗 / 云帽 / 雾团一起绕自身轴公转,
+    //    同时外层 group 沿球面移动 ⇒ 真正的「一边旋转一边运动」。
+    var swirl = new THREE.Group();
+    grp.add(swirl);
+    var innerMat = new THREE.MeshBasicMaterial({
+      map: texA, transparent: true, depthWrite: false,
+      side: THREE.DoubleSide, opacity: 0
+    });
+    var outerMat = new THREE.MeshBasicMaterial({
+      map: texB, transparent: true, depthWrite: false,
+      side: THREE.DoubleSide, opacity: 0
+    });
+    var hazeMat = new THREE.MeshBasicMaterial({
+      map: texC, transparent: true, depthWrite: false,
+      side: THREE.DoubleSide, opacity: 0
+    });
+    var inner = new THREE.Mesh(funnelInner, innerMat); inner.renderOrder = 5;
+    var outer = new THREE.Mesh(funnelOuter, outerMat); outer.renderOrder = 5;
+    var haze  = new THREE.Mesh(funnelHaze, hazeMat);  haze.renderOrder = 5;
+    swirl.add(inner); swirl.add(outer); swirl.add(haze);
+
+    var fade = [{ m: innerMat, b: 0.86 }, { m: outerMat, b: 0.40 },
+                { m: hazeMat, b: 0.22 }];
+    // ③ 4 个顶部云帽 + 3 个沿高度分布的雾团,把硬边锥体打散成云絮
+    for (var ci = 0; ci < 6; ci++) {
+      var cm = new THREE.MeshLambertMaterial({
+        color: 0xb9cddd, transparent: true, opacity: 0,
+        flatShading: true, depthWrite: false
+      });
+      var isCap = ci < 3;
+      var puff = new THREE.Mesh(isCap ? capGeo : puffGeo, cm);
+      var ca = (ci / 6) * Math.PI * 2 + tr() * 0.7;
+      var level = isCap ? 0.92 + tr() * 0.10 : 0.22 + tr() * 0.52;
+      var cr = isCap ? 0.020 + tr() * 0.018 : 0.014 + tr() * 0.020;
+      puff.position.set(Math.cos(ca) * cr, TORNADO_H * level, Math.sin(ca) * cr);
+      puff.renderOrder = 5;
+      swirl.add(puff);
+      fade.push({ m: cm, b: isCap ? 0.72 : 0.36 });
+    }
+    // 贴地尘埃环:平面法线 +Z → +Y
+    var dm = new THREE.MeshBasicMaterial({
+      map: dustShared, transparent: true, opacity: 0,
+      depthWrite: false, side: THREE.DoubleSide
+    });
+    var dust = new THREE.Mesh(new THREE.PlaneGeometry(0.15, 0.15), dm);
+    dust.rotation.x = -Math.PI / 2; dust.position.y = 0.002;
+    dust.renderOrder = 2;
+    grp.add(dust); fade.push({ m: dm, b: 0.66 });
+
+    var tn = {
+      group: grp, swirl: swirl, nrm: nrm, base: new THREE.Quaternion(),
+      spotIdx: tk * 6, phase: initPhases[tk], period: 38 + tr() * 22,
+      u: tSpots[tk * 6].u, v: tSpots[tk * 6].v,
+      heading: tr() * Math.PI * 2, speed: 0.010 + tr() * 0.010,
+      scroll: 0.60 + tr() * 0.30, spin: 2.4 + tr() * 1.4,
+      swayPhase: tr() * Math.PI * 2,
+      fade: fade, texA: texA, texB: texB, texC: texC,
+      inner: inner, outer: outer, haze: haze, dust: dust
+    };
+    placeTornado(grp, nrm, tSpots[tn.spotIdx]);
+    tn.base.copy(grp.quaternion);
+    grp.visible = false;
+    outGroup.add(grp);
+    tornadoes.push(tn);
+  }
+
   var okCount = 0, doneCount = 0;
   var statusEl = document.getElementById('status');
   function setStatus(text) { if (statusEl) statusEl.textContent = text; }
@@ -1311,6 +1526,70 @@ function initApp() {
       parr[pj * 3 + 2] = q.z + pv * q.amp * 0.7;
     }
     pGeo.attributes.position.needsUpdate = true;
+
+    // v5.2 龙卷风:淡入 → 持续 → 淡出 → 隐藏,轮换落点;只改 opacity / visible
+    for (var tq = 0; tq < tornadoes.length; tq++) {
+      var tn = tornadoes[tq];
+      tn.phase += dt / tn.period;
+      if (tn.phase >= 1) {
+        tn.phase -= 1;
+        tn.spotIdx = (tn.spotIdx + 1) % tSpots.length;   // 下次出现在别处
+        tn.u = tSpots[tn.spotIdx].u; tn.v = tSpots[tn.spotIdx].v;
+        tn.heading = tr() * Math.PI * 2;
+      }
+      // ② 沿陆地缓慢行进:与 walkers 同一套 (u,v) 参数空间步进。
+      //    du 要除以 2π·cosLat、dv 除以 π,才是真正的球面角距。
+      var tlat = (0.5 - tn.v) * Math.PI;
+      var tcos = Math.max(0.3, Math.cos(tlat));
+      var tdu = Math.cos(tn.heading) * tn.speed * dt / (2 * Math.PI * tcos);
+      var tdv = -Math.sin(tn.heading) * tn.speed * dt / Math.PI;
+      var tnu = (tn.u + tdu + 1) % 1, tnv = tn.v + tdv;
+      tn.heading += (tr() - 0.5) * dt * 0.30;
+      if (tnv < 0.12 || tnv > 0.88 || elevation(tnu, tnv) < 0.50) {
+        tn.heading += Math.PI * (0.5 + tr() * 0.5);      // 撞海岸 / 极区转向
+      } else {
+        tn.u = tnu; tn.v = tnv;
+      }
+      placeTornado(tn.group, tn.nrm, { u: tn.u, v: tn.v });
+      tn.base.copy(tn.group.quaternion);                 // 摆动仍叠加在新朝向之上
+      var ph = tn.phase, k = 0;
+      if (ph >= 0.58 && ph < 0.64) k = (ph - 0.58) / 0.06;        // 淡入
+      else if (ph >= 0.64 && ph < 0.82) k = 1;                     // 持续
+      else if (ph >= 0.82 && ph < 0.90) k = (0.90 - ph) / 0.08;    // 淡出
+      k = Math.max(0, Math.min(1, k));
+      tn.group.visible = k > 0.002;
+      if (!tn.group.visible) continue;
+      for (var fq = 0; fq < tn.fade.length; fq++)
+        tn.fade[fq].m.opacity = tn.fade[fq].b * k;
+      // 螺旋 UV 滚动 + 反向双层旋转 + 尘埃环旋转 + 极小幅摆动(不缩放)
+      tn.texA.offset.x -= dt * tn.scroll;          // 螺旋云纹滚动
+      tn.texB.offset.x += dt * tn.scroll * 0.55;
+      tn.texC.offset.x -= dt * tn.scroll * 0.32;
+      tn.swirl.rotation.y += dt * tn.spin * 0.8;   // 整团一起公转
+      tn.inner.rotation.y += dt * tn.spin;
+      tn.outer.rotation.y -= dt * tn.spin * 0.6;
+      tn.haze.rotation.y += dt * tn.spin * 0.25;
+      tn.dust.rotation.z += dt * 0.55;
+      _swayE.set(Math.sin(now * 0.0008 + tn.swayPhase) * 0.022, 0,
+                 Math.cos(now * 0.0011 + tn.swayPhase) * 0.018);
+      _swayQ.setFromEuler(_swayE);
+      tn.group.quaternion.copy(tn.base).multiply(_swayQ);
+    }
+    // 金标准:记录可见数量随时间的起伏,证明确实是「偶尔出现」
+    if (debugMode) {
+      var ttr = window.__globeDebug.tornadoTrace ||
+                (window.__globeDebug.tornadoTrace = []);
+      if (ttr.length < 60 && (!ttr.length || now - ttr[ttr.length - 1][0] > 400)) {
+        var vc = 0, phs = [], tpos = [];
+        for (var tq2 = 0; tq2 < tornadoes.length; tq2++) {
+          if (tornadoes[tq2].group.visible) vc++;
+          phs.push(+tornadoes[tq2].phase.toFixed(2));
+          tpos.push([+tornadoes[tq2].u.toFixed(4), +tornadoes[tq2].v.toFixed(4),
+                     +tornadoes[tq2].swirl.rotation.y.toFixed(2)]);
+        }
+        ttr.push([Math.round(now), vc, phs, tpos]);
+      }
+    }
 
     renderer.render(scene, camera);
     requestAnimationFrame(frame);
