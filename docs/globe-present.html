@@ -96,8 +96,8 @@
       A 接触阴影贴片 / elevation 复用为 bumpMap + 海陆 roughnessMap /
         海岸浪花线 / 地球纹理 480x240→768x384
         (1024x512 实测生成 2.8s,首屏太慢;降到 768x384 + elevationP() 后仅 0.4s);
-      B 独立 LCG 星空 / 双层 fresnel 大气 / 双层反向云 + 地表云影 /
-        多层太阳光晕与光斑;
+      B 独立 LCG 星空 / 大气云雾光晕(v5.1 改为径向渐变 Sprite) /
+        双层反向云 + 地表云影 / 多层太阳光晕与光斑;
       C 鸟群改 40 个 Sprite 三帧扇翅并挂 tiltPivot / 树只旋转不缩放的
         微摆 / 动物走走停停(腿频同步) / 森林上方漂浮光点。
       星空 / 光点一律走独立 LCG,不消耗全局 rand ⇒ 不干扰落点采样;
@@ -105,6 +105,14 @@
       全部在陆地贴地,与 v4 的具体坐标不同。
       硬约束不变:15 种动物 19 只 + 150 棵树、全部陆地贴地、
       动画过程零缩放、无 CSP / 贴图异常。
+    v5.1 (2026-11-07) 两处视觉/行为修正:
+      ① 大气不再用几何球(BackSide 大球泛蓝、FrontSide 贴边球成细亮环,
+         都像玻璃罩);改为面向相机的径向渐变云雾光晕,中心透明、
+         贴轮廓最亮、向外平滑归零并叠云絮斑块 + 极慢旋转;云层回调到
+         0.44/0.20 恢复朦胧感。
+      ② 长颈鹿改为朝头的方向前进:orient_probe.html 实测头顶顶点
+         100% 在局部 +X(其它物种在 +Z),MODELS 加 facing:-π/2,
+         stepWalkers 右乘局部 Y 旋转把 +X 摆到前进轴。
 -->
 <canvas id="sky"></canvas>
 <div id="stage"></div>
@@ -429,11 +437,11 @@ function initApp() {
 
   // B8 双层云反向慢速 ⇒ 视差;第三层把云纹当 alpha,在地表投一层很淡的暗斑
   var cloudTexA = createCloudTexture(0), cloudTexB = createCloudTexture(11.3);
-  var cloudMat = new THREE.MeshLambertMaterial({ map: cloudTexA, transparent: true, opacity: 0.38, depthWrite: false });
+  var cloudMat = new THREE.MeshLambertMaterial({ map: cloudTexA, transparent: true, opacity: 0.44, depthWrite: false });
   var clouds = new THREE.Mesh(new THREE.SphereGeometry(1.07, 44, 36), cloudMat);
   clouds.renderOrder = 3;
   tiltPivot.add(clouds);
-  var cloudMat2 = new THREE.MeshLambertMaterial({ map: cloudTexB, transparent: true, opacity: 0.17, depthWrite: false });
+  var cloudMat2 = new THREE.MeshLambertMaterial({ map: cloudTexB, transparent: true, opacity: 0.20, depthWrite: false });
   var clouds2 = new THREE.Mesh(new THREE.SphereGeometry(1.095, 40, 32), cloudMat2);
   clouds2.rotation.y = 0.9;
   clouds2.renderOrder = 4;
@@ -446,42 +454,55 @@ function initApp() {
   cloudShadow.renderOrder = 1;
   tiltPivot.add(cloudShadow);
 
-  // B7 双层 fresnel 大气:贴边 FrontSide 球,只在地球轮廓处发亮。
-  //   ⚠️ BackSide + 半径 1.10/1.26 会让整个圆盘泛蓝并在球轮廓处留下明显
-  //      硬边(实测像给地球套了玻璃罩),不可用。FrontSide 中心 f≈0 完全
-  //      透明、边缘 f→1,且半径紧贴 1.0 ⇒ 看起来就是一圈自然的蓝色描边。
-  var atmoVert = [
-    'varying vec3 vN; varying vec3 vV;',
-    'void main(){',
-    '  vec4 mv = modelViewMatrix * vec4(position,1.0);',
-    '  vN = normalize(normalMatrix * normal);',
-    '  vV = normalize(-mv.xyz);',
-    '  gl_Position = projectionMatrix * mv;',
-    '}'
-  ].join('\n');
-  var atmoFrag = [
-    'varying vec3 vN; varying vec3 vV;',
-    'uniform vec3 uColor; uniform float uPower; uniform float uGain;',
-    'void main(){',
-    '  float d = clamp(dot(normalize(vN), normalize(vV)), 0.0, 1.0);',
-    '  float f = pow(1.0 - d, uPower);',
-    '  gl_FragColor = vec4(uColor * f * uGain, f * 0.85);',
-    '}'
-  ].join('\n');
-  function atmoLayer(radius, color, power, gain, order) {
-    var mat = new THREE.ShaderMaterial({
-      vertexShader: atmoVert, fragmentShader: atmoFrag,
-      uniforms: { uColor: { value: new THREE.Color(color) },
-                  uPower: { value: power }, uGain: { value: gain } },
-      blending: THREE.AdditiveBlending, side: THREE.FrontSide,
-      transparent: true, depthWrite: false
-    });
-    var mesh = new THREE.Mesh(new THREE.SphereGeometry(radius, 64, 64), mat);
-    mesh.renderOrder = order;      // 0 = 透明层最底,不盖住云 / 阴影 / 模型
-    tiltPivot.add(mesh);
+  // B7 云雾大气(v5.1):彻底不用几何球。
+  //   ⚠️ 任何大气球都会在自身轮廓处留下硬边:BackSide 大半径(1.10/1.26)
+  //      会整个圆盘泛蓝,FrontSide 贴边(1.018/1.055)则变成细亮环,
+  //      两者看起来都像玻璃罩。改成面向相机的径向渐变光晕:中心透明、
+  //      贴地球轮廓处最亮、向外平滑淡出到 0 ⇒ 完全没有几何边界。
+  //   sprite 直径 3.0(半宽 1.5),地球半径 1 落在 canvas 半径 0.333*s 处。
+  function atmoGlowTex() {
+    var s = 512, cv = document.createElement('canvas'); cv.width = cv.height = s;
+    var ctx = cv.getContext('2d'), c = s / 2, seed = 7717;
+    function sr() { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 4294967296; }
+    var g = ctx.createRadialGradient(c, c, s * 0.315, c, c, s * 0.5);
+    g.addColorStop(0.00, 'rgba(96,170,255,0)');
+    g.addColorStop(0.05, 'rgba(120,195,255,0.42)');
+    g.addColorStop(0.20, 'rgba(140,205,255,0.26)');
+    g.addColorStop(0.48, 'rgba(160,215,255,0.11)');
+    g.addColorStop(0.78, 'rgba(175,220,255,0.035)');
+    g.addColorStop(1.00, 'rgba(175,220,255,0)');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, s, s);
+    // 沿轮廓叠柔和大斑 ⇒ 辉光不是完美圆环,有云絮般的不均匀感
+    ctx.globalCompositeOperation = 'lighter';
+    for (var i = 0; i < 34; i++) {
+      var ang = sr() * Math.PI * 2, rr = s * (0.32 + sr() * 0.14);
+      var x = c + Math.cos(ang) * rr, y = c + Math.sin(ang) * rr;
+      var rad = s * (0.035 + sr() * 0.085);
+      var gg = ctx.createRadialGradient(x, y, 0, x, y, rad);
+      gg.addColorStop(0, 'rgba(205,232,255,0.13)');
+      gg.addColorStop(1, 'rgba(205,232,255,0)');
+      ctx.fillStyle = gg; ctx.fillRect(x - rad, y - rad, rad * 2, rad * 2);
+    }
+    // 遮罩强制内圈透明、外圈归零,杜绝任何硬边(独立 LCG,不动全局 rand)
+    ctx.globalCompositeOperation = 'destination-in';
+    var mask = ctx.createRadialGradient(c, c, s * 0.30, c, c, s * 0.5);
+    mask.addColorStop(0.00, 'rgba(0,0,0,0)');
+    mask.addColorStop(0.12, 'rgba(0,0,0,1)');
+    mask.addColorStop(0.65, 'rgba(0,0,0,0.65)');
+    mask.addColorStop(1.00, 'rgba(0,0,0,0)');
+    ctx.fillStyle = mask; ctx.fillRect(0, 0, s, s);
+    ctx.globalCompositeOperation = 'source-over';
+    var tex = new THREE.CanvasTexture(cv);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    return tex;
   }
-  atmoLayer(1.018, 0x59b4ff, 3.2, 0.55, 0);
-  atmoLayer(1.055, 0x8f9bff, 4.2, 0.16, 0);
+  var atmoGlow = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: atmoGlowTex(), transparent: true, depthWrite: false,
+    blending: THREE.AdditiveBlending, opacity: 0.85
+  }));
+  atmoGlow.scale.set(3.0, 3.0, 1);
+  atmoGlow.renderOrder = 0;
+  scene.add(atmoGlow);
 
   var sunSprite = new THREE.Sprite(new THREE.SpriteMaterial({
     map: sunSpriteTex(), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending
@@ -648,7 +669,10 @@ function initApp() {
     // 熊猫 / 长颈鹿继续用程序化步态(用户已确认效果),尺寸与其余动物一致。
     { name: 'deer',    local: 'assets/glb/deer.glb',    url: 'https://static.poly.pizza/4b6c2a41-43c7-404c-ae37-e8c4645ff93b.glb', count: 2, height: 0.115, kind: 'grass',  walk: true, gap: 0.20 },
     { name: 'rabbit',  local: 'assets/glb/rabbit.glb',  url: 'https://static.poly.pizza/95941440-97ad-4457-ab4a-d17f21d7c03c.glb', count: 2, height: 0.095, kind: 'grass',  walk: true, gap: 0.20 },
-    { name: 'giraffe', local: 'assets/glb/giraffe.glb', url: 'https://static.poly.pizza/dad3098c-aa1d-4d1f-9e6e-3321bace45fb.glb', count: 2, height: 0.145, kind: 'grass',  walk: true, gait: true, gap: 0.20 },
+    // ⚠️ 实测 orient_probe.html:长颈鹿头顶顶点 100% 落在局部 +X(其余物种
+    //    都在 +Z),而 stepWalkers 的 makeBasis 约定局部 +Z 为前进方向 ⇒
+    //    必须绕局部 Y 转 -90° 把 +X 摆到前进方向,否则整只横着走。
+    { name: 'giraffe', local: 'assets/glb/giraffe.glb', url: 'https://static.poly.pizza/dad3098c-aa1d-4d1f-9e6e-3321bace45fb.glb', count: 2, height: 0.145, kind: 'grass',  walk: true, gait: true, facing: -Math.PI / 2, gap: 0.20 },
     { name: 'panda',   local: 'assets/glb/panda.glb',   url: 'https://static.poly.pizza/283a59b6-93f7-446d-99f3-2fd13a70d77b.glb', count: 2, height: 0.110, kind: 'forest', walk: true, gait: true, gap: 0.20 },
 
     // Quaternius Ultimate Animated Animals (CC0),经 Poly Pizza 的
@@ -1029,6 +1053,8 @@ function initApp() {
   var _p0 = new THREE.Vector3(), _p1 = new THREE.Vector3(),
       _fwd = new THREE.Vector3(), _right = new THREE.Vector3(),
       _zAxis = new THREE.Vector3(0, 0, 1),
+      _upAxis = new THREE.Vector3(0, 1, 0), _faceQ = new THREE.Quaternion(),
+      _headDir = new THREE.Vector3(),
       _basis = new THREE.Matrix4();
 
   function stepWalkers(dt, now) {
@@ -1080,6 +1106,21 @@ function initApp() {
       _right.crossVectors(_p0, _fwd).normalize();
       _basis.makeBasis(_right, _p0, _fwd);
       w.inst.quaternion.setFromRotationMatrix(_basis);
+      // 物种自身的朝向前缀:右乘局部旋转,把模型真正的"头"摆到前进方向。
+      // θ=-90° 时局部 +X → 局部 +Z(basis 的前进轴),长颈鹿专用。
+      if (w.facing) {
+        _faceQ.setFromAxisAngle(_upAxis, w.facing);
+        w.inst.quaternion.multiply(_faceQ);
+      }
+      if (debugMode) {
+        // 金标准校验:模型"头"轴(无 facing 用 +Z,长颈鹿用 +X)经完整旋转后
+        // 应与前进切向 _fwd 同向 ⇒ dot 恒 ≈ +1;若为 0 就是横着走。
+        _headDir.set(w.facing ? 1 : 0, 0, w.facing ? 0 : 1)
+                .applyQuaternion(w.inst.quaternion);
+        var ftr = window.__globeDebug.facingTrace ||
+                  (window.__globeDebug.facingTrace = []);
+        if (ftr.length < 40) ftr.push(+_headDir.dot(_fwd).toFixed(3));
+      }
 
       // 贴地:不再叠加 bob 起伏(那会让脚离地);步态由 gait 旋转 + leg morph 提供。
       // 半径用该模型按 footprint 算出的 groundR,平底与球面切平。
@@ -1127,6 +1168,7 @@ function initApp() {
           speed: WALK_SPEED * (0.7 + rand() * 0.6),
           phase: rand() * Math.PI * 2,
           faceYaw: (rand() - 0.5) * 0.6,
+          facing: spec.facing || 0,
           pauseIn: 3 + rand() * 7, idle: 0, act: null
         };
         w.baseRate = STEP_RATE * (w.speed / WALK_SPEED);
@@ -1227,6 +1269,7 @@ function initApp() {
 
     // earth spin (8 deg/s) + clouds drift
     earth.rotation.y += dt * SPIN_RATE;
+    atmoGlow.material.rotation += dt * 0.006;   // 云雾光晕缓慢流动
     clouds.rotation.y += dt * CLOUD_RATE;
     clouds2.rotation.y -= dt * CLOUD_RATE * 0.55;   // B8 反向慢速 ⇒ 双层视差
     cloudShadow.rotation.y = clouds.rotation.y * 0.96;
