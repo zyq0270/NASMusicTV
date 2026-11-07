@@ -29,6 +29,12 @@
     background: rgba(10,60,110,.55); padding: 6px 16px; border-radius: 999px;
     box-shadow: 0 2px 8px rgba(10,60,110,.25); transition: opacity .5s; }
   .status.hide { opacity: 0; }
+  #fx { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 0; pointer-events: none; }
+  .loading .bar { width: 190px; height: 4px; border-radius: 999px;
+    background: rgba(255,255,255,.24); overflow: hidden; }
+  .loading .bar i { display: block; width: 0%; height: 100%; background: #d8f4ff;
+    border-radius: 999px; transition: width .25s; }
+  .loading small { font-size: 11px; color: rgba(255,255,255,.72); letter-spacing: 1px; }
 </style>
 </head>
 <body>
@@ -132,11 +138,55 @@
       开场相位改到 0.66(完整可见段),保证打开页面就能看到;
     v5.2e: 落点额外避开森林簇(树点 1/4 抽样 + 0.14 rad 约束),
       让灰白雾团落在开阔陆地,不与绿色树冠混成一团。
+    v6 (2026-11-07) 优化 + 新视觉(用户选定「P9 拆分文件不做,其余全做」):
+      P1 阴影贴片 / 150 棵树改 InstancedMesh 合批;
+      P2 按滚动 FPS 自适应画质(可用 ?quality=0|1|2 钉住便于校对);
+      P3 elevation() 改为「与地球纹理同一次循环产生的 W×H 网格」双线性查表,
+        零额外噪声计算;网格同时导出 clsGrid 供灯光 / 海面 / 城市使用;
+      P4 window.__globeDebug.stats 常驻输出 fps / calls / tris / geometries /
+        textures / programs / quality / baked / csp;
+      P5 五张程序化纹理 + 一张 terrain 数据图预烘焙到 docs/assets/tex/,
+        首屏直接 TextureLoader 载入,失败自动回退程序化生成;
+      P6 loading 改为「首帧 + 首个模型就绪」才淡出,带真实百分比进度条;
+      P7 16 个 GLB 按 tier 分级 + 并发上限加载,先出主角动物与森林;
+      P8 全部可调参数集中到模块顶部 CONFIG(window.__globeConfig 可查);
+      P10 createImageBitmap 不再全局永久置空:先探测 blob: 是否被 CSP 拦,
+        仅在被拦时临时禁用,全部 GLB 加载完毕立刻恢复原值;
+      V1 昼夜分界 + 城市灯火(ShaderMaterial,随地球自转);
+      V2 四季色调缓慢循环(地球与树冠);V3 月亮 / 极光 / 流星;
+      V4 海面流动高光(ShaderMaterial + 海陆掩膜);
+      V5 龙卷风联动:附近动物惊走、树冠摇动加剧、林间光点亮起;
+      V6 动物脚印拖尾(单 Points 批,环形复用 240 槽,6.5s 淡出)。
+      硬约束不变:15 种动物 19 只 + 150 棵树、全部陆地贴地、
+      动画过程零缩放、无 CSP / 贴图异常、无交互控件。
+    v6.1 (2026-11-07) 龙卷风不再限定陆地(用户:「海上也有龙卷风的」):
+      落点池按索引交替生成「陆龙卷」(e>=0.52,仍避开动物与森林簇)与
+      「水龙卷」(e<0.44,离岸一段距离的海面);18 个落点海陆各半,
+      每个槽位每轮换点时 spotIdx+1 ⇒ 自然在两种环境间切换。
+      移动约束由「撞海岸就转向」改为「按自身环境判定」:水龙卷只在
+      海面走、陆龙卷只在陆地走,两者都仍避开极区、边旋转边移动。
+      水龙卷的漏斗与贴地水花环改偏冷蓝(只改 material.color,零缩放)。
+      开场相位 [0.66,0.66,0.84]:一海一陆同时可见 + 一枚正在消散,
+      之后照旧进入间歇期。tornadoTrace 追加 kinds 与 stats.tornado
+      作为「海陆都出现」的金标准。
+    v6.1c (2026-11-07) 收尾复核:
+      ① 开场三个落点进一步限定 z>0.58 且 v∈[0.33,0.64],
+         漏斗不再从球下缘伸出轮廓、月亮完整入画且不与标题重叠;
+      ② ⚠️ 修掉一个 URL 参数踩坑:'nobake=1' 字符串里含 'bake=1',
+         旧的 indexOf('bake=1') 会把「强制程序化回退」误判成
+         「只导出 PNG 不启动 WebGL」,页面静默停在纹理生成后。
+         改成 /(?:^|[?&])bake=1(?:&|$)/ 精确匹配参数名;
+      ③ ?nobake=1 复验:候选池 82404 grass / 1399 forest 与烘焙路径
+         逐点一致 ⇒ terrain.png 的 R(高程)/G(类别)回读无损;
+      ④ CSP 模拟(connect-src 禁 blob:)复验:P10 探测到拦截后临时
+         禁用 createImageBitmap、加载完毕恢复原值,GLB 贴图零丢失。
 -->
 <canvas id="sky"></canvas>
+<canvas id="fx"></canvas>
 <div id="stage"></div>
 <div class="title"><h1>生态地球</h1><p>CARTOON GLOBE · 自动旋转演示</p></div>
-<div class="loading" id="loading"><h2>生态地球</h2><p>正在唤醒绿色星球…</p></div>
+<div class="loading" id="loading"><h2>生态地球</h2><p>正在唤醒绿色星球…</p>
+  <div class="bar"><i id="loadBar"></i></div><small id="loadPct">0%</small></div>
 <div class="status" id="status">正在放置动物与树木…</div>
 <div class="err" id="errBox"><h3>加载失败</h3><p id="errMsg">3D 引擎加载失败，请检查网络后刷新页面重试。</p></div>
 
@@ -156,12 +206,57 @@ import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 // 动画串台;SkeletonUtils.clone 专治这个
 import { clone as cloneSkeleton } from "three/addons/utils/SkeletonUtils.js";
 
-/* 严格 CSP 的预览环境常把 blob: 排除在 connect-src 之外(如 WorkBuddy 预览面板),
-   而 GLTFLoader 在支持 createImageBitmap 时默认用 ImageBitmapLoader 去
-   fetch(blob:) 读 GLB 内嵌纹理 ⇒ 贴图全丢、模型变成纯白剪影。
-   这里让 GLTFLoader 走 TextureLoader 分支(<img src="blob:">,归 img-src 管,
-   通常允许 blob:/data:)。代价只是纹理在主线程解码,5 个小模型可忽略。 */
-try { window.createImageBitmap = undefined; } catch (e) {}
+/* P10: 严格 CSP 的预览环境常把 blob: 排除在 connect-src 之外(WorkBuddy 预览面板),
+   而 GLTFLoader 的 GLTFParser 构造时会按 typeof createImageBitmap 选择
+   ImageBitmapLoader(fetch(blob:) 被拦 ⇒ 贴图全丢、模型变纯白剪影)。
+   旧版直接 window.createImageBitmap = undefined 是「永久全局副作用」:
+   整个页面生命周期都关掉了浏览器最快的纹理解码路径。
+   现在改为:① 一次性探测 blob: 是否真被拦;② 仅在被拦时临时禁用;
+   ③ 全部 GLB 加载完立刻恢复原值(另有 45s 兜底)。正常环境零改动。 */
+var CSP = { probed: false, blocked: false, active: false,
+            had: false, original: undefined, released: false };
+function probeBlobCSP() {
+  return new Promise(function (resolve) {
+    var url = null, settled = false;
+    function finish(blocked) {
+      if (settled) return; settled = true;
+      clearTimeout(timer);
+      try { if (url) URL.revokeObjectURL(url); } catch (e) {}
+      CSP.probed = true; CSP.blocked = blocked;
+      resolve(blocked);
+    }
+    var timer = setTimeout(function () { finish(true); }, 900);
+    try {
+      url = URL.createObjectURL(new Blob([new Uint8Array([137, 80, 78, 71])],
+                                         { type: 'image/png' }));
+    } catch (e) { finish(true); return; }
+    try {
+      fetch(url).then(function () { finish(false); },
+                      function () { finish(true); });
+    } catch (e) { finish(true); }
+  });
+}
+function ensureGLBTextureCompat() {
+  return probeBlobCSP().then(function (blocked) {
+    if (!blocked) return;
+    CSP.had = ('createImageBitmap' in window);
+    CSP.original = window.createImageBitmap;
+    try { window.createImageBitmap = undefined; CSP.active = true; }
+    catch (e) { CSP.active = false; }
+  });
+}
+function releaseGLBTextureCompat() {
+  if (CSP.released) return;
+  CSP.released = true;
+  if (!CSP.active) return;
+  try {
+    if (CSP.had) window.createImageBitmap = CSP.original;
+    else delete window.createImageBitmap;
+  } catch (e) {}
+  CSP.active = false;
+}
+// 兜底:即便某个 GLB 永远挂起,也不把副作用留到页面结束
+setTimeout(releaseGLBTextureCompat, 45000);
 
 /* ---------- utilities ---------- */
 const rand = (function (seed) {
@@ -200,6 +295,61 @@ function spherePoint(u, v) {
   return [Math.sin(th) * sp, Math.cos(ph), Math.cos(th) * sp];
 }
 
+/* ---------- P8: 所有可调参数集中在这里 ----------
+   页面内各处的 var 只是热路径短别名(值全部来自 CONFIG),调参只改这一处。
+   window.__globeConfig 暴露给 ?debug=1 校对。 */
+var CONFIG = {
+  // 纹理 / 地形
+  texW: 768, texH: 384, cloudW: 384, cloudH: 192,
+  bakedTextures: true, bakedDir: 'assets/tex/',
+  // 地球 / 相机
+  radius: 1.0, tilt: -0.41, spinRate: 0.055, cloudRate: 0.012,
+  fov: 45, camDist: 3.2, camFit: 1.22,
+  // 摆放 / 行走
+  landMin: 0.47, walkSpeed: 0.010, stepRate: 0.45,
+  footprint: 0.24, minGap: 0.30,
+  forestCenters: 14, clusterR: 0.12, centerGap: 0.30,
+  // 数量
+  birds: 40, motes: 150, footprints: 240, treeHeight: 0.150,
+  tornadoCount: 3, tornadoH: 0.19,
+  // 加载 / 画质
+  loadConcurrency: 4, maxPixelRatio: 2,
+  lowFps: 26, highFps: 50, qualityWindow: 2.5,
+  // 新视觉
+  seasonPeriod: 96, meteorMin: 4.0, meteorMax: 9.0,
+  shadowCap: 256, footprintLife: 6.5, footprintEvery: 0.55
+};
+window.__globeConfig = CONFIG;
+
+/* ---------- P3: elevation 网格查表 ----------
+   旧实现每次调用都要跑 fbm3 的 5+4+3 个八度;walkers / tornado / 森林撒点
+   每帧几百次,是纯 CPU 热点。地球纹理那次循环本来就把每个像素的 e 算好了,
+   顺手存进 ELEV.data 即可零成本复用;elevation() 改成双线性插值查表。
+   ELEV.cls 同时保存地表类别(0 海 / 1 沙 / 2 草候选 / 3 林候选 /
+   4 岩 / 5 雪 / 6 高草非候选),供城市灯火 / 海面掩膜 / 预烘焙回读。 */
+var ELEV = { w: 0, h: 0, data: null, cls: null };
+function elevationFast(u, v) {
+  if (!ELEV.data) return elevationP(spherePoint(u, v));   // 兜底:精确计算
+  var w = ELEV.w, h = ELEV.h, d = ELEV.data;
+  u = u - Math.floor(u);
+  var fx = u * w - 0.5, fy = Math.min(h - 1, Math.max(0, v * h - 0.5));
+  var x0 = Math.floor(fx), y0 = Math.floor(fy);
+  var tx = fx - x0, ty = fy - y0;
+  var xa = ((x0 % w) + w) % w, xb = (xa + 1) % w;
+  var ya = Math.min(h - 1, Math.max(0, y0)), yb = Math.min(h - 1, ya + 1);
+  var a = d[ya * w + xa], b = d[ya * w + xb],
+      c = d[yb * w + xa], e = d[yb * w + xb];
+  return (a + (b - a) * tx) * (1 - ty) + (c + (e - c) * tx) * ty;
+}
+function classAt(u, v) {
+  if (!ELEV.cls) return 0;
+  var w = ELEV.w, h = ELEV.h;
+  u = u - Math.floor(u);
+  var px = Math.min(w - 1, Math.max(0, Math.floor(u * w)));
+  var py = Math.min(h - 1, Math.max(0, Math.floor(v * h)));
+  return ELEV.cls[py * w + px];
+}
+
 /* SphereGeometry(r160) 的 UV → 球面方向映射,专供摆模型用:
      vertex = (-cos(2πu)·sin(πv), cos(πv), sin(2πu)·sin(πv)), uv = (u, 1-v)
    CanvasTexture 默认 flipY=true ⇒ canvas 的 (u, v) 恰好对应这里的 (u, v)。
@@ -211,14 +361,14 @@ function surfaceDir(u, v) {
 }
 
 /* ---------- procedural cartoon earth texture ---------- */
-var W = 768, H = 384;    // v5: 480x240→768x384;1024x512 实测生成要 2.8s,首屏太慢
+var W = CONFIG.texW, H = CONFIG.texH;  // 值统一由 CONFIG 提供
 function elevationP(p) {
   var e1 = fbm3(p[0] * 1.6 + 0.37, p[1] * 1.6 + 0.11, p[2] * 1.6 + 0.53, 5);
   var e2 = fbm3(p[0] * 4.3 + 1.2, p[1] * 4.3 + 2.4, p[2] * 4.3 + 3.7, 4);
   var e3 = fbm3(p[0] * 9.0 + 0.6, p[1] * 9.0 + 3.1, p[2] * 9.0 + 5.2, 3);
   return clamp01(0.46 + e1 * 0.34 + e2 * 0.12 + e3 * 0.08);
 }
-function elevation(u, v) { return elevationP(spherePoint(u, v)); }
+function elevation(u, v) { return elevationFast(u, v); }
 function createEarthTexture() {
   var t0 = performance.now();
   var cv = document.createElement('canvas'); cv.width = W; cv.height = H;
@@ -230,6 +380,7 @@ function createEarthTexture() {
   var roughCv = document.createElement('canvas'); roughCv.width = W; roughCv.height = H;
   var roughCtx = roughCv.getContext('2d'), roughImg = roughCtx.createImageData(W, H), rd = roughImg.data;
   var grass = [], forest = [];
+  var elevGrid = new Float32Array(W * H), clsGrid = new Uint8Array(W * H);
   for (var py = 0; py < H; py++) {
     var v = py / H;
     for (var px = 0; px < W; px++) {
@@ -237,8 +388,9 @@ function createEarthTexture() {
       var sp = spherePoint(u, v), e = elevationP(sp);
       var det = fbm3(sp[0] * 20 + 7.7, sp[1] * 20 + 3.3, sp[2] * 20 + 9.9, 3);
       var sh = fbm3(sp[0] * 6 + 0.2, sp[1] * 6 + 4.4, sp[2] * 6 + 2.8, 3);
-      var r, g, b;
+      var r, g, b, cls = 0;
       if (e < 0.46) {
+        cls = 0;
         var dp = 1 - e / 0.46;
         var lo = fbm3(sp[0] * 30 + 1.9, sp[1] * 30 + 8.2, sp[2] * 30 + 12.4, 2);
         var lint = lo > 0.7 ? 0.1 : lo > 0.5 ? 0.05 : 0;
@@ -247,20 +399,24 @@ function createEarthTexture() {
         r += lint * 60; g += lint * 75; b += lint * 90;
       } else {
         var shade = 0.95 + sh * 0.12;
-        if (e < 0.49) { r = 0.93 * 255 * shade; g = 0.84 * 255 * shade; b = 0.55 * 255 * shade; }
+        if (e < 0.49) { cls = 1; r = 0.93 * 255 * shade; g = 0.84 * 255 * shade; b = 0.55 * 255 * shade; }
         else if (e < 0.72) {
           if (det > 0.5 + (e - 0.46) * 0.5) {
+            cls = 3;
             r = 0.24 * shade * 255; g = 0.55 * shade * 255; b = 0.17 * shade * 255;
             forest.push({ u: +u.toFixed(5), v: +v.toFixed(5) });
           } else {
+            cls = e < 0.66 ? 2 : 6;   // 只有 e<0.66 才进 grass 候选池
             var mot = 0.92 + fbm3(sp[0] * 16 + 3.5, sp[1] * 16 + 9.1, sp[2] * 16 + 6.3, 3) * 0.16;
             r = 0.46 * shade * mot * 255; g = 0.78 * shade * mot * 255; b = 0.24 * shade * mot * 255;
             if (e < 0.66) grass.push({ u: +u.toFixed(5), v: +v.toFixed(5) });
           }
         } else if (e < 0.82) {
+          cls = 4;
           var tt = (e - 0.72) / 0.1;
           r = lerp(0.7, 0.58, tt) * shade * 255; g = lerp(0.66, 0.54, tt) * shade * 255; b = lerp(0.5, 0.44, tt) * shade * 255;
         } else {
+          cls = 5;
           var se = 0.8 + (fbm3(sp[0] * 12 + 5.1, sp[1] * 12 + 0.8, sp[2] * 12 + 3.3, 3) + 1) * 0.025;
           var st = clamp01((e - se) / 0.05);
           r = lerp(0.72, 1.0, st) * 255; g = lerp(0.68, 1.0, st) * 255; b = lerp(0.64, 1.0, st) * 255;
@@ -280,6 +436,7 @@ function createEarthTexture() {
         b = lerp(b, 242, coast * 0.55);
       }
       data[i] = r; data[i + 1] = g; data[i + 2] = b; data[i + 3] = 255;
+      elevGrid[py * W + px] = e; clsGrid[py * W + px] = cls;
       // 海陆权重:两张辅助图都必须平滑过渡,否则 bump 会在海岸拉出硬亮边
       var landT = clamp01((e - 0.44) / 0.06);
       // bumpMap:海面平坦,陆地按高度 + 细节噪声起伏
@@ -300,9 +457,12 @@ function createEarthTexture() {
   bumpTex.wrapS = THREE.RepeatWrapping;
   var roughTex = new THREE.CanvasTexture(roughCv);
   roughTex.wrapS = THREE.RepeatWrapping;
+  ELEV.w = W; ELEV.h = H; ELEV.data = elevGrid; ELEV.cls = clsGrid;
   console.log('[globe-present] earth texture ' + W + 'x' + H + ' generated in ' +
               (performance.now() - t0).toFixed(0) + 'ms');
-  return { texture: tex, bump: bumpTex, rough: roughTex, grass: grass, forest: forest };
+  return { texture: tex, bump: bumpTex, rough: roughTex, grass: grass, forest: forest,
+           canvases: { earth: cv, bump: bumpCv, rough: roughCv },
+           elevGrid: elevGrid, clsGrid: clsGrid, generated: true };
 }
 
 /* ---------- cloud texture ---------- */
@@ -327,6 +487,134 @@ function createCloudTexture(seedOffset) {
   tex.wrapS = THREE.RepeatWrapping;
   return tex;
 }
+
+/* ---------- P5: 程序化纹理预烘焙 ----------
+   docs/assets/tex/ 下的 6 张静态图由 ?bake=1 一次性导出,首屏用
+   TextureLoader 直接载入,省掉整段噪声循环(实测最耗时的一块)。
+   terrain.png 是数据图:R = round(e*255),G = 地表类别(见 ELEV.cls),
+   B = 0。回读后既恢复 ELEV 网格,又按类别精确重建 grass/forest 候选池
+   ⇒ 落点与程序化生成时逐点一致,可复现。
+   任一文件缺失 / 解码失败 ⇒ 整体回退到程序化生成,页面照常可用。 */
+function buildProceduralResources() {
+  var r = createEarthTexture();
+  r.cloudA = createCloudTexture(0);
+  r.cloudB = createCloudTexture(11.3);
+  r.baked = false;
+  console.log('[globe-present] procedural textures, land candidates: ' +
+              r.grass.length + ' grass / ' + r.forest.length + ' forest');
+  return r;
+}
+function bakeTextures() {
+  var r = buildProceduralResources();
+  // terrain.png:R=高程量化,G=类别,B=0,A=255
+  var cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+  var ctx = cv.getContext('2d'), img = ctx.createImageData(W, H), d = img.data;
+  for (var i = 0; i < W * H; i++) {
+    d[i * 4]     = Math.round(clamp01(r.elevGrid[i]) * 255);
+    d[i * 4 + 1] = r.clsGrid[i];
+    d[i * 4 + 2] = 0;
+    d[i * 4 + 3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+  var cvs = r.canvases;
+  return {
+    earth:   cvs.earth.toDataURL('image/png'),
+    bump:    cvs.bump.toDataURL('image/png'),
+    rough:   cvs.rough.toDataURL('image/png'),
+    cloudA:  r.cloudA.image.toDataURL('image/png'),
+    cloudB:  r.cloudB.image.toDataURL('image/png'),
+    terrain: cv.toDataURL('image/png'),
+    size:    [W, H]
+  };
+}
+function loadTex(url, srgb) {
+  return new THREE.TextureLoader().loadAsync(url).then(function (t) {
+    if (srgb) t.colorSpace = THREE.SRGBColorSpace;
+    t.wrapS = THREE.RepeatWrapping;
+    return t;
+  });
+}
+function loadTerrain(url) {
+  return new Promise(function (resolve, reject) {
+    var im = new Image();
+    im.onload = function () {
+      try {
+        var cv = document.createElement('canvas');
+        cv.width = im.width; cv.height = im.height;
+        var ctx = cv.getContext('2d');
+        ctx.drawImage(im, 0, 0);
+        var d = ctx.getImageData(0, 0, cv.width, cv.height).data;
+        var n = cv.width * cv.height;
+        var eg = new Float32Array(n), cg = new Uint8Array(n);
+        var grass = [], forest = [];
+        for (var i = 0; i < n; i++) {
+          eg[i] = d[i * 4] / 255;
+          var cls = d[i * 4 + 1]; cg[i] = cls;
+          if (cls === 2 || cls === 3) {
+            var px = i % cv.width, py = Math.floor(i / cv.width);
+            var p = { u: +(px / cv.width).toFixed(5), v: +(py / cv.height).toFixed(5) };
+            if (cls === 2) grass.push(p); else forest.push(p);
+          }
+        }
+        ELEV.w = cv.width; ELEV.h = cv.height; ELEV.data = eg; ELEV.cls = cg;
+        resolve({ grass: grass, forest: forest, size: [cv.width, cv.height] });
+      } catch (e) { reject(e); }
+    };
+    im.onerror = function () { reject(new Error('terrain.png load failed')); };
+    im.src = url;
+  });
+}
+async function loadBakedResources() {
+  var D = CONFIG.bakedDir;
+  var names = ['earth.png', 'bump.png', 'rough.png', 'cloud-a.png', 'cloud-b.png'];
+  var tasks = [];
+  for (var i = 0; i < names.length; i++)
+    tasks.push(loadTex(D + names[i], i === 0 || i >= 3));
+  var t = await Promise.all(tasks);
+  var g = await loadTerrain(D + 'terrain.png');
+  if (g.size[0] !== CONFIG.texW || g.size[1] !== CONFIG.texH)
+    throw new Error('terrain size mismatch');
+  return { texture: t[0], bump: t[1], rough: t[2],
+           cloudA: t[3], cloudB: t[4],
+           grass: g.grass, forest: g.forest, baked: true,
+           elevGrid: ELEV.data, clsGrid: ELEV.cls };
+}
+async function getEarthResources() {
+  if (!CONFIG.bakedTextures) return buildProceduralResources();
+  try {
+    var t0 = performance.now();
+    var r = await loadBakedResources();
+    console.log('[globe-present] baked textures loaded in ' +
+                (performance.now() - t0).toFixed(0) + 'ms, land candidates: ' +
+                r.grass.length + ' grass / ' + r.forest.length + ' forest');
+    return r;
+  } catch (e) {
+    console.warn('[globe-present] 预烘焙纹理不可用,回退程序化生成:', e && e.message);
+    return buildProceduralResources();
+  }
+}
+
+/* ---------- P6: 加载遮罩状态 ---------- */
+var LOAD = { frame: false, model: false, hidden: false };
+function setLoadProgress(pct, text) {
+  var bar = document.getElementById('loadBar'), lab = document.getElementById('loadPct');
+  if (bar) bar.style.width = Math.max(0, Math.min(100, pct)) + '%';
+  if (lab) lab.textContent = text || (Math.round(pct) + '%');
+}
+function maybeHideLoading() {
+  if (LOAD.hidden || !LOAD.frame || !LOAD.model) return;
+  LOAD.hidden = true;
+  setLoadProgress(100, '就绪');
+  var l = document.getElementById('loading');
+  if (l) setTimeout(function () { l.classList.add('hide'); }, 120);
+}
+function forceHideLoading() {
+  LOAD.hidden = true;
+  var l = document.getElementById('loading');
+  if (l) l.classList.add('hide');
+}
+function firstModelReady() { LOAD.model = true; maybeHideLoading(); }
+setTimeout(forceHideLoading, 4000);   // 网络异常时不把用户挡在遮罩后面
 
 /* ---------- sun / bird textures ---------- */
 function sunSpriteTex() {
@@ -461,8 +749,139 @@ function dustTex() {
   return t;
 }
 
+/* ---------- V1 / V3 / V4 / V6 视觉资源(全部程序化,零外部依赖) ---------- */
+/* V1:从 ELEV.cls 的草 / 林 / 高草像素里撒暖色灯点,作为夜面城市灯火。
+   用独立 LCG,不消耗全局 rand() ⇒ 落点可复现。 */
+function makeCityTexture() {
+  var cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+  var ctx = cv.getContext('2d');
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+  var seed = 5521, cls = ELEV.cls;
+  function sr() { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 4294967296; }
+  if (cls) {
+    for (var i = 0; i < 3400; i++) {
+      var px = Math.floor(sr() * W), py = Math.floor(sr() * H);
+      var c = cls[py * W + px];
+      if (!(c === 2 || c === 3 || c === 6)) continue;
+      if (Math.abs(py / H - 0.5) > 0.39) continue;
+      var r = 0.6 + sr() * 1.5;
+      ctx.fillStyle = 'rgba(255,' + (176 + Math.floor(sr() * 64)) + ',' +
+                      (86 + Math.floor(sr() * 76)) + ',' + (0.30 + sr() * 0.62).toFixed(2) + ')';
+      ctx.fillRect(px, py, r, r);
+    }
+  }
+  var t = new THREE.CanvasTexture(cv);
+  t.colorSpace = THREE.SRGBColorSpace; t.wrapS = THREE.RepeatWrapping;
+  return t;
+}
+/* V4:海陆掩膜(白=海)。与地球纹理同 UV / flipY ⇒ 片元里 texture2D(mask,vUv)
+   即可精确只让海面出高光。 */
+function makeOceanMaskTexture() {
+  var cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+  var ctx = cv.getContext('2d');
+  var img = ctx.createImageData(W, H), d = img.data, cls = ELEV.cls;
+  for (var i = 0; i < W * H; i++) {
+    var o = cls ? (cls[i] === 0 ? 255 : 0) : 0;
+    d[i * 4] = o; d[i * 4 + 1] = o; d[i * 4 + 2] = o; d[i * 4 + 3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+  var t = new THREE.CanvasTexture(cv); t.wrapS = THREE.RepeatWrapping;
+  return t;
+}
+/* V3 月亮:柔光 + 环形山,普通混合(不像太阳那样过曝) */
+function moonTex() {
+  var s = 160, cv = document.createElement('canvas'); cv.width = cv.height = s;
+  var ctx = cv.getContext('2d'), c = s / 2;
+  var halo = ctx.createRadialGradient(c, c, s * 0.22, c, c, s * 0.5);
+  halo.addColorStop(0, 'rgba(205,225,255,0.42)');
+  halo.addColorStop(1, 'rgba(205,225,255,0)');
+  ctx.fillStyle = halo; ctx.fillRect(0, 0, s, s);
+  var disc = ctx.createRadialGradient(c - s * 0.12, c - s * 0.12, s * 0.02, c, c, s * 0.30);
+  disc.addColorStop(0, '#fdfbf2'); disc.addColorStop(0.72, '#dce3ee');
+  disc.addColorStop(1, '#a9b8cd');
+  ctx.fillStyle = disc; ctx.beginPath(); ctx.arc(c, c, s * 0.29, 0, Math.PI * 2); ctx.fill();
+  var seed = 3319;
+  function sr() { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 4294967296; }
+  for (var i = 0; i < 11; i++) {
+    var a = sr() * Math.PI * 2, rr = sr() * s * 0.22;
+    var x = c + Math.cos(a) * rr, y = c + Math.sin(a) * rr, rad = s * (0.012 + sr() * 0.032);
+    ctx.fillStyle = 'rgba(120,138,162,0.20)';
+    ctx.beginPath(); ctx.arc(x, y, rad, 0, Math.PI * 2); ctx.fill();
+  }
+  var t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; return t;
+}
+/* V6 脚印贴图:一枚软蹄印 + 三个小趾 */
+function footTex() {
+  var s = 64, cv = document.createElement('canvas'); cv.width = cv.height = s;
+  var ctx = cv.getContext('2d');
+  var g = ctx.createRadialGradient(s / 2, s / 2, 1, s / 2, s / 2, s * 0.46);
+  g.addColorStop(0, 'rgba(255,255,255,0.95)');
+  g.addColorStop(0.55, 'rgba(255,255,255,0.50)');
+  g.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = g;
+  ctx.beginPath(); ctx.ellipse(s / 2, s / 2, s * 0.40, s * 0.30, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.80)';
+  for (var i = 0; i < 3; i++) {
+    ctx.beginPath(); ctx.arc(s * 0.32 + i * s * 0.18, s * 0.29, s * 0.052, 0, Math.PI * 2); ctx.fill();
+  }
+  var t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; return t;
+}
+/* V3 极光 + 流星:独立 2D 图层,低分辨率绘制,不占 WebGL draw call。
+   流星用 Math.random(),刻意不消耗全局 rand() ⇒ 不扰动落点采样。 */
+var fxCanvas = null, fxCtx = null, fxW = 0, fxH = 0, fxScale = 0.70;
+var meteors = [], nextMeteor = 3.2;
+function resizeFx(w, h) {
+  fxCanvas = document.getElementById('fx');
+  if (!fxCanvas) return;
+  fxW = Math.max(1, Math.round(w * fxScale));
+  fxH = Math.max(1, Math.round(h * fxScale));
+  fxCanvas.width = fxW; fxCanvas.height = fxH;
+  fxCtx = fxCanvas.getContext('2d');
+}
+function drawFx(now, dt) {
+  if (!fxCtx) return;
+  var c = fxCtx, w = fxW, h = fxH, t = now * 0.001;
+  c.clearRect(0, 0, w, h);
+  c.globalCompositeOperation = 'lighter';
+  for (var r = 0; r < 3; r++) {
+    var yb = h * (0.05 + r * 0.042);
+    var grad = c.createLinearGradient(0, yb - h * 0.08, 0, yb + h * 0.14);
+    grad.addColorStop(0, 'rgba(90,220,190,0)');
+    grad.addColorStop(0.45, r === 1 ? 'rgba(120,170,255,0.070)' : 'rgba(90,235,190,0.082)');
+    grad.addColorStop(1, 'rgba(160,120,255,0)');
+    c.fillStyle = grad;
+    c.beginPath(); c.moveTo(0, yb);
+    for (var x = 0; x <= w; x += 14)
+      c.lineTo(x, yb + Math.sin(x * 0.008 + t * 0.32 + r * 1.7) * h * 0.026
+                     + Math.sin(x * 0.021 - t * 0.19 + r) * h * 0.010);
+    c.lineTo(w, yb + h * 0.16); c.lineTo(0, yb + h * 0.16);
+    c.closePath(); c.fill();
+  }
+  nextMeteor -= dt;
+  if (nextMeteor <= 0) {
+    nextMeteor = CONFIG.meteorMin + Math.random() * (CONFIG.meteorMax - CONFIG.meteorMin);
+    meteors.push({ x: w * (0.15 + Math.random() * 0.70), y: -18,
+                   vx: -(90 + Math.random() * 90) * fxScale,
+                   vy: (150 + Math.random() * 110) * fxScale,
+                   life: 0, max: 0.85 + Math.random() * 0.5 });
+  }
+  for (var m = meteors.length - 1; m >= 0; m--) {
+    var q = meteors[m];
+    q.life += dt; q.x += q.vx * dt; q.y += q.vy * dt;
+    var k = 1 - q.life / q.max;
+    if (k <= 0 || q.y > h * 1.1) { meteors.splice(m, 1); continue; }
+    var tx = q.x - q.vx * 0.17, ty = q.y - q.vy * 0.17;
+    var lg = c.createLinearGradient(q.x, q.y, tx, ty);
+    lg.addColorStop(0, 'rgba(255,255,255,' + (0.82 * k).toFixed(3) + ')');
+    lg.addColorStop(1, 'rgba(180,220,255,0)');
+    c.strokeStyle = lg; c.lineWidth = 1.6 * fxScale; c.lineCap = 'round';
+    c.beginPath(); c.moveTo(q.x, q.y); c.lineTo(tx, ty); c.stroke();
+  }
+  c.globalCompositeOperation = 'source-over';
+}
+
 /* ---------- scene ---------- */
-function initApp() {
+async function initApp() {
   var skyCanvas = document.getElementById('sky');
   if (skyCanvas) drawStarfield(skyCanvas);
   var stage = document.getElementById('stage');
@@ -474,22 +893,22 @@ function initApp() {
   stage.appendChild(renderer.domElement);
 
   var scene = new THREE.Scene();
-  var camera = new THREE.PerspectiveCamera(45, 1, 0.1, 100);
-  camera.position.set(0, 0.55, 3.2);
+  var camera = new THREE.PerspectiveCamera(CONFIG.fov, 1, 0.1, 100);
+  camera.position.set(0, 0.55, CONFIG.camDist);
   camera.lookAt(0, 0, 0);
 
-  scene.add(new THREE.AmbientLight(0xffffff, 0.75));
-  scene.add(new THREE.HemisphereLight(0xd8f0ff, 0x8fae66, 0.7));
+  var ambientLight = new THREE.AmbientLight(0xffffff, 0.75);
+  var hemiLight = new THREE.HemisphereLight(0xd8f0ff, 0x8fae66, 0.7);
   var sunLight = new THREE.DirectionalLight(0xfff3d6, 2.2);
   sunLight.position.set(3, 4, 6);
-  scene.add(sunLight);
+  scene.add(ambientLight); scene.add(hemiLight); scene.add(sunLight);
 
   // tilted axis + spin
   var tiltPivot = new THREE.Group();
-  tiltPivot.rotation.z = -0.41; // 23.5°
+  tiltPivot.rotation.z = CONFIG.tilt; // 23.5°
   scene.add(tiltPivot);
 
-  var earthRes = createEarthTexture();
+  var earthRes = await getEarthResources();
   // A2 地形凹凸 + A3 海洋高光:同一份 elevation 派生的两张灰度图
   var earthMat = new THREE.MeshStandardMaterial({
     map: earthRes.texture,
@@ -499,8 +918,87 @@ function initApp() {
   var earth = new THREE.Mesh(new THREE.SphereGeometry(1, 64, 64), earthMat);
   tiltPivot.add(earth);
 
+  var SUN_DIR = new THREE.Vector3(3, 4, 6).normalize();
+  /* V1 昼夜分界 + 城市灯火:世界法线与太阳方向的点积决定昼/夜,
+     只在夜面叠暖色灯点。挂在 earth 下 ⇒ 随地球自转,灯点固定在城市上。 */
+  var nightLayer = new THREE.Mesh(
+    new THREE.SphereGeometry(1.003, 64, 64),
+    new THREE.ShaderMaterial({
+      uniforms: { tLights: { value: makeCityTexture() },
+                  uSun: { value: SUN_DIR }, uTime: { value: 0 } },
+      vertexShader: [
+        'varying vec2 vUv; varying vec3 vWN;',
+        'void main(){',
+        '  vUv = uv;',
+        '  vWN = normalize(mat3(modelMatrix) * normal);',
+        '  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);',
+        '}'
+      ].join('\n'),
+      fragmentShader: [
+        'uniform sampler2D tLights; uniform vec3 uSun; uniform float uTime;',
+        'varying vec2 vUv; varying vec3 vWN;',
+        'void main(){',
+        '  float d = dot(normalize(vWN), normalize(uSun));',
+        '  float night = 1.0 - smoothstep(-0.25, 0.20, d);',
+        '  vec3 c = texture2D(tLights, vUv).rgb;',
+        '  float tw = 0.88 + 0.12 * sin(uTime * 1.6 + vUv.x * 120.0 + vUv.y * 55.0);',
+        '  gl_FragColor = vec4(c * night * tw * 1.35, 1.0);',
+        '}'
+      ].join('\n'),
+      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending
+    })
+  );
+  nightLayer.renderOrder = 2;
+  earth.add(nightLayer);
+  /* V4 海面流动高光:海陆掩膜 + 太阳半程镜面 + 两组滚动正弦波纹,
+     只在昼面的海上出光,UV 随时间流动 ⇒ 不是静止的一层白。 */
+  var oceanLayer = new THREE.Mesh(
+    new THREE.SphereGeometry(1.004, 64, 64),
+    new THREE.ShaderMaterial({
+      uniforms: { tMask: { value: makeOceanMaskTexture() },
+                  uSun: { value: SUN_DIR }, uTime: { value: 0 } },
+      vertexShader: [
+        'varying vec2 vUv; varying vec3 vWN; varying vec3 vWP;',
+        'void main(){',
+        '  vUv = uv;',
+        '  vWN = normalize(mat3(modelMatrix) * normal);',
+        '  vec4 wp = modelMatrix * vec4(position, 1.0);',
+        '  vWP = wp.xyz;',
+        '  gl_Position = projectionMatrix * viewMatrix * wp;',
+        '}'
+      ].join('\n'),
+      fragmentShader: [
+        'uniform sampler2D tMask; uniform vec3 uSun; uniform float uTime;',
+        'varying vec2 vUv; varying vec3 vWN; varying vec3 vWP;',
+        'void main(){',
+        '  float ocean = texture2D(tMask, vUv).r;',
+        '  if (ocean < 0.5) discard;',
+        '  vec3 N = normalize(vWN); vec3 L = normalize(uSun);',
+        '  vec3 V = normalize(cameraPosition - vWP);',
+        '  vec3 H = normalize(L + V);',
+        '  float day = smoothstep(-0.05, 0.35, dot(N, L));',
+        '  float glint = pow(max(dot(N, H), 0.0), 46.0);',
+        '  float w1 = 0.5 + 0.5 * sin(vUv.x * 210.0 + uTime * 1.35 + sin(vUv.y * 64.0 - uTime * 0.7) * 2.2);',
+        '  float w2 = 0.5 + 0.5 * sin(vUv.y * 150.0 - uTime * 1.05);',
+        '  float a = day * (glint * 0.75 + w1 * w2 * 0.11) * 0.34;',
+        '  gl_FragColor = vec4(vec3(0.62, 0.84, 1.0) * a, 1.0);',
+        '}'
+      ].join('\n'),
+      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending
+    })
+  );
+  oceanLayer.renderOrder = 2;
+  earth.add(oceanLayer);
+  /* V3 月亮:远离太阳方向,极慢漂移,普通混合避免过曝 */
+  var moonSprite = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: moonTex(), transparent: true, depthWrite: false, opacity: 0.92
+  }));
+  moonSprite.scale.setScalar(0.62);
+  moonSprite.renderOrder = 7;
+  scene.add(moonSprite);
+
   // B8 双层云反向慢速 ⇒ 视差;第三层把云纹当 alpha,在地表投一层很淡的暗斑
-  var cloudTexA = createCloudTexture(0), cloudTexB = createCloudTexture(11.3);
+  var cloudTexA = earthRes.cloudA, cloudTexB = earthRes.cloudB;
   var cloudMat = new THREE.MeshLambertMaterial({ map: cloudTexA, transparent: true, opacity: 0.44, depthWrite: false });
   var clouds = new THREE.Mesh(new THREE.SphereGeometry(1.07, 44, 36), cloudMat);
   clouds.renderOrder = 3;
@@ -601,7 +1099,7 @@ function initApp() {
 
   // C11 鸟群重做:40 个独立 Sprite(原 Points 是静止方形点、不会扇翅、
   //    也没挂到 tiltPivot)。三张纹理按相位切换 ⇒ 翅膀上下扇动。
-  var BC = 40, birdData = [], birdMats = [], birdSprites = [];
+  var BC = CONFIG.birds, birdData = [], birdMats = [], birdSprites = [];
   for (var bf = 0; bf < 3; bf++) {
     birdMats.push(new THREE.SpriteMaterial({
       map: birdTex(bf), transparent: true, depthWrite: false, opacity: 0.78
@@ -756,21 +1254,22 @@ function initApp() {
     { name: 'wolf', local: 'assets/glb/wolf.glb', url: 'https://static.poly.pizza/f1d12388-e39b-4157-b32a-646a1d089fc4.glb', count: 1, height: 0.115, kind: 'both', walk: true, gap: 0.20 },
 
     // 150 棵(原 30 的 5 倍)走 pickForestSpots():簇状聚集,不按全局最小间距平铺
-    { name: 'tree',    local: 'assets/glb/tree.glb', url: 'https://static.poly.pizza/53a83125-e16a-4024-b8f6-1e72679c7ddf.glb', count: 150, height: 0.150, kind: 'both', split: true, forest: true }
+    { name: 'tree',    local: 'assets/glb/tree.glb', url: 'https://static.poly.pizza/53a83125-e16a-4024-b8f6-1e72679c7ddf.glb', count: 150, height: CONFIG.treeHeight, kind: 'both', split: true, forest: true }
   ];
-  var R = 1.0, SURF = R;  // SURF 只是基准;实际半径由 groundRadius() 逐个算
-  var LAND_MIN   = 0.47;   // elevation 低于此值视为海洋,动物会在岸边转向
-  var WALK_SPEED = 0.010;  // 球面角速度(弧度/秒),原 0.030 走得太快
-  var STEP_RATE  = 0.45;   // 动画播放速率基准;实际 timeScale ∝ 位移速度
-  var SPIN_RATE  = 0.055;  // 地球自转角速度(原 0.14)
-  var CLOUD_RATE = 0.012;  // 云层漂移(原 0.03)
-  var FOOTPRINT = 0.24;   // 单个模型水平跨度上限(世界单位)
-  var MIN_GAP   = 0.30;   // 动物之间最小角距(弧度,约 17°)
-  // 森林簇:先挑中心(彼此拉开、避开动物),再在中心周围密集撒树。
-  // 簇内不做最小间距约束 ⇒ 树会挨在一起甚至局部重叠,形成森林冠层。
-  var FOREST_CENTERS = 14;    // 森林中心数量
-  var CLUSTER_R      = 0.12;  // 单个森林簇半径(球面角距,弧度)
-  var CENTER_GAP     = 0.30;  // 森林中心之间的最小角距
+  // P7 分级:主角 4 种 + 树先进队列,其余 11 种随后;tier 只影响发起顺序,
+  //   落点在加载前已预分配 ⇒ 分布与网络到达顺序无关。
+  var TIER0 = { deer: 1, rabbit: 1, giraffe: 1, panda: 1, tree: 1 };
+  for (var _mi = 0; _mi < MODELS.length; _mi++) {
+    MODELS[_mi].tier = TIER0[MODELS[_mi].name] ? 0 : 1;
+    if (MODELS[_mi].name === 'tree') MODELS[_mi].instanced = true;  // P1
+  }
+  // P8:以下是 CONFIG 的热路径短别名,数值不再散落在页面各处
+  var R = CONFIG.radius, SURF = R;
+  var LAND_MIN = CONFIG.landMin, WALK_SPEED = CONFIG.walkSpeed, STEP_RATE = CONFIG.stepRate,
+      SPIN_RATE = CONFIG.spinRate, CLOUD_RATE = CONFIG.cloudRate,
+      FOOTPRINT = CONFIG.footprint, MIN_GAP = CONFIG.minGap,
+      FOREST_CENTERS = CONFIG.forestCenters, CLUSTER_R = CONFIG.clusterR,
+      CENTER_GAP = CONFIG.centerGap;
 
   /* 平底模型站在球面上:中心相切、四角却离地 a²/2R。按缩放后半宽 a
      把模型下沉 sag*0.6 + 0.0015,既吃掉边缘空隙又不至于陷进地表。 */
@@ -964,12 +1463,23 @@ function initApp() {
   }
 
   /* ---------- 摆放: 统一展示尺寸 + 贴球面 + 闭环校准 ---------- */
-  function placeOnSphere(root, u, v, targetHeight) {
-    var size = root.userData.size;
+  var _placeUp = new THREE.Vector3(0, 1, 0), _yawQ = new THREE.Quaternion();
+  /* 纯计算版:InstancedMesh 没有 Object3D 可挂 Box3 校准,直接用同一套
+     size/u/v/height 公式得到 scale / 法线 / 朝向 / 贴地半径。 */
+  function computePlace(size, u, v, targetHeight, yaw) {
     var hDen = size.y > 1e-9 ? size.y : Math.max(size.x, size.z, 1e-9);
     var wDen = Math.max(size.x, size.z, 1e-9);
     var s = Math.min(targetHeight / hDen, FOOTPRINT / wDen);
-    var desiredH = s * hDen;
+    var d = surfaceDir(u, v);
+    var n = new THREE.Vector3(d[0], d[1], d[2]).normalize();
+    var q = new THREE.Quaternion().setFromUnitVectors(_placeUp, n);
+    q.multiply(_yawQ.setFromAxisAngle(_placeUp, yaw));   // 局部 Y = 地表法线
+    return { scale: s, height: s * hDen, groundR: groundRadius(size, s), n: n, q: q };
+  }
+  function placeOnSphere(root, u, v, targetHeight) {
+    var size = root.userData.size;
+    var pl = computePlace(size, u, v, targetHeight, rand() * Math.PI * 2);
+    var s = pl.scale, desiredH = pl.height;
     root.scale.setScalar(s);
     root.position.set(0, 0, 0);
     root.quaternion.identity();
@@ -980,16 +1490,12 @@ function initApp() {
     if (h > 1e-9 && isFinite(h) && Math.abs(h - desiredH) / desiredH > 0.01) {
       s *= desiredH / h;
       root.scale.setScalar(s);
+      pl.groundR = groundRadius(size, s);
     }
-
-    var d = surfaceDir(u, v);
-    var n = new THREE.Vector3(d[0], d[1], d[2]).normalize();
-    root.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), n);
-    root.rotateY(rand() * Math.PI * 2);       // 绕地表法线随机朝向
-    var gR = groundRadius(size, s);
-    root.userData.groundR = gR;
-    root.position.copy(n.multiplyScalar(gR));
-    return { scale: s, height: desiredH, groundR: gR };
+    root.quaternion.copy(pl.q);
+    root.userData.groundR = pl.groundR;
+    root.position.copy(pl.n).multiplyScalar(pl.groundR);
+    return { scale: s, height: desiredH, groundR: pl.groundR, n: pl.n, q: pl.q };
   }
 
   /* ---------- async load + scatter all models ----------
@@ -998,24 +1504,164 @@ function initApp() {
      改为「落点先按固定顺序预分配 → 每个模型加载完立刻单独摆放」:
      先到的小模型几秒内就出现,分布依旧可复现(不依赖网络到达顺序)。
   --------------------------------------------------------------- */
-  // A1 接触阴影:一份共享纹理 + 一份共享几何,169 个贴片几乎零成本。
-  //    贴片略高于球面(R+0.0035),否则会被半径 1.0 的地表挡住。
+  var outGroup = new THREE.Group();
+  tiltPivot.add(outGroup);
+  /* P1 合批①:169 个接触阴影贴片改成一个 InstancedMesh。
+     共享纹理 + 共享几何 + 一个 draw call;走动的 19 只动物每帧只更新
+     自己那一个实例的矩阵,150 棵树是静态的,一次写入后不再动。 */
   var shadowTex = contactShadowTex();
-  var shadowGeo = new THREE.PlaneGeometry(1, 1);
   var shadowMat = new THREE.MeshBasicMaterial({
     map: shadowTex, transparent: true, depthWrite: false, opacity: 0.72
   });
-  var treeSways = [];                       // C12 树的微摆状态
+  var shadowBatch = new THREE.InstancedMesh(
+    new THREE.PlaneGeometry(1, 1), shadowMat, CONFIG.shadowCap);
+  shadowBatch.count = 0;
+  shadowBatch.renderOrder = 2;
+  shadowBatch.frustumCulled = false;
+  outGroup.add(shadowBatch);
+  var shadowSlot = 0;
+  var _shUp = new THREE.Vector3(0, 0, 1), _shadowDummy = new THREE.Object3D();
+  function setShadow(slot, n, width) {
+    _shadowDummy.position.copy(n).multiplyScalar(R + 0.0035);
+    _shadowDummy.quaternion.setFromUnitVectors(_shUp, n);
+    _shadowDummy.scale.set(width, width, 1);
+    _shadowDummy.updateMatrix();
+    shadowBatch.setMatrixAt(slot, _shadowDummy.matrix);
+    shadowBatch.instanceMatrix.needsUpdate = true;
+  }
+  function allocShadow(n, width) {
+    if (shadowSlot >= CONFIG.shadowCap) return -1;
+    var s = shadowSlot++;
+    shadowBatch.count = shadowSlot;
+    setShadow(s, n, width);
+    return s;
+  }
+  /* P1 合批②:150 棵树。tree GLB 拆出的每个 part(5 种树形)里的每个 mesh
+     单独建一个 InstancedMesh,实例数 = 用该树形的树棵数。
+     几何在 buildTreeBatches() 里把节点自身变换(含 inner 的底面归零补偿)
+     一次性烘焙进顶点,实例矩阵只负责球面摆放。
+     树冠微摆由 writeTreeMatrix() 每帧重写矩阵实现,绝不改 scale 数值。 */
+  var treeSways = [];                       // 树的微摆记录(现在是实例槽位)
+  var treeInstances = [], treeCursor = [], treeInstanceCount = 0;
+  var treeTintMats = [];                   // V2 四季着色用
+  var _treeDummy = new THREE.Object3D();
   var _swayE = new THREE.Euler(), _swayQ = new THREE.Quaternion();
-  var outGroup = new THREE.Group();
-  tiltPivot.add(outGroup);
+  function buildTreeBatches(parts) {
+    var groups = [];
+    for (var vi = 0; vi < parts.length; vi++) {
+      var part = parts[vi];
+      part.updateMatrixWorld(true);
+      var meshes = [];
+      part.traverse(function (o) {
+        if (!o.isMesh || !o.geometry || !o.geometry.attributes.position) return;
+        var g = o.geometry.clone();
+        g.applyMatrix4(o.matrixWorld);
+        var m = o.material.clone();
+        meshes.push({ geo: g, mat: m });
+      });
+      groups.push(meshes);
+      for (var q = 0; q < meshes.length; q++) treeTintMats.push(meshes[q].mat);
+    }
+    return groups;
+  }
+  function makeTreeInstances(groups, counts) {
+    for (var vi = 0; vi < groups.length; vi++) {
+      var n = counts[vi], arr = [];
+      treeCursor[vi] = 0;
+      if (!n) { treeInstances[vi] = arr; continue; }
+      for (var mi = 0; mi < groups[vi].length; mi++) {
+        var im = new THREE.InstancedMesh(groups[vi][mi].geo, groups[vi][mi].mat, n);
+        im.count = n;
+        im.renderOrder = 1;
+        im.frustumCulled = false;
+        outGroup.add(im);
+        arr.push(im);
+        treeInstanceCount++;
+      }
+      treeInstances[vi] = arr;
+    }
+  }
+  function writeTreeMatrix(rec, extraQ) {
+    var arr = treeInstances[rec.vi];
+    if (!arr) return;
+    _treeDummy.position.copy(rec.n).multiplyScalar(rec.groundR);
+    _treeDummy.quaternion.copy(rec.base);
+    if (extraQ) _treeDummy.quaternion.multiply(extraQ);
+    _treeDummy.scale.setScalar(rec.scale);
+    _treeDummy.updateMatrix();
+    for (var i = 0; i < arr.length; i++) {
+      arr[i].setMatrixAt(rec.slot, _treeDummy.matrix);
+      arr[i].instanceMatrix.needsUpdate = true;
+    }
+  }
+  /* V6 脚印拖尾:一个 Points 批 + 环形复用 CONFIG.footprints 个槽位,
+     每只动物每 0.55s 落一枚(左右交替),6.5s 线性淡出。
+     只写 buffer 属性,不新建对象 ⇒ 1 个 draw call、零 GC 抖动。 */
+  var FCAP = CONFIG.footprints;
+  var fPos = new Float32Array(FCAP * 3), fAlpha = new Float32Array(FCAP),
+      fSize = new Float32Array(FCAP), fBorn = new Float32Array(FCAP);
+  for (var fz = 0; fz < FCAP; fz++) {
+    fAlpha[fz] = 0; fSize[fz] = 0.020; fBorn[fz] = -1e9;
+  }
+  var fGeo = new THREE.BufferGeometry();
+  fGeo.setAttribute('position', new THREE.Float32BufferAttribute(fPos, 3));
+  fGeo.setAttribute('aAlpha', new THREE.Float32BufferAttribute(fAlpha, 1));
+  fGeo.setAttribute('aSize', new THREE.Float32BufferAttribute(fSize, 1));
+  var footPoints = new THREE.Points(fGeo, new THREE.ShaderMaterial({
+    uniforms: { tDot: { value: footTex() } },
+    vertexShader: [
+      'attribute float aAlpha; attribute float aSize; varying float vA;',
+      'void main(){',
+      '  vA = aAlpha;',
+      '  vec4 mv = modelViewMatrix * vec4(position, 1.0);',
+      '  gl_PointSize = aSize * (900.0 / max(0.001, -mv.z));',
+      '  gl_Position = projectionMatrix * mv;',
+      '}'
+    ].join('\n'),
+    fragmentShader: [
+      'uniform sampler2D tDot; varying float vA;',
+      'void main(){',
+      '  if (vA <= 0.0) discard;',
+      '  vec4 d = texture2D(tDot, gl_PointCoord);',
+      '  if (d.a < 0.02) discard;',
+      '  gl_FragColor = vec4(0.17, 0.12, 0.08, d.a * vA * 0.55);',
+      '}'
+    ].join('\n'),
+    transparent: true, depthWrite: false
+  }));
+  footPoints.frustumCulled = false;
+  footPoints.renderOrder = 3;
+  outGroup.add(footPoints);
+  var fCursor = 0, panicCount = 0;
+  function pushFootprint(p, size) {
+    window.__footCount = (window.__footCount || 0) + 1;
+    var i = fCursor; fCursor = (fCursor + 1) % FCAP;
+    fPos[i * 3] = p.x; fPos[i * 3 + 1] = p.y; fPos[i * 3 + 2] = p.z;
+    fSize[i] = size || 0.020; fAlpha[i] = 1; fBorn[i] = performance.now();
+    fGeo.attributes.position.needsUpdate = true;
+    fGeo.attributes.aSize.needsUpdate = true;
+  }
+  function updateFootprints(now) {
+    var dirty = false;
+    for (var i = 0; i < FCAP; i++) {
+      if (fBorn[i] < 0) continue;
+      var a = 1 - (now - fBorn[i]) / (CONFIG.footprintLife * 1000);
+      var v = a > 0 ? a : 0;
+      if (v <= 0) fBorn[i] = -1e9;
+      if (fAlpha[i] !== v) { fAlpha[i] = v; dirty = true; }
+    }
+    if (dirty) fGeo.attributes.aAlpha.needsUpdate = true;
+  }
+
   var debugMode = location.search.indexOf('debug=1') >= 0;
   var debugRows = [];
   var walkers = [];        // 沿陆地游走的实例(树不在内)
   var animMixers = [];     // 每个带骨骼实例独立的 AnimationMixer
-  // 实时挂在 window 上,任意时刻都能读到「目前已摆放」的实例,便于校对
+  // P4:观测钩子常驻(不再只有 ?debug=1 才有),任意时刻可读 fps / draw calls
+  window.__globeDebug = { models: 0, done: 0, instances: debugRows,
+                          stats: {}, quality: 0, baked: !!earthRes.baked,
+                          csp: CSP, config: CONFIG };
   if (debugMode) {
-    window.__globeDebug = { models: 0, done: 0, instances: debugRows };
     // 校对用:每 0.5s 记一次第一只动物的球面坐标与动画时钟,用来证明
     // 位置在变(走来走去)、mixer.time 在推进(骨骼动画在播)
     window.__globeDebug.walkTrace = [];
@@ -1072,7 +1718,7 @@ function initApp() {
   var treePlan = null;
   for (var tpi = 0; tpi < plans.length; tpi++)
     if (plans[tpi].spec.name === 'tree') treePlan = plans[tpi];
-  var PN = 150, pPos = new Float32Array(PN * 3), pData = [], pseed = 4421;
+  var PN = CONFIG.motes, pPos = new Float32Array(PN * 3), pData = [], pseed = 4421;
   function pr() { pseed = (Math.imul(pseed, 1664525) + 1013904223) >>> 0; return pseed / 4294967296; }
   for (var pj = 0; pj < PN; pj++) {
     var base = (treePlan && treePlan.spots.length)
@@ -1103,7 +1749,7 @@ function initApp() {
      - 只改 opacity / visible / quaternion,绝不改 scale(延续零缩放约束)。
      - 独立 LCG,不消耗全局 rand ⇒ 动物 / 树落点完全不变。
      - 挂 outGroup ⇒ 随地球自转,始终立在陆地上。 */
-  var TORNADO_COUNT = 3, TORNADO_H = 0.19;   // v5.2c: 嫌太高,降到约树(0.15)的 1.3 倍
+  var TORNADO_COUNT = CONFIG.tornadoCount, TORNADO_H = CONFIG.tornadoH;
   // ⚠️ 不能复用 _upAxis:它声明在 stepWalkers 之前(更靠后),var 提升后此处
   //    是 undefined,setFromUnitVectors 读 .dot() 会让整个 initApp 崩掉。
   var _tornadoUp = new THREE.Vector3(0, 1, 0);
@@ -1121,32 +1767,44 @@ function initApp() {
     for (var apj = 0; apj < plans[api].spots.length; apj += stride)
       dst.push(plans[api].spots[apj]);
   }
-  function pickTornadoSpot(existing, frontOnly) {
+  /* 海陆混合落点(v6.1):
+       wantSea=true  → 水龙卷,取 e<0.44 的开阔海面(离岸一段距离,免得看起来
+                        仍贴着陆地);不检查动物 / 树(它们本来就在陆地上)。
+       wantSea=false → 陆龙卷,取 e>=0.52 的陆地内部,继续避开动物与森林簇。
+     开场那个槽位必须在正面半球,否则打开页面时正好在球背面看不见。 */
+  function pickTornadoSpot(existing, frontOnly, wantSea) {
     var fallback = null;
-    for (var tries = 0; tries < 1200; tries++) {
+    for (var tries = 0; tries < 1600; tries++) {
       var u = tr(), v = 0.16 + tr() * 0.68;
-      if (elevation(u, v) < 0.52) continue;       // 陆地内部,避开海岸
-      // 开场那个槽位必须在正面(surfaceDir 的 z 分量 > 0.38),
-      // 否则用户打开页面时龙卷风正好在球背面,完全看不见。
-      if (frontOnly && surfaceDir(u, v)[2] < 0.38) continue;
-      var p = { u: u, v: v }, good = true;
-      for (var ai = 0; ai < animalPts.length; ai++)
-        if (angularDist(p, animalPts[ai]) < 0.20) { good = false; break; }
-      if (!good) continue;
-      // 落在开阔陆地,别把灰白雾团盖在绿色树冠上(会看成「树开花」)
-      for (var tpi2 = 0; tpi2 < treePts.length; tpi2++)
-        if (angularDist(p, treePts[tpi2]) < 0.14) { good = false; break; }
-      if (!good) continue;
+      var e = elevation(u, v);
+      if (wantSea ? e >= 0.44 : e < 0.52) continue;
+      // 开场可见的三个槽位限定在正面偏中部:z>0.58 保证朝着相机,
+      // v∈[0.33,0.64] 避免落在球的上下缘(否则漏斗顺着法线伸出轮廓,
+      // 看起来像「从地球底部漏出一根白柱」)。
+      if (frontOnly && (surfaceDir(u, v)[2] < 0.58 || v < 0.33 || v > 0.64)) continue;
+      var p = { u: u, v: v, sea: !!wantSea }, good = true;
+      if (!wantSea) {
+        for (var ai = 0; ai < animalPts.length; ai++)
+          if (angularDist(p, animalPts[ai]) < 0.20) { good = false; break; }
+        // 落在开阔陆地,别把灰白雾团盖在绿色树冠上(会看成「树开花」)
+        for (var tpi2 = 0; good && tpi2 < treePts.length; tpi2++)
+          if (angularDist(p, treePts[tpi2]) < 0.14) { good = false; break; }
+        if (!good) continue;
+      }
       for (var ei = 0; ei < existing.length; ei++)
         if (angularDist(p, existing[ei]) < 0.45) { good = false; break; }
       if (good) return p;
       if (!fallback) fallback = p;
     }
-    return fallback || { u: 0.5, v: 0.42 };
+    return fallback || { u: 0.5, v: 0.42, sea: !!wantSea };
   }
+  // 18 个落点海陆交替;槽位每次轮换 +1 ⇒ 每个龙卷风都会在两种环境间切换。
   var tSpots = [];
-  for (var tsi = 0; tsi < TORNADO_COUNT * 6; tsi++)
-    tSpots.push(pickTornadoSpot(tSpots, tsi === 0));
+  for (var tsi = 0; tsi < TORNADO_COUNT * 6; tsi++) {
+    // 0 / 1 / 12 是三个槽位的初始落点(0=海、1=陆、12=海),都要一打开就看得见
+    var opening = (tsi === 0 || tsi === 1 || tsi === 12);
+    tSpots.push(pickTornadoSpot(tSpots, opening, tsi % 2 === 0));
+  }
 
   // 漏斗轮廓:底窄顶宽。内外两层用不同几何(不用 scale),避免任何缩放动画
   function funnelGeo(scaleR, scaleH) {
@@ -1169,9 +1827,19 @@ function initApp() {
     gr.position.copy(n).multiplyScalar(R + 0.001);
     gr.quaternion.setFromUnitVectors(_tornadoUp, n);   // 局部 +Y 对齐球面法线
   }
-  // 0 号一打开就处于完整可见的持续段(此前 0.56 在低帧率 headless 下
-  //    26s 都还没淡入完,截图看不到任何龙卷风),2 号正在消散。
-  var initPhases = [0.66, 0.10, 0.84];
+  // v6.1:0 号(海)与 1 号(陆)一打开就处于完整可见的持续段,
+  //   2 号(海)正在消散 ⇒ 海陆两种同时能看见,之后照旧进入间歇期。
+  //   (此前 0.56 在低帧率 headless 下 26s 都还没淡入完,截图看不到。)
+  var initPhases = [0.66, 0.66, 0.84];
+  var initSpots = [0, 1, 12];   // 0/12 是海点,1 是陆点
+  // 水龙卷偏冷蓝:只改 material.color,绝不改 scale(零缩放约束)
+  function applyTornadoTint(tn) {
+    var c = tn.sea ? 0xd2eaff : 0xffffff;
+    tn.inner.material.color.setHex(c);
+    tn.outer.material.color.setHex(c);
+    tn.haze.material.color.setHex(c);
+    tn.dust.material.color.setHex(tn.sea ? 0x9fd2ff : 0xffffff);
+  }
   var tornadoes = [];
   for (var tk = 0; tk < TORNADO_COUNT; tk++) {
     var grp = new THREE.Group(), nrm = new THREE.Vector3();
@@ -1231,14 +1899,16 @@ function initApp() {
 
     var tn = {
       group: grp, swirl: swirl, nrm: nrm, base: new THREE.Quaternion(),
-      spotIdx: tk * 6, phase: initPhases[tk], period: 38 + tr() * 22,
-      u: tSpots[tk * 6].u, v: tSpots[tk * 6].v,
+      spotIdx: initSpots[tk], phase: initPhases[tk], period: 38 + tr() * 22,
+      sea: !!tSpots[initSpots[tk]].sea,
+      u: tSpots[initSpots[tk]].u, v: tSpots[initSpots[tk]].v,
       heading: tr() * Math.PI * 2, speed: 0.010 + tr() * 0.010,
       scroll: 0.60 + tr() * 0.30, spin: 2.4 + tr() * 1.4,
       swayPhase: tr() * Math.PI * 2,
       fade: fade, texA: texA, texB: texB, texC: texC,
       inner: inner, outer: outer, haze: haze, dust: dust
     };
+    applyTornadoTint(tn);
     placeTornado(grp, nrm, tSpots[tn.spotIdx]);
     tn.base.copy(grp.quaternion);
     grp.visible = false;
@@ -1270,24 +1940,40 @@ function initApp() {
       _zAxis = new THREE.Vector3(0, 0, 1),
       _upAxis = new THREE.Vector3(0, 1, 0), _faceQ = new THREE.Quaternion(),
       _headDir = new THREE.Vector3(),
-      _basis = new THREE.Matrix4();
+      _basis = new THREE.Matrix4(),
+      _tmpWN = new THREE.Vector3(), _footPos = new THREE.Vector3(),
+      _footRight = new THREE.Vector3();
 
-  function stepWalkers(dt, now) {
+  function stepWalkers(dt, now, panicPts) {
+    panicCount = 0;
     for (var i = 0; i < walkers.length; i++) {
       var w = walkers[i];
       w.heading += (rand() - 0.5) * dt * 0.35;     // 缓慢随机游荡
+      // V5 龙卷风联动:附近(角距 < ~0.35 rad)的动物受惊,掉头 + 加速 + 不休息
+      var pan = 0, wN = _tmpWN.copy(w.inst.position).normalize();
+      for (var pz = 0; pz < panicPts.length; pz++)
+        if (wN.dot(panicPts[pz]) > 0.94) { pan = 1; break; }
+      if (pan) {
+        panicCount++;
+        if (!w.panic) {
+          w.heading += Math.PI * (0.6 + rand() * 0.7);
+          w.pauseIn = 8 + rand() * 6;
+        }
+        w.idle = 0;
+      }
+      w.panic = pan;
       // C13 走走停停:随机进入 1.2~4s 原地张望,腿频同步降下来(不缩放)
       if (w.idle > 0) {
         w.idle -= dt;
         if (w.act) w.act.timeScale = w.baseRate * 0.12;
       } else {
         w.pauseIn -= dt;
-        if (w.pauseIn <= 0) { w.idle = 1.2 + rand() * 2.8; w.pauseIn = 4 + rand() * 8; }
-        if (w.act) w.act.timeScale = w.baseRate;
+        if (w.pauseIn <= 0 && !pan) { w.idle = 1.2 + rand() * 2.8; w.pauseIn = 4 + rand() * 8; }
+        if (w.act) w.act.timeScale = w.baseRate * (pan ? 2.0 : 1);
       }
       var lat = (0.5 - w.v) * Math.PI;
       var cosLat = Math.max(0.3, Math.cos(lat));
-      var step = w.idle > 0 ? 0 : w.speed * dt;
+      var step = w.idle > 0 ? 0 : w.speed * dt * (pan ? 2.4 : 1);
 
       function tryAt(h) {
         var u = (w.u + Math.cos(h) * step / cosLat + 1) % 1;
@@ -1339,12 +2025,19 @@ function initApp() {
 
       // 贴地:不再叠加 bob 起伏(那会让脚离地);步态由 gait 旋转 + leg morph 提供。
       // 半径用该模型按 footprint 算出的 groundR,平底与球面切平。
+      var _wN = _p0.clone().normalize();          // 先在缩放前取单位法线
       w.inst.position.copy(_p0.multiplyScalar(w.inst.userData.groundR || SURF));
-      // A1 阴影贴片跟着走:法线随落点变化,始终平贴球面
-      if (w.shadow) {
-        var sn = _p0.clone().normalize();
-        w.shadow.position.copy(sn).multiplyScalar(R + 0.0035);
-        w.shadow.quaternion.setFromUnitVectors(_zAxis, sn);
+      // A1 阴影贴片跟着走:合批后只改自己那一个实例矩阵
+      if (w.shadowSlot >= 0) setShadow(w.shadowSlot, _wN, w.shadowW);
+      // V6 脚印:移动时才落,左右交替,与地表法线 / 前进正交基对齐
+      if (step > 0 && now - w.lastFoot > CONFIG.footprintEvery * 1000) {
+        w.lastFoot = now;
+        w.footSide = !w.footSide;
+        _footPos.copy(_wN).multiplyScalar(R + 0.005);
+        _footRight.set(1, 0, 0).applyQuaternion(w.inst.quaternion)
+                  .multiplyScalar((w.footSide ? 1 : -1) * w.shadowW * 0.13);
+        _footPos.add(_footRight);
+        pushFootprint(_footPos, 0.018 + w.shadowW * 0.02);
       }
 
       // 程序化腿部迈步:与 gait clip 共用同一个 action.time,相位严格同步
@@ -1357,6 +2050,41 @@ function initApp() {
         }
       }
     }
+  }
+
+  /* P1 树的合批摆放:与 scatter() 用同一套 computePlace(),落点 / 尺寸 /
+     贴地半径完全一致,只是把「每棵一个 Group 层级」换成实例矩阵。 */
+  function scatterTrees(res, plan) {
+    var spec = plan.spec, spots = plan.spots, parts = res.parts;
+    var groups = buildTreeBatches(parts);
+    var counts = [], n = Math.min(spots.length, spec.count), k;
+    for (k = 0; k < parts.length; k++) counts[k] = 0;
+    for (k = 0; k < n; k++) counts[k % parts.length]++;
+    makeTreeInstances(groups, counts);
+    for (k = 0; k < n; k++) {
+      var vi = k % parts.length, sp = spots[k];
+      var pl = computePlace(parts[vi].userData.size, sp.u, sp.v,
+                            spec.height, rand() * Math.PI * 2);
+      var rec = { vi: vi, slot: treeCursor[vi]++, base: pl.q.clone(),
+                  n: pl.n.clone(), scale: pl.scale, groundR: pl.groundR,
+                  phase: rand() * Math.PI * 2, u: sp.u, v: sp.v, panic: 0 };
+      treeSways.push(rec);
+      writeTreeMatrix(rec, null);
+      var tw = Math.min(0.17, Math.max(0.045,
+        Math.max(parts[vi].userData.size.x, parts[vi].userData.size.z) * pl.scale * 1.40));
+      allocShadow(pl.n, tw);
+      if (debugMode) debugRows.push({
+        name: spec.name, part: vi,
+        u: +sp.u.toFixed(4), v: +sp.v.toFixed(4),
+        elev: +elevation(sp.u, sp.v).toFixed(3),
+        measured: parts[vi].userData.size, scale: +pl.scale.toFixed(6),
+        height: +pl.height.toFixed(4),
+        radius: +pl.groundR.toFixed(4), groundR: +pl.groundR.toFixed(4),
+        gait: 'instanced'
+      });
+    }
+    console.log('[globe-present] tree: ' + n + ' instances in ' +
+                treeInstanceCount + ' InstancedMesh batches');
   }
 
   function scatter(res, plan) {
@@ -1384,28 +2112,19 @@ function initApp() {
           phase: rand() * Math.PI * 2,
           faceYaw: (rand() - 0.5) * 0.6,
           facing: spec.facing || 0,
-          pauseIn: 3 + rand() * 7, idle: 0, act: null
+          pauseIn: 3 + rand() * 7, idle: 0, act: null,
+          lastFoot: performance.now(), footSide: false, panic: 0
         };
         w.baseRate = STEP_RATE * (w.speed / WALK_SPEED);
         walkers.push(w);
       }
 
       // A1 接触阴影:独立于模型缩放(模型 s≈0.02,贴片必须按世界尺寸算)
-      var shN = new THREE.Vector3().copy(inst.position).normalize();
+      var shN = info.n.clone();
       var shW = Math.min(0.17, Math.max(0.045,
         Math.max(inst.userData.size.x, inst.userData.size.z) * info.scale * 1.40));
-      var sh = new THREE.Mesh(shadowGeo, shadowMat);
-      sh.scale.set(shW, shW, 1);
-      sh.position.copy(shN).multiplyScalar(R + 0.0035);
-      sh.quaternion.setFromUnitVectors(_zAxis, shN);
-      sh.renderOrder = 2;
-      outGroup.add(sh);
-      if (w) w.shadow = sh;
-      // C12 树保存初始朝向,每帧只叠加 quaternion 摆动(绝不改 scale / position)
-      if (!spec.walk) {
-        treeSways.push({ inst: inst, base: inst.quaternion.clone(),
-                         phase: rand() * Math.PI * 2 });
-      }
+      var slot = allocShadow(shN, shW);
+      if (w) { w.shadowSlot = slot; w.shadowN = shN; w.shadowW = shW; }
 
       // 每个实例独立 mixer:12 只带骨骼动物播 Walk,6 只无骨骼动物播程序化步态
       var useClip = clip;
@@ -1443,29 +2162,38 @@ function initApp() {
                  spec.gait ? ' (procedural gait + leg morph)' : ' (static)'));
   }
 
-  plans.forEach(function (plan) {
-    loadGLB(plan.spec).then(function (res) {
+  /* P7:分级 + 并发上限。16 个 GLB 一次性并发会抢带宽、拖慢主角出现;
+     按 tier 排序后最多同时 4 个,完成一个补一个。落点已预分配 ⇒ 顺序安全。 */
+  function runPlan(plan) {
+    return loadGLB(plan.spec).then(function (res) {
       okCount++;
-      scatter(res, plan);
+      if (plan.spec.instanced) scatterTrees(res, plan);
+      else scatter(res, plan);
+      if (okCount === 1) {                       // P6:首个模型真正上场
+        firstModelReady();
+        window.__globeDebug.firstModelMs = Math.round(performance.now());
+      }
     }).catch(function (err) {
       // 单个模型失败只跳过它自己,不再连累其他物种
       console.warn('[globe-present] ' + plan.spec.name + ' 加载失败,已跳过:', err);
     }).then(function () {          // finally:成功 / 失败都推进进度
       doneCount++;
-      if (debugMode) {
-        window.__globeDebug.models = okCount;
-        window.__globeDebug.done = doneCount;
-        window.__globeDebug.walkers = walkers.length;
-        window.__globeDebug.mixers = animMixers.length;
-        window.__globeDebug.gait = walkers.filter(function (x) { return x.morphs; }).length;
-        window.__globeDebug.trees = debugRows.filter(function (x) { return x.name === 'tree'; }).length;
-      }
+      window.__globeDebug.models = okCount;
+      window.__globeDebug.done = doneCount;
+      window.__globeDebug.walkers = walkers.length;
+      window.__globeDebug.mixers = animMixers.length;
+      window.__globeDebug.gait = walkers.filter(function (x) { return x.morphs; }).length;
+      window.__globeDebug.trees = debugRows.filter(function (x) { return x.name === 'tree'; }).length;
+      var pct = Math.round(doneCount / plans.length * 100);
+      setLoadProgress(pct, doneCount + '/' + plans.length + ' 模型');
       if (doneCount < plans.length) {
         setStatus('正在放置动物与树木… ' + okCount + '/' + plans.length);
       } else {
         clearTimeout(slowTimer);
+        releaseGLBTextureCompat();                 // P10:纹理解码完毕,恢复全局
         if (okCount === 0) {
           setStatus('模型加载失败,请检查网络');
+          firstModelReady();                       // 别把用户挡在遮罩后面
           document.getElementById('errMsg').textContent =
             '动物 / 树木模型全部加载失败,请检查网络后刷新页面重试(poly.pizza CDN 不可达?)。';
           document.getElementById('errBox').style.display = 'flex';
@@ -1475,12 +2203,118 @@ function initApp() {
         }
       }
     });
+  }
+  var loadQueue = plans.slice().sort(function (a, b) {
+    return (a.spec.tier || 0) - (b.spec.tier || 0);
   });
+  var activeLoads = 0, queueIdx = 0;
+  function pumpLoads() {
+    while (activeLoads < CONFIG.loadConcurrency && queueIdx < loadQueue.length) {
+      var plan = loadQueue[queueIdx++];
+      activeLoads++;
+      runPlan(plan).then(function () { activeLoads--; pumpLoads(); });
+    }
+  }
+  pumpLoads();
+
+  /* ---------- P2 自适应画质 ----------
+     三档:0 全画质 / 1 降 DPR + 关云影与林间光点 / 2 再关第二层云、
+     收鸟群、简化龙卷风雾壳。只减「氛围层」,绝不改动物 / 树的数量、
+     尺寸、动画或落点 ⇒ 硬约束不受画质切换影响。
+     连续 qualityWindow 秒低于 lowFps 才降档,高于 highFps 更久才升档,
+     避免来回抖动。?quality=0|1|2 可钉住档位便于校对截图。 */
+  var qPin = /quality=([012])/.exec(location.search);
+  var qualityLevel = 0, _qHold = 0;
+  function applyQuality(lv) {
+    lv = Math.max(0, Math.min(2, lv));
+    qualityLevel = lv;
+    renderer.setPixelRatio(lv === 0 ? Math.min(window.devicePixelRatio || 1, CONFIG.maxPixelRatio)
+                                   : lv === 1 ? 1 : 0.75);
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    clouds2.visible = lv < 2;
+    cloudShadow.visible = lv < 1;
+    pPoints.visible = lv < 1;
+    atmoGlow.material.opacity = lv === 0 ? 0.85 : lv === 1 ? 0.62 : 0.42;
+    var keep = lv === 0 ? BC : lv === 1 ? Math.floor(BC * 0.6) : Math.floor(BC * 0.3);
+    for (var i = 0; i < birdSprites.length; i++) birdSprites[i].visible = i < keep;
+    for (var j = 0; j < tornadoes.length; j++)
+      if (tornadoes[j].haze) tornadoes[j].haze.visible = lv < 2;
+    window.__globeDebug.quality = lv;
+  }
+  /* ---------- P4 观测钩子 ---------- */
+  var _statFrames = 0, _statT = performance.now();
+  function sampleStats(now) {
+    _statFrames++;
+    var span = now - _statT;
+    if (span < 500) return;
+    var fps = _statFrames * 1000 / Math.max(1, span);
+    _statFrames = 0; _statT = now;
+    var inf = renderer.info;
+    window.__globeDebug.stats = {
+      fps: +fps.toFixed(1), calls: inf.render.calls,
+      tris: inf.render.triangles, points: inf.render.points,
+      geometries: inf.memory.geometries, textures: inf.memory.textures,
+      programs: inf.programs ? inf.programs.length : 0,
+      quality: qualityLevel, baked: !!earthRes.baked,
+      shadows: shadowSlot, treeBatches: treeInstanceCount,
+      footprints: window.__footCount || 0, panic: panicCount,
+      tornado: {
+        sea: tornadoes.filter(function (x) { return x.sea; }).length,
+        land: tornadoes.filter(function (x) { return !x.sea; }).length,
+        visible: tornadoes.filter(function (x) { return x.group.visible; }).length
+      },
+      land: [earthRes.grass.length, earthRes.forest.length],
+      csp: { blocked: CSP.blocked, active: CSP.active }
+    };
+    if (qPin) return;
+    if (fps < CONFIG.lowFps && qualityLevel < 2) {
+      _qHold += span / 1000;
+      if (_qHold >= CONFIG.qualityWindow) { applyQuality(qualityLevel + 1); _qHold = 0; }
+    } else if (fps > CONFIG.highFps && qualityLevel > 0) {
+      _qHold += span / 1000;
+      if (_qHold >= CONFIG.qualityWindow * 2) { applyQuality(qualityLevel - 1); _qHold = 0; }
+    } else _qHold = 0;
+  }
+  if (qPin) applyQuality(Number(qPin[1]));
 
   /* ---------- animation loop ---------- */
   var prevT = performance.now();
   function frame(now) {
-    var dt = Math.min(0.05, (now - prevT) / 1000); prevT = now;
+    var dt = Math.max(0, Math.min(0.05, (now - prevT) / 1000)); prevT = now;
+
+    // V3 极光 / 流星 2D 图层
+    drawFx(now, dt);
+    // V5 联动源:当前可见龙卷风的球面法线(用上一帧位置,差一帧无影响)
+    var panicPts = [];
+    for (var pz0 = 0; pz0 < tornadoes.length; pz0++)
+      if (tornadoes[pz0].group.visible)
+        panicPts.push(tornadoes[pz0].group.position.clone().normalize());
+    var mt = now * 0.000018;
+    moonSprite.position.set(-2.45 + Math.cos(mt) * 0.18,
+                            0.95 + Math.sin(mt) * 0.14, -1.30);
+    // V2 四季:四组色温平滑插值,只乘材质 color,不改几何 / 尺寸 / 落点
+    var sec = now * 0.001;
+    var ST = [[1.00, 1.03, 0.97], [0.98, 1.00, 0.95],
+              [1.07, 0.97, 0.86], [0.97, 1.00, 1.06]];
+    var sf = ((sec / CONFIG.seasonPeriod) % 1) * 4;
+    var si0 = Math.floor(sf) % 4, si1 = (si0 + 1) % 4, st = smooth01(sf - Math.floor(sf));
+    var tintR = lerp(ST[si0][0], ST[si1][0], st),
+        tintG = lerp(ST[si0][1], ST[si1][1], st),
+        tintB = lerp(ST[si0][2], ST[si1][2], st);
+    earthMat.color.setRGB(tintR, tintG, tintB);
+    for (var sm = 0; sm < treeTintMats.length; sm++) {
+      var tm = treeTintMats[sm];
+      if (!tm.color) continue;
+      if (!tm.userData.__sr) tm.userData.__sr = [tm.color.r, tm.color.g, tm.color.b];
+      var bc = tm.userData.__sr;
+      tm.color.setRGB(bc[0] * lerp(1, tintR, 0.35),
+                      bc[1] * lerp(1, tintG, 0.35),
+                      bc[2] * lerp(1, tintB, 0.35));
+    }
+    sunLight.intensity = 2.2 * (0.95 + 0.05 * Math.cos(sec / CONFIG.seasonPeriod * Math.PI * 2));
+    nightLayer.material.uniforms.uTime.value = sec;
+    oceanLayer.material.uniforms.uTime.value = sec;
+    updateFootprints(now);
 
     // earth spin (8 deg/s) + clouds drift
     earth.rotation.y += dt * SPIN_RATE;
@@ -1490,18 +2324,23 @@ function initApp() {
     cloudShadow.rotation.y = clouds.rotation.y * 0.96;
     outGroup.rotation.y = earth.rotation.y;   // 模型跟着地球自转,始终踩在陆地上
 
-    // C12 树随风微摆:只叠加 quaternion,不动 scale / position
+    // C12 树随风微摆:合批后每帧重写实例矩阵的旋转部分(scale 恒定)
     var swayT = now * 0.001;
     for (var ti = 0; ti < treeSways.length; ti++) {
       var ts = treeSways[ti], a = swayT * 1.05 + ts.phase;
-      _swayE.set(Math.sin(a) * 0.016, 0, Math.sin(a * 0.77 + 1.3) * 0.021);
+      var tpn = 0;
+      for (var pz1 = 0; pz1 < panicPts.length; pz1++)
+        if (ts.n.dot(panicPts[pz1]) > 0.94) { tpn = 1; break; }
+      ts.panic = tpn;
+      var amp = 0.016 * (1 + tpn * 3.2);   // V5 龙卷风联动
+      _swayE.set(Math.sin(a) * amp, 0, Math.sin(a * 0.77 + 1.3) * amp * 1.3);
       _swayQ.setFromEuler(_swayE);
-      ts.inst.quaternion.copy(ts.base).multiply(_swayQ);
+      writeTreeMatrix(ts, _swayQ);
     }
 
     // 骨骼腿部动画 + 沿陆地游走
     for (var mi = 0; mi < animMixers.length; mi++) animMixers[mi].update(dt);
-    stepWalkers(dt, now);
+    stepWalkers(dt, now, panicPts);
 
     // C11 鸟群绕地轴飞 + 三帧扇翅(Sprite 始终朝向相机)
     for (var bi = 0; bi < BC; bi++) {
@@ -1526,6 +2365,7 @@ function initApp() {
       parr[pj * 3 + 2] = q.z + pv * q.amp * 0.7;
     }
     pGeo.attributes.position.needsUpdate = true;
+    pPoints.material.size = 0.018 * (panicPts.length ? 1.45 : 1);  // V5
 
     // v5.2 龙卷风:淡入 → 持续 → 淡出 → 隐藏,轮换落点;只改 opacity / visible
     for (var tq = 0; tq < tornadoes.length; tq++) {
@@ -1535,9 +2375,11 @@ function initApp() {
         tn.phase -= 1;
         tn.spotIdx = (tn.spotIdx + 1) % tSpots.length;   // 下次出现在别处
         tn.u = tSpots[tn.spotIdx].u; tn.v = tSpots[tn.spotIdx].v;
+        tn.sea = !!tSpots[tn.spotIdx].sea;               // 海 / 陆交替
+        applyTornadoTint(tn);
         tn.heading = tr() * Math.PI * 2;
       }
-      // ② 沿陆地缓慢行进:与 walkers 同一套 (u,v) 参数空间步进。
+      // ② 沿球面缓慢行进:与 walkers 同一套 (u,v) 参数空间步进。
       //    du 要除以 2π·cosLat、dv 除以 π,才是真正的球面角距。
       var tlat = (0.5 - tn.v) * Math.PI;
       var tcos = Math.max(0.3, Math.cos(tlat));
@@ -1545,8 +2387,13 @@ function initApp() {
       var tdv = -Math.sin(tn.heading) * tn.speed * dt / Math.PI;
       var tnu = (tn.u + tdu + 1) % 1, tnv = tn.v + tdv;
       tn.heading += (tr() - 0.5) * dt * 0.30;
-      if (tnv < 0.12 || tnv > 0.88 || elevation(tnu, tnv) < 0.50) {
-        tn.heading += Math.PI * (0.5 + tr() * 0.5);      // 撞海岸 / 极区转向
+      // v6.1:按「自身环境」判定,不再一律要求陆地 —— 水龙卷在海面走,
+      //   陆龙卷在陆地走;靠近对方环境(海岸)或极区就转向。
+      var eNext = elevation(tnu, tnv);
+      var offGlobe = tnv < 0.12 || tnv > 0.88;
+      var wrongTerrain = tn.sea ? eNext >= 0.455 : eNext < 0.50;
+      if (offGlobe || wrongTerrain) {
+        tn.heading += Math.PI * (0.5 + tr() * 0.5);
       } else {
         tn.u = tnu; tn.v = tnv;
       }
@@ -1580,18 +2427,23 @@ function initApp() {
       var ttr = window.__globeDebug.tornadoTrace ||
                 (window.__globeDebug.tornadoTrace = []);
       if (ttr.length < 60 && (!ttr.length || now - ttr[ttr.length - 1][0] > 400)) {
-        var vc = 0, phs = [], tpos = [];
+        var vc = 0, phs = [], tpos = [], kinds = [];
         for (var tq2 = 0; tq2 < tornadoes.length; tq2++) {
-          if (tornadoes[tq2].group.visible) vc++;
-          phs.push(+tornadoes[tq2].phase.toFixed(2));
-          tpos.push([+tornadoes[tq2].u.toFixed(4), +tornadoes[tq2].v.toFixed(4),
-                     +tornadoes[tq2].swirl.rotation.y.toFixed(2)]);
+          var tt = tornadoes[tq2];
+          if (tt.group.visible) vc++;
+          phs.push(+tt.phase.toFixed(2));
+          kinds.push(tt.sea ? 'sea' : 'land');
+          tpos.push([+tt.u.toFixed(4), +tt.v.toFixed(4),
+                     +tt.swirl.rotation.y.toFixed(2),
+                     +elevation(tt.u, tt.v).toFixed(3)]);
         }
-        ttr.push([Math.round(now), vc, phs, tpos]);
+        ttr.push([Math.round(now), vc, phs, tpos, panicCount, kinds]);
       }
     }
 
     renderer.render(scene, camera);
+    sampleStats(now);                                            // P4 + P2
+    if (!LOAD.frame) { LOAD.frame = true; maybeHideLoading(); }  // P6
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
@@ -1600,37 +2452,48 @@ function initApp() {
   function onResize() {
     var w = window.innerWidth, h = window.innerHeight;
     renderer.setSize(w, h);
+    resizeFx(w, h);                       // V3
     if (skyCanvas) drawStarfield(skyCanvas);
     camera.aspect = w / h;
     // 窄视口(竖屏)水平视野不足,地球边缘连同站在边缘的模型会被裁掉。
     // 按 aspect 把相机拉远,保证半径约 1.22 的范围完整入画。
     var halfV = Math.tan(camera.fov * Math.PI / 360);
-    var dist = Math.max(3.2, 1.22 / (halfV * Math.min(1, camera.aspect)));
-    camera.position.set(0, 0.55 * (dist / 3.2), dist);
+    var dist = Math.max(CONFIG.camDist,
+                        CONFIG.camFit / (halfV * Math.min(1, camera.aspect)));
+    camera.position.set(0, 0.55 * (dist / CONFIG.camDist), dist);
     camera.lookAt(0, 0, 0);
     camera.updateProjectionMatrix();
   }
   window.addEventListener('resize', onResize);
   onResize();
 
-  /* ---------- hide loading overlay once first frame is drawn ---------- */
-  setTimeout(function () {
-    var l = document.getElementById('loading');
-    if (l) l.classList.add('hide');
-  }, 300);
 }
 
-/* ---------- boot ---------- */
-try { initApp(); }
-catch (e) {
-  console.error('[globe-present] init failed:', e);
-  var box = document.getElementById('errBox');
-  var msg = document.getElementById('errMsg');
-  msg.textContent = '3D 引擎初始化失败：' + (e && e.message ? e.message : e);
-  box.style.display = 'flex';
-  var l2 = document.getElementById('loading');
-  if (l2) l2.classList.add('hide');
+/* ---------- boot ----------
+   ?bake=1 是 P5 的离线构建入口:不启动 WebGL,只跑一遍程序化纹理并
+   把 6 张 PNG 的 dataURL 放到 window.__bakeResult,供构建脚本落盘。 */
+async function boot() {
+  try {
+    // 必须用精确参数匹配:字符串 'nobake=1' 里也含 'bake=1',
+    // 用 indexOf 会把「强制程序化回退」误判成「只导出纹理不启动场景」。
+    var qs = location.search;
+    if (/(?:^|[?&])bake=1(?:&|$)/.test(qs)) {
+      window.__bakeResult = bakeTextures();
+      return;
+    }
+    if (/(?:^|[?&])nobake=1(?:&|$)/.test(qs)) CONFIG.bakedTextures = false;
+    await ensureGLBTextureCompat();
+    await initApp();
+  } catch (e) {
+    console.error('[globe-present] init failed:', e);
+    var box = document.getElementById('errBox');
+    var msg = document.getElementById('errMsg');
+    msg.textContent = '3D 引擎初始化失败：' + (e && e.message ? e.message : e);
+    box.style.display = 'flex';
+    forceHideLoading();
+  }
 }
+boot();
 </script>
 </body>
 </html>
