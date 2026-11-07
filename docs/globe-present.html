@@ -269,6 +269,27 @@
           法线变换不用 matrixWorld(旧写法的 Matrix3.getNormalMatrix 算出全 NaN,
           反而拆成 Rz(tilt)·Ry(earthRot) 解析式自算,不依赖渲染器的更新时序。
       硬约束不变:15 种动物 19 只 + 150 棵树、全部陆地贴地、
+    V6.4 山脉层(2026-11-07):
+       ① 路线 B(叠加山体,不动球面假设):地球本体保持完美球面 ⇒
+          动物 / 树 / 接触阴影 / 脚印 / 龙卷风的贴地逻辑零改动,
+          硬约束「全部陆地贴地、动画零缩放」不受影响。
+          山体是独立的 256×128 球壳,顶点径向抬起,高度场用页面同源的
+          hash3/vnoise3/fbm3 现场算(不读 terrain.png ⇒ 无需重烘焙贴图)。
+       ② 山脚与大陆【同源】:山脚颜色直接取地球贴图原色,草地染色复用
+          landSeason 层的同一张掩膜(tMask.R)与同一个季节强度
+          (uMtnGrassAmt ≡ 大陆的 grassYellowK)⇒ 春夏露出原贴图绿、
+          秋天随大陆一起泛黄,两者不会各变各的。
+       ③ 草裙 / 岩石 / 雪帽按【相对峰顶高度】划分(vMtnRel = 高度 / 本座山
+          峰顶高度,±10 格局部 max 包络)⇒ 矮山不会整座都是草、高山不会
+          半身是雪;按绝对高度划分时这两个问题同时存在。
+       ④ 山体是独立材质 ⇒ 必须跟大陆用同一个季节 tint(mtnMat.color),
+          否则秋冬山体与大陆色调对不上。
+       ⑤ 山脚裁切:山体壳与地球面(64×64 多面体)在山脚一圈几乎共面 ⇒
+          互相穿插。低于裁切高度(MTN_SINK + 0.0018)的片元直接丢弃,
+          那里本来就该由地球面露出,颜色本就一致。
+       ⑥ 岩石用固有色(中性偏暖灰)而不是脚下地表色 ⇒ 山体落在沙滩上
+          时不会变成「一座沙山」;再乘季节染色与大陆四季色调一致。
+       ⑦ 树木 / 动物避开山体(mtnBlock)⇒ 不会埋在岩里。
       动画过程零缩放、无交互、无 CSP / 贴图异常。
 -->
 <canvas id="sky"></canvas>
@@ -416,7 +437,8 @@ var CONFIG = {
   // 新视觉
   seasonPeriod: 60, meteorMin: 4.0, meteorMax: 9.0,
   shadowCap: 200, footprintLife: 6.5, footprintEvery: 0.55,
-  snowCap: 900, leafCap: 150, flowerCap: 900
+  snowCap: 900, leafCap: 150, flowerCap: 900,
+  mountainAmp: 0.185,        // V6.4 山峰最大相对半径抬升
 };
 window.__globeConfig = CONFIG;
 
@@ -1283,6 +1305,213 @@ async function initApp() {
   landSeason.visible = false;
   earth.add(landSeason);
 
+  /* ---------- V6.4 山脉层(路线 B:叠加山体,不动球面假设) ----------
+     地球本体保持【完美球面】⇒ 动物 / 树 / 接触阴影 / 脚印 / 龙卷风的贴地
+     逻辑【零改动】⇒ 硬约束「全部陆地贴地、动画过程零缩放」不受影响。
+     山脉是一层独立的分辨率壳体:
+       · 顶点沿径向抬起(高度场用页面同源的 hash3/vnoise3/fbm3 现场算)
+       · 自带岩 / 雪着色,随 earth 一起自转 ⇒ 山长在原地
+       · 山脚【埋进地表以下】(几何上),露出地表的部分自然形成山脚线
+     ⚠️ 不读 terrain.png ⇒ 无需重新烘焙那 6 张贴图。
+     ⚠️ 山峰会盖住 landSeason 的积雪壳(半径 1.0012,在山体内部)
+        ⇒ 冬季的雪山由山体材质自己响应季节(uniform uMtnSnow)。
+     ⚠️ 夜面压暗壳(1.0025)也在山体内部 ⇒ 山体材质自带同一套昼夜压暗,
+        否则山在夜面会比周围地面亮一截。
+     ⚠️ 树木 / 动物要避开山体(否则会埋在岩里)⇒ mtnBlock() 供落点过滤。 */
+  var MTN_W = 256, MTN_H = 128;
+  var MTN_AMP = CONFIG.mountainAmp;
+  var MTN_SINK = 0.004;      // 山脚埋入地表的深度(世界单位)
+  var MTN_MIN = 0.02;         // 归一化山势阈值(低于此不成山)
+  var mtnField = new Float32Array(MTN_W * MTN_H);
+  (function buildMountainField() {
+    for (var j = 0; j < MTN_H; j++) {
+      var v = (j + 0.5) / MTN_H;
+      for (var i = 0; i < MTN_W; i++) {
+        var u = (i + 0.5) / MTN_W;
+        var pp = spherePoint(u, v);
+        // ① 山带:大尺度噪声决定山脉出现在哪(成带,不是均匀撒)
+        var rg = fbm3(pp[0] * 2.1 + 40.5, pp[1] * 2.1 + 11.2, pp[2] * 2.1 + 77.3, 4);
+        var mask = clamp01((rg * 0.5 + 0.5 - 0.625) / 0.135);
+        mask = mask * mask * (3 - 2 * mask);
+        if (mask <= 0.001) continue;
+        // ② 山脊:多倍频 ridged noise(脊线锐利)
+        var rid = 0, amp = 1, fq = 7.0, norm = 0, o;
+        for (o = 0; o < 4; o++) {
+          var nz = fbm3(pp[0] * fq + 3.3, pp[1] * fq + 8.8, pp[2] * fq + 1.4, 2);
+          rid += (1 - Math.abs(nz)) * amp; norm += amp; amp *= 0.5; fq *= 2.1;
+        }
+        mtnField[j * MTN_W + i] = Math.pow(Math.max(0, rid / norm), 3.0) * mask;
+      }
+    }
+  })();
+
+  // 归一化山势(双线性)
+  function mtnRawAt(u, v) {
+    var x = (u % 1) * MTN_W - 0.5, y = v * MTN_H - 0.5;
+    var x0 = Math.floor(x), y0 = Math.floor(y), tx = x - x0, ty = y - y0;
+    function g(a, b) {
+      var aa = ((a % MTN_W) + MTN_W) % MTN_W;
+      var bb = Math.min(MTN_H - 1, Math.max(0, b));
+      return mtnField[bb * MTN_W + aa];
+    }
+    return g(x0, y0) * (1 - tx) * (1 - ty) + g(x0 + 1, y0) * tx * (1 - ty) +
+           g(x0, y0 + 1) * (1 - tx) * ty + g(x0 + 1, y0 + 1) * tx * ty;
+  }
+  // 山体高度(相对半径抬升,世界单位)
+  function mtnHeightAt(u, v) {
+    var m = mtnRawAt(u, v);
+    if (m <= MTN_MIN) return 0;
+    var e = elevation(u, v);
+    if (e < 0.455) return 0;                      // 海面不长山
+    var inland = clamp01((e - 0.47) / 0.05);       // 离岸衰减,山不直接顶到海岸
+    if (inland <= 0) return 0;
+    // ⚠️ 直接用 m,不要再做 (m-MTN_MIN)/(1-MTN_MIN) 的归一化:
+    //    那一步会把典型山势(0.1~0.3)压到 0.005 半径 ⇒ 山几乎贴地看不见。
+    return (m - MTN_MIN) / (1 - MTN_MIN) * MTN_AMP * inland;
+  }
+  // 该点是否在山体上(树木 / 动物落点要避开)
+  function mtnBlock(u, v) { return mtnHeightAt(u, v) > MTN_SINK * 2.2; }
+
+  // 几何:球壳顶点径向抬起;山脚埋入地表以下
+  var mtnGeo = new THREE.SphereGeometry(1, MTN_W, MTN_H);
+  var mtnPos = mtnGeo.attributes.position;
+  var mtnAttr = new Float32Array(mtnPos.count);
+  var mtnPeak = 0, mtnLand = 0;
+  for (var mi2 = 0; mi2 < mtnPos.count; mi2++) {
+    var ix = mi2 % (MTN_W + 1), iy = (mi2 / (MTN_W + 1)) | 0;
+    var mu = ix / MTN_W, mv = iy / MTN_H;
+    var mh = mtnHeightAt(mu, mv);
+    if (mh > mtnPeak) mtnPeak = mh;
+    var md = surfaceDir(mu, mv);
+    var mr = 1 + mh - MTN_SINK;
+    mtnPos.setXYZ(mi2, md[0] * mr, md[1] * mr, md[2] * mr);
+    mtnAttr[mi2] = mh;
+  }
+  mtnGeo.setAttribute('aMtn', new THREE.BufferAttribute(mtnAttr, 1));
+  mtnGeo.computeVertexNormals();
+
+  /* ---- 局部峰顶包络(±MTN_ENV_R 格内的最大高度)----
+     ⚠️ 为什么需要:山脚的「草裙 / 岩石带 / 常年雪帽」若按【绝对高度】划分,
+        矮山整座都会落在草裙区间里(看起来只有一片草地没有山),
+        高山则大半截被雪盖住(看起来是一团白)。
+     ⇒ 改按【相对本地峰顶的高度比例】划分:每座山都有自己的草裙与雪帽,
+        与山有多高无关。 */
+  var MTN_ENV_R = 10;
+  var W2 = MTN_W + 1, H2 = MTN_H + 1;
+  var mtnEnv = new Float32Array(mtnAttr.length), mtnEnv2 = new Float32Array(mtnAttr.length);
+  (function () {
+    var x, y, dx, dy, xx, yy, m, t;
+    for (y = 0; y < H2; y++) {                 // 横向 max(可分离滤波)
+      for (x = 0; x < W2; x++) {
+        m = 0;
+        for (dx = -MTN_ENV_R; dx <= MTN_ENV_R; dx++) {
+          xx = x + dx; if (xx < 0) xx += W2; else if (xx >= W2) xx -= W2;
+          t = mtnAttr[y * W2 + xx]; if (t > m) m = t;
+        }
+        mtnEnv[y * W2 + x] = m;
+      }
+    }
+    for (x = 0; x < W2; x++) {                 // 纵向 max(用第二缓冲,避免原地污染)
+      for (y = 0; y < H2; y++) {
+        m = 0;
+        for (dy = -MTN_ENV_R; dy <= MTN_ENV_R; dy++) {
+          yy = y + dy; if (yy < 0) yy += H2; else if (yy >= H2) yy -= H2;
+          t = mtnEnv[yy * W2 + x]; if (t > m) m = t;
+        }
+        mtnEnv2[y * W2 + x] = m;
+      }
+    }
+  })();
+  var mtnRel = new Float32Array(mtnAttr.length);
+  for (var mi3 = 0; mi3 < mtnRel.length; mi3++) {
+    var ev = mtnEnv2[mi3];
+    mtnRel[mi3] = ev > 1e-5 ? Math.min(1, mtnAttr[mi3] / ev) : 0;
+  }
+  mtnGeo.setAttribute('aMtnRel', new THREE.BufferAttribute(mtnRel, 1));
+
+  var mtnSnowU = { value: 0 };     // 冬季积雪强度
+  var mtnWarmU = { value: 0 };     // 秋季岩石偏暖
+  // 山脚草地跟随大陆四季:春夏=0(露出原贴图绿),秋天=grassYellowK
+  var mtnGrassU = { value: new THREE.Vector3(GRASS_YELLOW[0], GRASS_YELLOW[1], GRASS_YELLOW[2]) };
+  var mtnGrassAmtU = { value: 0 };
+  var mtnMat = new THREE.MeshStandardMaterial({
+    map: earthRes.texture, roughness: 0.94, metalness: 0.0
+  });
+  mtnMat.onBeforeCompile = function (sh) {
+    sh.uniforms.uMtnSnow = mtnSnowU;
+    sh.uniforms.uMtnWarm = mtnWarmU;
+    sh.uniforms.uMtnGrass = mtnGrassU;
+    sh.uniforms.uMtnGrassAmt = mtnGrassAmtU;
+    // 山脚裁切高度:山体壳与地球面(64×64 多面体,面中心比半径 1 低约 0.0012)
+    //   在山脚一圈几乎共面 ⇒ 互相穿插 ⇒ z-fighting(实测出现同心涟漪)。
+    //   做法:低于此高度的片元直接丢弃 —— 那里本来就该由地球面露出,
+    //   颜色本来就与山脚一致(foot≈1 ⇒ 用的是地球贴图原色)。
+    //   裁切面取 1.0018 > landSeason 壳半径 1.0012 ⇒ 大陆的季节色层
+    //   永远落在山体壳内部(被山体挡住),山体自带季节色,两层不打架。
+    sh.uniforms.uMtnCut = { value: MTN_SINK + 0.0018 };
+    // 复用陆地季节色层的草地掩膜(R=草地)⇒ 山脚与大陆四季完全同源
+    sh.uniforms.tMask = { value: landSeason.material.uniforms.tMask.value };
+    // 自带一份地表贴图:用来取【未染色】的亮度(与 landSeason 的 elum 同口径)
+    sh.uniforms.uMtnTex = { value: earthRes.texture };
+    sh.uniforms.uMtnSun = { value: SUN_DIR };
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>',
+        '#include <common>\nattribute float aMtn;\nattribute float aMtnRel;\nvarying float vMtn;\nvarying float vMtnRel;\nvarying vec3 vMtnWN;\nvarying vec2 vMtnUv;')
+      .replace('#include <begin_vertex>',
+        '#include <begin_vertex>\n  vMtn = aMtn;\n  vMtnRel = aMtnRel;\n  vMtnUv = uv;\n  vMtnWN = normalize(mat3(modelMatrix) * normal);');
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>',
+        '#include <common>\nvarying float vMtn;\nvarying float vMtnRel;\nvarying vec3 vMtnWN;\nvarying vec2 vMtnUv;\nuniform float uMtnSnow;\nuniform float uMtnWarm;\nuniform vec3 uMtnGrass;\nuniform float uMtnGrassAmt;\nuniform float uMtnCut;\nuniform sampler2D tMask;\nuniform sampler2D uMtnTex;\nuniform vec3 uMtnSun;')
+      .replace('#include <map_fragment>', [
+        '  // 山脚裁切:低于 uMtnCut 的片元直接丢弃。',
+        '  //   那里山体壳与地球面(64×64 多面体)几乎共面 ⇒ 互相穿插 ⇒',
+        '  //   z-fighting(实测山脚出现同心涟漪花纹)。',
+        '  //   裁切面恒在半径 1.0018(> landSeason 壳 1.0012)⇒ 两层不打架。',
+        '  if (vMtn < uMtnCut) discard;',
+        '#include <map_fragment>',
+        '  // ---- 山脚与大陆平滑衔接 ----',
+        '  // vMtnRel = 该点高度 / 本座山峰顶高度(0=山脚,1=峰顶)',
+        '  // 草裙与雪帽都按【相对高度】划分 ⇒ 每座山都有自己的植被裙边与雪帽,',
+        '  //   不受这座山本身有多高影响(矮山不会整座都是草,高山不会半身雪)。',
+        '  float foot = 1.0 - smoothstep(0.04, 0.34, vMtnRel);',
+        '  // 未染色的地表采样:与 landSeason 层共用同一张贴图、同一口径,',
+        '  //   ⇒ 山脚颜色与大陆逐像素对得上(染色只影响岩石,不影响衔接)。',
+        '  vec3 texCol = texture2D(uMtnTex, vMtnUv).rgb;',
+        '  float ml = dot(texCol, vec3(0.299, 0.587, 0.114));',
+        '  float tl = dot(diffuseColor.rgb, vec3(0.299, 0.587, 0.114));',
+        '  // 岩石固有色(中性偏暖灰)而不是直接拿脚下的地表色当岩石',
+        '  //   ⇒ 山体落在沙滩/草地上时也不会变成「一座沙山」;',
+        '  //   再乘季节染色(diffuse = 本帧的 tint),与大陆四季色调一致。',
+        '  vec3 rockTone = vec3(0.44, 0.415, 0.385) * diffuse;',
+        '  vec3 rock = mix(diffuseColor.rgb, rockTone * (0.62 + 0.66 * ml), (1.0 - foot) * 0.93);',
+        '  // 山脚草地:与大陆共用同一张草地掩膜(tMask.R)+ 同一个季节强度',
+        '  //   (uMtnGrassAmt ≡ 大陆的 grassYellowK)⇒ 春夏露出原贴图绿、',
+        '  //   秋天随大陆一起泛黄 ⇒ 两者同源、平滑结合,不会各变各的。',
+        '  float mtnGrass = texture2D(tMask, vMtnUv).r;',
+        '  float gAmt = clamp(mtnGrass * uMtnGrassAmt * foot, 0.0, 1.0);',
+        '  // 秋天岩石偏暖(草地部分不吃暖色,否则会与大陆的枯黄对不上)',
+        '  rock = mix(rock, rock * vec3(1.12, 0.92, 0.74), uMtnWarm * (1.0 - gAmt));',
+        '  vec3 gCol = uMtnGrass * (0.78 + 0.44 * ml) * 0.62;',
+        '  rock = mix(rock, gCol, gAmt);',
+        '  // 常年积雪:按【相对峰顶高度】给雪帽(只有顶部约 20% 才盖白)',
+        '  //   ⇒ 雪是「帽」而不是「半身」,山体轮廓仍然读得出来。',
+        '  float alp = smoothstep(0.78, 0.97, vMtnRel);',
+        '  float sn = clamp(uMtnSnow + alp * 0.85, 0.0, 1.0);',
+        '  // 雪的明暗调制与 landSeason 层同一口径(0.86+0.30*elum)⇒ 冬季山雪',
+        '  //   与大陆积雪的纹理密度一致,不会一块纯白一块有细节。',
+        '  vec3 snowCol = vec3(0.95, 0.97, 1.0) * (0.86 + 0.30 * ml);',
+        '  diffuseColor.rgb = mix(rock, snowCol, sn);',
+        '  // 夜面压暗(与 nightShade 同一口径,否则山在夜里比周围亮)',
+        '  float mdn = dot(normalize(vMtnWN), normalize(uMtnSun));',
+        '  float mnight = 1.0 - smoothstep(-0.20, 0.16, mdn);',
+        '  diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.04, 0.08, 0.20), mnight * 0.62);'
+      ].join('\n'));
+  };
+  mtnMat.customProgramCacheKey = function () { return 'mtnSeason'; };
+  var mtnMesh = new THREE.Mesh(mtnGeo, mtnMat);
+  mtnMesh.frustumCulled = false;
+  earth.add(mtnMesh);
+
   /* V6.3 全黑纹理:给夜面灯火当「关掉」的替身,
    保留 nightLayer 的着色器与调用点,改回一行即可恢复灯火。 */
 function makeBlackTexture() {
@@ -1575,7 +1804,9 @@ function makeBlackTexture() {
   function pickSpots(list, count, min) {
     // 候选点来自纹理的逐像素扫描(北极→南极、u=0→1)。按原顺序贪心取点会把
     // 模型全挤在少数几条经度带里;先洗牌 ⇒ 等价于全球陆地上的均匀采样。
-    var pool = list.slice();
+    var pool = [];
+    for (var pi = 0; pi < list.length; pi++)
+      if (!mtnBlock(list[pi].u, list[pi].v)) pool.push(list[pi]);
     for (var i = pool.length - 1; i > 0; i--) {
       var j = Math.floor(rand() * (i + 1));
       var t = pool[i]; pool[i] = pool[j]; pool[j] = t;
@@ -1638,6 +1869,7 @@ function makeBlackTexture() {
         var v = c.v - rad * Math.sin(ang) / Math.PI;
         if (v <= 0.12 || v >= 0.88) continue;
         if (elevation(u, v) < LAND_MIN) continue;
+        if (mtnBlock(u, v)) continue;          // V6.4 不把树种在山体里
         out.push({ u: +u.toFixed(5), v: +v.toFixed(5) });
         made++;
       }
@@ -2594,6 +2826,7 @@ function makeBlackTexture() {
         var u = (w.u + Math.cos(h) * step / cosLat + 1) % 1;
         var v = w.v - Math.sin(h) * step;
         return v > 0.12 && v < 0.88 && elevation(u, v) >= LAND_MIN
+          && !mtnBlock(u, v)                     // V6.4 动物不走进山体
           ? { u: u, v: v } : null;
       }
       var next = tryAt(w.heading);
@@ -2988,7 +3221,25 @@ function makeBlackTexture() {
     } else {                        // 春:无雪无黄
       snowGroundK = 0; snowFallK = 0; grassYellowK = 0;
     }
+    /* V6.4 山体季节联动(必须【每帧无条件】更新 —— 放在 landSeason.visible
+       的条件块里会在春夏(visible=false)残留上一季的值)。
+       · mtnSnowU  : 冬季整座山变白(与大陆积雪同强度)
+       · mtnWarmU  : 秋季岩石偏暖;随雪一起在秋末褪掉 ⇒ 与冬季无硬边
+       · mtnGrassAmtU: 秋季山脚草地泛黄(与大陆 grassYellowK 同一个值) */
+    mtnSnowU.value = snowGroundK;
+    mtnWarmU.value = (si0 === 1) ? seasonW : (si0 === 2 ? (1 - snowGroundK) : 0);
+    mtnGrassAmtU.value = grassYellowK;
     earthMat.color.setRGB(tintR, tintG, tintB);
+    // V6.4 山体也是独立材质 ⇒ 必须跟大陆用【同一个季节 tint】,
+    //   否则秋冬山体与大陆的色调对不上(大陆暖了、山体还是中性色)。
+    mtnMat.color.setRGB(tintR, tintG, tintB);
+    if (window.__globeDebug) {
+      window.__globeDebug.mountains = {
+        peak: +mtnPeak.toFixed(4), amp: MTN_AMP, grid: [MTN_W, MTN_H],
+        snow: +mtnSnowU.value.toFixed(2), warm: +mtnWarmU.value.toFixed(2),
+        grass: +mtnGrassAmtU.value.toFixed(2)
+      };
+    }
     atmoGlow.material.color.setRGB(lerp(1, tintR, 0.55),
                                    lerp(1, tintG, 0.55),
                                    lerp(1, tintB, 0.55));
