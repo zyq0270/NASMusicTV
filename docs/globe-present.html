@@ -180,6 +180,14 @@
          逐点一致 ⇒ terrain.png 的 R(高程)/G(类别)回读无损;
       ④ CSP 模拟(connect-src 禁 blob:)复验:P10 探测到拦截后临时
          禁用 createImageBitmap、加载完毕恢复原值,GLB 贴图零丢失。
+    v6.1d (2026-11-07) 修「月亮没看到」:
+      旧位置是硬编码世界坐标 (-2.45,0.95,-1.30),只有 aspect>=1.35 才入画,
+      近方形 / 竖屏预览面板里投影到 NDC x=-1.35 / -1.58,整个跑出视野。
+      改成用相机 right/up/forward 基向量把固定 NDC 锚点反投影到世界:
+      宽屏锚点 (-0.84,0.60)、窄屏 (-0.72,0.68),屏幕尺寸按视口高度恒定
+      (NDC 高 0.26),resize 时重算 ⇒ 横屏 / 竖屏 / 近方形都完整入画,
+      既不压标题也不与地球重叠。每帧只改 position 做极慢漂移,零缩放。
+      debug hook 追加 moon.ndc / aspect / onScreen 作为可见性金标准。
 -->
 <canvas id="sky"></canvas>
 <canvas id="fx"></canvas>
@@ -993,9 +1001,43 @@ async function initApp() {
   var moonSprite = new THREE.Sprite(new THREE.SpriteMaterial({
     map: moonTex(), transparent: true, depthWrite: false, opacity: 0.92
   }));
-  moonSprite.scale.setScalar(0.62);
   moonSprite.renderOrder = 7;
   scene.add(moonSprite);
+  /* V3 月亮按屏幕锚点定位(v6.1d):
+     旧写法把月亮钉死在世界坐标 (-2.45,0.95,-1.30),只有 aspect>=1.35 才入画,
+     窄预览面板 / 竖屏会整个跑出视野(用户反馈「月亮没看到」)。
+     改成用相机基向量把固定 NDC 锚点反投影到世界:任何宽高比都完整入画,
+     屏幕尺寸恒定(NDC 高度 0.26),窄屏锚点略往内上移以躲开地球与标题。
+     每帧只改 position 做极慢漂移,不做任何缩放动画。 */
+  var MOON_NDC_H = 0.26;
+  var moonAnchor = { d: 5.45, hw: 1, hh: 1, nx: -0.84, ny: 0.60 };
+  var _mFwd = new THREE.Vector3(), _mRight = new THREE.Vector3(), _mUp = new THREE.Vector3();
+  function updateMoonAnchor() {
+    var halfV = Math.tan(camera.fov * Math.PI / 360);
+    var d = camera.position.length() + 2.2;
+    moonAnchor.d = d;
+    moonAnchor.hw = d * halfV * camera.aspect;
+    moonAnchor.hh = d * halfV;
+    moonAnchor.nx = camera.aspect >= 1.3 ? -0.84 : -0.72;
+    moonAnchor.ny = camera.aspect >= 1.3 ? 0.60 : 0.68;
+    moonSprite.scale.setScalar(MOON_NDC_H * moonAnchor.hh);
+    _mFwd.set(0, 0, -1).applyQuaternion(camera.quaternion);
+    _mRight.set(1, 0, 0).applyQuaternion(camera.quaternion);
+    _mUp.set(0, 1, 0).applyQuaternion(camera.quaternion);
+  }
+  function positionMoon(mt) {
+    var a = moonAnchor;
+    var nx = a.nx + Math.cos(mt) * 0.045, ny = a.ny + Math.sin(mt) * 0.035;
+    moonSprite.position.copy(camera.position)
+      .addScaledVector(_mFwd, a.d)
+      .addScaledVector(_mRight, nx * a.hw)
+      .addScaledVector(_mUp, ny * a.hh);
+    if (window.__globeDebug) window.__globeDebug.moon = {
+      ndc: [+nx.toFixed(3), +ny.toFixed(3)],
+      aspect: +camera.aspect.toFixed(3),
+      onScreen: Math.abs(nx) < 1 && Math.abs(ny) < 1
+    };
+  }
 
   // B8 双层云反向慢速 ⇒ 视差;第三层把云纹当 alpha,在地表投一层很淡的暗斑
   var cloudTexA = earthRes.cloudA, cloudTexB = earthRes.cloudB;
@@ -2290,8 +2332,7 @@ async function initApp() {
       if (tornadoes[pz0].group.visible)
         panicPts.push(tornadoes[pz0].group.position.clone().normalize());
     var mt = now * 0.000018;
-    moonSprite.position.set(-2.45 + Math.cos(mt) * 0.18,
-                            0.95 + Math.sin(mt) * 0.14, -1.30);
+    positionMoon(mt);
     // V2 四季:四组色温平滑插值,只乘材质 color,不改几何 / 尺寸 / 落点
     var sec = now * 0.001;
     var ST = [[1.00, 1.03, 0.97], [0.98, 1.00, 0.95],
@@ -2463,6 +2504,7 @@ async function initApp() {
     camera.position.set(0, 0.55 * (dist / CONFIG.camDist), dist);
     camera.lookAt(0, 0, 0);
     camera.updateProjectionMatrix();
+    updateMoonAnchor();
   }
   window.addEventListener('resize', onResize);
   onResize();
