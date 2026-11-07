@@ -35,7 +35,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from e53_upstream_verify import e53_verdict  # noqa: E402
 import e53_uefi_contra_probe as uefi  # noqa: E402
 
-DOC = "docs/e53-run-and-gun-survey.md"
+DOC = "docs/archive/e53-run-and-gun-survey.md"
 VERIFY = "logs_temp/e53_upstream_verify.json"
 
 # 附录从这里开始（含）——附录里逐条留档是裁决要求的，正文才算违规

@@ -635,7 +635,7 @@ def swap(doc, begin, end, body):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--doc", default="docs/e53-run-and-gun-survey.md")
+    ap.add_argument("--doc", default="docs/archive/e53-run-and-gun-survey.md")
     ap.add_argument("--pool", default="docs/开源横版卷轴游戏总表_更新版.md")
     ap.add_argument("--json", default="logs_temp/e53_upstream_verify.json")
     ap.add_argument("--shots", default="logs_temp/e53_screenshots.json")

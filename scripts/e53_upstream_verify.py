@@ -1,5 +1,5 @@
 r"""
-E53 上游候选池复验 —— 对 docs/e53-run-and-gun-survey.md 附录 A/B 的 84 + 18 个仓库逐条打 GitHub API。
+E53 上游候选池复验 —— 对 docs/archive/e53-run-and-gun-survey.md 附录 A/B 的 84 + 18 个仓库逐条打 GitHub API。
 
 ## 为什么需要这个脚本
 

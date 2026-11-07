@@ -19354,12 +19354,12 @@ CSS:  最终色 = p × (1 − α + α·c/255)
 - ⛔ **不自动定时切换、不随歌曲切换、不随段落/副歌切换**（用户裁决）。
 - 子模式序号持久化在 `AppPreferences.lyricsStageModeOrdinal`（DataStore，**不进备份 JSON**，
   与 `qianliColorVersion` 同理 —— 设备本地显示偏好）。
-- 方案文档：`docs/lyrics-stage-plan.md`（逐行移植说明 + 5 个子模式的算法细节）。
+- 方案文档：`docs/archive/lyrics-stage-plan.md`（逐行移植说明 + 5 个子模式的算法细节）。
 
 #### 2. 许可与署名
 
 子模式 1–4 **移植自 folia-major（AGPL-3.0）**，逐文件头部标注来源路径与
-「Project Folia version 0.5.27-a16525c」；`docs/lyrics-stage-plan.md` 开头有致谢章节。
+「Project Folia version 0.5.27-a16525c」；`docs/archive/lyrics-stage-plan.md` 开头有致谢章节。
 子模式 0 是本仓原创（E23），不涉及上游。
 
 #### 3. 关键架构决策：歌词数据**不走 `RenderContext`**
@@ -24791,7 +24791,7 @@ CURRENT（drawPoints + Plus）/ FIXED（drawPoints + SrcOver），输出 `logs_t
 | 7 | `test/…/visualizer/renderers/StarrySkyTest.kt` | 效果总数硬计数 28 → 27 |
 | 8 | `docs/visualizer-effects-list.md` | ADV 表删 E23 行；总数 28 → 27、ADV 19 → 18；「已移除效果」表加 E23 行 + 说明（并注明它的回落目标是 E53 而非默认效果） |
 | 9 | `CHANGELOG.md` | `v2.39.13` 的 `Removed` 段加一行 |
-| 10 | `docs/lyrics-stage-plan.md` | §14「风险与约束」里「现有 E23 兼容」那一行改为「已下线 / 被子模式 0 吸收」 |
+| 10 | `docs/archive/lyrics-stage-plan.md` | §14「风险与约束」里「现有 E23 兼容」那一行改为「已下线 / 被子模式 0 吸收」 |
 
 ⛔ **没有动** `LyricsDotMatrixTest` / `LyricsDotMatrixDensityGateTest`（测的是**渲染器类**、不是主题）
 与 `EffectFurnitureGateTest`（遍历 `VisualizerTheme.entries` 逐个建渲染器 ⇒ E23 退出循环后仍绿）。

@@ -220,7 +220,7 @@ class LyricsStageRenderer : VisualizerRenderer {
      * 建子渲染器。
      *
      * ⚠️ FULL_VIEW（整曲版面 + 相机变换）只在 HIGH 画质提供；
-     * 非 HIGH 画质降级为 GLOW_LINE（见 `docs/lyrics-stage-plan.md` §13）。
+     * 非 HIGH 画质降级为 GLOW_LINE（见 `docs/archive/lyrics-stage-plan.md` §13）。
      */
     private fun createSubRenderer(target: LyricsStageMode, quality: VisualQuality): LyricsSubRenderer =
         when (target) {
