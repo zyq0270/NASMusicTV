@@ -1,24 +1,24 @@
 r"""
-E53 附录再生 —— 把 scripts/e53_upstream_verify.py 的 API 快照（数字列）、
-scripts/e53_screenshot_probe.py 的截图取证（预览列）与
+E54 附录再生 —— 把 scripts/e54_upstream_verify.py 的 API 快照（数字列）、
+scripts/e54_screenshot_probe.py 的截图取证（预览列）与
 「开源横版卷轴游戏总表·更新版」（描述列）join 成 markdown，写回 e53 方案文档的四个标记区：
 
-    <!-- E53-POOL:BEGIN -->   → 附录 A.1~A.8（逐条表 + 统计 + 许可分歧明细）
-    <!-- E53-NOGO:BEGIN -->   → 附录 C（❌ 不做清单 / 🔶 判定前不做清单 / ✅ 可做池截图核对）
-    <!-- E53-POOL10:BEGIN --> → 正文 §五 的「✅ 可做池体量与素材实测」表（2026-11-04 新增，
-                                数据源 `logs_temp/e53_pool10_sizes.json`）
-    <!-- E53-SCENES:BEGIN --> → 正文 §5.6 方案 C 的逐场景表（数据源
-                                `logs_temp/e53_agent_arcade_scenes.json`）
+    <!-- E54-POOL:BEGIN -->   → 附录 A.1~A.8（逐条表 + 统计 + 许可分歧明细）
+    <!-- E54-NOGO:BEGIN -->   → 附录 C（❌ 不做清单 / 🔶 判定前不做清单 / ✅ 可做池截图核对）
+    <!-- E54-POOL10:BEGIN --> → 正文 §五 的「✅ 可做池体量与素材实测」表（2026-11-04 新增，
+                                数据源 `logs_temp/e54_pool10_sizes.json`）
+    <!-- E54-SCENES:BEGIN --> → 正文 §5.6 方案 C 的逐场景表（数据源
+                                `logs_temp/e54_agent_arcade_scenes.json`）
 
 ## 为什么是脚本而不是手抄
 
 附录 A.1 有 84 行、A.2 有 38 行。人工誊写 license / stars / pushed 这三列
 = 直接把「表内许可不可信」这个 bug 再复制一遍（本次复验发现 24/122 处许可有问题）。
-所以 E53 文档里附录表格的**数字列一律由本脚本从 JSON 快照再生**，
+所以 E54 文档里附录表格的**数字列一律由本脚本从 JSON 快照再生**，
 描述列（分类 / 简介 / 自动玩方式 / 备注）沿用原表文字 —— 那些不是测量值。
 
 「不做 / 判定前不做」同样不许手抄：判定口径只有一份，定义在
-`e53_upstream_verify.e53_verdict()`，本脚本与附录 C 都调它 ——
+`e54_upstream_verify.e54_verdict()`，本脚本与附录 C 都调它 ——
 否则「A.5 说它无 LICENSE、C 说它可以做」这类自相矛盾就会重新长出来。
 
 ## 幂等
@@ -28,17 +28,17 @@ scripts/e53_screenshot_probe.py 的截图取证（预览列）与
 ## 预览列（截图）的取舍
 
 原「更新版」的截图列 84 行里约 3/4 只是把仓库链接重复一遍，不是图片。
-现在这一列**只放 `e53_screenshot_probe.py` 实测通过的直链**（存在性 + 位图 + >2KB 三重判定），
+现在这一列**只放 `e54_screenshot_probe.py` 实测通过的直链**（存在性 + 位图 + >2KB 三重判定），
 并注明来源（README / 根目录 / 官网 / Release / 原表列）。
 取不到图的写**实测出来的原因**（纯文字仓库 / 只有徽章 / README 指向的文件不在该分支 …），
 ⛔ 不再写「见 README」这种含糊话，也 ⛔ 绝不凭猜测拼一个图片 URL。
 
 ## 用法（从仓库根跑）
 
-    python scripts/e53_upstream_verify.py            # ① 快照：仓库存在性 + 许可
-    python scripts/e53_screenshot_probe.py           # ② 取证：真实图片直链
-    python scripts/e53_pool10_sizes.py               # ③ 取证：✅ 可做池的源码/素材体量（§五 用）
-    python scripts/e53_pool_table_join.py            # ④ 灌进文档的三个标记区
+    python scripts/e54_upstream_verify.py            # ① 快照：仓库存在性 + 许可
+    python scripts/e54_screenshot_probe.py           # ② 取证：真实图片直链
+    python scripts/e54_pool10_sizes.py               # ③ 取证：✅ 可做池的源码/素材体量（§五 用）
+    python scripts/e54_pool_table_join.py            # ④ 灌进文档的三个标记区
 """
 
 import argparse
@@ -50,21 +50,21 @@ from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 # 许可与判定口径只有一份，⛔ 不在这里重复定义
-from e53_upstream_verify import OSI_OK, e53_verdict, HARD_EXCLUDE, LOOK_EXCLUDE
+from e54_upstream_verify import OSI_OK, e54_verdict, HARD_EXCLUDE, LOOK_EXCLUDE
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-BEGIN = "<!-- E53-POOL:BEGIN (由 scripts/e53_pool_table_join.py 再生，勿手改数字列) -->"
-END = "<!-- E53-POOL:END -->"
-NOGO_BEGIN = "<!-- E53-NOGO:BEGIN (由 scripts/e53_pool_table_join.py 再生，勿手改任何一行) -->"
-NOGO_END = "<!-- E53-NOGO:END -->"
-POOL10_BEGIN = "<!-- E53-POOL10:BEGIN (由 scripts/e53_pool_table_join.py 再生，勿手改数字) -->"
-POOL10_END = "<!-- E53-POOL10:END -->"
-SCENES_BEGIN = "<!-- E53-SCENES:BEGIN (由 e53_agent_arcade_scenes.py 取证 + 本脚本再生，勿手改) -->"
-SCENES_END = "<!-- E53-SCENES:END -->"
+BEGIN = "<!-- E54-POOL:BEGIN (由 scripts/e54_pool_table_join.py 再生，勿手改数字列) -->"
+END = "<!-- E54-POOL:END -->"
+NOGO_BEGIN = "<!-- E54-NOGO:BEGIN (由 scripts/e54_pool_table_join.py 再生，勿手改任何一行) -->"
+NOGO_END = "<!-- E54-NOGO:END -->"
+POOL10_BEGIN = "<!-- E54-POOL10:BEGIN (由 scripts/e54_pool_table_join.py 再生，勿手改数字) -->"
+POOL10_END = "<!-- E54-POOL10:END -->"
+SCENES_BEGIN = "<!-- E54-SCENES:BEGIN (由 e54_agent_arcade_scenes.py 取证 + 本脚本再生，勿手改) -->"
+SCENES_END = "<!-- E54-SCENES:END -->"
 
-LINES_PER_BYTE = 35.0   # 与 e53_pool10_sizes.py / e53_agent_arcade_scenes.py 同一个折算常数
+LINES_PER_BYTE = 35.0   # 与 e54_pool10_sizes.py / e54_agent_arcade_scenes.py 同一个折算常数
 
 IMG_HINT = ("raw.githubusercontent.com", "imgur.com", "user-images.githubusercontent.com",
             "supertux.org", "ddnet.org")
@@ -114,7 +114,7 @@ def row_md(r, pool_by_path, pool_by_name, shots=None):
     pushed = r["pushed"] or "—"
     archived = "⚠️已归档" if r["archived"] else ""
     stars = str(r["stars"]) if r["stars"] is not None else "—"
-    vd, _ = e53_verdict(r)
+    vd, _ = e54_verdict(r)
     note = p["note"].replace("|", "/")
     return "| %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s |" % (
         r["name"], repo, p["cat"], p["desc"], p["auto"], p["status"], http,
@@ -154,7 +154,7 @@ def shot_cell(r, shots):
 
 def _shot_raw(r, shots):
     if not shots:
-        return "本轮未取证（先跑 e53_screenshot_probe.py）"
+        return "本轮未取证（先跑 e54_screenshot_probe.py）"
     s = shots["by_path"].get((r.get("renamed_to") or r["path"] or "").lower())
     if s is None:
         return "⛔ 无法取证：本轮快照里该仓库不是 200，没有可读的 README"
@@ -179,7 +179,7 @@ def shot_state(r, shots):
 
 
 def load_sizes(path):
-    """体量取证产物（`e53_pool10_sizes.py`）；缺文件返回 None ⇒ §五 的表写「本轮未取证」，⛔ 不编数。"""
+    """体量取证产物（`e54_pool10_sizes.py`）；缺文件返回 None ⇒ §五 的表写「本轮未取证」，⛔ 不编数。"""
     if not os.path.exists(path):
         return None
     with open(path, encoding="utf-8") as f:
@@ -194,7 +194,7 @@ def mib(n):
 
 
 def pool10_block(rows, shots, sizes):
-    """§五 的**体量与素材实测表**（`E53-POOL10` 标记区）。
+    """§五 的**体量与素材实测表**（`E54-POOL10` 标记区）。
 
     这张表为什么必须存在：v3.0~v4.1 的选型全建立在「代码量」那一列的**人工估计**上，
     而 §七 又断言「所有推荐候选都是全程序化绘制，没有一张图片文件」—— 两句都是猜的。
@@ -204,9 +204,9 @@ def pool10_block(rows, shots, sizes):
     ⛔ 正文不许再出现手抄的体量数字；§七 的贴图预算直接引用这里的「位图」列。
     """
     if not sizes:
-        return ("_本轮未取证 —— 先跑 `python scripts/e53_pool10_sizes.py` 再复跑本脚本。"
+        return ("_本轮未取证 —— 先跑 `python scripts/e54_pool10_sizes.py` 再复跑本脚本。"
                 "⛔ 不取证就不写数字。_")
-    ok = [r for r in rows if e53_verdict(r)[0].startswith("✅")]
+    ok = [r for r in rows if e54_verdict(r)[0].startswith("✅")]
     ok.sort(key=lambda r: (sizes.get(((r.get("renamed_to") or r["path"] or "")).lower(), {})
                            .get("src_bytes") or 10 ** 12))
     out = ["| 上游 | 许可(API) | 源码字节 → 折算行数(估) | 位图（张 / 体积） | 音频体积 | "
@@ -265,7 +265,7 @@ def pool10_block(rows, shots, sizes):
 
 
 def load_scenes(path):
-    """方案 C 的逐场景取证产物（`e53_agent_arcade_scenes.py`）；缺文件返回 None ⇒ 表写「本轮未取证」。"""
+    """方案 C 的逐场景取证产物（`e54_agent_arcade_scenes.py`）；缺文件返回 None ⇒ 表写「本轮未取证」。"""
     if not os.path.exists(path):
         return None
     with open(path, encoding="utf-8-sig") as f:
@@ -273,7 +273,7 @@ def load_scenes(path):
 
 
 def scenes_block(sc):
-    """§5.6 方案 C 的**逐场景体量表**（`E53-SCENES` 标记区）。
+    """§5.6 方案 C 的**逐场景体量表**（`E54-SCENES` 标记区）。
 
     为什么要给这一小节单开一个产物：「一仓几个游戏」既是方案 C 的卖点又是计费基数
     （工时 = 场景数 × 单游戏 3-6 人日），而该仓库里存在**两份**场景源码
@@ -281,7 +281,7 @@ def scenes_block(sc):
     手工数目录会数出 12 个 ⇒ 工时翻倍。取证脚本按 `src/` 过滤并把镜像单独记账。
     """
     if not sc:
-        return ("_本轮未取证 —— 先跑 `python scripts/e53_agent_arcade_scenes.py` 再复跑本脚本。"
+        return ("_本轮未取证 —— 先跑 `python scripts/e54_agent_arcade_scenes.py` 再复跑本脚本。"
                 "⛔ 不取证就不写「几个游戏」和逐场景字节。_")
     out = ["| 场景文件（实测字节） | 折算行数（估） | 品类（⚠️ 按文件名推断，须读源核实） |",
            "|---|---|---|"]
@@ -298,7 +298,7 @@ def scenes_block(sc):
                       format(round(b["bytes"] / LINES_PER_BYTE), ",")))
     mirrors = sc.get("mirror_copies") or []
     out.append("")
-    out.append("> ⚠️ **上表由 `scripts/e53_agent_arcade_scenes.py` 再生**（产物 `logs_temp/e53_agent_arcade_scenes.json`），⛔ 不许手抄。"
+    out.append("> ⚠️ **上表由 `scripts/e54_agent_arcade_scenes.py` 再生**（产物 `logs_temp/e54_agent_arcade_scenes.json`），⛔ 不许手抄。"
                "该仓库里有**两份**场景源码：`src/**/*.ts`（真源码，本表只数这一份）与 "
                "`.github/extensions/arcade-canvas/**/*.js`（VS Code 扩展的打包副本，**%d 个文件 / %s B**，字节还更大）"
                "—— 不按 `src/` 过滤就会数出「%d 个游戏」，工时直接翻倍。"
@@ -311,14 +311,14 @@ def scenes_block(sc):
     return "\n".join(out)
 
 
-HDR_A = ("| 名称 | 仓库（复验后路径） | 分类 | 简介 | 自动玩方式 | 原表核验 | 本次复验 | 实际许可(API) | E53判定 | stars | 最近推送 | 预览 | 备注 |\n"
+HDR_A = ("| 名称 | 仓库（复验后路径） | 分类 | 简介 | 自动玩方式 | 原表核验 | 本次复验 | 实际许可(API) | E54判定 | stars | 最近推送 | 预览 | 备注 |\n"
          "|---|---|---|---|---|---|---|---|---|---|---|---|---|")
-HDR_B = ("| 候选 | 仓库 | 出处 | 原记许可 | 本次复验 | 实际许可(API) | E53判定 | stars | 最近推送 | 预览 | 结论 |\n"
+HDR_B = ("| 候选 | 仓库 | 出处 | 原记许可 | 本次复验 | 实际许可(API) | E54判定 | stars | 最近推送 | 预览 | 结论 |\n"
          "|---|---|---|---|---|---|---|---|---|---|---|")
 
 
 def stats_block(rows):
-    from e53_upstream_verify import lic_class
+    from e54_upstream_verify import lic_class
     a = [r for r in rows if not r["tag"].startswith("正文")]
     b = [r for r in rows if r["tag"].startswith("正文")]
     hard, none_, undet, arch, stale = [], [], [], [], []
@@ -401,15 +401,15 @@ STALE_BEFORE = "2024-11-03"
 
 
 def row_b(r, shots=None):
-    """正文候选表：判定与原因都走 `e53_verdict()` 这一份口径（⛔ 不在此处再写一遍规则）。
+    """正文候选表：判定与原因都走 `e54_verdict()` 这一份口径（⛔ 不在此处再写一遍规则）。
 
     以前这里自己拼结论，结果 §2.1 那批「无 LICENSE」的行被拼成了「✅ 与原表一致」——
     那是一句真话（和原表一致）**但答错了问题**（读者要的是「能不能做」）。
     现在结论列直接给出三档判定 + 原因。
     """
-    from e53_upstream_verify import lic_class
+    from e54_upstream_verify import lic_class
     claimed, lic = r["claimed_lic"], (r["license"] or "—")
-    vd, why = e53_verdict(r)
+    vd, why = e54_verdict(r)
     hard = ""
     if r["exists"] and lic_class(claimed, r["license"]) == "HARD":
         hard = "（另：表内 %s ↔ 实际 %s，见 A.4）" % (claimed, lic)
@@ -430,7 +430,7 @@ BUCKET_TITLE = [
     ("LOOK", "C.3 ❌ 不做 · 所有者观感裁决（实机图不好看，2026-11-04）",
      "⚠️ **这一堆与许可无关**：下面 %d 条的存在性与 LICENSE 文件本轮全部复验**通过**（判据、图链见附录 A.1/A.2 同行），"
      "是所有者 2026-11-04 逐条看过实机图后裁决「观感不达标」，移出移植池。"
-     "登记在 `e53_upstream_verify.LOOK_EXCLUDE`（与授权类的 `HARD_EXCLUDE` 分开，⛔ 不要合并 —— "
+     "登记在 `e54_upstream_verify.LOOK_EXCLUDE`（与授权类的 `HARD_EXCLUDE` 分开，⛔ 不要合并 —— "
      "合并后读的人会以为这些仓库有授权问题）。正文里关于它们的评估、选型与实现细节已按要求清除，此处是唯一的留档。"),
     ("NOLIC", "C.4 ❌ 不做 · 仓库里没有 LICENSE 文件",
      "API `license.spdx_id = NONE` ⇒ 默认 all-rights-reserved，C4 不成立。"
@@ -475,27 +475,27 @@ def bucket_of(r, vd, why):
 def no_go_block(rows, shots):
     """附录 C：把「不做 / 判定前不做」集中一处，并逐条写明原因。
 
-    ⚠️ 判定只来自 `e53_verdict()`；这里再加一条规则就会和附录 A.1 的判定列分叉。
+    ⚠️ 判定只来自 `e54_verdict()`；这里再加一条规则就会和附录 A.1 的判定列分叉。
     """
     groups = {}
     for r in rows:
-        vd, why = e53_verdict(r)
+        vd, why = e54_verdict(r)
         groups.setdefault(bucket_of(r, vd, why), []).append((r, vd, why))
     n_pool = lambda ks: sum(1 for r, _, _ in ks if not r["tag"].startswith("正文"))
     out = []
     total = len(rows)
     ok = groups.get("OK", [])
-    # 档位轴（✅/🔶/❌）必须由 e53_verdict 直接数出来，⛔ 不能拿成因桶相加代替 ——
+    # 档位轴（✅/🔶/❌）必须由 e54_verdict 直接数出来，⛔ 不能拿成因桶相加代替 ——
     # 成因桶和档位不是同一个切法（Open Sonic 的成因是人工裁决、档位是 🔶），
     # 用桶加出来会得到 64/10，而判定列逐条读出来是 63/11，两处一对不上就是 v4.0 的老毛病。
     tier = {}
     for r in rows:
-        vd = e53_verdict(r)[0]
+        vd = e54_verdict(r)[0]
         tier.setdefault(vd.split()[0], []).append((r, vd, ""))
     n_pend = len(tier.get("🔶", []))
     n_dead = len(tier.get("❌", []))
-    out.append("### C.1 汇总（%d 条 = 大池 84 + 正文候选 38，判定口径见 §8.7 与 `e53_verdict`）\n" % total)
-    out.append("**先按档位数（这一张表的三个数，就是附录 A.1 / A.2「E53判定」列逐条读出来的结果）**\n")
+    out.append("### C.1 汇总（%d 条 = 大池 84 + 正文候选 38，判定口径见 §8.7 与 `e54_verdict`）\n" % total)
+    out.append("**先按档位数（这一张表的三个数，就是附录 A.1 / A.2「E54判定」列逐条读出来的结果）**\n")
     out.append("| 档位 | 大池 | 正文候选 | 合计 | 含义 |")
     out.append("|---|---|---|---|---|")
     for mark, label, meaning in (("✅", "✅ 可做",
@@ -530,7 +530,7 @@ def no_go_block(rows, shots):
                % (sum(1 for r in rows if not r["tag"].startswith("正文")),
                   sum(1 for r in rows if r["tag"].startswith("正文")), total))
     out.append("")
-    out.append("> ⚠️ **「❌ 不做」不等于「这个项目不好」**。授权类（C.2、C.4、C.5、C.9）只说明：按 E53 现在的硬约束"
+    out.append("> ⚠️ **「❌ 不做」不等于「这个项目不好」**。授权类（C.2、C.4、C.5、C.9）只说明：按 E54 现在的硬约束"
                "（C4 只认 LICENSE 文件、C8 不碰他人 IP），**拿它的源码来移植这件事不成立**；"
                "作为玩法参考、作为「上游有没有自动跑能力」的证据，它们仍然可以读。\n")
     out.append("> ⛔ **但 C.3（观感裁决）是例外**：这 %d 条是所有者看过实机图后直接裁掉的，"
@@ -568,8 +568,8 @@ def no_go_block(rows, shots):
                "（存在性 + 位图 + >2KB 三重判定，来源标注 README / 根目录 / 官网 / 原表截图列 / Release / 文件树），"
                "要么写明**实测出来的原因**。⛔ 没有「见 README」这种含糊话。\n")
     if not shots:
-        out.append("> ⚠️ 本轮没有截图取证产物（`logs_temp/e53_screenshots.json` 不存在）"
-                   "⇒ 请先跑 `python scripts/e53_screenshot_probe.py` 再再生本文档。\n")
+        out.append("> ⚠️ 本轮没有截图取证产物（`logs_temp/e54_screenshots.json` 不存在）"
+                   "⇒ 请先跑 `python scripts/e54_screenshot_probe.py` 再再生本文档。\n")
     out.append("| 名称 | 仓库 | 出处 | 实际许可(API) | 预览（实测） |")
     out.append("|---|---|---|---|---|")
     for r, vd, why in sorted(ok, key=lambda x: x[0]["name"].lower()):
@@ -635,14 +635,14 @@ def swap(doc, begin, end, body):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--doc", default="docs/archive/e53-run-and-gun-survey.md")
+    ap.add_argument("--doc", default="docs/e54-run-and-gun-survey.md")
     ap.add_argument("--pool", default="docs/开源横版卷轴游戏总表_更新版.md")
-    ap.add_argument("--json", default="logs_temp/e53_upstream_verify.json")
-    ap.add_argument("--shots", default="logs_temp/e53_screenshots.json")
-    ap.add_argument("--sizes", default="logs_temp/e53_pool10_sizes.json",
-                    help="✅ 可做池的体量取证产物（e53_pool10_sizes.py）")
-    ap.add_argument("--scenes", default="logs_temp/e53_agent_arcade_scenes.json",
-                    help="方案 C 的逐场景取证产物（e53_agent_arcade_scenes.py）")
+    ap.add_argument("--json", default="logs_temp/e54_upstream_verify.json")
+    ap.add_argument("--shots", default="logs_temp/e54_screenshots.json")
+    ap.add_argument("--sizes", default="logs_temp/e54_pool10_sizes.json",
+                    help="✅ 可做池的体量取证产物（e54_pool10_sizes.py）")
+    ap.add_argument("--scenes", default="logs_temp/e54_agent_arcade_scenes.json",
+                    help="方案 C 的逐场景取证产物（e54_agent_arcade_scenes.py）")
     ap.add_argument("--stdout", action="store_true", help="只打印，不写文档")
     args = ap.parse_args()
 
@@ -653,18 +653,18 @@ def main():
     shots = load_shots(args.shots)
     if shots is None:
         print("⚠️ 没有 %s ⇒ 预览列一律写「本轮未取证」（⛔ 不会假装「见 README」）。"
-              "先跑 python scripts/e53_screenshot_probe.py。" % args.shots)
+              "先跑 python scripts/e54_screenshot_probe.py。" % args.shots)
     sizes = load_sizes(args.sizes)
     if sizes is None:
         print("⚠️ 没有 %s ⇒ §五 的体量表写「本轮未取证」。"
-              "先跑 python scripts/e53_pool10_sizes.py。" % args.sizes)
+              "先跑 python scripts/e54_pool10_sizes.py。" % args.sizes)
     scenes = load_scenes(args.scenes)
     if scenes is None:
         print("⚠️ 没有 %s ⇒ §5.6 的逐场景表写「本轮未取证」。"
-              "先跑 python scripts/e53_agent_arcade_scenes.py。" % args.scenes)
+              "先跑 python scripts/e54_agent_arcade_scenes.py。" % args.scenes)
 
     a_rows = [r for r in rows if not r["tag"].startswith("正文")]   # 附录 A.1 = 84 条大池
-    b_rows = [r for r in rows if r["tag"].startswith("正文")]        # 附录 A.2 = E53 正文自己的候选
+    b_rows = [r for r in rows if r["tag"].startswith("正文")]        # 附录 A.2 = E54 正文自己的候选
 
     exists_a = sum(1 for r in a_rows if r["exists"])
     gone_a = sum(1 for r in a_rows if r["exists"] is False)
@@ -702,10 +702,10 @@ def main():
 
     with open(args.doc, encoding="utf-8") as f:
         doc = f.read()
-    for mark, name in ((BEGIN, "E53-POOL:BEGIN"), (END, "E53-POOL:END"),
-                       (NOGO_BEGIN, "E53-NOGO:BEGIN"), (NOGO_END, "E53-NOGO:END"),
-                       (POOL10_BEGIN, "E53-POOL10:BEGIN"), (POOL10_END, "E53-POOL10:END"),
-                       (SCENES_BEGIN, "E53-SCENES:BEGIN"), (SCENES_END, "E53-SCENES:END")):
+    for mark, name in ((BEGIN, "E54-POOL:BEGIN"), (END, "E54-POOL:END"),
+                       (NOGO_BEGIN, "E54-NOGO:BEGIN"), (NOGO_END, "E54-NOGO:END"),
+                       (POOL10_BEGIN, "E54-POOL10:BEGIN"), (POOL10_END, "E54-POOL10:END"),
+                       (SCENES_BEGIN, "E54-SCENES:BEGIN"), (SCENES_END, "E54-SCENES:END")):
         if mark not in doc:
             print("文档里找不到 %s 标记，拒绝写入（避免尾部重复追加）" % name)
             sys.exit(1)
@@ -717,7 +717,7 @@ def main():
         f.write(doc)
     print("已写入 %s（附录 A.1 %d 行 + A.2 %d 行 + A.3~A.8 汇总 + 附录 C + §五 体量表 %d 行 + §5.6 场景 %s 个）"
           % (args.doc, len(a_rows), len(b_rows),
-             sum(1 for r in rows if e53_verdict(r)[0].startswith("✅")),
+             sum(1 for r in rows if e54_verdict(r)[0].startswith("✅")),
              str(scenes["n_scenes"]) if scenes else "未取证"))
 
 

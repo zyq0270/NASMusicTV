@@ -1,5 +1,5 @@
 r"""
-E53 上游候选池复验 —— 对 docs/archive/e53-run-and-gun-survey.md 附录 A/B 的 84 + 18 个仓库逐条打 GitHub API。
+E54 上游候选池复验 —— 对 docs/e54-run-and-gun-survey.md 附录 A/B 的 84 + 18 个仓库逐条打 GitHub API。
 
 ## 为什么需要这个脚本
 
@@ -8,7 +8,7 @@ E53 上游候选池复验 —— 对 docs/archive/e53-run-and-gun-survey.md 附�
 
 1. **许可证列不可信**：多行与 GitHub API 的 license.spdx_id 不符（SuperTux 写 GPLv2+ 实为 GPL-3.0、
    SpaceHuggers 写 MIT 实为 GPL-3.0、BGUG 写 GPLv3 实为 MIT、NESlib 写 MIT 实为 Zlib …）。
-   E53 的 C4 约束（OSI 许可）直接依赖这一列 ⇒ 错了就会把不合规的上游移植进 GPL 仓库。
+   E54 的 C4 约束（OSI 许可）直接依赖这一列 ⇒ 错了就会把不合规的上游移植进 GPL 仓库。
 2. **「失效」与「路径写错」混为一谈**：Cendric / Hawkthorne 并非作者删库，而是路径写错
    （实际在 tizian/Cendric2 / hawkthorne/hawkthorne-journey）。
 
@@ -29,13 +29,13 @@ E53 上游候选池复验 —— 对 docs/archive/e53-run-and-gun-survey.md 附�
 
 ## 用法
 
-    python scripts/e53_upstream_verify.py            # 全量（84 + 18 条，需 gh 登录或 GITHUB_TOKEN）
-    python scripts/e53_upstream_verify.py --group A  # 只跑附录 A
-    python scripts/e53_upstream_verify.py --no-api    # 只重排上次的 JSON 快照，不打 API
+    python scripts/e54_upstream_verify.py            # 全量（84 + 18 条，需 gh 登录或 GITHUB_TOKEN）
+    python scripts/e54_upstream_verify.py --group A  # 只跑附录 A
+    python scripts/e54_upstream_verify.py --no-api    # 只重排上次的 JSON 快照，不打 API
 
 匿名限额 60 次/小时 ⇒ 102 条必须用 token（5000 次/小时）。取 token 的顺序：
 环境变量 GITHUB_TOKEN → `gh auth token` → 匿名（会踩限流，脚本会如实标 UNKNOWN）。
-产物落在 logs_temp/e53_upstream_verify.{md,json}。
+产物落在 logs_temp/e54_upstream_verify.{md,json}。
 """
 
 import argparse
@@ -141,7 +141,7 @@ GROUP_A = [
     ("Co-op Platformer", "ChronosNexus/godot-coop-platformer", "MIT", "❌", []),
 ]
 
-# E53 正文 §二 / §三 自己列出的候选（同一口径复验，别只有附录有数）
+# E54 正文 §二 / §三 自己列出的候选（同一口径复验，别只有附录有数）
 GROUP_B = [
     ("commander-in-chief", "shoemoney/commander-in-chief", "MIT", "正文§二.1", []),
     ("last-bastion", "chenmoulaile/last-bastion", "MIT", "正文§二.1", []),
@@ -330,7 +330,7 @@ def lic_class(claimed, actual):
 
 
 def verdict(name, res):
-    """对 E53 硬约束的粗筛结论（只按可机检的 C4/C8 信号给，人工项标「需读源」）。"""
+    """对 E54 硬约束的粗筛结论（只按可机检的 C4/C8 信号给，人工项标「需读源」）。"""
     if res.get("http") == 0:
         return "❓ 未定位到仓库，本轮未探测"
     if res["exists"] is None:
@@ -425,8 +425,8 @@ LOOK_EXCLUDE = {
 COPYLEFT_OK = ("GPL-3.0", "LGPL-3.0", "LGPL-2.1")
 
 
-def e53_verdict(r):
-    """E53 口径的逐条判定 —— 返回 (判定, 原因)。
+def e54_verdict(r):
+    """E54 口径的逐条判定 —— 返回 (判定, 原因)。
 
     判定只有三档，附录 A.1 / A.2 / 附录 C 共用这一份定义：
       ✅ 可做   许可机检成立，可进移植池
@@ -471,7 +471,7 @@ def main():
 
     outdir = "logs_temp"
     os.makedirs(outdir, exist_ok=True)
-    snap = os.path.join(outdir, "e53_upstream_verify.json")
+    snap = os.path.join(outdir, "e54_upstream_verify.json")
 
     if args.no_api:
         with open(snap, encoding="utf-8") as f:
@@ -532,7 +532,7 @@ def main():
 
     lines = []
     w = lines.append
-    w("# E53 上游候选池复验（脚本再生，勿手抄）\n")
+    w("# E54 上游候选池复验（脚本再生，勿手抄）\n")
     w("生成时间：%s ｜ 认证：%s\n"
       % (json.load(open(snap, encoding="utf-8"))["generated_at"],
          "是" if json.load(open(snap, encoding="utf-8"))["authed"] else "否"))
@@ -550,7 +550,7 @@ def main():
     w("| 表内写了许可、API 判不出来（自定义/混合，须人工读） | %d |" % len(claim_undet))
     w("| 存在但许可证无法自动判定（NONE+NOASSERTION） | %d |" % len(undetectable))
     w("\n## 逐条\n")
-    w("| 名称 | 路径 | HTTP | 实际许可 | 表内许可 | stars | 最近推送 | archived | 对 E53 的判定 |")
+    w("| 名称 | 路径 | HTTP | 实际许可 | 表内许可 | stars | 最近推送 | archived | 对 E54 的判定 |")
     w("|---|---|---|---|---|---|---|---|---|")
     for r in rows:
         path = r.get("renamed_to") or r["path"]
@@ -580,7 +580,7 @@ def main():
         w("- %s：%s → %s" % (r["name"], r["path"], r["renamed_to"]))
 
     text = "\n".join(lines) + "\n"
-    mdpath = os.path.join(outdir, "e53_upstream_verify.md")
+    mdpath = os.path.join(outdir, "e54_upstream_verify.md")
     with open(mdpath, "w", encoding="utf-8") as f:
         f.write(text)
     print("\n" + text)

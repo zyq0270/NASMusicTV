@@ -42,7 +42,6 @@
 | `code-review-deferred-analysis-2026-09-04.md` + `.docx` | 复审暂缓项分析；三项均已处理 |
 | `codebase-architecture.html` | 架构快照，一次性产物 |
 | `lyrics-stage-plan.md` | E53「歌词舞台」**定稿**（2026-11-07 所有者定稿）⇒ 方案文档不再维护；实现与验证记录见 `technical-overview.md` §10.282（主节）、§10.344（点阵扫光与合批）、§10.346（换行推进改由歌词时间线驱动）；逐行移植说明与 5 个子模式的算法细节保留在本文件内 |
-| `e53-run-and-gun-survey.md` | E53 定稿后随之归档（上游候选游戏调研，记录了 122 个候选仓库的逐条取证）。⚠️ **仍留有未决的所有者决策项**（与 E53 本身无关，E53 的命运已定）：**D1 / D1b**（战地合集类 A/B/C 三方案、是否改用 BGUG 前生镜像）、**D2**（平台跳跃用 L'Abbaye(GPL-3.0) 还是 Froglet(MIT+archived)、是否做 4 个 polished 游戏）、**D3**（是否做 attract mode 自动还原）、**D4**（音量/触觉绑定）、**D5**（录音/视频上传体验）、**D7**（本地 JS 库）、**D8**（是否 vendoring 上游仓库 + commit SHA + LICENSE 原件）⇒ 后续若要动这些候选，另起新文档 |
 
 ### 已落地的功能方案（23）
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""E53 §五 选型的**体量证据**取证：只打「✅ 可做」池，把每个上游的真实体积量出来。
+"""E54 §五 选型的**体量证据**取证：只打「✅ 可做」池，把每个上游的真实体积量出来。
 
 为什么要这个脚本（2026-11-04）：v3.0/v4.0 的选型表里「代码量」那一列一直是**人工估计**
 （「~420 行」「5-8K 行」），而 §五 的人日预算完全建立在它上面。观感裁决把 38 条裁掉以后，
@@ -16,11 +16,11 @@
   ⚠️ 它和 `src_bytes` 的比值就是「素材占比」的信号：比值大 ⇒ 这个上游是**贴图驱动**的，
   移植时要另算资产预算（§七）。
 
-输出：`logs_temp/e53_pool10_sizes.json`，由 `scripts/e53_pool_table_join.py` 的
-`E53-POOL10` 标记区消费。⛔ 正文里那 10 行的数字只能来自这里，不许手抄。
+输出：`logs_temp/e54_pool10_sizes.json`，由 `scripts/e54_pool_table_join.py` 的
+`E54-POOL10` 标记区消费。⛔ 正文里那 10 行的数字只能来自这里，不许手抄。
 
 用法：
-    python scripts/e53_pool10_sizes.py            # 需要 GITHUB_TOKEN / gh auth token
+    python scripts/e54_pool10_sizes.py            # 需要 GITHUB_TOKEN / gh auth token
 环境变量 GITHUB_TOKEN → `gh auth token` → 匿名（60 次/小时，10 条 ×2 请求勉强够，但会如实标 UNKNOWN）。
 """
 
@@ -31,10 +31,10 @@ import urllib.parse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from e53_upstream_verify import api_get, get_token, e53_verdict  # noqa: E402
+from e54_upstream_verify import api_get, get_token, e54_verdict  # noqa: E402
 
-OUT = "logs_temp/e53_pool10_sizes.json"
-VERIFY = "logs_temp/e53_upstream_verify.json"
+OUT = "logs_temp/e54_pool10_sizes.json"
+VERIFY = "logs_temp/e54_upstream_verify.json"
 
 LINES_PER_BYTE = 35.0  # 折算系数（JS/C/GDScript/Dart 的常见量级），⚠️ 只用于对话旧口径
 
@@ -85,19 +85,19 @@ def tree_bytes(path, branch, token):
 def main():
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     if not os.path.exists(VERIFY):
-        print("缺少 %s —— 先跑 python scripts/e53_upstream_verify.py" % VERIFY)
+        print("缺少 %s —— 先跑 python scripts/e54_upstream_verify.py" % VERIFY)
         return 2
     with open(VERIFY, encoding="utf-8-sig") as f:
         snap = json.load(f)
     rows = snap["rows"]
     if not snap.get("authed"):
-        print("⛔ 快照 %s 是**未认证**那一轮取的 ⇒ 数字作废，先复跑 e53_upstream_verify.py" % VERIFY)
+        print("⛔ 快照 %s 是**未认证**那一轮取的 ⇒ 数字作废，先复跑 e54_upstream_verify.py" % VERIFY)
         return 2
     token = get_token()
     if not token:
         print("⚠️ 没有令牌（匿名配额 60 次/小时）—— 取到的数字可能大面积 UNKNOWN")
 
-    ok = [r for r in rows if e53_verdict(r)[0].startswith("✅")]
+    ok = [r for r in rows if e54_verdict(r)[0].startswith("✅")]
     print("✅ 可做池 %d 条，逐条取证体量…" % len(ok))
 
     out = {}

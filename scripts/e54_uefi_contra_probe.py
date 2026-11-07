@@ -3,11 +3,11 @@ r"""池外候选逐条取证：MikeWuPing/UEFI_Contra（所有者 2026-11-04 指
 
 为什么单开一个脚本
 ------------------
-附录 A 那 122 条（`e53_upstream_verify.py` 的 GROUP_A/GROUP_B）是**两份原表的池子**，
+附录 A 那 122 条（`e54_upstream_verify.py` 的 GROUP_A/GROUP_B）是**两份原表的池子**，
 往里塞一条「所有者后来另外指定的仓库」会把正文里十几处「84 条大池 / 122 条」的计数全部弄脏，
 还会让 A.1/A.2 的行数不再等于原表行数。所以本仓库**不进 GROUP_A/B**，单独由本脚本取证，
 结论落在**附录 C.12**。⛔ 本文档正文不许点它的名字 —— 名字进禁词表的机制见
-`e53_body_clean_check.OUT_OF_POOL_NOGO`（它从本脚本的 `REPO` + `VERDICT` 反推，不另立名单）。
+`e54_body_clean_check.OUT_OF_POOL_NOGO`（它从本脚本的 `REPO` + `VERDICT` 反推，不另立名单）。
 
 取证的三层数字（全部由本脚本再生，⛔ 不许手抄进文档）
 ------------------------------------------------
@@ -24,9 +24,9 @@ r"""池外候选逐条取证：MikeWuPing/UEFI_Contra（所有者 2026-11-04 指
    `--offline` 复用上次落盘的镜像，只重算度量。
 
 用法：
-    python scripts/e53_uefi_contra_probe.py            # 打 API + 下载镜像 + 度量
-    python scripts/e53_uefi_contra_probe.py --offline  # 只重算度量（镜像已在 logs_temp 下）
-    python scripts/e53_uefi_contra_probe.py --dir logs_temp/uefi_contra_probe
+    python scripts/e54_uefi_contra_probe.py            # 打 API + 下载镜像 + 度量
+    python scripts/e54_uefi_contra_probe.py --offline  # 只重算度量（镜像已在 logs_temp 下）
+    python scripts/e54_uefi_contra_probe.py --dir logs_temp/uefi_contra_probe
 """
 
 import argparse
@@ -37,13 +37,13 @@ import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from e53_upstream_verify import api_get, get_token  # noqa: E402
+from e54_upstream_verify import api_get, get_token  # noqa: E402
 
 REPO = "MikeWuPing/UEFI_Contra"
 BRANCH = "main"
 MIRROR = "logs_temp/uefi_contra_probe"
 
-# 判定口径与 `e53_upstream_verify.e53_verdict` 的三档一致；本条是本脚本的**结论**，
+# 判定口径与 `e54_upstream_verify.e54_verdict` 的三档一致；本条是本脚本的**结论**，
 # 归堆理由同时写进 HARD_EXCLUDE 语义的附录 C.12。⚠️ 改这里 = 改正文禁词表。
 VERDICT = ("❌ 不做",
            "① 无 LICENSE 文件（README 自称 MIT ⇒ 附录 A.5 的假 MIT 形态，C4 不成立）；"

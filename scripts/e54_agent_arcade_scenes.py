@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """§5.6 方案 C 的证据脚本：agent-arcade 的**逐场景字节**与引擎绑定。
 
-为什么单开一个脚本（而不是并进 e53_pool10_sizes.py）：
-`e53_pool10_sizes.py` 量的是「整仓」的四类资产占比，回答「要不要算贴图驱动」；
+为什么单开一个脚本（而不是并进 e54_pool10_sizes.py）：
+`e54_pool10_sizes.py` 量的是「整仓」的四类资产占比，回答「要不要算贴图驱动」；
 §5.6 要回答的是另一个问题——**这一个仓库里到底有几个游戏、每个多大**，
 粒度必须下探到 `src/game/scenes/` 的单个文件，还要读 `package.json` 确认引擎版本。
 
@@ -10,9 +10,9 @@
 一旦上游加/删场景，正文就会静默失真——而「几个游戏」正是方案 C 的全部卖点。
 
 用法：
-    python scripts/e53_agent_arcade_scenes.py            # 需要 GITHUB_TOKEN / gh auth token
+    python scripts/e54_agent_arcade_scenes.py            # 需要 GITHUB_TOKEN / gh auth token
 
-产物：logs_temp/e53_agent_arcade_scenes.json
+产物：logs_temp/e54_agent_arcade_scenes.json
 """
 
 import json
@@ -22,11 +22,11 @@ import urllib.parse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from e53_upstream_verify import api_get, get_token  # noqa: E402
+from e54_upstream_verify import api_get, get_token  # noqa: E402
 
 REPO = "DanWahlin/agent-arcade"
-OUT = "logs_temp/e53_agent_arcade_scenes.json"
-LINES_PER_BYTE = 35.0   # 与 e53_pool10_sizes.py 同一个折算常数，保持两表可对话
+OUT = "logs_temp/e54_agent_arcade_scenes.json"
+LINES_PER_BYTE = 35.0   # 与 e54_pool10_sizes.py 同一个折算常数，保持两表可对话
 
 # 场景基类不是游戏，单独记账；正文里那行「共享基类 = 现成的切换框架」靠它
 BASE_HINTS = ("basescene", "base-scene", "basescene.ts")

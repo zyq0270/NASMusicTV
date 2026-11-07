@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
-"""E53 正文净化检查 —— 附录以外的正文里，⛔ 不许再出现「弃用候选」的仓库标识。
+"""E54 正文净化检查 —— 附录以外的正文里，⛔ 不许再出现「弃用候选」的仓库标识。
 
 背景（所有者 2026-11-04 裁决）：判成为 ❌ 不做 / 🔶 判定前不做 的候选，其逐条评估、
 选型与实现细节都从正文清除，**唯一留档是附录 C**。正文里继续点它们的名字就等于没清。
 
-判定口径不重复定义，直接吃 `e53_upstream_verify.e53_verdict()` 与
-`logs_temp/e53_upstream_verify.json` ⇒ 归堆一变，本检查自动跟着变。
+判定口径不重复定义，直接吃 `e54_upstream_verify.e54_verdict()` 与
+`logs_temp/e54_upstream_verify.json` ⇒ 归堆一变，本检查自动跟着变。
 池外复看候选（所有者在 122 行快照之外另行指定的，不进快照以免弄脏计数）由各自的取证脚本
 声明 `REPO` + `VERDICT`，本检查经 `out_of_pool_paths()` 取用 —— ⛔ 别在这里手抄名单。
 
@@ -20,8 +20,8 @@
 名字全在那里。附录命中数低于 `APPENDIX_MIN_TOKENS` 就 `exit 2`，判本轮检查作废。
 
 用法：
-    python scripts/e53_body_clean_check.py            # 违规则 exit 1 并打印行号
-    python scripts/e53_body_clean_check.py --verbose  # 顺带打印禁词表
+    python scripts/e54_body_clean_check.py            # 违规则 exit 1 并打印行号
+    python scripts/e54_body_clean_check.py --verbose  # 顺带打印禁词表
 """
 
 import argparse
@@ -32,11 +32,11 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from e53_upstream_verify import e53_verdict  # noqa: E402
-import e53_uefi_contra_probe as uefi  # noqa: E402
+from e54_upstream_verify import e54_verdict  # noqa: E402
+import e54_uefi_contra_probe as uefi  # noqa: E402
 
-DOC = "docs/archive/e53-run-and-gun-survey.md"
-VERIFY = "logs_temp/e53_upstream_verify.json"
+DOC = "docs/e54-run-and-gun-survey.md"
+VERIFY = "logs_temp/e54_upstream_verify.json"
 
 # 附录从这里开始（含）——附录里逐条留档是裁决要求的，正文才算违规
 APPENDIX_START = "## 附录 A"
@@ -59,7 +59,7 @@ GENRE_WORDS = {"asteroids", "snake", "tetris", "breakout", "arkanoid", "pong",
 def out_of_pool_paths():
     """池外候选的仓库路径 —— 所有者在 122 条快照之外另行指定复看的仓库。
 
-    它们**不在** `logs_temp/e53_upstream_verify.json` 里（进了就会把正文里十几处
+    它们**不在** `logs_temp/e54_upstream_verify.json` 里（进了就会把正文里十几处
     「84 条大池 / 122 条」的计数和 A.1/A.2 的行数弄脏），但同样判了 🔶/❌ ⇒ 同样禁点名。
     ⛔ 本函数**不另立名单**：路径与判定都从各自的取证脚本读（`REPO` + `VERDICT`），
     判成 ✅ 的自动不进禁词表。
@@ -84,7 +84,7 @@ def name_forms(rows):
         strict.add(path.lower())
         (genre if base in GENRE_WORDS else strict).add(base)
     for r in rows:
-        if e53_verdict(r)[0].startswith("✅"):
+        if e54_verdict(r)[0].startswith("✅"):
             continue
         path = (r.get("renamed_to") or r.get("path") or "")
         nm = re.sub(r"\s+", " ", (r.get("name") or "").strip())
@@ -141,7 +141,7 @@ def main():
 
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     if not os.path.exists(args.json):
-        print("⛔ 缺少 %s —— 先跑 python scripts/e53_upstream_verify.py（没有判定快照就没法知道谁被弃用）。"
+        print("⛔ 缺少 %s —— 先跑 python scripts/e54_upstream_verify.py（没有判定快照就没法知道谁被弃用）。"
               % args.json)
         return 2
     with open(args.json, encoding="utf-8-sig") as f:

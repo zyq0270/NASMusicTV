@@ -1,6 +1,6 @@
 r"""
-E53 截图取证 —— 对快照里**存在**的仓库，逐条抓一张**真实可访问的图片直链**，
-写入 logs_temp/e53_screenshots.json，供 scripts/e53_pool_table_join.py 灌进附录 A.1 的「预览」列。
+E54 截图取证 —— 对快照里**存在**的仓库，逐条抓一张**真实可访问的图片直链**，
+写入 logs_temp/e54_screenshots.json，供 scripts/e54_pool_table_join.py 灌进附录 A.1 的「预览」列。
 
 ## 为什么必须脚本抓，⛔ 不许手写
 
@@ -35,11 +35,11 @@ E53 截图取证 —— 对快照里**存在**的仓库，逐条抓一张**真�
 
 ## 用法（从仓库根跑）
 
-    python scripts/e53_upstream_verify.py        # 先有快照（决定探哪些仓库）
-    python scripts/e53_screenshot_probe.py       # 再取证图片
-    python scripts/e53_pool_table_join.py        # 最后灌进文档
+    python scripts/e54_upstream_verify.py        # 先有快照（决定探哪些仓库）
+    python scripts/e54_screenshot_probe.py       # 再取证图片
+    python scripts/e54_pool_table_join.py        # 最后灌进文档
 
-    python scripts/e53_screenshot_probe.py --limit 5 --stdout   # 小样本自查
+    python scripts/e54_screenshot_probe.py --limit 5 --stdout   # 小样本自查
 
 ## 防退化自检，以及为什么阈值是 30% 而不是 50%
 
@@ -62,7 +62,7 @@ import urllib.request
 from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from e53_upstream_verify import get_token  # 令牌来源只有一份
+from e54_upstream_verify import get_token  # 令牌来源只有一份
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -417,8 +417,8 @@ def probe_repo(path, token, pool_img=""):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--snapshot", default="logs_temp/e53_upstream_verify.json")
-    ap.add_argument("--out", default="logs_temp/e53_screenshots.json")
+    ap.add_argument("--snapshot", default="logs_temp/e54_upstream_verify.json")
+    ap.add_argument("--out", default="logs_temp/e54_screenshots.json")
     ap.add_argument("--pool", default="docs/开源横版卷轴游戏总表_更新版.md",
                     help="原表路径，用于把它「截图」列的链接一起实测（不作为未验证的兜底）")
     ap.add_argument("--limit", type=int, default=0, help="只探前 N 个（自查用）")
@@ -432,7 +432,7 @@ def main():
 
     pool_imgs = {}
     if os.path.exists(args.pool):
-        from e53_pool_table_join import parse_pool
+        from e54_pool_table_join import parse_pool
         pool_imgs = {p: v.get("img", "") for p, v in parse_pool(args.pool)[0].items()}
 
     with open(args.snapshot, encoding="utf-8") as f:
