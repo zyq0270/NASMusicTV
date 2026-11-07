@@ -54,9 +54,24 @@
     未精简的原始 GLB 备份于 logs_temp/glb_probe/before_opt/(该目录被 gitignore)。
 
   行走: deer/rabbit 自带骨骼 Walk 剪辑,用 SkeletonUtils.clone + 每实例
-    AnimationMixer 播放真实步态;giraffe/panda 无骨骼动画,仅球面位移 +
-    轻微起伏;树固定不动。动物沿 (u,v) 参数空间步进,以 elevation >=
-    LAND_MIN 判定陆地,撞海岸或极区自动转向。
+    AnimationMixer 播放真实步态。giraffe/panda 的 GLB 只有「1 节点 + 1 mesh、
+    0 骨骼」,没有任何可动子节点 ⇒ 程序化补两套动作:
+      ① gait 容器上的 AnimationClip(摇摆 / 点头 / 呼吸 / 轻微起伏);
+      ② 网格的两个 relative morph target,按局部高度 + 左右/前后分组,
+         让对角腿交替前后摆动( Influence 与 gait clip 同一时钟驱动)。
+    树固定不动。动物沿 (u,v) 参数空间步进,以 elevation >= LAND_MIN
+    判定陆地,撞海岸或极区自动转向;动画速率与实际位移速度成正比,不滑步。
+
+  贴地: 不再把模型统一抬到 SURF=R+0.012(那会浮起约 10% 身高)。
+    改成按每个模型缩放后的半宽计算球面凹陷 sag = R - sqrt(R²-a²),
+    下沉 sag*0.6 + 0.0015,让平底与球面切平;行走时不再叠加 bob 起伏。
+
+  变更记录:
+    v1 (2026-11-07) 固定展示尺寸 / 全球陆地散布 / 渐进加载 / CSP 兼容 /
+       骨骼 Walk 步态 / GLB 精简至 2.43MB
+    v2 (2026-11-07) 树 10→30 且允许成片;无骨骼动物补程序化步态;
+       行走与自转减速;按 footprint 计算贴地下沉量消除悬空;
+       树叶由 alphaMode=BLEND 改 alphaTest 镂空,消除 30 棵时的半透明「幽灵树」
 -->
 <div id="stage"></div>
 <div class="title"><h1>生态地球</h1><p>CARTOON GLOBE · 自动旋转演示</p></div>
@@ -352,17 +367,30 @@ function initApp() {
   var MODELS = [
     { name: 'deer',    local: 'assets/glb/deer.glb', url: 'https://static.poly.pizza/4b6c2a41-43c7-404c-ae37-e8c4645ff93b.glb', count: 6,  height: 0.115, kind: 'grass', walk: true },
     { name: 'rabbit',  local: 'assets/glb/rabbit.glb', url: 'https://static.poly.pizza/95941440-97ad-4457-ab4a-d17f21d7c03c.glb', count: 6,  height: 0.095, kind: 'grass', walk: true },
-    { name: 'giraffe', local: 'assets/glb/giraffe.glb', url: 'https://static.poly.pizza/dad3098c-aa1d-4d1f-9e6e-3321bace45fb.glb', count: 4,  height: 0.145, kind: 'grass', walk: true },
-    { name: 'panda',   local: 'assets/glb/panda.glb', url: 'https://static.poly.pizza/283a59b6-93f7-446d-99f3-2fd13a70d77b.glb', count: 2,  height: 0.110, kind: 'forest', walk: true },
+    { name: 'giraffe', local: 'assets/glb/giraffe.glb', url: 'https://static.poly.pizza/dad3098c-aa1d-4d1f-9e6e-3321bace45fb.glb', count: 4,  height: 0.145, kind: 'grass',  walk: true, gait: true },
+    { name: 'panda',   local: 'assets/glb/panda.glb', url: 'https://static.poly.pizza/283a59b6-93f7-446d-99f3-2fd13a70d77b.glb', count: 2,  height: 0.110, kind: 'forest', walk: true, gait: true },
     // GLB 顶层是 5 棵 sibling 树(NormalTree_1..5),整簇缩放会变成一圈
     // 裹住地球的带子 ⇒ 拆成 5 个独立 part,每棵单独测量 / 缩放 / 摆放
-    { name: 'tree',    local: 'assets/glb/tree.glb', url: 'https://static.poly.pizza/53a83125-e16a-4024-b8f6-1e72679c7ddf.glb', count: 10, height: 0.150, kind: 'both', split: true }
+    // 树用更小的 gap,让它们能成片成林,而不是跟动物一样稀疏地平均分布
+    { name: 'tree',    local: 'assets/glb/tree.glb', url: 'https://static.poly.pizza/53a83125-e16a-4024-b8f6-1e72679c7ddf.glb', count: 30, height: 0.150, kind: 'both', split: true, gap: 0.18 }
   ];
-  var R = 1.0, SURF = R + 0.012;
+  var R = 1.0, SURF = R;  // SURF 只是基准;实际半径由 groundRadius() 逐个算
   var LAND_MIN   = 0.47;   // elevation 低于此值视为海洋,动物会在岸边转向
-  var WALK_SPEED = 0.030;  // 球面角速度(弧度/秒),约合每秒走 0.03 个地球半径
+  var WALK_SPEED = 0.010;  // 球面角速度(弧度/秒),原 0.030 走得太快
+  var STEP_RATE  = 0.45;   // 动画播放速率基准;实际 timeScale ∝ 位移速度
+  var SPIN_RATE  = 0.055;  // 地球自转角速度(原 0.14)
+  var CLOUD_RATE = 0.012;  // 云层漂移(原 0.03)
   var FOOTPRINT = 0.24;   // 单个模型水平跨度上限(世界单位)
   var MIN_GAP   = 0.30;   // 模型之间最小角距(弧度,约 17°)
+
+  /* 平底模型站在球面上:中心相切、四角却离地 a²/2R。按缩放后半宽 a
+     把模型下沉 sag*0.6 + 0.0015,既吃掉边缘空隙又不至于陷进地表。 */
+  function groundRadius(size, s) {
+    var a = Math.max(size.x, size.z) * s * 0.5;
+    var sag = R - Math.sqrt(Math.max(0, R * R - a * a));
+    return R - sag * 0.6 - 0.0015;
+  }
+  function smooth01(t) { t = clamp01(t); return t * t * (3 - 2 * t); }
 
   /* ---------- GLTF load: 保留骨骼与动画 ----------
      实测(2026-11-07):这些 GLB 的骨骼节点确实 bake 了 100×/140× 缩放,
@@ -382,10 +410,64 @@ function initApp() {
     return found;
   }
 
-  function makePart(node) {
+  /* 给没有骨骼的模型造「腿」:两个 relative morph target。
+     局部 +Y 是上、局部 +Z 是前进方向(placeOnSphere / makeBasis 的约定)。
+     按顶点高度加权(只动下半身),按 x/z 所在象限分组,让对角腿同相、
+     另一对反相 ⇒ 迈步时四条腿交替前后摆。
+     注意:绝不能在这里调 geometry.computeBoundingBox(),r160 会把
+     morph 的极值并进 bbox,导致上面的归一化缩放把模型算小。 */
+  function addLegMorph(mesh) {
+    var geo = mesh.geometry;
+    if (!geo || !geo.attributes || !geo.attributes.position) return;
+    if (geo.morphAttributes.position && geo.morphAttributes.position.length) return;
+    var pos = geo.attributes.position, n = pos.count;
+    var y0 = Infinity, y1 = -Infinity, x0 = Infinity, x1 = -Infinity,
+        z0 = Infinity, z1 = -Infinity, i;
+    for (i = 0; i < n; i++) {
+      var vx = pos.getX(i), vy = pos.getY(i), vz = pos.getZ(i);
+      if (vy < y0) y0 = vy; if (vy > y1) y1 = vy;
+      if (vx < x0) x0 = vx; if (vx > x1) x1 = vx;
+      if (vz < z0) z0 = vz; if (vz > z1) z1 = vz;
+    }
+    var h = Math.max(1e-6, y1 - y0), xm = (x0 + x1) * 0.5, zm = (z0 + z1) * 0.5;
+    var amp = h * 0.085;
+    var A = new Float32Array(n * 3), B = new Float32Array(n * 3);
+    for (i = 0; i < n; i++) {
+      var x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+      var leg = 1 - smooth01((y - y0) / h / 0.42);
+      var phase = (x >= xm ? 1 : -1) * (z >= zm ? 1 : -1);
+      var dz = amp * leg * phase;
+      A[i * 3 + 2] = dz;
+      B[i * 3 + 2] = -dz;
+      A[i * 3] = B[i * 3] = amp * 0.12 * leg;   // 轻微侧向张合,更像迈步
+    }
+    var aAttr = new THREE.Float32BufferAttribute(A, 3); aAttr.name = 'legFwdA';
+    var bAttr = new THREE.Float32BufferAttribute(B, 3); bAttr.name = 'legFwdB';
+    geo.morphAttributes.position = [aAttr, bAttr];
+    mesh.morphTargetsRelative = true;
+    mesh.updateMorphTargets();
+  }
+
+  function collectMorphs(root) {
+    var out = [];
+    root.traverse(function (o) {
+      if (!o.isMesh || !o.geometry || !o.geometry.morphAttributes) return;
+      var mp = o.geometry.morphAttributes.position;
+      if (!mp || mp.length < 2) return;
+      o.morphTargetsRelative = true;
+      o.updateMorphTargets();          // clone 后重建独立的 influence 数组
+      out.push(o);
+    });
+    return out;
+  }
+
+  function makePart(node, procedural) {
     var outer = new THREE.Group();   // placeOnSphere 只操作 outer
+    var gait  = new THREE.Group();   // 程序化步态 pivot:原点就在模型底面中心
+    gait.name = 'gait';
     var inner = new THREE.Group();   // 底面 / 居中补偿
-    outer.add(inner);
+    outer.add(gait);
+    gait.add(inner);
     inner.attach(node);              // attach 保留世界变换(含祖先 bake 缩放)
     outer.updateMatrixWorld(true);
     var box = new THREE.Box3().setFromObject(outer);
@@ -401,9 +483,44 @@ function initApp() {
         o.material.roughness = 0.92;
         o.material.metalness = 0.0;
         if (o.material.map) o.material.map.colorSpace = THREE.SRGBColorSpace;
+        // 树叶原始材质是 alphaMode=BLEND(半透明):10 棵时不显眼,30 棵叠在
+        // 草地上就会发白像「幽灵树」。改成 alphaTest 硬边镂空 ⇒ 颜色饱满、
+        // 不参与透明排序,树冠轮廓也更清楚。
+        if (o.material.transparent && o.material.map) {
+          o.material.alphaTest = 0.42;
+          o.material.transparent = false;
+          o.material.depthWrite = true;
+          o.material.needsUpdate = true;
+        }
+        if (procedural) addLegMorph(o);
       }
     });
     return outer;
+  }
+
+  /* 无骨骼动物的程序化步态剪辑。作用在名为 'gait' 的容器上:
+     quaternion(摇摆/点头)、position(轻微起伏,幅度按 1/scale 换算成世界单位)、
+     scale(呼吸)。pivot 在底面中心 ⇒ 摇摆时脚不会飞离地面。 */
+  function makeGaitClip(invScale, tag) {
+    var N = 24, dur = 1.0, times = [], q = [], p = [], sc = [], i;
+    var e = new THREE.Euler(), quat = new THREE.Quaternion();
+    for (i = 0; i <= N; i++) {
+      var t = i / N, ph = t * Math.PI * 2;
+      times.push(t * dur);
+      e.set(0.042 * Math.sin(2 * ph + 0.6), 0.034 * Math.sin(ph + 1.1),
+            0.075 * Math.sin(ph), 'XYZ');
+      quat.setFromEuler(e);
+      q.push(quat.x, quat.y, quat.z, quat.w);
+      p.push(0.0009 * invScale * Math.sin(ph),
+             0.0012 * invScale * (0.5 + 0.5 * Math.sin(2 * ph)), 0);
+      var br = 1 + 0.012 * Math.sin(ph + 0.9);
+      sc.push(br, br, br);
+    }
+    return new THREE.AnimationClip('ProceduralGait_' + tag, dur, [
+      new THREE.QuaternionKeyframeTrack('gait.quaternion', times, q),
+      new THREE.VectorKeyframeTrack('gait.position', times, p),
+      new THREE.VectorKeyframeTrack('gait.scale', times, sc)
+    ]);
   }
 
   function fetchGLTF(src) {
@@ -444,7 +561,7 @@ function initApp() {
         }
       }
       if (!nodes.length) nodes = [gltf.scene];
-      var parts = nodes.map(makePart);
+      var parts = nodes.map(function (nd) { return makePart(nd, !!spec.gait); });
       var clip = pickWalkClip(gltf.animations);
       console.log('[globe-present] ' + spec.name + ': ' + parts.length +
                   ' part(s), walk=' + (clip ? clip.name : 'none') +
@@ -480,8 +597,10 @@ function initApp() {
     var n = new THREE.Vector3(d[0], d[1], d[2]).normalize();
     root.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), n);
     root.rotateY(rand() * Math.PI * 2);       // 绕地表法线随机朝向
-    root.position.copy(n.multiplyScalar(SURF));
-    return { scale: s, height: desiredH };
+    var gR = groundRadius(size, s);
+    root.userData.groundR = gR;
+    root.position.copy(n.multiplyScalar(gR));
+    return { scale: s, height: desiredH, groundR: gR };
   }
 
   /* ---------- async load + scatter all models ----------
@@ -513,13 +632,34 @@ function initApp() {
       window.__globeDebug.walkTrace.push(row);
       if (window.__globeDebug.walkTrace.length >= 40) clearInterval(traceTimer);
     }, 500);
+
+    // 校对用:证明无骨骼动物的程序化步态(gait clip + leg morph)确实在逐帧动,
+    // 以及地球自转已经降速。只在 ?debug=1 时运行。
+    window.__globeDebug.motionTrace = [];
+    var motionTimer = setInterval(function () {
+      var row = { t: Math.round(performance.now()) };
+      row.spin = +earth.rotation.y.toFixed(4);
+      for (var gi = 0; gi < walkers.length; gi++) {
+        var gw = walkers[gi];
+        if (!gw.morphs || !gw.morphs.length || !gw.gaitAction) continue;
+        var inf = gw.morphs[0].morphTargetInfluences;
+        row.morph = [+inf[0].toFixed(3), +inf[1].toFixed(3)];
+        row.gaitTime = +gw.gaitAction.time.toFixed(3);
+        var gp = gw.inst.children[0];
+        if (gp) row.gaitQuat = [gp.quaternion.x, gp.quaternion.y, gp.quaternion.z, gp.quaternion.w]
+          .map(function (x) { return +x.toFixed(4); });
+        break;
+      }
+      window.__globeDebug.motionTrace.push(row);
+      if (window.__globeDebug.motionTrace.length >= 40) clearInterval(motionTimer);
+    }, 500);
   }
 
   // 落点在开始加载前一次性挑好(共享 occupied 占位表),与 GLB 到达顺序无关
   var plans = MODELS.map(function (spec) {
     var src = spec.kind === 'forest' ? earthRes.forest :
               spec.kind === 'both' ? earthRes.grass.concat(earthRes.forest) : earthRes.grass;
-    return { spec: spec, spots: pickSpots(src, spec.count, MIN_GAP) };
+    return { spec: spec, spots: pickSpots(src, spec.count, spec.gap || MIN_GAP) };
   });
 
   var okCount = 0, doneCount = 0;
@@ -548,7 +688,7 @@ function initApp() {
   function stepWalkers(dt, now) {
     for (var i = 0; i < walkers.length; i++) {
       var w = walkers[i];
-      w.heading += (rand() - 0.5) * dt * 0.8;      // 缓慢随机游荡
+      w.heading += (rand() - 0.5) * dt * 0.35;     // 缓慢随机游荡
       var lat = (0.5 - w.v) * Math.PI;
       var cosLat = Math.max(0.3, Math.cos(lat));
       var step = w.speed * dt;
@@ -586,14 +726,25 @@ function initApp() {
       _basis.makeBasis(_right, _p0, _fwd);
       w.inst.quaternion.setFromRotationMatrix(_basis);
 
-      // 步态起伏:没有骨骼的模型也有一点上下颠簸,配合腿部动画更自然
-      var bob = Math.sin(now * 0.007 + w.phase) * 0.0035;
-      w.inst.position.copy(_p0.multiplyScalar(SURF + bob));
+      // 贴地:不再叠加 bob 起伏(那会让脚离地);起伏交给 gait clip / morph。
+      // 半径用该模型按 footprint 算出的 groundR,平底与球面切平。
+      w.inst.position.copy(_p0.multiplyScalar(w.inst.userData.groundR || SURF));
+
+      // 程序化腿部迈步:与 gait clip 共用同一个 action.time,相位严格同步
+      if (w.morphs && w.gaitAction) {
+        var ph = (w.gaitAction.time % 1) * Math.PI * 2;
+        var ca = Math.max(0, Math.sin(ph)), cb = Math.max(0, -Math.sin(ph));
+        for (var qi = 0; qi < w.morphs.length; qi++) {
+          var infl = w.morphs[qi].morphTargetInfluences;
+          if (infl && infl.length >= 2) { infl[0] = ca; infl[1] = cb; }
+        }
+      }
     }
   }
 
   function scatter(res, plan) {
     var spec = plan.spec, spots = plan.spots, parts = res.parts, clip = res.clip;
+    var gaitClip = !!(spec.gait && !clip);
     for (var k = 0; k < spots.length && k < spec.count; k++) {
       var partSrc = parts[k % parts.length];
       // 必须走 SkeletonUtils.clone,普通 clone(true) 会让所有实例共用一套
@@ -602,28 +753,39 @@ function initApp() {
       if (!inst.userData.size) inst.userData.size = partSrc.userData.size;
       var info = placeOnSphere(inst, spots[k].u, spots[k].v, spec.height);
       outGroup.add(inst);
+      // clone 可能丢 name,显式钉住 gait pivot 供 AnimationClip 绑定
+      if (spec.gait && inst.children[0]) inst.children[0].name = 'gait';
 
-      // 腿部动画:每个实例独立 mixer + 随机相位/速率,避免整齐划一
-      if (clip) {
-        var mixer = new THREE.AnimationMixer(inst);
-        var act = mixer.clipAction(clip);
-        act.setLoop(THREE.LoopRepeat, Infinity);
-        act.timeScale = 0.8 + rand() * 0.5;
-        act.time = rand() * clip.duration;
-        act.play();
-        animMixers.push(mixer);
-      }
-
-      // 走动状态(树不动)
+      // 走动状态(树不动);先建 walker,动画速率才能跟实际位移速度成正比
+      var w = null;
       if (spec.walk) {
-        walkers.push({
+        w = {
           inst: inst,
           u: spots[k].u, v: spots[k].v,
           heading: rand() * Math.PI * 2,
           speed: WALK_SPEED * (0.7 + rand() * 0.6),
           phase: rand() * Math.PI * 2,
           faceYaw: (rand() - 0.5) * 0.6
-        });
+        };
+        walkers.push(w);
+      }
+
+      // 每个实例独立 mixer:12 只带骨骼动物播 Walk,6 只无骨骼动物播程序化步态
+      var useClip = clip;
+      if (!useClip && gaitClip) useClip = makeGaitClip(1 / info.scale, spec.name);
+      if (useClip) {
+        var mixer = new THREE.AnimationMixer(inst);
+        var act = mixer.clipAction(useClip);
+        act.setLoop(THREE.LoopRepeat, Infinity);
+        // 位移慢了腿也要慢,否则会原地打滑
+        act.timeScale = STEP_RATE * (w ? w.speed / WALK_SPEED : 1);
+        act.time = rand() * useClip.duration;
+        act.play();
+        animMixers.push(mixer);
+        if (spec.gait) {
+          w.morphs = collectMorphs(inst);
+          w.gaitAction = act;
+        }
       }
 
       if (debugMode) debugRows.push({
@@ -632,12 +794,15 @@ function initApp() {
         elev: +elevation(spots[k].u, spots[k].v).toFixed(3),
         measured: inst.userData.size, scale: +info.scale.toFixed(6),
         height: +info.height.toFixed(4),
-        radius: +inst.position.length().toFixed(4)
+        radius: +inst.position.length().toFixed(4),
+        groundR: +info.groundR.toFixed(4),
+        gait: spec.gait ? 'procedural' : (clip ? 'skeleton' : 'static')
       });
     }
     console.log('[globe-present] ' + spec.name + ': placed ' +
                 Math.min(spots.length, spec.count) + '/' + spec.count + ' on land' +
-                (clip ? ' (walk clip: ' + clip.name + ')' : ' (static)'));
+                (clip ? ' (walk clip: ' + clip.name + ')' :
+                 spec.gait ? ' (procedural gait + leg morph)' : ' (static)'));
   }
 
   plans.forEach(function (plan) {
@@ -654,6 +819,8 @@ function initApp() {
         window.__globeDebug.done = doneCount;
         window.__globeDebug.walkers = walkers.length;
         window.__globeDebug.mixers = animMixers.length;
+        window.__globeDebug.gait = walkers.filter(function (x) { return x.morphs; }).length;
+        window.__globeDebug.trees = debugRows.filter(function (x) { return x.name === 'tree'; }).length;
       }
       if (doneCount < plans.length) {
         setStatus('正在放置动物与树木… ' + okCount + '/' + plans.length);
@@ -678,8 +845,8 @@ function initApp() {
     var dt = Math.min(0.05, (now - prevT) / 1000); prevT = now;
 
     // earth spin (8 deg/s) + clouds drift
-    earth.rotation.y += dt * 0.14;
-    clouds.rotation.y += dt * 0.03;
+    earth.rotation.y += dt * SPIN_RATE;
+    clouds.rotation.y += dt * CLOUD_RATE;
     outGroup.rotation.y = earth.rotation.y;   // 模型跟着地球自转,始终踩在陆地上
 
     // 骨骼腿部动画 + 沿陆地游走
