@@ -117,8 +117,8 @@ class ParticleBudgetGateTest {
         assertTrue("低画质应能选到数字雨", low.contains(VisualizerTheme.MATRIX_RAIN))
         assertFalse(low.contains(VisualizerTheme.BEAT_FIREWORK))
         assertFalse(low.contains(VisualizerTheme.WORLD))
-        // ULTRA 三项由帧缓冲门控，与本次裁决无关
-        assertFalse(low.contains(VisualizerTheme.MILKDROP_FEEDBACK))
+        // ULTRA 档只剩 E41「世界」一项（E18 反馈残像已于 2026-11-07 下线）⇒ 由帧缓冲门控，
+        // LOW 不提供（上面已对 WORLD 断言过）。
         // 照片墙三来源全关时依然被 selectable 过滤掉
         assertFalse(
             VisualizerRendererFactory.availableThemes(VisualQuality.LOW, false)

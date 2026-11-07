@@ -21,7 +21,7 @@ import java.io.File
  *    ①②③ 用"渲染器文件里一个 `0xFFRRGGBB` 都不许出现"把这条路堵死。
  * 2. **`postFx` 写成具名常量** —— `FxCoverageScanTest` 的 `postFxRe`/`numRe` 只认数值字面量，
  *    具名写法**不报错**、只是效果从后处理覆盖名单里**静默掉出**。④ 复刻那两条正则做正负双证
- *    （先例 `StarrySkyTest.⑧` / `MilkdropTest.⑪`）。
+ *    （先例 `StarrySkyTest.⑧`）。
  * 3. **`Brush.verticalGradient(vararg)` 写进 `draw*` 体内** —— 每次调用分配 vararg 数组，
  *    破零分配红线；而 `PerfBudgetContractTest` 的禁项清单里**没有** `Brush`，这条洞必须自己补
  *    （E43 `SeasideTest:103` 同做法）。⑦。

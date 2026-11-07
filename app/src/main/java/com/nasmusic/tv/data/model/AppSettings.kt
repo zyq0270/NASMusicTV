@@ -161,7 +161,10 @@ data class AppSettings(
 )
 
 /**
- * 可视化效果主题（27 套手动效果，无自动导演档）。
+ * 可视化效果主题（28 套手动效果，无自动导演档）。
+ *
+ * ⚠️ 计数口径：[VisualizerTheme.entries] 恒在册（28 项，与 lofi.city / highway.enabled
+ * 两个编译期开关无关）；两个开关都关着时**可选**的是 26 套（`selectable()` 的过滤结果）。
  *
  * ⚠️ 其中 [LOFI_CITY] 受编译期开关 `BuildConfig.LOFI_CITY_ENABLED` 控制，
  * **枚举项恒在册**（`entries.size` 与本机/CI 无关），只有 [selectable] 出的列表会过滤它。
@@ -193,9 +196,7 @@ enum class VisualizerTheme(
     LIQUID_RIPPLE(R.string.visualizer_theme_liquid_ripple, "液态涟漪", Tier.ADV, "15"),
     MATRIX_RAIN(R.string.visualizer_theme_matrix_rain, "数字雨", Tier.ADV, "16"),
     CONSTELLATION(R.string.visualizer_theme_constellation, "星座", Tier.ADV, "17"),
-    MILKDROP_FEEDBACK(R.string.visualizer_theme_milkdrop_feedback, "反馈残像", Tier.ULTRA, "18"),
     LYRICS_DOT_MATRIX(R.string.visualizer_theme_lyrics_dot_matrix, "歌词点阵", Tier.ADV, "23"),
-    ECG_WAVE(R.string.visualizer_theme_ecg_wave, "心跳", Tier.BASIC, "24"),
     HYPNOTIC_FUNCTION(R.string.visualizer_theme_hypnotic_function, "催眠", Tier.BASIC, "25"),
     ORBITAL_RINGS(R.string.visualizer_theme_orbital_rings, "太阳系", Tier.ADV, "29"),
     RADAR_GRID(R.string.visualizer_theme_radar_grid, "雷达", Tier.BASIC, "30"),
@@ -549,6 +550,13 @@ private val LEGACY_MAP = mapOf(
         "ORIGAMI_POLY" to CIRCULAR_RING,
         "STAIRCASE_WAVE" to CIRCULAR_RING,
         "FRACTAL_TREE" to CIRCULAR_RING,
+        // ⛔ 以下 2 个效果已于 2026-11-07 从效果库移除（所有者裁决）：同样回落到默认
+        // CIRCULAR_RING。⛔ 主题持久化**按枚举名**（不是 ordinal）⇒ 删除枚举项不会
+        // 挪动任何存活主题的 `ordinalLabel`，但老用户存过这两个名字时仍要能解析出
+        // 一个**能画出来**的效果 ⇒ 必须登记在这里（否则 `fromKey` 的末位 fallback
+        // 虽然也回落到 Default，但那是「碰巧等价」；显式登记 = 固化迁移意图）。
+        "ECG_WAVE" to CIRCULAR_RING,
+        "MILKDROP_FEEDBACK" to CIRCULAR_RING,
     )
 
         fun fromKey(key: String?): VisualizerTheme =

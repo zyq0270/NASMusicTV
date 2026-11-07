@@ -18,10 +18,10 @@ import androidx.compose.ui.unit.LayoutDirection
 /**
  * 离屏后处理（**仅 `FxLevel.FULL`**）。
  *
- * 代价参照 `UltraRenderers.kt:28-31` 的实测结论：全屏离屏回绘是 TV 填充率杀手
+ * 代价参照已下线的 E18「反馈残像」实测结论：全屏离屏回绘是 TV 填充率杀手
  * ⇒ 必须降采样（[downscale] ≥ 2）、且必须 `onExit` 显式 `recycle`。
  *
- * **不变式（与 `MilkdropRenderer` 同）**：`aCanvas` 恒包装 `a`、`bCanvas` 恒包装 `b`、
+ * **不变式（与 E18 的帧缓冲反馈实现同）**：`aCanvas` 恒包装 `a`、`bCanvas` 恒包装 `b`、
  * `sceneCanvas` 恒包装 `scene`；重建（`ensure` 尺寸变化）与释放（`onExit`）同步交换/清空。
  *
  * ⚠️ buffer→buffer 的绘制（阈值提取 / Kawase 滤波）**必须经 [CanvasDrawScope] 画到

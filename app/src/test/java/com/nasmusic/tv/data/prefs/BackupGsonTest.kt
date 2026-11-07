@@ -144,12 +144,14 @@ class BackupGsonTest {
 
     @Test
     fun `export still writes the plain enum constant name`() {
+        // ⚠️ 2026-11-07：样本原为 `ECG_WAVE`（E24「心跳」），随该效果下线 ⇒ 换成仍在册的
+        //   `HYPNOTIC_FUNCTION`（同为 Tier.BASIC、同样**不是**默认项 ⇒ 判据语义不变）。
         val json = backupGson.toJson(
-            AppSettings(visualizerTheme = VisualizerTheme.ECG_WAVE)
+            AppSettings(visualizerTheme = VisualizerTheme.HYPNOTIC_FUNCTION)
         )
         assertTrue(
             "容错适配器的 write 必须与 Gson 默认行为一致（写出 enum.name），json=$json",
-            json.contains("\"visualizerTheme\":\"ECG_WAVE\"")
+            json.contains("\"visualizerTheme\":\"HYPNOTIC_FUNCTION\"")
         )
     }
 

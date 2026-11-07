@@ -43,11 +43,9 @@ class FxCoverageScanTest {
         "LiquidGridRenderer",          // E13 液态网格（§A5-6）
         "LiquidRippleRenderer",        // E15 液态涟漪（§A6-5）
         "ConstellationRenderer",       // E17 星座（§A7-5）
-        "EcgWaveRenderer",             // E24 心跳（§A8-4 CRT 后处理）
         "RadarGridRenderer",           // E30 雷达（§A9-3 CRT 后处理）
         "BeatFireworkRenderer",        // E14 节拍烟花（§B2-④ 暗角 0.44 + 颗粒 0.030）
         "MatrixRainRenderer",          // E16 数字雨（§B3-④ 暗角 0.50 + 颗粒 0.030 + 扫描线 0.16）
-        "MilkdropRenderer",            // E18 反馈残像（§B4 + §12.4 补后处理 暗角 0.48 + 颗粒 0.030）
         "LyricsDotMatrixRenderer",     // E23 歌词点阵（§B7 暗角 0.44 + 颗粒 0.026）
         "HypnoticFunctionRenderer",    // E25 催眠（§B8 暗角 0.44 + 颗粒 0.028）
         "LightBeamsRenderer",          // E35 光轴（§B10 暗角 0.50 + 颗粒 0.030）
@@ -346,9 +344,10 @@ class FxCoverageScanTest {
     @Test
     fun `负向N1 覆盖名单摘掉真覆盖的类必须被完整性断言抓到`() {
         val decls = rendererDecls()
-        // ⚠️ 2026-10-05：样本原为 `WaterfallRenderer`（E12），随效果删除 ⇒ 换成 `MilkdropRenderer`
-        //   （E18，仍在 covered 里）。⚠️ 样本**必须仍在 [covered] 中**否则这条会退化成空转。
-        val sample = "MilkdropRenderer"
+        // ⚠️ 2026-10-05：样本原为 `WaterfallRenderer`（E12），随效果删除 ⇒ 换成 `RadarGridRenderer`
+        //   （E30，仍在 covered 里）。⚠️ 2026-11-07：原样本 `MilkdropRenderer`（E18）也随效果下线
+        //   ⇒ 再换一次。⚠️ 样本**必须仍在 [covered] 中**否则这条会退化成空转。
+        val sample = "RadarGridRenderer"
         assertTrue("前提：样本 $sample 必须仍在 covered 里，否则本负向自证空转", sample in covered)
         val broken = covered - sample
         val unassigned = decls.map { it.name }.filter { it !in broken && it !in exempt.keys }

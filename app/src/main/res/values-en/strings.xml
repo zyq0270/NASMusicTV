@@ -1376,7 +1376,6 @@
     <string name="visualizer_theme_constellation">Constellation</string>
     <string name="visualizer_theme_desert_smoke">Lone Smoke over the Dunes</string>
     <string name="visualizer_theme_dna">DNA double helix</string>
-    <string name="visualizer_theme_ecg_wave">ECG wave</string>
     <string name="visualizer_theme_highway">Highway</string>
     <string name="visualizer_theme_hypnotic_function">Hypnotic</string>
     <string name="visualizer_theme_light_beams">Light beams</string>
@@ -1392,7 +1391,6 @@
     <string name="visualizer_theme_lyrics_dot_matrix">Lyrics dot matrix</string>
     <string name="visualizer_theme_lyrics_stage">Lyrics Stage</string>
     <string name="visualizer_theme_matrix_rain">Matrix rain</string>
-    <string name="visualizer_theme_milkdrop_feedback">Feedback afterimage</string>
     <string name="visualizer_theme_molecule">Molecule</string>
     <string name="visualizer_theme_moonlit">Moonlit sea</string>
     <string name="visualizer_theme_orbital_rings">Solar system</string>

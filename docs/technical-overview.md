@@ -19800,3 +19800,91 @@ lyricsStagePayload.currentIndex = lyricInfo.lineIndex
 同样会让设备空间的变换每帧都变 ⇒ 旋转中的文字**绕开了字形缓存**（Skia 对带旋转的文本
 不走缓存掩码）⇒ 重新光栅化的开销**比缩放更大**。
 本条只量化缩放（题目范围），旋转的量化需要另立一条（步长必须按**角度**而不是倍率来定）。
+
+#### 12. 下线两套效果（2026-11-07 所有者裁决）：E18「反馈残像」+ E24「心跳」
+
+##### 12.1 决策
+
+所有者于 2026-11-07 裁决把两套效果从产品里**移除**（不是隐藏、不是降级）：
+
+| 序号 | 枚举键 | 显示名 | 原档位 | 原 `ordinalLabel` |
+|---|---|---|---|---|
+| E18 | `MILKDROP_FEEDBACK` | 反馈残像 | `Tier.ULTRA` | `"18"` |
+| E24 | `ECG_WAVE` | 心跳 | `Tier.BASIC` | `"24"` |
+
+⇒ 两套效果不再出现在效果选择器里，**各自的渲染器连同门禁一并删除**（不留死代码）。
+
+##### 12.2 持久化按**名字**而不是序号 ⇒ 存活主题的编号一个都没动
+
+`VisualizerTheme` 的持久化键是 `enum.name`（`AppPreferences` / 备份 JSON 都存名字），
+`ordinalLabel` 只是**展示编号**、从不参与存储 ⇒ 删除两个枚举项**不会**挪动任何存活主题的
+`ordinalLabel`（`"18"` / `"24"` 随各自主题一起消失，其余编号保持原样）。
+
+⭐ 但老用户（此前选过这两套效果的人）DataStore 里存的就是这两个名字 ⇒ 必须有迁移路径，
+否则升级后会指向一个**不存在的主题**。仓库里已有现成机制：`LEGACY_MAP`（历史枚举名 → 现行主题）：
+
+```kotlin
+"ECG_WAVE" to CIRCULAR_RING,
+"MILKDROP_FEEDBACK" to CIRCULAR_RING,
+```
+
+两者都落到默认 `CIRCULAR_RING`（没有更贴近的后继者）。⛔ `fromKey` 的末位 fallback
+本来就等价于 `Default` ⇒ 显式登记只是为了**固化迁移意图**并让
+`docs/visualizer-effects-list.md` 的「已移除名册 ⇒ LEGACY_MAP」这条约定继续成立。
+
+##### 12.3 改动清单（枚举 → 工厂 → 渲染器 → 资源 → 门禁 → 文档）
+
+| # | 位置 | 改动 |
+|---|---|---|
+| 1 | `data/model/AppSettings.kt` | 删除 `MILKDROP_FEEDBACK` / `ECG_WAVE` 两个枚举项；`LEGACY_MAP` 加两条；类 KDoc 的套数口径改为 28（枚举项）/ 26（开关关着时的可选数） |
+| 2 | `visualizer/VisualizerRendererFactory.kt` | 删两个 `when` 分支 + 两个 import |
+| 3 | `visualizer/renderers/EcgWaveRenderer.kt` | **整文件删除**（E24 专属） |
+| 4 | `visualizer/renderers/UltraRenderers.kt` | **整文件删除** —— ⚠️ 该文件历史上承载 E18/E19/E20 多个渲染器，但 2026-10-05 的删除重构已把 E19/E20 移走 ⇒ **实测本文件只剩 `MilkdropRenderer` 一个类**（`grep '^(internal \|open \|abstract \)*class '` 命中 1 处），随 E18 一并删除 |
+| 5 | `visualizer/fx/OffscreenFx.kt` | KDoc 里指向 `UltraRenderers.kt:28-31` / `MilkdropRenderer` 的两处引用改为「已下线的 E18」表述（⛔ 不留指向已删文件的死链接） |
+| 6 | `visualizer/fx/ProceduralTexture.kt` | KDoc 里 `MilkdropRenderer.releaseBuffers` 的引用改为「已下线的 E18 `releaseBuffers`」 |
+| 7 | `res/values/strings.xml`、`res/values-en/strings.xml` | 删 `visualizer_theme_ecg_wave` / `visualizer_theme_milkdrop_feedback` 两个键（`VisualizerThemeStringsGateTest` 断言「`visualizer_theme_*` 键数 == 枚举项数」） |
+| 8 | `test/…/data/model/VisualizerThemeTest.kt` | 计数 30 → 28（4 处）；ULTRA 档断言的样本由 `MILKDROP_FEEDBACK` 换成 `WORLD`（ULTRA 档下线后只剩它） |
+| 9 | `test/…/data/model/ParticleBudgetGateTest.kt` | 「ULTRA 三项由帧缓冲门控」那条断言换成 `WORLD`（ULTRA 只剩一项） |
+| 10 | `test/…/visualizer/renderers/StarrySkyTest.kt` | 效果总数 30 → 28；ULTRA 门样本换成 `WORLD`（改断言 MEDIUM 不提供，与上面那条不重复） |
+| 11 | `test/…/data/prefs/BackupGsonTest.kt` | 备份 JSON 往返的样本枚举由 `ECG_WAVE` 换成 `HYPNOTIC_FUNCTION`（同为 `Tier.BASIC`、同样**不是**默认项 ⇒ 判据语义不变） |
+| 12 | `test/…/visualizer/RendererSwapperTest.kt` | 样本主题由 `ECG_WAVE` 换成 `HYPNOTIC_FUNCTION`（**同为 `Tier.BASIC`** ⇒ 「切换前后 tier 不变」这个前提仍成立） |
+| 13 | `test/…/visualizer/renderers/RendererBaseContractTest.kt` | 夹具渲染器的 `theme` 由 `ECG_WAVE` 换成 `HYPNOTIC_FUNCTION` |
+| 14 | `test/…/visualizer/fx/FxCoverageScanTest.kt` | `covered` 名单删 `EcgWaveRenderer` / `MilkdropRenderer` 两项；N1 的负向自证样本由 `MilkdropRenderer` 换成 `RadarGridRenderer`（仍在 `covered` 里 ⇒ 不空转） |
+| 15 | `test/…/visualizer/renderers/EcgWaveformTest.kt`、`MilkdropTest.kt` | **整文件删除**（两个渲染器的门禁） |
+| 16 | `test/…/visualizer/renderers/MoonlitSkySeaTest.kt` | KDoc 里对 `MilkdropTest.⑪` 的引用删除（被引文件已删） |
+| 17 | `docs/visualizer-effects-list.md`、`CHANGELOG.md`、`README.md` | 效果清单（总数 / BASIC / ULTRA 档数 / 已移除名册）、变更日志的 `Removed` 段、README 的「30+ 套特效」计数（→ 26+）同步 |
+
+##### 12.4 计数（改完之后）
+
+| 口径 | 改前 | 改后 |
+|---|---|---|
+| `VisualizerTheme.entries.size` | 30 | **28** |
+| 可选（`selectable(true)`，两个编译期开关关着） | 28 | **26** |
+| 可选（三来源全关 ⇒ 无照片墙） | 27 | **25** |
+| BASIC / ADV / ULTRA（可选口径） | 9 / 17 / 2 | **8 / 17 / 1** |
+
+⚠️ 枚举项数**与 `lofi.city` / `highway.enabled` 两个编译期开关无关**（开关只过滤运行期列表）⇒
+计数门禁仍写成「基线 + lofiInList + highwayInList」的形式（`VisualizerThemeTest`）。
+
+##### 12.5 ⚠️ 本地构建的**覆盖层**也引用了这两个渲染器
+
+本机 `~/.gradle/init.d/10-nasmusic-e51-local.gradle` 把 `app/src/e51-overlay/`（隐藏分支
+`feat/e51-private` 的物化副本，**gitignored**）挂成 app 模块 main 源集的额外源目录，
+并**排除**仓库里同名的 `VisualizerRendererFactory.kt` ⇒ **本地构建编译的是覆盖层那份工厂**。
+
+⇒ 覆盖层那份工厂同样 `import` 了 `MilkdropRenderer` / `EcgWaveRenderer` ⇒ 仓库里删掉这两个类后，
+**不改覆盖层 ⇒ 本地编译直接失败**（`unresolved reference`）。
+
+⇒ 本次同步改了覆盖层那份工厂（同样删两个分支 + 两个 import）。
+⚠️ 覆盖层必须与 `feat/e51-private` **逐字节一致**（`PrivateOverlayDriftGateTest` 门禁）⇒
+**收尾动作**：把本次改动 cherry-pick 到 `feat/e51-private`，再在仓库根跑
+`python scripts/sync_private_overlay.py`（`--check` 必须 0 漂移）。
+
+##### 12.6 门禁
+
+- `VisualizerThemeTest`（枚举 / 可选列表 / 编号唯一 / 显示名唯一 / 档位门）
+- `ParticleBudgetGateTest`（LOW 档的粒子预算门 + ULTRA 只剩 WORLD）
+- `StarrySkyTest` ⑥（效果总数硬计数 + 工厂 `when` 分支穷举）
+- `FxCoverageScanTest`（在册渲染器名单完整性 + 覆盖 / 豁免归属 + 三条负向自证）
+- `RendererSwapperTest` / `RendererBaseContractTest` / `BackupGsonTest`（样本枚举替换后的原判据不变）
+- `VisualizerThemeStringsGateTest`（`visualizer_theme_*` 键数 == 枚举项数）

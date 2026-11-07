@@ -20,6 +20,8 @@ import org.junit.Test
  * ⚠️ 2026-10-05：主题枚举删掉 9 个效果后，本文件只把**样本值**换成仍然存在的项
  *   （`TUNNEL_FLY` → `ECG_WAVE`，`SPECTRO_WATERFALL` → `LIQUID_GRID`，tier 分别不变）——
  *   Harness 注入的是 [FakeRenderer]，主题只用于「与上一项不同」的区分，断言一字未动。
+ * ⚠️ 2026-11-07：`ECG_WAVE`（E24「心跳」）随该效果下线 ⇒ 再换成仍在册的
+ *   `HYPNOTIC_FUNCTION`（**同为 Tier.BASIC** ⇒ 「切换前后 tier 不变」这个前提依旧成立）。
  */
 class RendererSwapperTest {
 
@@ -69,7 +71,7 @@ class RendererSwapperTest {
         h.swapper.sync(VisualizerTheme.CIRCULAR_RING, VisualQuality.MEDIUM, true, h.ctx, t0)
         val old = h.swapper.current
 
-        h.swapper.sync(VisualizerTheme.ECG_WAVE, VisualQuality.MEDIUM, true, h.ctx, t0 + 100)
+        h.swapper.sync(VisualizerTheme.HYPNOTIC_FUNCTION, VisualQuality.MEDIUM, true, h.ctx, t0 + 100)
 
         assertSame("旧渲染器必须保留下来参与淡出", old, h.swapper.previous)
         assertTrue(h.swapper.isCrossfading)
@@ -97,7 +99,7 @@ class RendererSwapperTest {
         h.swapper.sync(VisualizerTheme.CIRCULAR_RING, VisualQuality.MEDIUM, false, h.ctx, t0)
         val old = h.swapper.current as FakeRenderer
 
-        h.swapper.sync(VisualizerTheme.ECG_WAVE, VisualQuality.MEDIUM, false, h.ctx, t0 + 10)
+        h.swapper.sync(VisualizerTheme.HYPNOTIC_FUNCTION, VisualQuality.MEDIUM, false, h.ctx, t0 + 10)
 
         assertNull(h.swapper.previous)
         assertFalse(h.swapper.isCrossfading)
@@ -108,11 +110,11 @@ class RendererSwapperTest {
     @Test
     fun `quality change re-enters the same renderer instance`() {
         val h = Harness()
-        h.swapper.sync(VisualizerTheme.ECG_WAVE, VisualQuality.LOW, false, h.ctx, t0)
+        h.swapper.sync(VisualizerTheme.HYPNOTIC_FUNCTION, VisualQuality.LOW, false, h.ctx, t0)
         val renderer = h.swapper.current as FakeRenderer
         assertEquals(1, renderer.enterCount)
 
-        val changed = h.swapper.sync(VisualizerTheme.ECG_WAVE, VisualQuality.HIGH, false, h.ctx, t0 + 50)
+        val changed = h.swapper.sync(VisualizerTheme.HYPNOTIC_FUNCTION, VisualQuality.HIGH, false, h.ctx, t0 + 50)
 
         assertTrue(changed)
         assertSame("画质变化不该重建渲染器，只重新 onEnter 分配缓冲", renderer, h.swapper.current)
@@ -154,7 +156,7 @@ class RendererSwapperTest {
     fun `a second switch during crossfade drops the oldest layer`() {
         val h = Harness()
         h.swapper.sync(VisualizerTheme.CIRCULAR_RING, VisualQuality.MEDIUM, true, h.ctx, t0)
-        h.swapper.sync(VisualizerTheme.ECG_WAVE, VisualQuality.MEDIUM, true, h.ctx, t0 + 10)
+        h.swapper.sync(VisualizerTheme.HYPNOTIC_FUNCTION, VisualQuality.MEDIUM, true, h.ctx, t0 + 10)
         val middle = h.swapper.previous as FakeRenderer
 
         // 8s 驻留保证正常不会发生；此处验证防御分支不泄漏

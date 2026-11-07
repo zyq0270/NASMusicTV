@@ -1038,7 +1038,7 @@ class StarrySkyTest {
         assertEquals("ordinalLabel", "42", t.ordinalLabel)
         assertEquals("档位", VisualizerTheme.Tier.ADV, t.tier)
         assertEquals("⛔ 效果总数（门禁硬计数；枚举项恒声明，开关只影响 selectable）",
-            30, VisualizerTheme.entries.size)
+            28, VisualizerTheme.entries.size)
         assertEquals("从键反查必须回到自己", t, VisualizerTheme.fromKey("STAR_TRAILS"))
         assertTrue("必须出现在可选列表里", VisualizerTheme.selectable(true).contains(t))
         // 工厂分支存在（穷举 when 的完备性：每个枚举都有分支）
@@ -1064,7 +1064,8 @@ class StarrySkyTest {
         // 负向：门必须是活的 —— 真读预算的效果在 LOW 仍被挡住
         assertTrue("真读预算的效果（世界）在 LOW 必须被挡", VisualizerTheme.WORLD.needsParticleBudget)
         assertFalse("LOW 不得提供世界（证明上面的『恒 true』不是因为门失效）", VisualQuality.LOW.supports(VisualizerTheme.WORLD))
-        assertFalse("LOW 不得提供反馈残像（ULTRA 门）", VisualQuality.LOW.supports(VisualizerTheme.MILKDROP_FEEDBACK))
+        // ULTRA 档（E18「反馈残像」下线后只剩 E41「世界」）：帧缓冲门 ⇒ MEDIUM 也不提供
+        assertFalse("MEDIUM 不得提供 ULTRA 档的世界（ULTRA 门）", VisualQuality.MEDIUM.supports(VisualizerTheme.WORLD))
     }
 
     @Test

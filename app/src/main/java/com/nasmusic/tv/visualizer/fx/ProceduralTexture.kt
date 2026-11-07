@@ -337,7 +337,7 @@ object ProceduralTexture {
         return bmp
     }
 
-    /** 释放全部纹理。可安全重复调用（与 `MilkdropRenderer.releaseBuffers` 同语义）。 */
+    /** 释放全部纹理。可安全重复调用（与已下线的 E18 `releaseBuffers` 同语义）。 */
     fun release() {
         for (i in slots.indices) {
             slots[i]?.asAndroidBitmap()?.recycle()

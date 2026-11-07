@@ -28,7 +28,7 @@
 - **播放控制**：顺序 / 单曲循环 / 列表循环 / 随机四种模式，队列增删改与排序，队列持久化（重启自动恢复）
 - **音质**：播放页显示当前档位或真实码率，网络歌曲可随时切换档位，支持单曲指定档位
 - **应用内音量**：独立于系统音量（0–100%），设置页与播放页均可调节，跨曲交叉淡入自动适配
-- **均衡器与可视化**：均衡器预设与频段调节；全屏沉浸式可视化 30+ 套特效（含 three-globe 3D 地球版「世界」，WebView + WebGL 完全离线渲染，参考 [three-globe](https://github.com/vasturiano/three-globe) 与 [three.js](https://github.com/mrdoob/three.js)）；可视化画质可按设备性能分低/中/高三档选择
+- **均衡器与可视化**：均衡器预设与频段调节；全屏沉浸式可视化 26+ 套特效（含 three-globe 3D 地球版「世界」，WebView + WebGL 完全离线渲染，参考 [three-globe](https://github.com/vasturiano/three-globe) 与 [three.js](https://github.com/mrdoob/three.js)）；可视化画质可按设备性能分低/中/高三档选择
 - **照片墙可视化**：图库 / 外接存储（U 盘、SD 卡）/ Jellyfin 三来源照片全屏轮播，43 种转场随机切换，可选「仅显示含人像」
 - **K 歌**：人声消除伴奏模式、原唱 / 伴奏切换、升降调、播放变速
 - **MTV 音乐视频**：播放页一键进入全屏 MV（B 站搜索），切歌自动预搜
@@ -68,7 +68,7 @@
 |:---:|:---:|
 | <img src="https://cdn.jsdelivr.net/gh/hxzhang2000/NASMusicTV@main/screenshots/01-dashboard.jpg" width="440" alt="首页"><br>**首页**：当前播放 / 最近播放 / 实时天气 / 频谱预览 | <img src="https://cdn.jsdelivr.net/gh/hxzhang2000/NASMusicTV@main/screenshots/02-player.jpg" width="440" alt="播放页"><br>**播放页**：封面 + 歌词 + 可视化 + 歌曲详情 |
 | <img src="https://cdn.jsdelivr.net/gh/hxzhang2000/NASMusicTV@main/screenshots/03-karaoke.jpg" width="440" alt="逐字卡拉OK歌词"><br>**逐字卡拉 OK 歌词** | <img src="https://cdn.jsdelivr.net/gh/hxzhang2000/NASMusicTV@main/screenshots/04-mtv.jpg" width="440" alt="MTV音乐视频"><br>**MTV 全屏音乐视频** |
-| <img src="https://cdn.jsdelivr.net/gh/hxzhang2000/NASMusicTV@main/screenshots/05-visualizer.jpg" width="440" alt="全屏可视化"><br>**全屏可视化**：30+ 套特效 | <img src="https://cdn.jsdelivr.net/gh/hxzhang2000/NASMusicTV@main/screenshots/06-library.jpg" width="440" alt="曲库"><br>**曲库**：专辑 / 艺术家 / 歌曲 / 流派 / 年代 |
+| <img src="https://cdn.jsdelivr.net/gh/hxzhang2000/NASMusicTV@main/screenshots/05-visualizer.jpg" width="440" alt="全屏可视化"><br>**全屏可视化**：26+ 套特效 | <img src="https://cdn.jsdelivr.net/gh/hxzhang2000/NASMusicTV@main/screenshots/06-library.jpg" width="440" alt="曲库"><br>**曲库**：专辑 / 艺术家 / 歌曲 / 流派 / 年代 |
 | <img src="https://cdn.jsdelivr.net/gh/hxzhang2000/NASMusicTV@main/screenshots/07-discover.jpg" width="440" alt="发现页"><br>**发现页**：六维度筛选 | <img src="https://cdn.jsdelivr.net/gh/hxzhang2000/NASMusicTV@main/screenshots/08-search.jpg" width="440" alt="搜索"><br>**搜索**：拼音首字母 + 子串匹配 |
 | <img src="https://cdn.jsdelivr.net/gh/hxzhang2000/NASMusicTV@main/screenshots/09-weather-radio.jpg" width="440" alt="天气电台"><br>**天气电台**：按实时天气匹配心情电台 | <img src="https://cdn.jsdelivr.net/gh/hxzhang2000/NASMusicTV@main/screenshots/10-detail.jpg" width="440" alt="专辑详情"><br>**专辑详情** |
 | <img src="https://cdn.jsdelivr.net/gh/hxzhang2000/NASMusicTV@main/screenshots/11-queue.jpg" width="440" alt="播放队列"><br>**播放队列**：增删改与排序 | <img src="https://cdn.jsdelivr.net/gh/hxzhang2000/NASMusicTV@main/screenshots/12-mine.jpg" width="440" alt="我的"><br>**我的**：收藏 / 最近播放 / 本地歌单 |

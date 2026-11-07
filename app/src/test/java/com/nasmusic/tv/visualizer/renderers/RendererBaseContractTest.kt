@@ -179,7 +179,7 @@ class RendererBaseContractTest {
         // 测试夹具子类（下方 FixtureProbeRenderer）保证扫描到的子类数 > 0（⑨ 空转自证）
         val fixtureSrc = """
             class FixtureProbeRenderer : RendererFx() {
-                override val theme = VisualizerTheme.ECG_WAVE
+                override val theme = VisualizerTheme.HYPNOTIC_FUNCTION
                 override fun androidx.compose.ui.graphics.drawscope.DrawScope.drawContent(
                     frame: AudioFrame, ctx: RenderContext, fx: FxFrame
                 ) { val t = fx.nowMs }   // ✅ 合法：用 fx 的 nowMs（ctx 的同名字段是被禁写法，见负向⑦）
@@ -283,7 +283,7 @@ class RendererBaseContractTest {
 
     /** 扫描段的"真实子类"锚点（保证子类数 > 0，防扫描空转）；本身必须零违规 */
     private class FixtureProbeRenderer : RendererFx() {
-        override val theme = VisualizerTheme.ECG_WAVE
+        override val theme = VisualizerTheme.HYPNOTIC_FUNCTION
         override fun DrawScope.drawContent(
             frame: AudioFrame,
             ctx: RenderContext,

@@ -1,10 +1,10 @@
 # 可视化效果列表
 
 > **版本**：v2.39.13（versionCode 198）
-> **更新日期**：2026-11-06
+> **更新日期**：2026-11-07
 > **来源**：`app/src/main/java/com/nasmusic/tv/data/model/AppSettings.kt` — `VisualizerTheme` 枚举
 
-共 **28** 个效果，分三档。档位只决定「在哪种画质下可选」：
+共 **26** 个效果，分三档。档位只决定「在哪种画质下可选」：
 
 - **BASIC** —— 三档画质全可用。
 - **ADV** —— 逐项门控：看该效果**是否真的读取** `ctx.quality.maxParticles`（枚举第 4 参 `needsParticleBudget`），
@@ -13,12 +13,11 @@
 
 增删历史、实现细节、真机验收记录见 `docs/technical-overview.md` §10。
 
-## BASIC 档（9 套）
+## BASIC 档（8 套）
 
 | 序号 | 枚举键 | 显示名 |
 |---|---|---|
 | E05 | CIRCULAR_RING | 圆形频谱环 |
-| E24 | ECG_WAVE | 心跳 |
 | E25 | HYPNOTIC_FUNCTION | 催眠 |
 | E30 | RADAR_GRID | 雷达 |
 | E33 | CONCENTRIC_GEARS | 齿轮 |
@@ -59,26 +58,26 @@
 > 恒速 + 整幅 multiply**；远山按所有者裁定改成**半透明墨晕**（不再是白）；
 > 画面**无限连续**（只裁不重置）。方案与验收细节已归档 ⇒ `docs/archive/shan-shui-inf-porting-plan.md`。
 
-## ULTRA 档（2 套）
+## ULTRA 档（1 套）
 
 | 序号 | 枚举键 | 显示名 |
 |---|---|---|
-| E18 | MILKDROP_FEEDBACK | 反馈残像 |
 | E41 | WORLD | 世界 |
 
-> `E41 世界` 是 WebView + WebGL 的 3D 地球（完全离线）。归 ULTRA 的理由与 E18 不同：2026-10-06 真机故障
+> `E41 世界` 是 WebView + WebGL 的 3D 地球（完全离线）。归 ULTRA 的理由：2026-10-06 真机故障
 > ——**电视端 WebView 只画首帧**，MEDIUM / LOW 用户会看到一块静止的地球，所有者裁决改为仅最高画质档提供（§10.215）。
+> ⛔ 2026-11-07 下线 E18「反馈残像」后，ULTRA 档只剩本项。
 
 ## 门控的三个特殊项（容易漏）
 
 1. **E39 照片墙是唯一有「列表级」门控的效果**：`VisualizerTheme.selectable(photoWallAvailable)` 在三个照片来源
-   开关全关时把 `PHOTO_WALL` 从列表里过滤掉（指示器不显示、左右键也切不到）。其余 27 套恒在列表里（受画质档约束）。
+   开关全关时把 `PHOTO_WALL` 从列表里过滤掉（指示器不显示、左右键也切不到）。其余 25 套恒在列表里（受画质档约束）。
 2. **E14 节拍烟花**：ADV 档里唯一 `needsParticleBudget = true` 且非 ULTRA 的效果 ⇒ `LOW.maxParticles = 0` 时被
    `supports()` 挡下。
-3. **E18 / E41**：见上「ULTRA」口径。⛔ 没有任何「按设备能力隐藏效果」的过滤逻辑（`availableThemes()` 只看画质档 +
+3. **E41**：见上「ULTRA」口径。⛔ 没有任何「按设备能力隐藏效果」的过滤逻辑（`availableThemes()` 只看画质档 +
    照片来源）⇒ E41 在不支持 WebView 上屏的设备上仍会出现于 HIGH 档。
 
-## 已移除效果（v2.37.6 移除 11 个；v2.38.2 再移除 9 个）
+## 已移除效果（v2.37.6 移除 11 个；v2.38.2 再移除 9 个；v2.39.13 再移除 2 个）
 
 | 序号 | 枚举键 | 显示名 |
 |---|---|---|
@@ -102,7 +101,12 @@
 | E31 | ORIGAMI_POLY | 折纸 |
 | E32 | STAIRCASE_WAVE | 阶梯 |
 | E34 | FRACTAL_TREE | 分形 |
+| E18 | MILKDROP_FEEDBACK | 反馈残像 |
+| E24 | ECG_WAVE | 心跳 |
 
+> **2026-11-07 下线的 2 个**（所有者裁决）：E18「反馈残像」= 全仓库唯一的真帧缓冲反馈（1280×720 乒乓回绘，
+> 电视端填充率杀手，且长时间播放会糊成灰白）；E24「心跳」= 心电图式滚动波形。两者连同各自渲染器一并移除。
+>
 > 老用户存过的已移除主题键经 `AppSettings.kt` 的 `LEGACY_MAP` 自动回落到默认 `CIRCULAR_RING`（圆形频谱环）。
 > ⚠️ 清单靠人工维护：`VisualizerThemeTest` 不核对已删名册是否全部进表 ⇒ **删效果时必须手工补 `LEGACY_MAP`**。
 > 已移除序号位保留空号，`ordinalLabel` 唯一性不受影响。

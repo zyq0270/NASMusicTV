@@ -12,11 +12,9 @@ import com.nasmusic.tv.visualizer.renderers.DesertSmokeRenderer
 import com.nasmusic.tv.visualizer.renderers.LiquidGridRenderer
 import com.nasmusic.tv.visualizer.renderers.LiquidRippleRenderer
 import com.nasmusic.tv.visualizer.renderers.MatrixRainRenderer
-import com.nasmusic.tv.visualizer.renderers.MilkdropRenderer
 import com.nasmusic.tv.visualizer.renderers.MoonlitRenderer
 import com.nasmusic.tv.visualizer.renderers.LyricsDotMatrixRenderer
 import com.nasmusic.tv.visualizer.renderers.LyricsStageRenderer
-import com.nasmusic.tv.visualizer.renderers.EcgWaveRenderer
 import com.nasmusic.tv.visualizer.renderers.HypnoticFunctionRenderer
 import com.nasmusic.tv.visualizer.renderers.OrbitalRingsRenderer
 import com.nasmusic.tv.visualizer.renderers.RadarGridRenderer
@@ -75,9 +73,7 @@ object VisualizerRendererFactory {
         VisualizerTheme.LIQUID_RIPPLE -> LiquidRippleRenderer()
         VisualizerTheme.MATRIX_RAIN -> MatrixRainRenderer()
         VisualizerTheme.CONSTELLATION -> ConstellationRenderer()
-        VisualizerTheme.MILKDROP_FEEDBACK -> MilkdropRenderer()
         VisualizerTheme.LYRICS_DOT_MATRIX -> LyricsDotMatrixRenderer()
-        VisualizerTheme.ECG_WAVE -> EcgWaveRenderer()
         VisualizerTheme.HYPNOTIC_FUNCTION -> HypnoticFunctionRenderer()
         VisualizerTheme.ORBITAL_RINGS -> OrbitalRingsRenderer()
         VisualizerTheme.RADAR_GRID -> RadarGridRenderer()

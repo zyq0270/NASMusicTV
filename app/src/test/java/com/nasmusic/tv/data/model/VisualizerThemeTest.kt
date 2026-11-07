@@ -38,6 +38,10 @@ class VisualizerThemeTest {
         assertEquals(VisualizerTheme.CIRCULAR_RING, VisualizerTheme.fromKey("CLASSICAL_WAVE"))
         assertEquals(VisualizerTheme.CIRCULAR_RING, VisualizerTheme.fromKey("SONIC_TERRAIN"))
         assertEquals(VisualizerTheme.CIRCULAR_RING, VisualizerTheme.fromKey("CIRCULAR_NEBULA"))
+        // ⚠️ 2026-11-07：E24「心跳」/ E18「反馈残像」下线 ⇒ 老用户存过的这两个名字
+        //   必须回落到默认效果（而不是指向一个**不存在**的主题）。
+        assertEquals(VisualizerTheme.CIRCULAR_RING, VisualizerTheme.fromKey("ECG_WAVE"))
+        assertEquals(VisualizerTheme.CIRCULAR_RING, VisualizerTheme.fromKey("MILKDROP_FEEDBACK"))
     }
 
     @Test
@@ -63,17 +67,18 @@ class VisualizerThemeTest {
 
     @Test
     fun `theme library is all concrete effects, no auto mode`() {
-        // 30 = 29 + E53 歌词舞台。⛔ 与 lofi.city 开关无关：枚举恒声明，只有 selectable() 会过滤。
-        assertEquals(30, VisualizerTheme.entries.size)
+        // 28 = 30 − E18「反馈残像」− E24「心跳」（2026-11-07 所有者裁决下线）。
+        // ⛔ 与 lofi.city 开关无关：枚举恒声明，只有 selectable() 会过滤。
+        assertEquals(28, VisualizerTheme.entries.size)
     }
 
     @Test
     fun `selectable list contains every theme when the photo wall is available`() {
         val selectable = VisualizerTheme.selectable(photoWallAvailable = true)
-        // 28 = 30 项枚举减去被 lofi.city / highway.enabled 两个编译期开关过滤掉的那两项
+        // 26 = 28 项枚举减去被 lofi.city / highway.enabled 两个编译期开关过滤掉的那两项
         // （本用例照片墙是开着的 ⇒ 不触发列表级门控）。
-        assertEquals(28 + lofiInList + highwayInList, selectable.size)
-        assertEquals(28 + lofiInList + highwayInList, selectable.distinct().size)
+        assertEquals(26 + lofiInList + highwayInList, selectable.size)
+        assertEquals(26 + lofiInList + highwayInList, selectable.distinct().size)
         assertTrue(selectable.contains(VisualizerTheme.PHOTO_WALL))
     }
 
@@ -104,24 +109,26 @@ class VisualizerThemeTest {
             listOf(VisualizerTheme.PHOTO_WALL),
             on.filter { it !in off.toSet() }
         )
-        // 关：29 项（30 − 照片墙）再减两个被开关过滤的；开：30 项再减两个被开关过滤的。
-        assertEquals(27 + lofiInList + highwayInList, off.size)
-        assertEquals(28 + lofiInList + highwayInList, on.size)
+        // 关：27 项（28 − 照片墙）再减两个被开关过滤的；开：28 项再减两个被开关过滤的。
+        assertEquals(25 + lofiInList + highwayInList, off.size)
+        assertEquals(26 + lofiInList + highwayInList, on.size)
     }
 
     @Test
     fun `ordinal labels are unique`() {
         val labels = VisualizerTheme.entries.map { it.ordinalLabel }
-        // 30 个编号互异 —— 千里江山取 "50"（E51 占 "51"、E52 占 "52"、E53 占 "53"），不再与 E43「海边」重号。
-        assertEquals(30, labels.distinct().size)
+        // 28 个编号互异 —— 千里江山取 "50"（E51 占 "51"、E52 占 "52"、E53 占 "53"），不再与 E43「海边」重号。
+        // ⚠️ E18「反馈残像」("18") 与 E24「心跳」("24") 已于 2026-11-07 下线 ⇒ 随主题一同消失，
+        //    存活主题的 `ordinalLabel` **一个都没动**（它们是稳定的展示编号，不是序号）。
+        assertEquals(28, labels.distinct().size)
     }
 
     @Test
     fun `display names are non blank and unique`() {
         val names = VisualizerTheme.entries.map { it.displayName }
         assertTrue(names.none { it.isBlank() })
-        // 「千里江山」是唯一显示名 ⇒ 30 个互异。
-        assertEquals(30, names.distinct().size)
+        // 「千里江山」是唯一显示名 ⇒ 28 个互异。
+        assertEquals(28, names.distinct().size)
     }
 
     @Test
@@ -158,10 +165,14 @@ class VisualizerThemeTest {
         //   `ParticleBudgetGateTest` 用源码扫描反推真值集合，标错就会红。
         assertTrue(VisualizerTheme.WORLD.needsParticleBudget)
 
-        // ULTRA 需要帧缓冲：只有 HIGH 允许（与本条裁决无关，一字未动）
-        assertFalse(VisualQuality.LOW.supports(VisualizerTheme.MILKDROP_FEEDBACK))
-        assertFalse(VisualQuality.MEDIUM.supports(VisualizerTheme.MILKDROP_FEEDBACK))
-        assertTrue(VisualQuality.HIGH.supports(VisualizerTheme.MILKDROP_FEEDBACK))
+        // ULTRA 需要帧缓冲：只有 HIGH 允许（`supports()` 的 ULTRA 分支 = `allowFramebuffer`）
+        // ⚠️ 2026-11-07：E18「反馈残像」下线后 ULTRA 档**只剩 E41「世界」**一项
+        //   ⇒ ULTRA 的门控样本改用它（`supports()` 的 ULTRA 分支 = `allowFramebuffer`，
+        //   只有 HIGH 为 true ⇒ LOW / MEDIUM 一律不提供）。
+        assertEquals(VisualizerTheme.Tier.ULTRA, VisualizerTheme.WORLD.tier)
+        assertFalse(VisualQuality.LOW.supports(VisualizerTheme.WORLD))
+        assertFalse(VisualQuality.MEDIUM.supports(VisualizerTheme.WORLD))
+        assertTrue(VisualQuality.HIGH.supports(VisualizerTheme.WORLD))
     }
 
     /**
@@ -196,7 +207,8 @@ class VisualizerThemeTest {
             "真读预算的效果（节拍烟花）在 LOW 档仍然必须被挡",
             VisualQuality.LOW.supports(VisualizerTheme.BEAT_FIREWORK)
         )
-        assertFalse(VisualQuality.LOW.supports(VisualizerTheme.MILKDROP_FEEDBACK))
+        // ULTRA 档的样本（E18 下线后只剩 E41「世界」）：LOW 不得提供
+        assertFalse(VisualQuality.LOW.supports(VisualizerTheme.WORLD))
     }
 
     @Test
