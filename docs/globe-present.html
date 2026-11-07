@@ -1,0 +1,742 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" href="data:,">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>生态地球 · 自动旋转演示</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden;
+    background: radial-gradient(circle at 50% 30%, #4f9fd4 0%, #2a6fa8 55%, #103f66 100%);
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; }
+  #stage { position: fixed; inset: 0; }
+  #stage canvas { display: block; width: 100% !important; height: 100% !important; }
+  .title { position: fixed; top: 14px; left: 0; right: 0; text-align: center; pointer-events: none; z-index: 20; }
+  .title h1 { font-size: 22px; font-weight: 900; color: #fff; letter-spacing: 4px; text-shadow: 0 2px 10px rgba(10,60,110,.55); }
+  .title p { display: inline-block; margin-top: 6px; font-size: 11px; font-weight: 700; color: #0d4f84;
+    background: rgba(255,255,255,.85); padding: 3px 12px; border-radius: 999px; box-shadow: 0 2px 8px rgba(10,60,110,.18); }
+  .loading { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; z-index: 30; transition: opacity .5s; }
+  .loading.hide { opacity: 0; pointer-events: none; }
+  .loading h2 { font-size: 20px; font-weight: 900; color: #fff; letter-spacing: 5px; text-shadow: 0 2px 10px rgba(10,60,110,.5); }
+  .loading p { font-size: 13px; color: rgba(255,255,255,.85); }
+  .err { position: fixed; inset: 0; display: none; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 32px; text-align: center; z-index: 31; color: #fff; }
+  .err h3 { font-size: 18px; letter-spacing: 2px; }
+  .err p { font-size: 13px; line-height: 1.8; color: rgba(255,255,255,.88); }
+  .status { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 20;
+    pointer-events: none; white-space: nowrap; font-size: 12px; font-weight: 700; color: #fff;
+    background: rgba(10,60,110,.55); padding: 6px 16px; border-radius: 999px;
+    box-shadow: 0 2px 8px rgba(10,60,110,.25); transition: opacity .5s; }
+  .status.hide { opacity: 0; }
+</style>
+</head>
+<body>
+<!--
+  动物 / 树木模型（开源）:
+    鹿 / 兔 / 树 — Quaternius Ultimate Animal & Vegetation Pack (CC0 1.0 Universal)
+      https://quaternius.com/packs.html
+    长颈鹿 — elkiotbear via Poly Pizza (CC-BY 3.0)
+      https://poly.pizza/
+    熊猫 — Poly by Google via Poly Pizza (CC-BY 3.0)
+  三维引擎: three.js r160 (MIT) https://threejs.org/
+
+  尺寸约定: 动物 / 树木均「不按地球真实比例」渲染,统一使用固定的展示高度
+  (见 MODELS.height,单位 = 地球半径 R=1),分散在全球陆地上。
+
+  模型本地副本: docs/assets/glb/*.glb (精简后合计约 2.43MB,来源与许可同上)。
+    poly.pizza CDN 实测仅约 100KB/s,单个 tree GLB 就要 30s+,
+    故页面优先加载本地副本实现秒开;未携带 assets/ 时自动回退 CDN。
+
+  按最终屏幕显示尺寸(模型仅约 40~60px)做过精简: 5.29MB -> 2.43MB (-54%):
+    - tree 两张 1024x1024 RGB PNG -> 256x256 JPEG(第 3 张带 alpha,保持 PNG);
+    - deer/rabbit 删除未使用的 25/29 个动画剪辑(只保留 Walk),
+      重建 bufferViews/accessors 并清除死字节;几何未减面以保住轮廓。
+    未精简的原始 GLB 备份于 logs_temp/glb_probe/before_opt/(该目录被 gitignore)。
+
+  行走: deer/rabbit 自带骨骼 Walk 剪辑,用 SkeletonUtils.clone + 每实例
+    AnimationMixer 播放真实步态;giraffe/panda 无骨骼动画,仅球面位移 +
+    轻微起伏;树固定不动。动物沿 (u,v) 参数空间步进,以 elevation >=
+    LAND_MIN 判定陆地,撞海岸或极区自动转向。
+-->
+<div id="stage"></div>
+<div class="title"><h1>生态地球</h1><p>CARTOON GLOBE · 自动旋转演示</p></div>
+<div class="loading" id="loading"><h2>生态地球</h2><p>正在唤醒绿色星球…</p></div>
+<div class="status" id="status">正在放置动物与树木…</div>
+<div class="err" id="errBox"><h3>加载失败</h3><p id="errMsg">3D 引擎加载失败，请检查网络后刷新页面重试。</p></div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from "three";
+import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+// 普通 clone(true) 不会重建 skeleton.bones 引用,多实例会共用一套骨架、
+// 动画串台;SkeletonUtils.clone 专治这个
+import { clone as cloneSkeleton } from "three/addons/utils/SkeletonUtils.js";
+
+/* 严格 CSP 的预览环境常把 blob: 排除在 connect-src 之外(如 WorkBuddy 预览面板),
+   而 GLTFLoader 在支持 createImageBitmap 时默认用 ImageBitmapLoader 去
+   fetch(blob:) 读 GLB 内嵌纹理 ⇒ 贴图全丢、模型变成纯白剪影。
+   这里让 GLTFLoader 走 TextureLoader 分支(<img src="blob:">,归 img-src 管,
+   通常允许 blob:/data:)。代价只是纹理在主线程解码,5 个小模型可忽略。 */
+try { window.createImageBitmap = undefined; } catch (e) {}
+
+/* ---------- utilities ---------- */
+const rand = (function (seed) {
+  return function () { seed |= 0; seed = seed + 0x6D2B79F5 | 0;
+    var t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+})(20261107);
+
+function hash3(x, y, z) {
+  var n = (Math.imul(Math.floor(x), 374761393) + Math.imul(Math.floor(y), 668265263) + Math.imul(Math.floor(z), 1442695041)) | 0;
+  n = Math.imul(n ^ (n >>> 13), 1274126177); n = n ^ (n >>> 16);
+  return ((n & 0xffffff) / 0xffffff) * 2 - 1;
+}
+function smooth(t) { return t * t * (3 - 2 * t); }
+function vnoise3(x, y, z) {
+  var x0 = Math.floor(x), y0 = Math.floor(y), z0 = Math.floor(z);
+  var fx = x - x0, fy = y - y0, fz = z - z0;
+  var u = smooth(fx), v = smooth(fy), w = smooth(fz);
+  var c000 = hash3(x0, y0, z0), c100 = hash3(x0 + 1, y0, z0), c010 = hash3(x0, y0 + 1, z0), c110 = hash3(x0 + 1, y0 + 1, z0);
+  var c001 = hash3(x0, y0, z0 + 1), c101 = hash3(x0 + 1, y0, z0 + 1), c011 = hash3(x0, y0 + 1, z0 + 1), c111 = hash3(x0 + 1, y0 + 1, z0 + 1);
+  return c000 * (1 - u) * (1 - v) * (1 - w) + c100 * u * (1 - v) * (1 - w) +
+    c010 * (1 - u) * v * (1 - w) + c110 * u * v * (1 - w) +
+    c001 * (1 - u) * (1 - v) * w + c101 * u * (1 - v) * w +
+    c011 * (1 - u) * v * w + c111 * u * v * w;
+}
+function fbm3(x, y, z, oct) {
+  var sum = 0, amp = 1, f = 1, n = 0, i;
+  for (i = 0; i < oct; i++) { sum += vnoise3(x * f, y * f, z * f) * amp; n += amp; amp *= 0.5; f *= 2; }
+  return sum / n;
+}
+function clamp01(v) { return v < 0 ? 0 : v > 1 ? 1 : v; }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function spherePoint(u, v) {
+  var th = u * Math.PI * 2, ph = v * Math.PI, sp = Math.sin(ph);
+  return [Math.sin(th) * sp, Math.cos(ph), Math.cos(th) * sp];
+}
+
+/* SphereGeometry(r160) 的 UV → 球面方向映射,专供摆模型用:
+     vertex = (-cos(2πu)·sin(πv), cos(πv), sin(2πu)·sin(πv)), uv = (u, 1-v)
+   CanvasTexture 默认 flipY=true ⇒ canvas 的 (u, v) 恰好对应这里的 (u, v)。
+   注意它和 spherePoint() 不是同一个映射(相差 90° 经度):程序化噪声用
+   spherePoint 无所谓,但模型落点若用错,就会整体偏离纹理上的陆地。 */
+function surfaceDir(u, v) {
+  var th = u * Math.PI * 2, ph = v * Math.PI, sp = Math.sin(ph);
+  return [-Math.cos(th) * sp, Math.cos(ph), Math.sin(th) * sp];
+}
+
+/* ---------- procedural cartoon earth texture ---------- */
+var W = 480, H = 240;
+function elevation(u, v) {
+  var p = spherePoint(u, v);
+  var e1 = fbm3(p[0] * 1.6 + 0.37, p[1] * 1.6 + 0.11, p[2] * 1.6 + 0.53, 5);
+  var e2 = fbm3(p[0] * 4.3 + 1.2, p[1] * 4.3 + 2.4, p[2] * 4.3 + 3.7, 4);
+  var e3 = fbm3(p[0] * 9.0 + 0.6, p[1] * 9.0 + 3.1, p[2] * 9.0 + 5.2, 3);
+  return clamp01(0.46 + e1 * 0.34 + e2 * 0.12 + e3 * 0.08);
+}
+function createEarthTexture() {
+  var cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+  var ctx = cv.getContext('2d');
+  var img = ctx.createImageData(W, H), data = img.data;
+  var grass = [], forest = [];
+  for (var py = 0; py < H; py++) {
+    var v = py / H;
+    for (var px = 0; px < W; px++) {
+      var u = px / W, i = (py * W + px) * 4;
+      var sp = spherePoint(u, v), e = elevation(u, v);
+      var det = fbm3(sp[0] * 20 + 7.7, sp[1] * 20 + 3.3, sp[2] * 20 + 9.9, 3);
+      var sh = fbm3(sp[0] * 6 + 0.2, sp[1] * 6 + 4.4, sp[2] * 6 + 2.8, 3);
+      var r, g, b;
+      if (e < 0.46) {
+        var dp = 1 - e / 0.46;
+        var lo = fbm3(sp[0] * 30 + 1.9, sp[1] * 30 + 8.2, sp[2] * 30 + 12.4, 2);
+        var lint = lo > 0.7 ? 0.1 : lo > 0.5 ? 0.05 : 0;
+        var deep = clamp01(dp * 1.4);
+        r = lerp(0.28, 0.1, deep) * 255; g = lerp(0.6, 0.32, deep) * 255; b = lerp(0.88, 0.55, deep) * 255;
+        r += lint * 60; g += lint * 75; b += lint * 90;
+      } else {
+        var shade = 0.95 + sh * 0.12;
+        if (e < 0.49) { r = 0.93 * 255 * shade; g = 0.84 * 255 * shade; b = 0.55 * 255 * shade; }
+        else if (e < 0.72) {
+          if (det > 0.5 + (e - 0.46) * 0.5) {
+            r = 0.24 * shade * 255; g = 0.55 * shade * 255; b = 0.17 * shade * 255;
+            forest.push({ u: +u.toFixed(5), v: +v.toFixed(5) });
+          } else {
+            var mot = 0.92 + fbm3(sp[0] * 16 + 3.5, sp[1] * 16 + 9.1, sp[2] * 16 + 6.3, 3) * 0.16;
+            r = 0.46 * shade * mot * 255; g = 0.78 * shade * mot * 255; b = 0.24 * shade * mot * 255;
+            if (e < 0.66) grass.push({ u: +u.toFixed(5), v: +v.toFixed(5) });
+          }
+        } else if (e < 0.82) {
+          var tt = (e - 0.72) / 0.1;
+          r = lerp(0.7, 0.58, tt) * shade * 255; g = lerp(0.66, 0.54, tt) * shade * 255; b = lerp(0.5, 0.44, tt) * shade * 255;
+        } else {
+          var se = 0.8 + (fbm3(sp[0] * 12 + 5.1, sp[1] * 12 + 0.8, sp[2] * 12 + 3.3, 3) + 1) * 0.025;
+          var st = clamp01((e - se) / 0.05);
+          r = lerp(0.72, 1.0, st) * 255; g = lerp(0.68, 1.0, st) * 255; b = lerp(0.64, 1.0, st) * 255;
+        }
+      }
+      var polar = Math.min(v, 1 - v);
+      if (polar < 0.08) {
+        var pe = 0.07 + (fbm3(sp[0] * 8 + 2.2, sp[1] * 8 + 6.6, sp[2] * 8 + 1.1, 3) + 1) * 0.02;
+        var pt = clamp01((pe - polar) / 0.03);
+        r = lerp(r, 235, pt); g = lerp(g, 244, pt); b = lerp(b, 250, pt);
+      }
+      data[i] = r; data[i + 1] = g; data[i + 2] = b; data[i + 3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  var tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = THREE.RepeatWrapping;
+  return { texture: tex, grass: grass, forest: forest };
+}
+
+/* ---------- cloud texture ---------- */
+function createCloudTexture() {
+  var cw = 384, ch = 192, cv = document.createElement('canvas');
+  cv.width = cw; cv.height = ch;
+  var ctx = cv.getContext('2d'), img = ctx.createImageData(cw, ch), data = img.data;
+  for (var py = 0; py < ch; py++) { for (var px = 0; px < cw; px++) {
+    var u = px / cw, v = py / ch;
+    var sp = spherePoint(u, v);
+    var n = fbm3(sp[0] * 3 + 0.8, sp[1] * 3 + 1.7, sp[2] * 3 + 2.6, 5) * 0.7 + fbm3(sp[0] * 9 + 4.2, sp[1] * 9 + 2.3, sp[2] * 9 + 5.9, 3) * 0.3;
+    var cl = clamp01((n + 0.22) / 0.5);
+    var latBand = 1 - Math.abs(v - 0.5) * 1.5;
+    var a = cl * cl * (0.7 + latBand * 0.3);
+    var i = (py * cw + px) * 4;
+    data[i] = 255; data[i + 1] = 255; data[i + 2] = 255; data[i + 3] = Math.round(a * 255);
+  } }
+  ctx.putImageData(img, 0, 0);
+  var tex = new THREE.CanvasTexture(cv);
+  tex.wrapS = THREE.RepeatWrapping;
+  return tex;
+}
+
+/* ---------- sun / bird textures ---------- */
+function sunSpriteTex() {
+  var s = 256, cv = document.createElement('canvas'); cv.width = s; cv.height = s;
+  var ctx = cv.getContext('2d');
+  var g = ctx.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, s / 2);
+  g.addColorStop(0, 'rgba(255,252,235,1)'); g.addColorStop(0.15, 'rgba(255,246,205,0.9)');
+  g.addColorStop(0.35, 'rgba(255,236,170,0.4)'); g.addColorStop(1, 'rgba(255,224,150,0)');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, s, s);
+  var t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; return t;
+}
+function birdTex() {
+  var s = 64, cv = document.createElement('canvas'); cv.width = s; cv.height = s;
+  var ctx = cv.getContext('2d');
+  ctx.fillStyle = 'rgba(255,255,255,0.95)';
+  ctx.beginPath();
+  ctx.moveTo(s * 0.5, s * 0.44);
+  ctx.quadraticCurveTo(s * 0.3, s * 0.62, s * 0.08, s * 0.56);
+  ctx.quadraticCurveTo(s * 0.32, s * 0.68, s * 0.5, s * 0.48);
+  ctx.quadraticCurveTo(s * 0.68, s * 0.68, s * 0.92, s * 0.56);
+  ctx.quadraticCurveTo(s * 0.7, s * 0.62, s * 0.5, s * 0.44);
+  ctx.closePath(); ctx.fill();
+  var t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; return t;
+}
+
+/* ---------- scene ---------- */
+function initApp() {
+  var stage = document.getElementById('stage');
+  var renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.15;
+  renderer.setClearAlpha(0);
+  stage.appendChild(renderer.domElement);
+
+  var scene = new THREE.Scene();
+  var camera = new THREE.PerspectiveCamera(45, 1, 0.1, 100);
+  camera.position.set(0, 0.55, 3.2);
+  camera.lookAt(0, 0, 0);
+
+  scene.add(new THREE.AmbientLight(0xffffff, 0.75));
+  scene.add(new THREE.HemisphereLight(0xd8f0ff, 0x8fae66, 0.7));
+  var sunLight = new THREE.DirectionalLight(0xfff3d6, 2.2);
+  sunLight.position.set(3, 4, 6);
+  scene.add(sunLight);
+
+  // tilted axis + spin
+  var tiltPivot = new THREE.Group();
+  tiltPivot.rotation.z = -0.41; // 23.5°
+  scene.add(tiltPivot);
+
+  var earthRes = createEarthTexture();
+  var earthMat = new THREE.MeshStandardMaterial({ map: earthRes.texture, roughness: 0.92 });
+  var earth = new THREE.Mesh(new THREE.SphereGeometry(1, 64, 64), earthMat);
+  tiltPivot.add(earth);
+
+  var cloudMat = new THREE.MeshLambertMaterial({ map: createCloudTexture(), transparent: true, opacity: 0.5, depthWrite: false });
+  var clouds = new THREE.Mesh(new THREE.SphereGeometry(1.07, 44, 36), cloudMat);
+  tiltPivot.add(clouds);
+
+  var atmoMat = new THREE.ShaderMaterial({
+    vertexShader: 'varying vec3 vN; void main(){ vN = normalize(normalMatrix * normal); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
+    fragmentShader: 'varying vec3 vN; void main(){ float i = pow(0.58 - dot(vN, vec3(0.0,0.0,1.0)), 2.0); gl_FragColor = vec4(0.42,0.7,1.0,1.0) * i; }',
+    blending: THREE.AdditiveBlending, side: THREE.BackSide, transparent: true, depthWrite: false
+  });
+  tiltPivot.add(new THREE.Mesh(new THREE.SphereGeometry(1.24, 64, 64), atmoMat));
+
+  var sunSprite = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: sunSpriteTex(), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending
+  }));
+  sunSprite.position.set(3.2, 4.6, 6); sunSprite.scale.setScalar(3);
+  scene.add(sunSprite);
+
+  // birds
+  var BC = 40, birdP = new Float32Array(BC * 3), birdData = [];
+  for (var bi = 0; bi < BC; bi++) {
+    birdData.push({
+      r: 1.15 + rand() * 0.4, lat: (rand() - 0.5) * 1.0,
+      speed: (0.16 + rand() * 0.3) * (rand() > 0.5 ? 1 : -1),
+      ph: rand() * Math.PI * 2, bob: 0.02 + rand() * 0.03, bf: 0.9 + rand() * 1.5
+    });
+  }
+  var birdGeo = new THREE.BufferGeometry();
+  birdGeo.setAttribute('position', new THREE.Float32BufferAttribute(birdP, 3));
+  scene.add(new THREE.Points(birdGeo, new THREE.PointsMaterial({
+    size: 0.05, map: birdTex(), transparent: true, depthWrite: false, sizeAttenuation: true
+  })));
+
+  /* ---------- spacing helper: 全球均匀散布 ---------- */
+  function angularDist(a, b) {
+    var lat1 = (0.5 - a.v) * Math.PI, lat2 = (0.5 - b.v) * Math.PI;
+    var dLat = lat2 - lat1, dLon = (b.u - a.u) * Math.PI * 2;
+    var h = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    return 2 * Math.asin(Math.min(1, Math.sqrt(h)));
+  }
+  // 所有物种共用一张占位表,避免鹿 / 兔 / 树各挑各的、堆在同一片大陆上
+  var occupied = [];
+  function pickSpots(list, count, min) {
+    // 候选点来自纹理的逐像素扫描(北极→南极、u=0→1)。按原顺序贪心取点会把
+    // 模型全挤在少数几条经度带里;先洗牌 ⇒ 等价于全球陆地上的均匀采样。
+    var pool = list.slice();
+    for (var i = pool.length - 1; i > 0; i--) {
+      var j = Math.floor(rand() * (i + 1));
+      var t = pool[i]; pool[i] = pool[j]; pool[j] = t;
+    }
+    var out = [];
+    function attempt(m) {
+      for (var i = 0; i < pool.length && out.length < count; i++) {
+        var p = pool[i], ok = true, j;
+        for (j = 0; j < out.length; j++) if (angularDist(p, out[j]) < m) { ok = false; break; }
+        for (j = 0; ok && j < occupied.length; j++) if (angularDist(p, occupied[j]) < m) { ok = false; break; }
+        if (ok) out.push(p);
+      }
+    }
+    attempt(min); if (out.length < count) attempt(min * 0.6); if (out.length < count) attempt(min * 0.35);
+    occupied.push.apply(occupied, out);
+    return out;
+  }
+
+  /* ---------- model catalog (CC0 / CC-BY — see header comment) ----------
+     deer / rabbit / tree : Quaternius Ultimate Animal & Vegetation Pack (CC0 1.0)
+     giraffe : elkiotbear via Poly Pizza (CC-BY 3.0)
+     panda   : Poly by Google via Poly Pizza (CC-BY 3.0)
+
+     ⚠️ 尺寸策略:动物和树一律不按地球真实比例。真实比例下一只鹿只有地球
+     半径的千万分之一,屏幕上连 1px 都不到。这里给每个模型固定的展示高度
+     height(单位 = 地球半径 R=1),约合屏幕 40~60px,清晰可辨;再用
+     FOOTPRINT 限制水平跨度,防止扁平模型被拉成裹住地球的一圈带子。
+  --------------------------------------------------------------- */
+  var MODELS = [
+    { name: 'deer',    local: 'assets/glb/deer.glb', url: 'https://static.poly.pizza/4b6c2a41-43c7-404c-ae37-e8c4645ff93b.glb', count: 6,  height: 0.115, kind: 'grass', walk: true },
+    { name: 'rabbit',  local: 'assets/glb/rabbit.glb', url: 'https://static.poly.pizza/95941440-97ad-4457-ab4a-d17f21d7c03c.glb', count: 6,  height: 0.095, kind: 'grass', walk: true },
+    { name: 'giraffe', local: 'assets/glb/giraffe.glb', url: 'https://static.poly.pizza/dad3098c-aa1d-4d1f-9e6e-3321bace45fb.glb', count: 4,  height: 0.145, kind: 'grass', walk: true },
+    { name: 'panda',   local: 'assets/glb/panda.glb', url: 'https://static.poly.pizza/283a59b6-93f7-446d-99f3-2fd13a70d77b.glb', count: 2,  height: 0.110, kind: 'forest', walk: true },
+    // GLB 顶层是 5 棵 sibling 树(NormalTree_1..5),整簇缩放会变成一圈
+    // 裹住地球的带子 ⇒ 拆成 5 个独立 part,每棵单独测量 / 缩放 / 摆放
+    { name: 'tree',    local: 'assets/glb/tree.glb', url: 'https://static.poly.pizza/53a83125-e16a-4024-b8f6-1e72679c7ddf.glb', count: 10, height: 0.150, kind: 'both', split: true }
+  ];
+  var R = 1.0, SURF = R + 0.012;
+  var LAND_MIN   = 0.47;   // elevation 低于此值视为海洋,动物会在岸边转向
+  var WALK_SPEED = 0.030;  // 球面角速度(弧度/秒),约合每秒走 0.03 个地球半径
+  var FOOTPRINT = 0.24;   // 单个模型水平跨度上限(世界单位)
+  var MIN_GAP   = 0.30;   // 模型之间最小角距(弧度,约 17°)
+
+  /* ---------- GLTF load: 保留骨骼与动画 ----------
+     实测(2026-11-07):这些 GLB 的骨骼节点确实 bake 了 100×/140× 缩放,
+     但只要「测量前先 gltf.scene.updateMatrixWorld(true)」,Box3 就能得到
+     干净的真实尺寸(deer 4.3159,而不是旧代码测到的虚高 439.4),缩放严格
+     线性,连播 216 帧 Walk 动画尺寸也完全不变。
+     ⇒ 上一版把 SkinnedMesh 逐顶点烘焙成静态 Mesh 属过度修复,现已撤销:
+       保留骨骼 + AnimationMixer,动物才有真正的腿部走动动画。
+     仍保留两条防线:
+       ① 所有归一化变换只作用在干净的 outer / inner 容器上,绝不改写
+          GLB 节点自身的 position / scale / rotation;
+       ② 摆放前复测一次包围盒做闭环校准。
+  --------------------------------------------------------------- */
+  function hasMeshDeep(node) {
+    var found = false;
+    node.traverse(function (o) { if (o.isMesh) found = true; });
+    return found;
+  }
+
+  function makePart(node) {
+    var outer = new THREE.Group();   // placeOnSphere 只操作 outer
+    var inner = new THREE.Group();   // 底面 / 居中补偿
+    outer.add(inner);
+    inner.attach(node);              // attach 保留世界变换(含祖先 bake 缩放)
+    outer.updateMatrixWorld(true);
+    var box = new THREE.Box3().setFromObject(outer);
+    var size = box.getSize(new THREE.Vector3());
+    var ctr = box.getCenter(new THREE.Vector3());
+    // 底面归到 y=0、X/Z 居中;补偿放在 inner,outer 的 position 留给球面摆放
+    inner.position.set(-ctr.x, -box.min.y, -ctr.z);
+    outer.updateMatrixWorld(true);
+    outer.userData.size = { x: size.x, y: size.y, z: size.z };
+    outer.traverse(function (o) {
+      if (o.isMesh) {
+        o.material = o.material.clone();
+        o.material.roughness = 0.92;
+        o.material.metalness = 0.0;
+        if (o.material.map) o.material.map.colorSpace = THREE.SRGBColorSpace;
+      }
+    });
+    return outer;
+  }
+
+  function fetchGLTF(src) {
+    return new Promise(function (resolve, reject) {
+      new GLTFLoader().load(src, resolve, undefined, reject);
+    });
+  }
+
+  function pickWalkClip(clips) {
+    if (!clips || !clips.length) return null;
+    // deer: "Walk"; rabbit: "CharacterArmature|...|Walk";
+    // 排除 Walk_Holding / Idle,优先精确以 Walk 结尾的 clip
+    var exact = null, loose = null;
+    for (var i = 0; i < clips.length; i++) {
+      var n = clips[i].name || '';
+      if (/(^|\|)Walk$/i.test(n)) { if (!exact) exact = clips[i]; }
+      else if (/walk/i.test(n) && !/holding/i.test(n)) { if (!loose) loose = clips[i]; }
+    }
+    return exact || loose || null;
+  }
+
+  function loadGLB(spec) {
+    // 本地副本优先。部署时若没带 docs/assets/glb/,自动回退到原 CDN 地址。
+    return fetchGLTF(spec.local).catch(function () {
+      console.warn('[globe-present] ' + spec.name + ': 本地 GLB 不可用,回退 CDN');
+      return fetchGLTF(spec.url);
+    }).then(function (gltf) {
+      // ⚠️ 测量前必须刷新整棵世界矩阵。否则 SkinnedMesh 的 bindMatrixInverse
+      // 还是旧值,Box3 会量到虚高 100× 的尺寸(旧版"巨鹿"的真正原因)。
+      gltf.scene.updateMatrixWorld(true);
+      var nodes = [];
+      if (spec.split) {
+        var direct = gltf.scene.children.filter(hasMeshDeep);
+        if (direct.length >= 2) nodes = direct.slice();
+        else if (gltf.scene.children.length === 1 && !gltf.scene.children[0].isMesh) {
+          var kids = gltf.scene.children[0].children.filter(hasMeshDeep);
+          if (kids.length >= 2) nodes = kids.slice();
+        }
+      }
+      if (!nodes.length) nodes = [gltf.scene];
+      var parts = nodes.map(makePart);
+      var clip = pickWalkClip(gltf.animations);
+      console.log('[globe-present] ' + spec.name + ': ' + parts.length +
+                  ' part(s), walk=' + (clip ? clip.name : 'none') +
+                  ' / ' + (gltf.animations ? gltf.animations.length : 0) + ' clips, size=' +
+                  parts.map(function (p) {
+                    var z = p.userData.size;
+                    return z.x.toFixed(2) + 'x' + z.y.toFixed(2) + 'x' + z.z.toFixed(2);
+                  }).join(' | '));
+      return { parts: parts, clip: clip };
+    });
+  }
+
+  /* ---------- 摆放: 统一展示尺寸 + 贴球面 + 闭环校准 ---------- */
+  function placeOnSphere(root, u, v, targetHeight) {
+    var size = root.userData.size;
+    var hDen = size.y > 1e-9 ? size.y : Math.max(size.x, size.z, 1e-9);
+    var wDen = Math.max(size.x, size.z, 1e-9);
+    var s = Math.min(targetHeight / hDen, FOOTPRINT / wDen);
+    var desiredH = s * hDen;
+    root.scale.setScalar(s);
+    root.position.set(0, 0, 0);
+    root.quaternion.identity();
+    root.updateMatrixWorld(true);
+    // 此时无旋转 ⇒ AABB 高度就是模型高度;偏差 >1% 再修正一次,兜住皮肤网格等
+    var box = new THREE.Box3().setFromObject(root);
+    var h = box.getSize(new THREE.Vector3()).y;
+    if (h > 1e-9 && isFinite(h) && Math.abs(h - desiredH) / desiredH > 0.01) {
+      s *= desiredH / h;
+      root.scale.setScalar(s);
+    }
+
+    var d = surfaceDir(u, v);
+    var n = new THREE.Vector3(d[0], d[1], d[2]).normalize();
+    root.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), n);
+    root.rotateY(rand() * Math.PI * 2);       // 绕地表法线随机朝向
+    root.position.copy(n.multiplyScalar(SURF));
+    return { scale: s, height: desiredH };
+  }
+
+  /* ---------- async load + scatter all models ----------
+     ⚠️ 不能等所有 GLB 到齐再统一摆放:tree 的 GLB 有 3.4MB(内嵌纹理),
+     慢的时候要几十秒,旧写法会让地球先光秃秃地转很久,看着像"没有动物"。
+     改为「落点先按固定顺序预分配 → 每个模型加载完立刻单独摆放」:
+     先到的小模型几秒内就出现,分布依旧可复现(不依赖网络到达顺序)。
+  --------------------------------------------------------------- */
+  var outGroup = new THREE.Group();
+  tiltPivot.add(outGroup);
+  var debugMode = location.search.indexOf('debug=1') >= 0;
+  var debugRows = [];
+  var walkers = [];        // 沿陆地游走的实例(树不在内)
+  var animMixers = [];     // 每个带骨骼实例独立的 AnimationMixer
+  // 实时挂在 window 上,任意时刻都能读到「目前已摆放」的实例,便于校对
+  if (debugMode) {
+    window.__globeDebug = { models: 0, done: 0, instances: debugRows };
+    // 校对用:每 0.5s 记一次第一只动物的球面坐标与动画时钟,用来证明
+    // 位置在变(走来走去)、mixer.time 在推进(骨骼动画在播)
+    window.__globeDebug.walkTrace = [];
+    var traceTimer = setInterval(function () {
+      var w0 = walkers[0], row = { t: Math.round(performance.now()) };
+      if (w0) {
+        row.u = +w0.u.toFixed(4); row.v = +w0.v.toFixed(4);
+        row.p = [w0.inst.position.x, w0.inst.position.y, w0.inst.position.z]
+          .map(function (x) { return +x.toFixed(4); });
+      }
+      row.mixer = animMixers.length ? +animMixers[0].time.toFixed(3) : null;
+      window.__globeDebug.walkTrace.push(row);
+      if (window.__globeDebug.walkTrace.length >= 40) clearInterval(traceTimer);
+    }, 500);
+  }
+
+  // 落点在开始加载前一次性挑好(共享 occupied 占位表),与 GLB 到达顺序无关
+  var plans = MODELS.map(function (spec) {
+    var src = spec.kind === 'forest' ? earthRes.forest :
+              spec.kind === 'both' ? earthRes.grass.concat(earthRes.forest) : earthRes.grass;
+    return { spec: spec, spots: pickSpots(src, spec.count, MIN_GAP) };
+  });
+
+  var okCount = 0, doneCount = 0;
+  var statusEl = document.getElementById('status');
+  function setStatus(text) { if (statusEl) statusEl.textContent = text; }
+  function hideStatus(delay) {
+    setTimeout(function () { if (statusEl) statusEl.classList.add('hide'); }, delay || 0);
+  }
+  // 兜底:若某个 GLB 特别慢/挂起,不让状态条永远挂着
+  var slowTimer = setTimeout(function () {
+    if (doneCount < plans.length) {
+      setStatus('部分模型较大仍在加载,其余已显示');
+      hideStatus(2500);
+    }
+  }, 30000);
+
+  /* ---------- 沿球面陆地游走 ----------
+     在 (u,v) 参数空间步进,用 elevation() 判定下一格是不是陆地;撞到海岸
+     就换方向,始终待在陆地上。高纬度经度步长要按 cos(lat) 放大,否则
+     极地附近会被"拉长"。朝向由切向 + 法线构造正交基,随前进方向转身。
+  --------------------------------------------------------------- */
+  var _p0 = new THREE.Vector3(), _p1 = new THREE.Vector3(),
+      _fwd = new THREE.Vector3(), _right = new THREE.Vector3(),
+      _basis = new THREE.Matrix4();
+
+  function stepWalkers(dt, now) {
+    for (var i = 0; i < walkers.length; i++) {
+      var w = walkers[i];
+      w.heading += (rand() - 0.5) * dt * 0.8;      // 缓慢随机游荡
+      var lat = (0.5 - w.v) * Math.PI;
+      var cosLat = Math.max(0.3, Math.cos(lat));
+      var step = w.speed * dt;
+
+      function tryAt(h) {
+        var u = (w.u + Math.cos(h) * step / cosLat + 1) % 1;
+        var v = w.v - Math.sin(h) * step;
+        return v > 0.12 && v < 0.88 && elevation(u, v) >= LAND_MIN
+          ? { u: u, v: v } : null;
+      }
+      var next = tryAt(w.heading);
+      if (!next) {
+        // 撞到海岸/极区:原地找一个朝向陆地的新方向
+        for (var a = 0; a < 8 && !next; a++) {
+          w.heading += 0.6 + rand() * 1.2;
+          next = tryAt(w.heading);
+        }
+        if (!next) { w.heading += Math.PI; continue; }  // 被海围住就原地转身
+      }
+      w.u = next.u; w.v = next.v;
+
+      var d0 = surfaceDir(w.u, w.v);
+      _p0.set(d0[0], d0[1], d0[2]).normalize();
+      var eps = 0.003;
+      var u2 = (w.u + Math.cos(w.heading) * eps / cosLat + 1) % 1;
+      var v2 = w.v - Math.sin(w.heading) * eps;
+      var d1 = surfaceDir(u2, v2);
+      _p1.set(d1[0], d1[1], d1[2]);
+      _fwd.subVectors(_p1, _p0);
+      _fwd.addScaledVector(_p0, -_fwd.dot(_p0));   // 投影到切平面
+      if (_fwd.lengthSq() < 1e-10) continue;
+      _fwd.normalize();
+      if (w.faceYaw) _fwd.applyAxisAngle(_p0, w.faceYaw);
+      _right.crossVectors(_p0, _fwd).normalize();
+      _basis.makeBasis(_right, _p0, _fwd);
+      w.inst.quaternion.setFromRotationMatrix(_basis);
+
+      // 步态起伏:没有骨骼的模型也有一点上下颠簸,配合腿部动画更自然
+      var bob = Math.sin(now * 0.007 + w.phase) * 0.0035;
+      w.inst.position.copy(_p0.multiplyScalar(SURF + bob));
+    }
+  }
+
+  function scatter(res, plan) {
+    var spec = plan.spec, spots = plan.spots, parts = res.parts, clip = res.clip;
+    for (var k = 0; k < spots.length && k < spec.count; k++) {
+      var partSrc = parts[k % parts.length];
+      // 必须走 SkeletonUtils.clone,普通 clone(true) 会让所有实例共用一套
+      // skeleton、动画串台(而且 clone 会丢 userData,下面补回)
+      var inst = cloneSkeleton(partSrc);
+      if (!inst.userData.size) inst.userData.size = partSrc.userData.size;
+      var info = placeOnSphere(inst, spots[k].u, spots[k].v, spec.height);
+      outGroup.add(inst);
+
+      // 腿部动画:每个实例独立 mixer + 随机相位/速率,避免整齐划一
+      if (clip) {
+        var mixer = new THREE.AnimationMixer(inst);
+        var act = mixer.clipAction(clip);
+        act.setLoop(THREE.LoopRepeat, Infinity);
+        act.timeScale = 0.8 + rand() * 0.5;
+        act.time = rand() * clip.duration;
+        act.play();
+        animMixers.push(mixer);
+      }
+
+      // 走动状态(树不动)
+      if (spec.walk) {
+        walkers.push({
+          inst: inst,
+          u: spots[k].u, v: spots[k].v,
+          heading: rand() * Math.PI * 2,
+          speed: WALK_SPEED * (0.7 + rand() * 0.6),
+          phase: rand() * Math.PI * 2,
+          faceYaw: (rand() - 0.5) * 0.6
+        });
+      }
+
+      if (debugMode) debugRows.push({
+        name: spec.name, part: k % parts.length,
+        u: +spots[k].u.toFixed(4), v: +spots[k].v.toFixed(4),
+        elev: +elevation(spots[k].u, spots[k].v).toFixed(3),
+        measured: inst.userData.size, scale: +info.scale.toFixed(6),
+        height: +info.height.toFixed(4),
+        radius: +inst.position.length().toFixed(4)
+      });
+    }
+    console.log('[globe-present] ' + spec.name + ': placed ' +
+                Math.min(spots.length, spec.count) + '/' + spec.count + ' on land' +
+                (clip ? ' (walk clip: ' + clip.name + ')' : ' (static)'));
+  }
+
+  plans.forEach(function (plan) {
+    loadGLB(plan.spec).then(function (res) {
+      okCount++;
+      scatter(res, plan);
+    }).catch(function (err) {
+      // 单个模型失败只跳过它自己,不再连累其他物种
+      console.warn('[globe-present] ' + plan.spec.name + ' 加载失败,已跳过:', err);
+    }).then(function () {          // finally:成功 / 失败都推进进度
+      doneCount++;
+      if (debugMode) {
+        window.__globeDebug.models = okCount;
+        window.__globeDebug.done = doneCount;
+        window.__globeDebug.walkers = walkers.length;
+        window.__globeDebug.mixers = animMixers.length;
+      }
+      if (doneCount < plans.length) {
+        setStatus('正在放置动物与树木… ' + okCount + '/' + plans.length);
+      } else {
+        clearTimeout(slowTimer);
+        if (okCount === 0) {
+          setStatus('模型加载失败,请检查网络');
+          document.getElementById('errMsg').textContent =
+            '动物 / 树木模型全部加载失败,请检查网络后刷新页面重试(poly.pizza CDN 不可达?)。';
+          document.getElementById('errBox').style.display = 'flex';
+        } else {
+          setStatus('已放置 ' + okCount + '/' + plans.length + ' 种模型');
+          hideStatus(1500);
+        }
+      }
+    });
+  });
+
+  /* ---------- animation loop ---------- */
+  var prevT = performance.now();
+  function frame(now) {
+    var dt = Math.min(0.05, (now - prevT) / 1000); prevT = now;
+
+    // earth spin (8 deg/s) + clouds drift
+    earth.rotation.y += dt * 0.14;
+    clouds.rotation.y += dt * 0.03;
+    outGroup.rotation.y = earth.rotation.y;   // 模型跟着地球自转,始终踩在陆地上
+
+    // 骨骼腿部动画 + 沿陆地游走
+    for (var mi = 0; mi < animMixers.length; mi++) animMixers[mi].update(dt);
+    stepWalkers(dt, now);
+
+    // birds orbit at different lat/lon
+    var arr = birdGeo.attributes.position.array;
+    for (var bi = 0; bi < BC; bi++) {
+      var b = birdData[bi];
+      b.ph += dt * b.speed / b.r;
+      var la = b.lat;
+      arr[bi*3]   = Math.cos(b.ph) * Math.cos(la) * b.r;
+      arr[bi*3+1] = Math.sin(la) * b.r + (Math.sin(now*0.002 + bi) * b.bob);
+      arr[bi*3+2] = Math.sin(b.ph) * Math.cos(la) * b.r;
+    }
+    birdGeo.attributes.position.needsUpdate = true;
+
+    renderer.render(scene, camera);
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+
+  /* ---------- resize ---------- */
+  function onResize() {
+    var w = window.innerWidth, h = window.innerHeight;
+    renderer.setSize(w, h);
+    camera.aspect = w / h;
+    // 窄视口(竖屏)水平视野不足,地球边缘连同站在边缘的模型会被裁掉。
+    // 按 aspect 把相机拉远,保证半径约 1.22 的范围完整入画。
+    var halfV = Math.tan(camera.fov * Math.PI / 360);
+    var dist = Math.max(3.2, 1.22 / (halfV * Math.min(1, camera.aspect)));
+    camera.position.set(0, 0.55 * (dist / 3.2), dist);
+    camera.lookAt(0, 0, 0);
+    camera.updateProjectionMatrix();
+  }
+  window.addEventListener('resize', onResize);
+  onResize();
+
+  /* ---------- hide loading overlay once first frame is drawn ---------- */
+  setTimeout(function () {
+    var l = document.getElementById('loading');
+    if (l) l.classList.add('hide');
+  }, 300);
+}
+
+/* ---------- boot ---------- */
+try { initApp(); }
+catch (e) {
+  console.error('[globe-present] init failed:', e);
+  var box = document.getElementById('errBox');
+  var msg = document.getElementById('errMsg');
+  msg.textContent = '3D 引擎初始化失败：' + (e && e.message ? e.message : e);
+  box.style.display = 'flex';
+  var l2 = document.getElementById('loading');
+  if (l2) l2.classList.add('hide');
+}
+</script>
+</body>
+</html>
