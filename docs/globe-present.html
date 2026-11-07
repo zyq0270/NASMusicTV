@@ -48,6 +48,8 @@
   (见 MODELS.height,单位 = 地球半径 R=1),分散在全球陆地上。
   同源的 12 种 Quaternius 动物统一 height=0.115,且一律 setScalar 均匀
   缩放 ⇒ 彼此大小一致,模型自身长宽高比例也不会被拉伸。
+  树共 150 棵,按「森林中心 + 簇内密集撒点」分布,簇内不设最小间距,
+  允许挨在一起甚至局部重叠,以形成连片森林而不是均匀平铺。
 
   模型本地副本: docs/assets/glb/*.glb (16 个 GLB,精简后合计约 5.58MB,
     来源与许可同上;原始 11.2MB 的下载件留在 logs_temp/glb_probe/quaternius_raw/)。
@@ -87,6 +89,8 @@
     v3 (2026-11-07) 加入 Quaternius Animated Animal Pack 全部 12 种动物
        (deer 已有,新增 11 种),每种 1 个实例;原有 4 种动物各减到 2 个,
        保证所有物种都出现;新动物统一 height=0.115 并复用骨骼 Walk 动画
+    v4 (2026-11-07) 树 30→150(5 倍);新增 pickForestSpots() 森林簇分配:
+       14 个中心 + 每簇密集撒点、簇内无最小间距,体现堆积成林的效果
 -->
 <div id="stage"></div>
 <div class="title"><h1>生态地球</h1><p>CARTOON GLOBE · 自动旋转演示</p></div>
@@ -369,6 +373,72 @@ function initApp() {
     return out;
   }
 
+  /* 150 棵树若继续用 pickSpots() 的「全局最小间距」,只会均匀平铺,
+     看不出森林。这里改成两级:
+       ① 从深绿 forest 像素里挑 FOREST_CENTERS 个中心,彼此拉开、
+          并避开已分配的动物落点;
+       ② 每个中心周围按 sqrt(rand) 圆盘撒树,簇内不设最小间距。
+     中心挑在 forest 上、簇内允许落到草地,但一律 elevation >= LAND_MIN。
+     ⚠️ rad 是球面角距,换算到 (u,v) 要除以 2π·cosLat / π;直接把 rad
+        当参数空间偏移会把簇放大 3~6 倍,树就摊平了(2026-11-07 实测踩过)。 */
+  function pickForestSpots(count) {
+    var pool = earthRes.forest.slice();
+    if (pool.length < 2000) pool = pool.concat(earthRes.grass);
+    for (var i = pool.length - 1; i > 0; i--) {
+      var j = Math.floor(rand() * (i + 1));
+      var t = pool[i]; pool[i] = pool[j]; pool[j] = t;
+    }
+
+    var centers = [], i, k;
+    for (i = 0; i < pool.length && centers.length < FOREST_CENTERS; i++) {
+      var p = pool[i];
+      if (p.v < 0.15 || p.v > 0.85) continue;
+      var ok = true;
+      for (k = 0; k < centers.length; k++)
+        if (angularDist(p, centers[k]) < CENTER_GAP) { ok = false; break; }
+      for (k = 0; ok && k < occupied.length; k++)
+        if (angularDist(p, occupied[k]) < CENTER_GAP * 0.8) { ok = false; break; }
+      if (ok) centers.push({ u: p.u, v: p.v });
+    }
+    if (!centers.length) centers.push({ u: 0.5, v: 0.5 });  // 极端兜底
+
+    var per = Math.ceil(count / centers.length) + 2;  // 多撒几棵,供海岸裁剪
+    var out = [];
+    for (var ci = 0; ci < centers.length && out.length < count; ci++) {
+      var c = centers[ci];
+      var cosLat = Math.max(0.3, Math.cos((0.5 - c.v) * Math.PI));
+      var made = 0, tries = 0;
+      while (made < per && out.length < count && tries < per * 40) {
+        tries++;
+        var ang = rand() * Math.PI * 2;
+        // rad 是球面角距。换算到参数空间:du = rad/(2π·cosLat),dv = rad/π
+        var rad = Math.sqrt(rand()) * CLUSTER_R;
+        var u = (c.u + rad * Math.cos(ang) / (2 * Math.PI * cosLat) + 1) % 1;
+        var v = c.v - rad * Math.sin(ang) / Math.PI;
+        if (v <= 0.12 || v >= 0.88) continue;
+        if (elevation(u, v) < LAND_MIN) continue;
+        out.push({ u: +u.toFixed(5), v: +v.toFixed(5) });
+        made++;
+      }
+    }
+    // 万一某几个中心贴着海岸没撒够,继续在已有中心周围补点(保持簇状),
+    // 绝不全局随机撒 —— 那会把森林重新摊平。
+    var guard = 0;
+    while (out.length < count && guard < count * 30) {
+      guard++;
+      var c2 = centers[Math.floor(rand() * centers.length)];
+      var cl2 = Math.max(0.3, Math.cos((0.5 - c2.v) * Math.PI));
+      var a2 = rand() * Math.PI * 2, r2 = Math.sqrt(rand()) * CLUSTER_R;
+      var u2 = (c2.u + r2 * Math.cos(a2) / (2 * Math.PI * cl2) + 1) % 1;
+      var v2 = c2.v - r2 * Math.sin(a2) / Math.PI;
+      if (v2 <= 0.12 || v2 >= 0.88) continue;
+      if (elevation(u2, v2) < LAND_MIN) continue;
+      out.push({ u: +u2.toFixed(5), v: +v2.toFixed(5) });
+    }
+    occupied.push.apply(occupied, out);
+    return out;
+  }
+
   /* ---------- model catalog (CC0 / CC-BY — see header comment) ----------
      deer / rabbit / tree : Quaternius Ultimate Animal & Vegetation Pack (CC0 1.0)
      giraffe : elkiotbear via Poly Pizza (CC-BY 3.0)
@@ -403,8 +473,8 @@ function initApp() {
     { name: 'husky', local: 'assets/glb/husky.glb', url: 'https://static.poly.pizza/611d25c7-430f-4bb5-ab2c-d8f5f3cb9712.glb', count: 1, height: 0.115, kind: 'both', walk: true, gap: 0.20 },
     { name: 'wolf', local: 'assets/glb/wolf.glb', url: 'https://static.poly.pizza/f1d12388-e39b-4157-b32a-646a1d089fc4.glb', count: 1, height: 0.115, kind: 'both', walk: true, gap: 0.20 },
 
-    // 树用更小的 gap,让它们能成片成林,而不是跟动物一样稀疏地平均分布
-    { name: 'tree',    local: 'assets/glb/tree.glb', url: 'https://static.poly.pizza/53a83125-e16a-4024-b8f6-1e72679c7ddf.glb', count: 30, height: 0.150, kind: 'both', split: true, gap: 0.18 }
+    // 150 棵(原 30 的 5 倍)走 pickForestSpots():簇状聚集,不按全局最小间距平铺
+    { name: 'tree',    local: 'assets/glb/tree.glb', url: 'https://static.poly.pizza/53a83125-e16a-4024-b8f6-1e72679c7ddf.glb', count: 150, height: 0.150, kind: 'both', split: true, forest: true }
   ];
   var R = 1.0, SURF = R;  // SURF 只是基准;实际半径由 groundRadius() 逐个算
   var LAND_MIN   = 0.47;   // elevation 低于此值视为海洋,动物会在岸边转向
@@ -413,7 +483,12 @@ function initApp() {
   var SPIN_RATE  = 0.055;  // 地球自转角速度(原 0.14)
   var CLOUD_RATE = 0.012;  // 云层漂移(原 0.03)
   var FOOTPRINT = 0.24;   // 单个模型水平跨度上限(世界单位)
-  var MIN_GAP   = 0.30;   // 模型之间最小角距(弧度,约 17°)
+  var MIN_GAP   = 0.30;   // 动物之间最小角距(弧度,约 17°)
+  // 森林簇:先挑中心(彼此拉开、避开动物),再在中心周围密集撒树。
+  // 簇内不做最小间距约束 ⇒ 树会挨在一起甚至局部重叠,形成森林冠层。
+  var FOREST_CENTERS = 14;    // 森林中心数量
+  var CLUSTER_R      = 0.12;  // 单个森林簇半径(球面角距,弧度)
+  var CENTER_GAP     = 0.30;  // 森林中心之间的最小角距
 
   /* 平底模型站在球面上:中心相切、四角却离地 a²/2R。按缩放后半宽 a
      把模型下沉 sag*0.6 + 0.0015,既吃掉边缘空隙又不至于陷进地表。 */
@@ -696,7 +771,9 @@ function initApp() {
   var plans = MODELS.map(function (spec) {
     var src = spec.kind === 'forest' ? earthRes.forest :
               spec.kind === 'both' ? earthRes.grass.concat(earthRes.forest) : earthRes.grass;
-    return { spec: spec, spots: pickSpots(src, spec.count, spec.gap || MIN_GAP) };
+    var spots = spec.forest ? pickForestSpots(spec.count)
+                           : pickSpots(src, spec.count, spec.gap || MIN_GAP);
+    return { spec: spec, spots: spots };
   });
 
   var okCount = 0, doneCount = 0;
