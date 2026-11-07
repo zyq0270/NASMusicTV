@@ -628,6 +628,8 @@ private fun VisualizerOverlay(
             song = currentSong,
             // T6 双缓冲：传 provider 而非快照引用——绘制循环每帧求值，拿到当前 front
             frame = { vm.frame },
+            // 逐帧的播放位置（`vm.progress` 是 1 Hz 的 StateFlow ⇒ 动画会每秒跳一次）
+            positionMs = { vm.positionMs },
             cover = cover,
             palette = palette,
             lyrics = lyrics?.lines,

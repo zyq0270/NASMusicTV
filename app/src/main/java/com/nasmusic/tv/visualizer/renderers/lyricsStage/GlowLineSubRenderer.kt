@@ -664,8 +664,12 @@ class GlowLineSubRenderer : LyricsSubRenderer {
     override fun onExit() {
         curLayout = null
         prevLayout = null
-        // 辉光位图是**共享缓存** ⇒ 退出效果时必须显式回收（否则位图泄漏到进程结束）
-        GlowWordHalo.clear()
+        // ⛔ **这里不得清辉光缓存**（`GlowWordHalo` 的 `clear()`）：
+        //    子模式切换会走这个 `onExit` ⇒ 清掉缓存 ⇒ 切换后的首行要把每个字形
+        //    重新模糊一遍（10–15 字形 × 2 次真实高斯模糊，**主线程**）⇒ 硬卡顿。
+        //    缓存键是 (字形, 字号, 颜色, 内圈半径, 外圈半径) ⇒ 别的子模式的条目只是闲置，
+        //    缓存本身也有 `GlowWordHalo.MAX_ENTRIES` 上限。
+        // ⇒ 回收挪到了**主题**退出时（`LyricsStageRenderer.onExit`）。
     }
 
     /**
@@ -1426,6 +1430,38 @@ class GlowLineSubRenderer : LyricsSubRenderer {
     }
 
     /**
+     * 把缩放倍率**量化**到 [SCALE_QUANT_STEP] 分之一。
+     *
+     * ## 为什么（这是电视卡顿的第二个主因）
+     * `Canvas.scale(...)` 改的是**设备空间**的字号 ⇒ Android 的字形缓存（glyph cache）
+     * 按「设备空间的字号 + 变换」分 strike ⇒ **缩放一变缓存就 miss**
+     * ⇒ 整行文字（10–15 个字形）在 RenderThread 上被**重新整形 + 重新光栅化**。
+     *
+     * 呼吸动画的缩放**每帧都变**（关键帧插值出来的连续值）⇒ 每帧一次全行重新光栅化
+     * ⇒ 弱电视上这就是「明明只是呼吸，却一直卡」的原因。
+     *
+     * ## 量化步长怎么定的（实测值）
+     * 呼吸缩放的关键帧是 `[1.0, 1.01, 1.0, 0.995, 1.0]` ⇒ 幅度区间 **[0.995, 1.01]**
+     * （总幅度 1.5%，相对 1.0 最多 +1.0% / −0.5%）。
+     *
+     * 步长取 **1/1024**（0.0977%）：
+     *  - 量化误差 ≤ 半个步长 = 1/2048 = **0.049%**；
+     *  - 一行的内容区最长 `maxLineWidthPx = 72 * 16 = 1152 px` ⇒ 绕中心缩放时
+     *    单次跳变 ≤ 1152/2 × 1/1024 ≈ **0.56 px** ⇒ **亚像素 ⇒ 不可见**；
+     *  - 重新光栅化的频率从「每帧」降到「每呼吸周期约 30 次」（normal 档 7 s 一轮）
+     *    ⇒ 平均 **约 4.3 次/秒**（实测：原来 48 次/秒）⇒ 比原来少 **11 倍**。
+     *
+     * ⚠️ **不能取 1/64**：1/64 = 1.5625% 已经**大于整个幅度区间（1.5%）**
+     * ⇒ 整个呼吸只落到 **1 个**量化档（等于把动画删了）⇒ 跳变还会一次性达到 9 px。
+     * 1/256（0.39%）也偏大：只落到 3.8 个档 ⇒ 跳变 1152/2 × 1/256 ≈ 2.25 px
+     * ⇒ 电视上看得见微跳。⇒ 1/1024 是**最粗的亚像素步长**（0.56 px）。
+     *
+     * ⛔ **只量化光栅化粒度**：版面 / 时序 / 颜色一律不动。
+     */
+    private fun quantizeScale(scale: Float): Float =
+        round(scale * SCALE_QUANT_STEP) / SCALE_QUANT_STEP
+
+    /**
      * 画一行。
      *
      * Folia 的层序（DOM 顺序 + z-index）：
@@ -1444,7 +1480,10 @@ class GlowLineSubRenderer : LyricsSubRenderer {
         canvas.save()
         // 外层 70vh 容器：呼吸浮动（位移 + 绕容器中心的缩放）
         canvas.translate(0f, breathY)
-        canvas.scale(breathScale, breathScale, layout.boxCx, layout.boxCy)
+        // ⚠️ 缩放**必须量化**（见 [quantizeScale]）：呼吸缩放每帧都变 ⇒ 设备空间的字号
+        //    每帧都变 ⇒ 字形缓存每帧 miss ⇒ 整行文字每帧重新光栅化。
+        val qBreathScale = quantizeScale(breathScale)
+        canvas.scale(qBreathScale, qBreathScale, layout.boxCx, layout.boxCy)
         // 行容器：入场 / 离场的缩放（绕内容区中心）
         canvas.scale(lineScale, lineScale, layout.contentCx, layout.contentCy)
 
@@ -1516,7 +1555,10 @@ class GlowLineSubRenderer : LyricsSubRenderer {
             val st = words[i]
             if (st.status == GlowWordStatus.WAITING) continue
 
-            val scale = st.scaleAnim.value * st.fitScale
+            // ⚠️ 缩放**必须量化**（见 [quantizeScale]）：词的 spring 缩放是**渐近**收敛的
+            //    ⇒ 不量化的话设备空间的字号每帧都变 ⇒ 字形缓存每帧 miss ⇒ 重新光栅化。
+            //    ⚠️ 辉光层与正文层必须用**同一个**量化值（否则同一个字看起来出现两次）。
+            val scale = quantizeScale(st.scaleAnim.value * st.fitScale)
             val rotate = st.rotateAnim.value
             val cx = wordCenterX(layout, st, scale)
             val cy = st.rowTop + layout.rowHeight * 0.5f + st.yAnim.value
@@ -1611,7 +1653,8 @@ class GlowLineSubRenderer : LyricsSubRenderer {
             val alpha = (wordOpacity * 255f).toInt().coerceIn(0, 255)
             textPaint.color = withAlpha(color, alpha)
 
-            val scale = st.scaleAnim.value * st.fitScale
+            // ⚠️ 与辉光层**同一个**量化值（见 [quantizeScale] 与 drawGlowPass 的同名注释）
+            val scale = quantizeScale(st.scaleAnim.value * st.fitScale)
             val rotate = st.rotateAnim.value
             val cx = wordCenterX(layout, st, scale)
             val cy = st.rowTop + layout.rowHeight * 0.5f + st.yAnim.value
@@ -1669,6 +1712,15 @@ class GlowLineSubRenderer : LyricsSubRenderer {
     }
 
     private companion object {
+        /**
+         * 缩放**量化**的步长（1/1024）。
+         *
+         * ⛔ **不要**改成 1/64：呼吸幅度区间只有 [0.995, 1.01]（总幅度 1.5%），
+         *    而 1/64 = 1.5625% 已经**大于整个区间** ⇒ 呼吸会塌成**一个**取值。
+         * 详见 [quantizeScale] 的 KDoc。
+         */
+        private const val SCALE_QUANT_STEP = 1024f
+
         /** 移植 classic/Visualizer.tsx:162-164 —— 非 calm 档的 justify-content 候选 */
         private val JUSTIFY_NORMAL = arrayOf("start", "center", "end", "around", "between")
 

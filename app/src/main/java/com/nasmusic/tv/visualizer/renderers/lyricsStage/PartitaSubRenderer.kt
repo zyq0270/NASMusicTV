@@ -14,6 +14,7 @@ import kotlin.math.cos
 import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.round
 import kotlin.math.sin
 
 // 移植自 Folia (AGPL-3.0): src/components/visualizer/partita/PartitaChunk.tsx — Project Folia version 0.5.27-a16525c
@@ -50,6 +51,16 @@ class PartitaSubRenderer : LyricsSubRenderer {
     // ── Folia 常量 ────────────────────────────────────────────────────────────
 
     private companion object {
+        /**
+         * 缩放**量化**的步长（1/1024）。
+         *
+         * ⛔ **不要**改成 1/64：漂浮缩放的关键帧是 `[1.0, 1.01, 1.0, 0.995, 1.0]`
+         *    ⇒ 幅度区间只有 [0.995, 1.01]（总幅度 1.5%），而 1/64 = 1.5625%
+         *    已经**大于整个区间** ⇒ 漂浮会塌成**一个**取值。
+         * 详见 [quantizeScale] 的 KDoc。
+         */
+        private const val SCALE_QUANT_STEP = 1024f
+
         /** partitaLayout.ts:495-496 `DEFAULT_PARTITA_TUNING.staggerMin / staggerMax` */
         const val STAGGER_MIN = 20f
         const val STAGGER_MAX = 100f
@@ -246,8 +257,12 @@ class PartitaSubRenderer : LyricsSubRenderer {
         exitingState = null
         activeLineIndex = -1
         activeLineStart = Double.NaN
-        // 辉光位图缓存是进程级的共享对象 ⇒ 退出效果时必须回收，否则位图泄漏
-        GlowWordHalo.clear()
+        // ⛔ **这里不得清辉光缓存**（`GlowWordHalo` 的 `clear()`）：
+        //    子模式切换会走这个 `onExit` ⇒ 清掉缓存 ⇒ 切换后的首行要把每个字形
+        //    重新模糊一遍（10–15 字形 × 2 次真实高斯模糊，**主线程**）⇒ 硬卡顿。
+        //    缓存键是 (字形, 字号, 颜色, 内圈半径, 外圈半径) ⇒ 别的子模式的条目只是闲置，
+        //    缓存本身也有 `GlowWordHalo.MAX_ENTRIES` 上限。
+        // ⇒ 回收挪到了**主题**退出时（`LyricsStageRenderer.onExit`）。
     }
 
     // ── 换行检测与版面构建 ────────────────────────────────────────────────────
@@ -490,6 +505,9 @@ class PartitaSubRenderer : LyricsSubRenderer {
         // ── 漂浮动画（VisualizerPartita.tsx:154-174 / :183-190）──
         val floatPhase = floatPhase(state, timeSec)
         val floatY = floatKeyframe(floatPhase, 0f, -state.floatDistance, 0f, state.floatDistance * 0.45f, 0f)
+        // ⚠️ 缩放在**画布变换**处量化（见 [quantizeScale] 与 drawChunk 里的同名注释）：
+        //    漂浮缩放每帧都变 ⇒ 设备空间的字号每帧都变 ⇒ 字形缓存每帧 miss
+        //    ⇒ 整块文字每帧重新光栅化。
         val floatScale = floatKeyframe(floatPhase, 1f, 1.01f, 1f, 0.995f, 1f)
 
         val centerX = ctx.canvasSize.width / 2f
@@ -582,7 +600,10 @@ class PartitaSubRenderer : LyricsSubRenderer {
         // ── 漂浮变换（歌词容器，VisualizerPartita.tsx:183-190）──
         nc.translate(floatOriginX, floatOriginY)
         nc.translate(0f, floatY)
-        nc.scale(floatScale, floatScale)
+        // ⚠️ 缩放**必须量化**（见 [quantizeScale]）：漂浮缩放每帧都变 ⇒ 设备空间的字号
+        //    每帧都变 ⇒ 字形缓存每帧 miss ⇒ 整块文字每帧重新光栅化。
+        val qFloatScale = quantizeScale(floatScale)
+        nc.scale(qFloatScale, qFloatScale)
         nc.translate(-floatOriginX, -floatOriginY)
         // ── 行容器变换（glowWordTiming.ts:58-91 的 initial/animate 的 scale）──
         nc.translate(groupOriginX, groupOriginY)
@@ -594,7 +615,10 @@ class PartitaSubRenderer : LyricsSubRenderer {
         nc.translate(originX, originY)
         nc.translate(chunk.x, chunk.y)
         nc.rotate(chunk.rotate)
-        nc.scale(chunk.scale, chunk.scale)
+        // ⚠️ 缩放**必须量化**（见 [quantizeScale]）：chunk 的 spring 缩放是**渐近**收敛的
+        //    ⇒ 不量化的话设备空间的字号每帧都变 ⇒ 字形缓存每帧 miss。
+        val qChunkScale = quantizeScale(chunk.scale)
+        nc.scale(qChunkScale, qChunkScale)
         nc.translate(-originX, -originY)
 
         // ── 引导线（PartitaChunk.tsx:95-182，chunk 的绝对定位子元素）──
@@ -801,7 +825,10 @@ class PartitaSubRenderer : LyricsSubRenderer {
         nc.translate(wordOriginX, wordOriginY)
         nc.translate(wordState.x, wordState.y)
         nc.rotate(wordState.rotate)
-        nc.scale(wordState.scale, wordState.scale)
+        // ⚠️ 缩放**必须量化**（见 [quantizeScale]）：词的 spring 缩放是**渐近**收敛的
+        //    ⇒ 不量化的话设备空间的字号每帧都变 ⇒ 字形缓存每帧 miss ⇒ 重新光栅化。
+        val qWordScale = quantizeScale(wordState.scale)
+        nc.scale(qWordScale, qWordScale)
         nc.translate(-wordOriginX, -wordOriginY)
 
         // ── 辉光层（移植 GlowWord.tsx:86-119 + wordGlow.ts:94-167）──
@@ -899,6 +926,39 @@ class PartitaSubRenderer : LyricsSubRenderer {
     }
 
     // ── 小工具 ───────────────────────────────────────────────────────────────
+
+    /**
+     * 把缩放倍率**量化**到 [SCALE_QUANT_STEP] 分之一。
+     *
+     * ## 为什么（这是电视卡顿的第二个主因）
+     * `Canvas.scale(...)` 改的是**设备空间**的字号 ⇒ Android 的字形缓存（glyph cache）
+     * 按「设备空间的字号 + 变换」分 strike ⇒ **缩放一变缓存就 miss**
+     * ⇒ 整块文字（十几字形）在 RenderThread 上被**重新整形 + 重新光栅化**。
+     *
+     * 漂浮动画的缩放**每帧都变**（关键帧插值出来的连续值）⇒ 每帧一次全量重新光栅化
+     * ⇒ 弱电视上这就是「明明只是漂浮，却一直卡」的原因。
+     *
+     * ## 量化步长怎么定的（实测值）
+     * 漂浮缩放的关键帧是 `[1.0, 1.01, 1.0, 0.995, 1.0]` ⇒ 幅度区间 **[0.995, 1.01]**
+     * （总幅度 1.5%，相对 1.0 最多 +1.0% / −0.5%）。
+     *
+     * 步长取 **1/1024**（0.0977%）：
+     *  - 量化误差 ≤ 半个步长 = 1/2048 = **0.049%**；
+     *  - 一列歌词的内容区在电视上约 1000 px 宽 ⇒ 绕中心缩放时单次跳变
+     *    ≤ 1000/2 × 1/1024 ≈ **0.49 px** ⇒ **亚像素 ⇒ 不可见**；
+     *    （逐词的缩放作用在更小的字形上 ⇒ 跳变更小）；
+     *  - 重新光栅化的频率从「每帧」降到「每漂浮周期约 30 次」（normal 档 7 s 一轮）
+     *    ⇒ 平均 **约 4.3 次/秒**（实测：原来 60 次/秒）⇒ 比原来少 **14 倍**。
+     *
+     * ⚠️ **不能取 1/64**：1/64 = 1.5625% 已经**大于整个幅度区间（1.5%）**
+     * ⇒ 整个漂浮只落到 **1 个**量化档（等于把动画删了）⇒ 跳变还会一次性达到 7.8 px。
+     * 1/256（0.39%）也偏大：只落到 3.8 个档 ⇒ 跳变 1000/2 × 1/256 ≈ 1.95 px
+     * ⇒ 电视上看得见微跳。⇒ 1/1024 是**最粗的亚像素步长**（0.49 px）。
+     *
+     * ⛔ **只量化光栅化粒度**：版面 / 时序 / 颜色一律不动。
+     */
+    private fun quantizeScale(scale: Float): Float =
+        round(scale * SCALE_QUANT_STEP) / SCALE_QUANT_STEP
 
     /** 漂浮动画的循环相位（0..1） */
     private fun floatPhase(state: PartitaState, timeSec: Double): Float {

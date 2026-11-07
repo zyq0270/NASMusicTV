@@ -212,6 +212,27 @@ class PlayerManager(private val applicationContext: Context) {
     private val _progress = MutableStateFlow(0L)
     val progress: StateFlow<Long> = _progress
 
+    /**
+     * 当前播放位置（毫秒）—— **逐帧**读取。
+     *
+     * ⛔ **不要用 [progress] 做逐帧动画**：`progress` 是 `progressUpdateRunnable`
+     *    （**1000 ms** 的 `Handler`）写的 StateFlow ⇒ 拿它当动画时钟就是
+     *    **每秒跳一次的阶梯**（60 fps 的绘制里，画面内容每秒才变一次
+     *    ⇒ 看起来就是「卡顿」）。
+     *
+     * `ExoPlayer.getCurrentPosition()` 是一次廉价的读取（位置信息 + elapsed-realtime 校正），
+     * ⛔ 必须在**应用主线程**调用（可视化器的 draw lambda 在主线程 ✓）。
+     */
+    fun currentPositionMs(): Long {
+        val p = player ?: return _progress.value
+        return try {
+            p.currentPosition
+        } catch (_: Throwable) {
+            // 队列错误/播放器未就绪时会抛 ⇒ 回退到 1 Hz 的值
+            _progress.value
+        }
+    }
+
     private val _duration = MutableStateFlow(0L)
     val duration: StateFlow<Long> = _duration
 

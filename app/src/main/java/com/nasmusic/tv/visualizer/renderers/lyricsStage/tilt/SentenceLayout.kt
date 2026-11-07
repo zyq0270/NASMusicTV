@@ -12,18 +12,28 @@ import kotlin.math.roundToInt
  *
  * 句子级拆分：按「标点 → 括号/引号 → 西文词 → CJK 空格 → 特殊字符」逐级降级，
  * 仍不够则 secondarySplit（词粒度），再多则 mergeSentences。
+ *
+ * ⚠️ 2026-11-07：修「歌词舞台」**整帧黑屏**。
+ *    起因：本文件曾把**字面**括号 `"["` / `"("` 填进 `PairedSymbolDef.open` / `close`
+ *    （Folia 侧这两个字段是**正则**）⇒ `Regex("[")` 抛 `PatternSyntaxException`
+ *    ⇒ 异常一路逃到 `draw()` ⇒ 宿主 catch 后**跳过整帧** ⇒ 歌词舞台**所有**子模式全黑。
+ *    现在有三道闸：
+ *    ① 正则元字符的配对（`[`/`]`、`(`/`)`）一律走 `openStr`/`closeStr`（**字面匹配**）；
+ *    ② 正则一侧**只编译一次**（构造期存 `Regex`），不再逐行重新编译；
+ *    ③ 编译失败**降级为「这条定义不匹配」**，绝不把异常抛进渲染路径。
  */
 object SentenceLayout {
 
-    private val CJK_REGEX = Regex("[\\u4e00-\\u9fa5\\u3040-\\u30ff\\uac00-\\ud7af]")
-
-    /** 移植 sentenceLayout.ts:6 `hasCjkText` */
-    private fun hasCjkText(text: String): Boolean = CJK_REGEX.containsMatchIn(text)
-
-    /** 移植 sentenceLayout.ts:13-26 `PairedSymbolDef` */
-    private data class PairedSymbolDef(
-        val open: String? = null,
-        val close: String? = null,
+    /**
+     * 移植 sentenceLayout.ts:13-26 `PairedSymbolDef`
+     *
+     * ⚠️ `open` / `close` 存的是**已编译的 `Regex`**（不是字符串！）⇒ 给它们赋一个
+     *    字符串字面量**根本编译不过** ⇒ 从**类型**上杜绝「把字面括号当正则」的回归。
+     *    `openStr` / `closeStr` 是**字面串**（`indexOf` 匹配）⇒ 正则元字符必须走这一侧。
+     */
+    internal data class PairedSymbolDef(
+        val open: Regex? = null,
+        val close: Regex? = null,
         val openStr: String? = null,
         val closeStr: String? = null,
     )
@@ -35,6 +45,75 @@ object SentenceLayout {
         val closeStart: Int,
         val closeEnd: Int,
     )
+
+    // ── 全部只编译一次（⛔ 逐行 / 逐字路径上不得再 new Regex）────────────────
+    //
+    // ⚠️ Kotlin **不允许**在 `object` 声明里再挂 `companion object`
+    //    （编译错误：Modifier 'companion' is not applicable inside 'standalone object'）
+    //    ⇒ 这里用 `object` 的私有成员：它本身就是**进程级单例**，语义与 companion 常量一致。
+
+    private val CJK_REGEX = Regex("[\\u4e00-\\u9fa5\\u3040-\\u30ff\\uac00-\\ud7af]")
+    private val PUNCTUATION_REGEX = Regex("[，。；！？、…·\\.\\,\\;\\!\\?]+")
+    private val LEADING_SPACES_REGEX = Regex("^\\s+")
+    private val WESTERN_BLOCK_REGEX = Regex(
+        "[a-zA-Z0-9]+(?:[a-zA-Z0-9'\\-]*[a-zA-Z0-9]+)?" +
+            "(?:\\s+[a-zA-Z0-9]+(?:[a-zA-Z0-9'\\-]*[a-zA-Z0-9]+)?)+" +
+            "[.,;:!?。，；：！？]?\\s*"
+    )
+    private val ASCII_ALNUM_SEQ_REGEX = Regex("[a-zA-Z0-9]+")
+    private val ASCII_ALNUM_REGEX = Regex("[a-zA-Z0-9]")
+    private val WHITESPACE_REGEX = Regex("\\s")
+    private val ONLY_WHITESPACE_REGEX = Regex("^\\s+$")
+    private val SPECIAL_CHAR_REGEX = Regex("[：:/／\\\\|｜~～]+")
+    private val WORD_BOUNDARY_REGEX =
+        Regex("[\\p{L}\\p{N}]+(?:['\\-][\\p{L}\\p{N}]+)*|[^\\s\\p{L}\\p{N}]")
+    private val LETTER_OR_NUMBER_REGEX = Regex("[\\p{L}\\p{N}]")
+    private val WESTERN_PHRASE_SPLIT_REGEX =
+        Regex("(?<=\\w[.,;:!?。，；：！？])(?=\\s+\\w)")
+
+    /**
+     * 把一个「可能是坏模式」的模式编译成 `Regex`；**编译失败返回 null**（绝不抛异常）。
+     *
+     * ⛔ 这是「一个坏正则不能杀掉整帧」的最后一道闸：渲染路径上的每一次正则编译
+     *    都必须走它 ⇒ 坏模式最多让**那一条定义不匹配**，而不是让整帧黑屏。
+     */
+    internal fun compilePatternOrNull(pattern: String): Regex? =
+        runCatching { Regex(pattern) }.getOrNull()
+
+    /** 正则配对（构造期编译一次；编译失败 ⇒ 该条定义退化成「不匹配」） */
+    private fun pairedRegex(open: String, close: String): PairedSymbolDef =
+        PairedSymbolDef(open = compilePatternOrNull(open), close = compilePatternOrNull(close))
+
+    /** 字面配对（`[`/`]`、`(`/`)` 等正则元字符**必须**走这里） */
+    private fun pairedLiteral(open: String, close: String): PairedSymbolDef =
+        PairedSymbolDef(openStr = open, closeStr = close)
+
+    /**
+     * 括号/引号配对表（**构造期一次性构建**；渲染路径上不再重复编译）。
+     *
+     * ⚠️ 历史 bug：ASCII 的 `[`/`]` 与 `(`/`)` 曾被当成**正则**填进 `open`/`close`
+     *    ⇒ `Regex("[")` 抛 `PatternSyntaxException` ⇒ 整帧黑屏。
+     *    现在它们走 `pairedLiteral`（`indexOf` 字面匹配）。
+     */
+    private val PAIRED_SYMBOLS: List<PairedSymbolDef> = listOf(
+        pairedRegex("「", "」"),
+        pairedRegex("『", "』"),
+        pairedRegex("《", "》"),
+        pairedRegex("【", "】"),
+        pairedRegex("｛", "｝"),
+        pairedRegex("［", "］"),
+        pairedLiteral("[", "]"),
+        pairedRegex("（", "）"),
+        pairedLiteral("(", ")"),
+        pairedLiteral("\"", "\""),
+        pairedLiteral("'", "'"),
+    )
+
+    /** 移植 sentenceLayout.ts:6 `hasCjkText` */
+    private fun hasCjkText(text: String): Boolean = CJK_REGEX.containsMatchIn(text)
+
+    /** 供门禁测试读取配对表（⛔ 只读快照；不得在生产代码里改它） */
+    internal fun pairedSymbolDefinitions(): List<PairedSymbolDef> = PAIRED_SYMBOLS
 
     /** 移植 sentenceLayout.ts:49-85 `splitIntoSentences` */
     fun splitIntoSentences(text: String, targetCount: Int, timeSeed: Double? = null): List<String> {
@@ -86,8 +165,7 @@ object SentenceLayout {
 
     /** 移植 sentenceLayout.ts:104-145 `splitByPunctuation` */
     private fun splitByPunctuation(text: String): List<String> {
-        val allPunctRegex = Regex("[，。；！？、…·\\.\\,\\;\\!\\?]+")
-        val matches = allPunctRegex.findAll(text).toList()
+        val matches = PUNCTUATION_REGEX.findAll(text).toList()
 
         if (matches.isEmpty()) return listOf(text)
 
@@ -100,7 +178,7 @@ object SentenceLayout {
 
             var trailingSpaces = ""
             val afterPunct = text.substring(punctEnd)
-            val spaceMatch = Regex("^\\s+").find(afterPunct)
+            val spaceMatch = LEADING_SPACES_REGEX.find(afterPunct)
             if (spaceMatch != null) {
                 trailingSpaces = spaceMatch.value
             }
@@ -130,17 +208,11 @@ object SentenceLayout {
     private fun splitByWesternWords(text: String): List<String> {
         if (!hasCjkText(text)) return listOf(text)
 
-        // 与 Folia 的 /[a-zA-Z0-9]+(?:[a-zA-Z0-9'\-]*[a-zA-Z0-9]+)?(?:\s+…)+[.,;:!?。，；：！？]?\s*/g 等价：
+        // 与 Folia 的西文块正则（/[a-zA-Z0-9]+(?:[a-zA-Z0-9'\-]*[a-zA-Z0-9]+)?(?:\s+…)+[.,;:!?。，；：！？]?\s*，JS 侧带 /g 全局标志）等价：
         // 「含空格的多词西文块」。
-        val westernBlockRegex = Regex(
-            "[a-zA-Z0-9]+(?:[a-zA-Z0-9'\\-]*[a-zA-Z0-9]+)?" +
-                "(?:\\s+[a-zA-Z0-9]+(?:[a-zA-Z0-9'\\-]*[a-zA-Z0-9]+)?)+" +
-                "[.,;:!?。，；：！？]?\\s*"
-        )
-
         var hasMultipleWordBlock = false
-        for (match in westernBlockRegex.findAll(text)) {
-            val wordCount = Regex("[a-zA-Z0-9]+").findAll(match.value).count()
+        for (match in WESTERN_BLOCK_REGEX.findAll(text)) {
+            val wordCount = ASCII_ALNUM_SEQ_REGEX.findAll(match.value).count()
             if (wordCount > 1) {
                 hasMultipleWordBlock = true
                 break
@@ -152,7 +224,7 @@ object SentenceLayout {
         val parts = mutableListOf<String>()
         var lastIndex = 0
 
-        for (match in westernBlockRegex.findAll(text)) {
+        for (match in WESTERN_BLOCK_REGEX.findAll(text)) {
             val blockStart = match.range.first
             val blockEnd = match.range.last + 1
             val beforeBlock = text.substring(lastIndex, blockStart)
@@ -178,8 +250,15 @@ object SentenceLayout {
 
     /** 移植 sentenceLayout.ts:202-211 `getGlobalCount` */
     private fun getGlobalCount(text: String, char: String): Int {
-        val escaped = Regex.escape(char)
-        return Regex(escaped).findAll(text).count()
+        // ⛔ 原实现是 `Regex(Regex.escape(char))` ⇒ 每调一次就编译一个正则；
+        //    `Regex.escape` 出来的模式与 `char` **字面等价** ⇒ 直接数出现次数即可（零分配）。
+        var count = 0
+        var index = text.indexOf(char)
+        while (index != -1) {
+            count++
+            index = text.indexOf(char, index + char.length)
+        }
+        return count
     }
 
     /** 移植 sentenceLayout.ts:213-224 `shouldSkipBoundary` */
@@ -200,21 +279,7 @@ object SentenceLayout {
 
     /** 移植 sentenceLayout.ts:239-256 `splitByBracketsQuotes` */
     private fun splitByBracketsQuotes(text: String): List<String> {
-        val allPairedSymbols = listOf(
-            PairedSymbolDef(open = "「", close = "」"),
-            PairedSymbolDef(open = "『", close = "』"),
-            PairedSymbolDef(open = "《", close = "》"),
-            PairedSymbolDef(open = "【", close = "】"),
-            PairedSymbolDef(open = "｛", close = "｝"),
-            PairedSymbolDef(open = "［", close = "］"),
-            PairedSymbolDef(open = "[", close = "]"),
-            PairedSymbolDef(open = "（", close = "）"),
-            PairedSymbolDef(open = "(", close = ")"),
-            PairedSymbolDef(openStr = "\"", closeStr = "\""),
-            PairedSymbolDef(openStr = "'", closeStr = "'"),
-        )
-
-        val result = extractOutermostPairs(text, allPairedSymbols)
+        val result = extractOutermostPairs(text, PAIRED_SYMBOLS)
         return if (result.size > 1) result else listOf(text)
     }
 
@@ -246,16 +311,18 @@ object SentenceLayout {
         var best: OutermostMatch? = null
 
         for (def in defs) {
-            val openMatch = if (def.openStr != null) {
-                findStringMatch(def.openStr, text, 0)
-            } else {
-                findRegexMatch(def.open!!, text, 0)
+            // ⛔ 任一侧都拿不到匹配器（正则编译失败 ⇒ open/close 为 null）⇒ 跳过这条定义，
+            //    绝不让异常逃出渲染路径。
+            val openMatch = when {
+                def.openStr != null -> findStringMatch(def.openStr, text, 0)
+                def.open != null -> findRegexMatch(def.open, text, 0)
+                else -> null
             } ?: continue
 
-            val closeMatch = if (def.closeStr != null) {
-                findStringMatch(def.closeStr, text, openMatch.second)
-            } else {
-                findRegexMatch(def.close!!, text, openMatch.second)
+            val closeMatch = when {
+                def.closeStr != null -> findStringMatch(def.closeStr, text, openMatch.second)
+                def.close != null -> findRegexMatch(def.close, text, openMatch.second)
+                else -> null
             } ?: continue
 
             val candidate = OutermostMatch(
@@ -276,9 +343,13 @@ object SentenceLayout {
         return best
     }
 
-    /** 移植 sentenceLayout.ts:27-30 `findRegexMatch` */
-    private fun findRegexMatch(regex: String, text: String, fromIndex: Int): Pair<Int, Int>? {
-        val match = Regex(regex).find(text, fromIndex) ?: return null
+    /** 移植 sentenceLayout.ts:27-30 `findRegexMatch`
+     *
+     *  ⚠️ 传入的是**已编译**的 `Regex`（不再每次调用都重新编译一个正则）。
+     *  ⛔ 匹配本身也包一层保护 ⇒ 任何异常都只是「这条定义不匹配」。
+     */
+    private fun findRegexMatch(regex: Regex, text: String, fromIndex: Int): Pair<Int, Int>? {
+        val match = runCatching { regex.find(text, fromIndex) }.getOrNull() ?: return null
         return match.range.first to (match.range.last + 1)
     }
 
@@ -299,8 +370,8 @@ object SentenceLayout {
         for (char in text) {
             // ⚠️ Kotlin 的 `Char` **不是** `CharSequence` ⇒ 正则匹配要先转成 String。
             val isCjk = CJK_REGEX.matches(char.toString())
-            val isWestern = Regex("[a-zA-Z0-9]").matches(char.toString())
-            val isSpace = Regex("\\s").matches(char.toString())
+            val isWestern = ASCII_ALNUM_REGEX.matches(char.toString())
+            val isSpace = WHITESPACE_REGEX.matches(char.toString())
 
             if (isCjk) {
                 currentSegment += char
@@ -341,7 +412,7 @@ object SentenceLayout {
         }
 
         if (currentSegment.isNotEmpty()) {
-            if (segments.isNotEmpty() && Regex("^\\s+$").matches(currentSegment)) {
+            if (segments.isNotEmpty() && ONLY_WHITESPACE_REGEX.matches(currentSegment)) {
                 segments[segments.lastIndex] = segments[segments.lastIndex] + currentSegment
             } else {
                 segments.add(currentSegment)
@@ -353,8 +424,7 @@ object SentenceLayout {
 
     /** 移植 sentenceLayout.ts:388-428 `splitBySpecialChars` */
     private fun splitBySpecialChars(text: String): List<String> {
-        val specialCharRegex = Regex("[：:/／\\\\|｜~～]+")
-        val parts = specialCharRegex.split(text)
+        val parts = SPECIAL_CHAR_REGEX.split(text)
 
         if (parts.count { it.isNotEmpty() } <= 1) return listOf(text)
 
@@ -409,14 +479,13 @@ object SentenceLayout {
             if (candidates.isEmpty()) break
 
             // 词边界（近似 Intl.Segmenter 的 word 粒度：词 / 数字 / 标点各自成段）
-            val wordBoundaryRegex = Regex("[\\p{L}\\p{N}]+(?:['\\-][\\p{L}\\p{N}]+)*|[^\\s\\p{L}\\p{N}]")
             val semanticCandidates = mutableListOf<Triple<Int, Int, Double>>() // index, splitPos, score
 
             for ((index, sentence) in candidates) {
                 val wordPositions = mutableListOf<Pair<Int, Int>>()
                 var offset = 0
-                for (seg in wordBoundaryRegex.findAll(sentence)) {
-                    if (seg.value.isNotEmpty() && Regex("[\\p{L}\\p{N}]").containsMatchIn(seg.value)) {
+                for (seg in WORD_BOUNDARY_REGEX.findAll(sentence)) {
+                    if (seg.value.isNotEmpty() && LETTER_OR_NUMBER_REGEX.containsMatchIn(seg.value)) {
                         wordPositions.add(offset to (offset + seg.value.length))
                     }
                     offset += seg.value.length
@@ -494,7 +563,7 @@ object SentenceLayout {
     /** 移植 sentenceLayout.ts:226-237 `splitWesternPhrase`（独立西文短语的标点后拆分） */
     fun splitWesternPhrase(text: String): List<String> {
         if (!hasCjkText(text) && text.isNotEmpty()) {
-            val parts = text.split(Regex("(?<=\\w[.,;:!?。，；：！？])(?=\\s+\\w)"))
+            val parts = text.split(WESTERN_PHRASE_SPLIT_REGEX)
             if (parts.size > 1) return parts.filter { it.isNotEmpty() }
         }
         return listOf(text)

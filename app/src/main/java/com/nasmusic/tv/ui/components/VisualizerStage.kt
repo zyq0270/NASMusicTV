@@ -120,6 +120,13 @@ private const val FPS_SETTING_KEY = "nasmusic_fps"
 fun VisualizerStage(
     song: Song?,
     frame: () -> AudioFrame,
+    /**
+     * 当前播放位置（毫秒）—— **逐帧**读取的 provider。
+     *
+     * ⛔ **不要**用 `progressMs` 那个参数做逐帧动画：它是 **1 Hz** 的 StateFlow
+     *    ⇒ 「逐字揭示 / 相机跟随 / 辉光扫过」会变成**每秒跳一次**（看起来就是卡顿）。
+     */
+    positionMs: () -> Long,
     cover: ImageBitmap?,
     palette: CoverPalette,
     lyrics: List<LyricsLine>?,
@@ -586,9 +593,12 @@ fun VisualizerStage(
                 // ⛔ **不走 `RenderContext`**（那个类被本机私有分支的覆盖层遮蔽）。
                 // ⚠️ 逐帧只改三个字段、不新建对象 ⇒ 零分配。
                 if (cur is LyricsStageRenderer) {
+                    // ⛔ **逐帧**读播放位置：`progressMs` 是 1 Hz 的 StateFlow ⇒ 动画每秒跳一次
+                    val posMs = positionMs()
                     lyricsStagePayload.lines = lyricsStageLines
-                    lyricsStagePayload.currentIndex = lyricInfo.lineIndex
-                    lyricsStagePayload.timeSec = progressMs / 1000.0
+                    // 行索引也必须逐帧算（`lyricInfo.lineIndex` 同样是 1 Hz ⇒ 换行会迟 1 秒）
+                    lyricsStagePayload.currentIndex = findCurrentLyricLine(lyrics, posMs)
+                    lyricsStagePayload.timeSec = posMs / 1000.0
                     cur.applyLyrics(lyricsStagePayload)
                 }
                 // tick 参与读取以确保每帧重绘

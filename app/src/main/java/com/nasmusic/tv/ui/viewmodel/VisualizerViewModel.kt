@@ -334,6 +334,14 @@ class VisualizerViewModel(
     /** 音频帧（来自 SpectrumRepository 单例） */
     val frame: AudioFrame get() = playerManager.spectrumRepository.frame
 
+    /**
+     * 当前播放位置（毫秒）—— 逐帧读取。
+     *
+     * ⛔ 不要用 `progress`（1 Hz StateFlow）做逐帧动画 ⇒ 见
+     * [PlayerManager.currentPositionMs] 的说明。
+     */
+    val positionMs: Long get() = playerManager.currentPositionMs()
+
     private val _cover = MutableStateFlow<androidx.compose.ui.graphics.ImageBitmap?>(null)
     val cover: StateFlow<androidx.compose.ui.graphics.ImageBitmap?> = _cover.asStateFlow()
 

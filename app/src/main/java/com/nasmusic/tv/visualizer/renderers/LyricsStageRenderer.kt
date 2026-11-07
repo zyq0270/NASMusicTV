@@ -11,6 +11,7 @@ import com.nasmusic.tv.visualizer.VisualizerRenderer
 import com.nasmusic.tv.visualizer.renderers.lyricsStage.DotMatrixSubRenderer
 import com.nasmusic.tv.visualizer.renderers.lyricsStage.FullViewSubRenderer
 import com.nasmusic.tv.visualizer.renderers.lyricsStage.GlowLineSubRenderer
+import com.nasmusic.tv.visualizer.renderers.lyricsStage.GlowWordHalo
 import com.nasmusic.tv.visualizer.renderers.lyricsStage.LyricsStageMode
 import com.nasmusic.tv.visualizer.renderers.lyricsStage.LyricsStagePayload
 import com.nasmusic.tv.visualizer.renderers.lyricsStage.LyricsSubRenderer
@@ -139,9 +140,12 @@ class LyricsStageRenderer : VisualizerRenderer {
             //    放进隐式接收者链，扩展接收者由外层的 DrawScope 提供。
             with(current) { draw(frame, ctx, payload) }
         } else {
-            // 子模式切换的 300ms 淡入：整层画进一个带 alpha 的图层。
-            // ⚠️ 用 `saveLayer(bounds, paint)`（仓内既有写法，见 photo/transitions/*）而不是
+            // 子模式切换的淡入：整层画进一个带 alpha 的图层。
+            // ⚠️ 用 `saveLayer(bounds, paint)`（仓内既有写法，见 photo/transitions/ 下的写法）而不是
             //    `saveLayerAlpha` —— 前者的 alpha 走 Paint，避免任何 API 弃用告警（lint 是阻断门禁）。
+            // ⛔ **当前走不到这里**（`TRANSITION_MS = 0L` ⇒ alpha 恒为 1f）⇒ 这段是保留的
+            //    「备用淡入实现」：改回 `TRANSITION_MS = 300L` 即可重新启用（代价见该常量的 KDoc）。
+            //    ⚠️ `bounds = null` ⇒ 图层是**整块画布** ⇒ 弱电视上切换那几百毫秒会掉到 10–20 fps。
             drawIntoCanvas { canvas ->
                 val native = canvas.nativeCanvas
                 layerPaint.alpha = (alpha * 255f).toInt().coerceIn(0, 255)
@@ -156,18 +160,25 @@ class LyricsStageRenderer : VisualizerRenderer {
         subRenderer?.onExit()
         subRenderer = null
         lastCtx = null
+        // ⚠️ 辉光位图缓存是**进程级共享**的 ⇒ 退出**主题**时统一回收（否则位图泄漏到进程结束）。
+        // ⛔ **子模式切换不得清**：缓存键是 (字形, 字号, 颜色, 内圈半径, 外圈半径) ⇒ 别的子模式的
+        //    条目只是**闲置**（缓存本身有 `GlowWordHalo.MAX_ENTRIES` 上限）⇒ 清掉只会让切换后的
+        //    首行把每个字形重新模糊一遍（10–15 字形 × 2 次真实高斯模糊，主线程）⇒ 硬卡顿。
+        GlowWordHalo.clear()
     }
 
     // ── 内部 ───────────────────────────────────────────────────
 
     /**
-     * 切到指定子模式：释放旧的、建新的、起 300ms 淡入。
+     * 切到指定子模式：释放旧的、建新的、（若启用淡入）起一段淡入。
      *
      * @param ctx 非 null 时用该上下文进入新子渲染器；null 表示还没有上下文
      *            （此时只建不进入，等 [onEnter] 补）。
      */
     private fun applyMode(newMode: LyricsStageMode, ctx: RenderContext?) {
         mode = newMode
+        // ⚠️ 子渲染器的 `onExit` **不得**清辉光缓存（否则切换后的首行要重新模糊每个字形 ⇒ 卡顿）
+        //    ⇒ 缓存在**主题**退出时由 [onExit] 统一回收。
         subRenderer?.onExit()
         val quality = ctx?.quality ?: lastQuality
         lastQuality = quality
@@ -201,7 +212,30 @@ class LyricsStageRenderer : VisualizerRenderer {
         }
 
     companion object {
-        /** 子模式切换的淡入时长（ms） */
-        const val TRANSITION_MS = 300L
+        /**
+         * 子模式切换的淡入时长（ms）。
+         *
+         * ⛔ **当前是 0 ⇒ 子模式切换是硬切（没有淡入）**。
+         *
+         * ## 为什么关掉（2026-11-07 电视卡顿实测）
+         * 淡入走 `Canvas.saveLayer(null, paint)` ⇒ `bounds == null` ⇒ 图层是**整块画布**：
+         *  - 1080×2340 的手机 ⇒ 离屏缓冲 **10 MB**
+         *  - 1920×1080 的电视 ⇒ 离屏缓冲 **8.3 MB**
+         *
+         * 切换那 300 ms 里，每帧都要「清 FBO → 光栅化整屏 → 合成回来」
+         * ⇒ 约 **30 MB/帧**的额外 GPU 流量 ⇒ 弱电视上 ≈ **10 ms/帧**
+         * ⇒ 切换本身掉到 10–20 fps（读起来像卡死；设备反馈「电视上比手机更卡」正是这条）。
+         *
+         * 何况子模式切换已经有 **Toast** 提示（舞台里的 `lyricsStageToastText`），
+         * 且切换是**用户主动**按上下键触发的 ⇒ 淡入的收益远小于它的代价。
+         *
+         * ## 怎么重新打开
+         * 把下面的常量改回 `300L` 即可 —— 淡入代码路径**完整保留**（只是走不到）。
+         * ⚠️ 改回之前请先做两件事之一：
+         *  ① 改成**有界**图层（给 `saveLayer` 传一个矩形而不是 `null`）——
+         *     ⚠️ 但各子模式的内容范围不同 ⇒ 矩形算错会把淡入裁掉；
+         *  ② 或者接受这一次切换会掉帧。
+         */
+        const val TRANSITION_MS = 0L
     }
 }

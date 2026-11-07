@@ -57,6 +57,41 @@ import kotlin.math.sin
  * 真正贵的是每次提交里装的**椭圆个数**。故低档只降 [capacityForTier] 的粒子上限，
  * 并按 [fontMaxRatio] 同步收缩字号上限以维持点阵密度（不缩字号 = 低档文字出空洞）。
  *
+ * ## ✅ 点阵密度修复（2026-11-07，用户反馈「要再加多粒子，现在都不够组成文字」）
+ *
+ * ### 病根 ①：行内取点判据漏取约 46% ⇒ 字形成了「空心轮廓」
+ * 旧判据 `((taken - 1) % takeEvery) < 0.5f` 里 `takeEvery = rowInk / targetCount` 是**小数**，
+ * 取模后命中的位置**不再是等距的**（实测间隔在 14 / 29 / 43 个墨迹像素之间乱跳），
+ * 且只命中 **≈54%** 的目标数 ⇒ 声明的 [CAP_HIGH]=3600 实际只落下 **1959** 个（LOW 档 900 → 479）。
+ * 更糟的是落点**偏在笔画的一侧** ⇒ 每个笔画只剩一条边被点亮 ⇒ 整个字看着像「线框」而不是字。
+ * ⛔ 这与本文件「每行 cap 个粒子」的声明**不符** —— 性能门禁
+ *    （`LowTierElementBudgetTest` ②）也是按 `capacityForTier × 2 行 × 2 层` 建模的，
+ *    即**门禁一直以为本套在画满预算**。
+ * ✅ 改为 [isSegmentStart]：把本行墨迹像素**均匀分段**、每段取首个
+ *    ⇒ 恰好取满 `targetCount` 个、且沿**笔画宽度方向**也铺开。
+ *
+ * ### 病根 ②：字号上限与粒子预算 `sqrt` 耦合 ⇒ 单纯加粒子会被字号吃掉
+ * [fontMaxRatio] 按 `sqrt(cap)` 缩放（设计意图：低档减点时同步缩字号以维持密度）。
+ * 但**加**密度时它会**顺带放大字号** ⇒ 新增的粒子被摊到更大的字上，密度反降。
+ * 实测（TV 1920×1080，8 字行）：`cap 3600 → 7200` 且字号跟着涨 ⇒ 覆盖率 44.6% → **36.3%**（更差）；
+ * 锁住字号上限（同为 7200）⇒ 覆盖率 **62.8%**。
+ * ✅ 故字号上限改用 [fontBudgetCap]：**只有当实际预算比档位默认更小时才收缩字号**，
+ *    加密度时字号**不动** ⇒ 密度必涨、字不会变大。
+ *
+ * ### 落点与实测（TV 1920×1080，`你说过不会离开我` 8 字 / 字号 172.8px）
+ * | 状态 | 每行粒子 | 每字粒子 | 笔画覆盖率 |
+ * |---|---|---|---|
+ * | 修复前 | 1959 | 245 | **23.2%** |
+ * | 修复后（cap 3600） | 3522 | 440 | **34.5%** |
+ * | 修复后 + 歌词舞台加密度（cap 7200） | 7122 | 890 | **62.8%** |
+ *
+ * 数字由 `scripts/measure_lyrics_dot_matrix_density.java` 再生（⛔ 不许手抄）。
+ *
+ * ### 作用面
+ * 本文件既是 E23「歌词点阵」独立主题，也是 E53「歌词舞台」的子模式 0 ⇒ 两边都吃到 病根 ① 的修复。
+ * 「加密度」本身（病根 ②）做成**宿主可开关的每实例预算覆盖** [setParticleBudget]，
+ * 由 E53 歌词舞台**显式开启** ⇒ E23 独立主题的预算档位（3600 / 900）**保持不变**。
+ *
  * ## ⛔ 卡拉OK 逐字亮度分档必须保留（§13.5-D4）
  * 它不是性能瓶颈，删了反而更慢 —— 详见 [addLineToPaths] 内的守卫注释。
  */
@@ -134,7 +169,43 @@ class LyricsDotMatrixRenderer : RendererFx() {
     private var incomingNextText: String = ""
 
     // 每行粒子数上限：高/中档取最高密度，低档必须降（见 companion 的 capacityForTier）
-    private fun capacityFor(ctx: RenderContext): Int = capacityForTier(ctx.quality)
+    private fun capacityFor(ctx: RenderContext): Int = effectiveCapacity(capacityForTier(ctx.quality))
+
+    /**
+     * 每行粒子上限的**宿主覆盖**（0 = 用档位默认，见 [capacityForTier]）。
+     *
+     * ⛔ 只改**粒子数**，不改**字号**（字号上限走 [fontBudgetCap]）⇒ 覆盖调大时密度必涨、字不会变大。
+     */
+    private var particleBudgetOverride = 0
+
+    /**
+     * 实际生效的每行粒子上限（**纯函数式**，门禁可直接调）。
+     *
+     * @param tierCap 档位默认上限（见 [capacityForTier]）
+     */
+    internal fun effectiveCapacity(tierCap: Int): Int =
+        if (particleBudgetOverride > 0) particleBudgetOverride else tierCap
+
+    /**
+     * 设置每行粒子上限覆盖（<= 0 表示恢复档位默认）。
+     *
+     * 供宿主（如 E53「歌词舞台」子模式 0）按需**加密度**用：
+     * E23「歌词点阵」独立主题不调用它 ⇒ 其预算档位（3600 / 900）保持不变。
+     *
+     * @param perLine 每行粒子数上限
+     */
+    internal fun setParticleBudget(perLine: Int) {
+        particleBudgetOverride = perLine.coerceIn(0, MAX_PARTICLE_BUDGET)
+    }
+
+    /**
+     * 字号上限所用的预算档（见 companion 的 [fontBudgetCap]）。
+     *
+     * ⚠️ 减点 ⇒ 沿用档位默认（同步缩字号，维持密度）；
+     *    加点 ⇒ 字号**不动** ⇒ 密度必涨、字不会变大。
+     */
+    private fun fontCapFor(ctx: RenderContext): Int =
+        fontBudgetCap(capacityForTier(ctx.quality), capacityFor(ctx))
 
     // ── 自适应字号 ──────────────────────────────────────────
     // 规则（用户需求）：
@@ -178,6 +249,7 @@ class LyricsDotMatrixRenderer : RendererFx() {
         //    与提交次数无关 ⇒ 低档只能减点；减点若不同步缩字号，同样多的点摊到更大的字上
         //    就会「文字空洞」，正是上面第 4 条要避免的情形。下限 [MIN_FONT_S] 是**可读性**
         //    底线，与密度无关 ⇒ 不随 cap 收缩。
+        // ⚠️ 调用方必须传 [fontBudgetCap]（**不是**实际粒子数）：加密度时字号不得跟着涨。
         return base.coerceIn(h * MIN_FONT_S, h * fontMaxRatio(cap))
     }
 
@@ -334,19 +406,24 @@ class LyricsDotMatrixRenderer : RendererFx() {
         var curRowFill = 0
         for (ri in rowPixelCount.indices) {
             val y = ri * step
-            if (rowPixelCount[ri] == 0) continue
+            val rowInk = rowPixelCount[ri]
+            if (rowInk == 0) continue
             val targetCount = quota[ri]
             if (targetCount <= 0) continue
-            var taken = 0
+            var inkIdx = 0      // 本行第几个有效像素
             var filled = 0
-            val takeEvery = (rowPixelCount[ri].toFloat() / targetCount).coerceAtLeast(1f)
             b.getPixels(rowBufLocal, 0, bmpW, 0, y, bmpW, 1)
             for (x in 0 until bmpW step step) {
                 if (curRowFill >= cap) break
                 if (rowBufLocal[x] and 0xFF000000.toInt() != 0) {
-                    taken++
-                    // 该行内等距抽取 targetCount 个
-                    if (((taken - 1).toFloat() % takeEvery) < 0.5f) {
+                    // ✅ 行内**均匀分段**取点（[isSegmentStart]）：本行 rowInk 个有效像素
+                    //    均分成 targetCount 段、每段取首个 ⇒ 恰好取满 targetCount 个，
+                    //    且沿**笔画宽度方向**也铺开。
+                    // ⛔ 旧判据 `((taken-1) % takeEvery) < 0.5f`（takeEvery 是小数）会漏取约 46%
+                    //    （声明 3600 实落 1959），且落点偏在笔画一侧 ⇒ 字成了「空心轮廓」。
+                    val takeThis = isSegmentStart(inkIdx, rowInk, targetCount)
+                    inkIdx++
+                    if (takeThis) {
                         val o = n * STRIDE
                         target[o + TX] = x.toFloat()
                         target[o + TY] = y.toFloat()
@@ -449,7 +526,9 @@ class LyricsDotMatrixRenderer : RendererFx() {
             ?: ctx.currentLyricLine?.takeIf { it.isNotBlank() }
             ?: ctx.caption?.takeIf { it.isNotBlank() }
         if (w != cachedFontW || h != cachedFontH || longestKey != cachedLongest) {
-            fontSizePx = computeFontSize(ctx, w, h, cap)
+            // ⚠️ 传 [fontBudgetCap]（**不是**实际粒子数）：加密度时字号**不得**跟着涨，
+            //    否则新增的粒子被摊到更大的字上 ⇒ 密度不增反降（实测 44.6% → 36.3%）。
+            fontSizePx = computeFontSize(ctx, w, h, fontCapFor(ctx))
             lineHeightPx = fontSizePx * 1.4f
             cachedFontW = w
             cachedFontH = h
@@ -946,6 +1025,12 @@ class LyricsDotMatrixRenderer : RendererFx() {
         private const val CAP_HIGH = 3600
         private const val CAP_LOW = 900
 
+        /**
+         * 宿主覆盖每行粒子上限时的**上界**（防呆：别把覆盖值写成天文数字）。
+         * ⛔ 覆盖值越大 ⇒ 每帧椭圆数越多 ⇒ 帧率越低（见 [CAP_HIGH] 的实测曲线）。
+         */
+        internal const val MAX_PARTICLE_BUDGET = 12000
+
         /** 按档位选每行粒子上限（**纯函数**，门禁可直接调用） */
         internal fun capacityForTier(
             quality: com.nasmusic.tv.data.model.VisualQuality
@@ -959,6 +1044,41 @@ class LyricsDotMatrixRenderer : RendererFx() {
          */
         internal fun fontMaxRatio(cap: Int): Float =
             MAX_FONT_S * kotlin.math.sqrt(cap.toFloat() / CAP_HIGH.toFloat())
+
+        /**
+         * 字号上限所用的「预算档」（**纯函数**，门禁可直接调用）。
+         *
+         * ⚠️ **只有当实际粒子预算比档位默认更小时才用它**：
+         * - 减点（低档降密度）⇒ 沿用 [fontMaxRatio] 的 `sqrt` 收缩，维持密度不变（既有设计）；
+         * - 加点（宿主覆盖调大）⇒ **字号不动** ⇒ 新增的粒子落在**同样大小**的字上 ⇒ 密度必涨。
+         *
+         * ⛔ 反过来做（字号跟着 `sqrt(cap)` 一起涨）会把新增粒子摊到更大的字上，密度反降：
+         * 实测 TV 1920×1080 / 8 字行：`cap 3600→7200` 字号同步涨 ⇒ 覆盖率 44.6% → **36.3%**。
+         */
+        internal fun fontBudgetCap(tierCap: Int, actualCap: Int): Int =
+            if (actualCap < tierCap) actualCap else tierCap
+
+        /**
+         * 行内均匀取点判据（**纯函数**，门禁可直接调）。
+         *
+         * 把本行 [rowInk] 个有效像素**均匀分段**，返回第 [inkIdx] 个像素是否是某一段的**首个**
+         * （段首 ⇒ 取点）。⇒ 恰好取 [targetCount] 个点，且沿**笔画宽度方向**也铺开
+         * （不是只贴着笔画的一侧 ⇒ 字不会变成「空心轮廓」）。
+         *
+         * @param inkIdx 本行第几个有效像素（0 起）
+         * @param rowInk 本行有效像素总数
+         * @param targetCount 本行要取的点数
+         */
+        internal fun isSegmentStart(inkIdx: Int, rowInk: Int, targetCount: Int): Boolean {
+            if (rowInk <= 0 || targetCount <= 0) return false
+            if (inkIdx < 0 || inkIdx >= rowInk) return false
+            // 段号 = 该像素落在第几段；段号变了 ⇒ 段首 ⇒ 取点。
+            // ⚠️ 乘法不会溢出：`inkIdx < rowInk ≤ bmpW`（≈4e3）、`targetCount ≤ MAX_PARTICLE_BUDGET`（1.2e4）
+            //    ⇒ 乘积 ≤ 5e7 < Int.MAX_VALUE。
+            val chunk = inkIdx * targetCount / rowInk
+            val prevChunk = if (inkIdx == 0) -1 else (inkIdx - 1) * targetCount / rowInk
+            return chunk != prevChunk
+        }
 
         // ── §B7 纯函数（`internal` 供门禁直接调；⛔ 测试不复制算法 —— 复制必然漂移）──
 

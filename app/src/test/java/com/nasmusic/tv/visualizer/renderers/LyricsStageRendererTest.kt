@@ -150,8 +150,12 @@ class LyricsStageRendererTest {
     }
 
     @Test
-    fun `the sub mode transition window is 300 milliseconds`() {
-        assertEquals(300L, LyricsStageRenderer.TRANSITION_MS)
-        assertTrue(LyricsStageRenderer.TRANSITION_MS > 0L)
+    fun `the sub mode transition window is disabled`() {
+        // ⛔ 淡入已关掉（2026-11-07）：`saveLayer(null, …)` 的图层是**整块画布**
+        //    （电视上 8.3 MB）⇒ 切换那几百毫秒每帧约 30 MB 的额外 GPU 流量
+        //    ⇒ 弱电视上切换本身掉到 10–20 fps。
+        //    淡入的实现**完整保留** ⇒ 把常量改回 300L 即可重新启用。
+        assertEquals(0L, LyricsStageRenderer.TRANSITION_MS)
+        assertTrue("淡入必须关着（<= 0 ⇒ 跳过 saveLayer 分支）", LyricsStageRenderer.TRANSITION_MS <= 0L)
     }
 }
