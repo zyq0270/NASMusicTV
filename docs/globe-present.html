@@ -288,6 +288,24 @@
           时不会变成「一座沙山」;再乘季节染色与大陆四季色调一致。
        ⑦ 树木 / 动物避开山体(mtnBlock)⇒ 不会埋在岩里。
       动画过程零缩放、无交互、无 CSP / 贴图异常。
+     v6.5 评审修复(2026-11-08,按 logs_temp/glb_probe/_review_report.md 逐条处理):
+       ① P0-1:frame() 的 flowerLight / flowerD 调试分支改为 debugMode 门控 ——
+         window.__globeDebug 常驻且恒真,此前不开 ?debug=1,夏季每帧仍多跑
+         约 900 次花朵 d 值重算 + 排序;修复后关闭时零开销。
+       ② P0-2:山高归一化注释与代码矛盾 —— 旧注释称归一化「把典型山势
+         (0.1~0.3)压到 0.005 半径、几乎看不见」,该算式对应早期
+         MTN_AMP≈0.0625;当前 MTN_AMP=0.185 数值复算 peak≈0.139 半径、
+         起伏带 0.02~0.08、63% 非零顶点 ≥1% 半径,山体清晰可见
+         (脚本 logs_temp/glb_probe/mtn_peak_check.mjs)。归一化保留为
+         最终决定,理由与测算写入行内注释。
+       ③ P1:grassGreenK / GRASS_GREEN 仅存于注释的误导清理(3 处:
+         草地底色头注释 / 四季过渡注释 / landSeason 色层注释):实现不是
+         「底色插值颜色」,是「枯黄强度 grassYellowK 在雪盖期退 0、
+         露出原贴图绿」,用户可见时序不变(秋→冬连续变白、冬→春消融显绿)。
+       ④ P2:pushFootprint 主动置 aAlpha.needsUpdate(新脚印 alpha 不再
+         延迟一帧);seasonW 双重 smooth01 补注释(有意平顶 S 曲线)。
+       硬约束不变:15 种动物 19 只 + 150 棵树、全部陆地贴地、零缩放、
+       无交互、无视觉异常。
 -->
 <canvas id="sky"></canvas>
 <canvas id="fx"></canvas>
@@ -449,10 +467,13 @@ window.__globeConfig = CONFIG;
    - bark:   树干 tint(乘法,棕色系)
    - flowers/snowGround/snowFall/leafFall: 0..1 的出现强度
    树冠色不在这里 —— 见 LEAF_SEASON(它是「绝对色」不是乘法系数)。 */
-/* 草地底色的两个端点(线性空间):
-   GRASS_YELLOW = 秋天枯草色;GRASS_GREEN = 常绿色。
-   两者之间的推进由 grassGreenK 控制 —— 只在雪完全盖住之后才走,
-   保证用户看到的是「黄 → 连续变白」,而不是「黄 → 变绿 → 再变白」。 */
+/* 草地底色的实现形态:uGrassColor 只有枯黄单档(GRASS_YELLOW);
+    「变绿」不插值颜色,而是枯黄强度 grassYellowK 在雪盖期内退回 0
+    (强度 0 ⇒ shader 直接露出原贴图绿)。时序:冬前段雪已全覆盖、
+    黄层在雪底退掉 ⇒ 雪消融时露出的就是原绿,用户只看到
+    「连续变白 ⇒ 白色连续显出绿」。
+    旧设计的 grassGreenK / GRASS_GREEN 仅停留在注释,未落地为代码,
+    现按实际实现修正表述(2026-11-08 评审 P1)。 */
 var GRASS_YELLOW = [0.72, 0.60, 0.26];
 var SEASON_PARAMS = [
   { ground: [0.94, 1.14, 0.94], bark: [1.00, 1.02, 0.96],
@@ -1362,8 +1383,15 @@ async function initApp() {
     if (e < 0.455) return 0;                      // 海面不长山
     var inland = clamp01((e - 0.47) / 0.05);       // 离岸衰减,山不直接顶到海岸
     if (inland <= 0) return 0;
-    // ⚠️ 直接用 m,不要再做 (m-MTN_MIN)/(1-MTN_MIN) 的归一化:
-    //    那一步会把典型山势(0.1~0.3)压到 0.005 半径 ⇒ 山几乎贴地看不见。
+    // 【最终决定】保留 (m-MTN_MIN)/(1-MTN_MIN) 归一化。理由:归一化后
+    //    MTN_AMP 即峰高的绝对上界,与噪声场幅值(pow3 指数 / seed 漂移)
+    //    解耦 —— 重调种子不会把山体整体抬高或压没。
+    //    旧注释的"归一化把典型山势压到 0.005 半径 → 几乎贴地看不见"是
+    //    MTN_AMP≈0.0625 时代的算式;当前 MTN_AMP=0.185 数值复算
+    //    (logs_temp/glb_probe/mtn_peak_check.mjs,elevation 用未烘焙兜底近似):
+    //    peak ≈ 0.139 半径、起伏带 0.02~0.08、63% 非零顶点 ≥1% 半径,
+    //    山体清晰可见;且归一化与"直接用 m"在峰处仅差 0.7%、典型山坡差
+    //    ≈15% ⇒ 视觉上可互换,保留边界稳定这一优势。
     return (m - MTN_MIN) / (1 - MTN_MIN) * MTN_AMP * inland;
   }
   // 该点是否在山体上(树木 / 动物落点要避开)
@@ -2320,6 +2348,10 @@ function makeBlackTexture() {
     fSize[i] = size || 0.020; fAlpha[i] = 1; fBorn[i] = performance.now();
     fGeo.attributes.position.needsUpdate = true;
     fGeo.attributes.aSize.needsUpdate = true;
+    // 新脚印的 alpha 由上帧旧值变为 1;updateFootprints 只在检测到
+    // alpha 差异时才置 needsUpdate ⇒ 旧流程下这一帧的新脚印 alpha
+    // 延迟一帧生效(评审 P2,2026-11-08:主动置脏更稳健)。
+    fGeo.attributes.aAlpha.needsUpdate = true;
   }
   function updateFootprints(now) {
     var dirty = false;
@@ -3148,6 +3180,9 @@ function makeBlackTexture() {
     var si0 = Math.floor(sf) % 4, si1 = (si0 + 1) % 4, st = smooth01(sf - Math.floor(sf));
     var P0 = SEASON_PARAMS[si0], P1 = SEASON_PARAMS[si1];
     var SNOW_BLEND = 0.30;          // 过渡带占一季的比例(末尾 30%)
+    // st 已是过渡进度,带内再 smooth01 ⇒ S 曲线(两头慢、中部快):
+    // 前 70% 恒为本季值、季末才快速过渡 —— 有意的「本季稳定表现期」
+    // 设计,不是时序误差(2026-11-08 评审 P2:补此注释)。
     var seasonW = (function () {
       var w = (st - (1 - SNOW_BLEND)) / SNOW_BLEND;
       if (w <= 0) return 0;
@@ -3191,10 +3226,11 @@ function makeBlackTexture() {
     // ⚠️ 草地「黄→绿」必须【等雪完全盖住之后】才推进(用户 2026-11-07 明确指出):
     //    之前草地色是跨整季 lerp(秋黄→冬绿)⇒ 深秋时草地已经在变绿,
     //    叠上渐渐泛白的雪 ⇒ 看到的是「先黄变绿,再逐渐变白」,顺序反了。
-    //    正确:黄色一直保持 ⇒ 白色连续盖上来(黄→白);
-    //          雪覆盖满后,底色才在白色遮盖下悄悄变绿(看不见);
-    //          冬春交界雪消融 ⇒ 白色连续显出绿色。
-    //    grassGreenK = 底色由黄转绿的进度,只在雪覆盖率高时推进。
+    //    实现注记:「变绿」不插值底色 —— 底色恒为枯黄单档,
+    //      时序交给 grassYellowK 在冬季雪盖段撤销强度(见下冬分支):
+    //      黄色保持 ⇒ 白色连续盖上来(黄→白);黄底色→原贴图绿的切换
+    //      在雪盖下完成(看不见);冬春交界雪消融 ⇒ 白色连续显出绿。
+    //      (原设计命名 grassGreenK 即「底色黄→绿」的进度;代码中无此变量。)
     // ⚠️ 草地黄化强度 grassYellowK:
     //   0 = 完全露出【原贴图】的绿色(与春夏完全一致)
     //   1 = 完全变成枯黄
@@ -3374,7 +3410,7 @@ function makeBlackTexture() {
             if (nightF < 0.35) { _dR += flColBuf[fi2 * 3]; _dG += flColBuf[fi2 * 3 + 1]; _dB += flColBuf[fi2 * 3 + 2]; _dN++; }
             else if (nightF > 0.65) { _nR += flColBuf[fi2 * 3]; _nG += flColBuf[fi2 * 3 + 1]; _nB += flColBuf[fi2 * 3 + 2]; _nN++; }
           }
-          if (window.__globeDebug) {
+          if (debugMode) {
             window.__globeDebug.flowerLight = {
               day: _dN ? [+(_dR / _dN).toFixed(3), +(_dG / _dN).toFixed(3), +(_dB / _dN).toFixed(3)] : null,
               night: _nN ? [+(_nR / _nN).toFixed(3), +(_nG / _nN).toFixed(3), +(_nB / _nN).toFixed(3)] : null,
@@ -3382,7 +3418,7 @@ function makeBlackTexture() {
             };
           }
           // 调试:d 的分布 + 昼/夜平均色(核对昼夜调制是否真的生效)
-          if (window.__globeDebug) {
+          if (debugMode) {
             var _db = _fdDbuf; _fdDbuf = [];
             for (var fi4 = 0; fi4 < FLOW; fi4++) {
               var fd4 = fData[fi4];
@@ -3425,11 +3461,9 @@ function makeBlackTexture() {
         var lsu = landSeason.material.uniforms;
         lsu.uSnowAmt.value = snowA;
         lsu.uGrassAmt.value = grassA;
-        // 草地底色也逐季插值:秋(枯黄)→ 冬(常绿)。
-        // 秋冬交界时这层黄→绿的变化被逐渐增加的白色盖住 ⇒ 只看到「连续变白」;
-        // 冬春交界雪消融后 ⇒ 白色连续显出绿色。
-        // 草地底色:黄 → 绿,由 grassGreenK 控制(只在雪盖满后推进)
-        // 草地色只有一档(枯黄);强度=0 时 shader 直接露出原贴图绿
+        // 草地底色(枯黄)颜色恒定,不逐季插值;「黄→绿」时序见上:
+        // grassYellowK 在冬前雪盖期(雪已满盖)把强度降回 0 ⇒ 变色在
+        // 白色遮盖下完成,shader 强度=0 时直接露出原贴图绿。
         lsu.uGrassColor.value.setRGB(GRASS_YELLOW[0], GRASS_YELLOW[1], GRASS_YELLOW[2]);
       }
     }
