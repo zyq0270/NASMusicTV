@@ -25102,3 +25102,68 @@ Puppeteer + 本机 Edge 真实渲染：
 **另修一处随机源反模式**：v1.1 §4.1/§4.5/§4.6 用自建 `LCG(20261108)` 固定种子 ⇒ 撞上仓库明文禁忌
 「不能给所有渲染器同一个常量种子 —— 那样每个渲染器的首帧图案会完全一致（交叉淡入时两层图案重合），且每次进入都重复同一套图案」
 （`VisualizerRandom.kt:17-19`）⇒ v1.2 改用基类 `protected val rng`；单测需要可复现时**另起名**注入种子（⛔ 不得命名为 `rng`）。
+
+### 10.354 v2.39.13（**未升版**） —— E41「世界」原生 OpenGL ES 重写方案（新建 `docs/e41-globe-opengl-plan.md`）（2026-11-08）
+
+所有者指示「除 E41 的技术路线外还有没有别的 3D 地球实现方式」后，做了全仓渲染技术栈盘点并起草 GL 重写方案。
+
+**盘点结论（本仓已有两条非 WebView 路线的实据）**：
+- **原生 OpenGL ES**：E52「旷野公路」已在私有分支 + 本地覆盖层落地一整套
+  （`GLSurfaceView` + `GLES20` + 自写 ESSL + VBO + 自写投影矩阵 + 自适应画质 + 主线程↔GL 线程数据桥），
+  且在**同一台创维机**（PowerVR Rogue G6110 / GL ES 3.1）真机跑通 ⇒ 「手写 OpenGL ES 成本过高」这条 2026-09 的判断已被证伪。
+- **Canvas 2D 伪 3D**：旧 E41 2D 版（`WorldRenderer.kt`，2106 行 / 12 层 / Robinson 平面地图）于 2026-09-28 引入 →
+  09-29 被 3D 版取代 → 10-06 作为零实例化死代码删除 ⇒ **已被 D6 裁决封死**（`docs/archive/visualizer-texture-upgrade-plan.md:4476`）。
+
+**方案要点**（`docs/e41-globe-opengl-plan.md`）：
+1. **动机**：§10.215 记录 E41 曾把地球整体重写为原生 three.js 并真机验证画面正确，随后**全部回退** ——
+   阻断点不在 three-globe 而在**宿主**（电视系统 WebView 被 Compose `AndroidView` 承载时只画首帧，
+   已排除 `preserveDrawingBuffer`/`LAYER_TYPE_SOFTWARE`/`onResume`）⇒ **只要还用 WebView 就有这个天花板**。
+   连带后果：E41 被门控 `Tier.ULTRA` ⇒ 只有 HIGH 画质档提供 ⇒ **老电视根本看不到这个效果**。
+2. **可复用资产盘点**：4 张贴图（`earth_lit/earth_night/earth_glow` 2048×1024 + `moon.jpg` 1024×512，⚠️ **`moon.jpg` 与 E44 共用**）+
+   `WorldCities`（37 座）+ `WorldNetwork`（航线算法）+ `BeatClassifier`；
+   ⛔ `WorldProjection` / `WorldTerminator` / `WorldMapData` 三类**零生产调用点**（2D 遗留，可删）。
+3. **数值移植表**：相机（fov 50 / near 50 / far 1000 / z 260）、地球半径 100、**网格实测 90×45**（`globe.js` 注释写的 180×90 是错的）、
+   **yaw 原生实现 = 0**（`-π/2` 是 three-globe 的朝向补偿，不是地理事实，§10.215 已定案）、
+   大气层（外径 116 + `pow(0.1+dot(n,v), 3.5)`）、夜面片元（`smoothstep(0.10,-0.10,ndl)` + 灯光 ×2.6 + `alpha` 封顶 0.85）、
+   自转 0.00022 rad/帧、太阳/月亮/星空的全部参数、航线弧高公式与三级配色、100 ms 数据下发节奏。
+4. **渲染设计**：球体提细到 180×90；**昼面 + 夜面 + 大气合并进 1 个 program**（规避创维 PVRShaderCompiler ~5s/变体的编译慢）；
+   光点用 `GL_POINTS`（⛔ `gl_PointSize` 必须 clamp 64 px，E52 真机「巨大黑带」教训）；航线用 slerp + 管的等价实现；
+   星空两层 1880 点；月亮挂独立 pivot（⛔ 绝不挂地球下）。
+5. **档位下放**（最大用户可感知收益）：GL 版无黑屏 ⇒ E41 的 ULTRA 限定理由自动失效 ⇒ 可下放到 ADV/三档全可选
+   （数量按 `ctx.quality` 自分档 ⇒ `needsParticleBudget = false`）⇒ **老电视也能用**。⚠️ 这是行为变更，需所有者裁决。
+6. **风险清单 13 项**（含 E52 真机教训：点精灵爆炸 / 上下文丢失重建顺序 / 触摸与焦点被吃掉 / divisor 全局状态 /
+   16 位索引上限 / 帧率徽章说谎 / `ctx.songId` 在 View 旁路下永远是旧值 / **GL 线程不随 Activity 生命周期 ⇒
+   `MainActivity`→`GlHolder` 链在 main 与私有分支上均未接线**）。
+7. **里程碑 8 个 Phase**，约 **32~46 工作日**（共享 GL 层占 5~8 天）。
+8. ⚠️ **设备操作边界**（所有者 2026-11-07 明示）：真机验证段明确标注**须由所有者本人执行**（装包 / 运行 / 截图）。
+
+### 10.355 v2.39.13（**未升版**） —— 频谱开发文档 v2.0 —— 渲染栈由 Compose Canvas 改为原生 OpenGL ES（2026-11-08）
+
+按所有者指示「用 OpenGL ES 方案改本文档」，`docs/stellar-spectrum-plan.md` 由 v1.2（Canvas 2D）重写为 v2.0（原生 GL）。
+
+**视觉规格逐条保留**（星空 / 大气 / 频谱条 / 波形 / 粒子 / 流星 / 季节 / 昼夜全部不变），**渲染实现整体换栈**：
+
+| 层 | Canvas 2D（v1.2） | OpenGL ES（v2.0） |
+|---|---|---|
+| 载体 | Compose `DrawScope` + `RendererFx` 基类 | `GLSurfaceView` + `GLES20`，**View 型旁路** |
+| 大气渐变 | ⛔ 连续插值 ⇒ 逐帧重建 `Brush` = 每帧分配 | ✅ 片元着色器算，零分配 |
+| 星点闪烁 | ⛔ 逐点 alpha ⇒ 只能逐颗 `drawCircle` | ✅ per-point alpha attribute ⇒ **1 次 `GL_POINTS`** |
+| 频谱条圆角 | 每条一次 `drawRoundRect` | ✅ 片元 SDF 圆角 ⇒ **64 根合并成 1 个 VBO 1 次 draw** |
+| 波形 / 粒子 / 流星 | 逐段 / 逐颗绘制 | ✅ `GL_LINE_STRIP` / `GL_POINTS` / quad |
+| 每帧 draw call | ~300 | **≤ 8** |
+| 帧率时钟 | 基类 `fx.dt`（`FrameClock`） | GL 线程自算 `System.nanoTime()` 差分（⛔ 不用 `frame.timeMs`：那是 30 Hz 音频帧时钟，会抖） |
+
+**关键设计点**：
+1. **program 合并到 3 个**（`bg` / `sprite` / `line`）⇒ 规避创维 PVRShaderCompiler ~5 s/变体；首帧只 `glClear` + 逐帧预热。
+2. **不用 instancing**：创维机无 `GL_EXT_instanced_arrays`（E52 实测），且 `glVertexAttribDivisor` 是按属性索引的**全局状态**
+   （少复位一次 ⇒ 后续绘制顶点全读第 0 个元素 ⇒ 三角形退化）⇒ 改用**每帧动态 VBO**（上传 ≈ 82 KB/帧，可忽略）。
+3. **点精灵尺寸必须 clamp 64 px**（E52 真机「巨大黑带」教训）。
+4. **数据桥**：`GlBridge` 频谱特化，比 E52 的 `HighwayBridge` 多带 `waveform[128]`（E52 的桥**没有** waveform 字段）。
+5. **门禁变化**（View 型 ⇒ 与 Canvas 路径完全不同）：`FxCoverageScanTest` ⇒ 必须登记 `exempt`；
+   `RendererBaseContractTest`（G12）⇒ **不适用**（只扫 `RendererFx` 子类）；`ParticleBudgetGateTest` ⇒ 不读 `maxParticles`
+   ⇒ 枚举 `needsParticleBudget = false`；G1 双语 strings 仍适用。
+6. **与 E41 方案共用** `visualizer/gl/` 共享层（`GlHost`/`GlBridge`/`GlCaps`/`GlProjection`/`GlShader`）⇒
+   ⚠️ 与私有覆盖层里 E52 的同类件冲突 ⇒ 建议收敛到共享层（改覆盖层副本 + `sync_private_overlay.py` 同步）。
+7. **档位下放**：不读 `maxParticles` ⇒ `needsParticleBudget = false` ⇒ 三档全可选（LOW 档 `maxParticles = 0` 的坑）。
+
+**里程碑 6 个 Phase**，约 **17~26 工作日**（不含共享层；共享层与 §10.354 合并计算）。
