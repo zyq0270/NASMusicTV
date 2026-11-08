@@ -127,6 +127,14 @@ JAVA_HOME="C:/Program Files/Android/Android Studio/jbr" \
 - ⛔ **Kotlin 的块注释是「可嵌套」的**：注释里写 `assets/globe/**` 会被词法器当成**嵌套注释的开始** ⇒ 外层那个 `*/` 只关掉内层 ⇒ `Syntax error: Unclosed comment`（2026-11-04 写门禁 KDoc 时真踩了）。注释里要表达「某目录下全部」就写 `assets/globe/`（**不带 `**`**）。
   - ⚠️ **2026-11-06 又踩一次**（在 `VisualizerRendererFactory.kt` 的注释里写了 `` `qianli/port/**` `` ⇒ 整个 main 源集编译失败 ⇒ **同时打断 4 条并行 lane 的构建**）。报错位置还指着「第 1 行」，**极具误导性**。
   - ✅ **现在有编译前的检查器**：`python scripts/kotlin_comment_balance.py`（从仓库根跑）⇒ 模拟 Kotlin 的可嵌套语义逐字符扫描，**不配对就退出码 1**。改完 Kotlin 源码后**先跑它**再跑 Gradle。
+- ⛔ **Kotlin 里「换行后以 `+` 开头」不是续行，是一条独立语句**（一元正号）⇒ 写成
+  ```kotlin
+  val span = a * b
+          + c * d      // ⛔ 这两行是**独立表达式语句**（无副作用）⇒ span 只等于 a * b
+  ```
+  就**静默丢掉后两项**（2026-11-08 写 `HighwaySkyFog.range` 时真踩了：字节码里后两项直接 `pop2`
+  扔掉 ⇒ 深度算成 0 ⇒ 雾距退化成 `1.0`，编译与单测都"绿"得毫无异样，只有门禁的数值断言能抓住）。
+  ⇒ **一律把 `+` 留在行尾**（`val span = a * b +` 换行续写）；跨行算式优先用括号或显式 `add()`。
 - **Doc writing style (user-mandated, 2026-09-20)**: `README.md` lists **features only** — user-facing, concise, drop minor/implementation-level items. `CHANGELOG.md` entries state **what was done only** — one line each, **no root cause, no implementation detail, no source line numbers, no verification narrative**; all of that belongs in `docs/technical-overview.md` §10.N. Touch **only the current version's section** — never rewrite historical sections.
 - ⛔ **Never `reject()` in `MediaSession.Callback.onConnect`** (root cause of "car Bluetooth media buttons dead", §10.165). System-side controllers (Bluetooth AVRCP / SystemUI / car) arrive via the framework `MediaController` and Media3 routes them through `MediaSessionLegacyStub.tryGetController() → onConnect`; rejecting makes Media3 drop the command silently. Put the security boundary in `setAvailableSessionCommands` instead — and since that is **strict set membership** (not additive), only ever **add to** `DEFAULT_SESSION_AND_LIBRARY_COMMANDS`. Gate: `MediaSessionAccessPolicyTest`. ⚠️ Only reproducible in **release** builds.
 
@@ -333,15 +341,19 @@ JAVA_HOME="C:/Program Files/Android/Android Studio/jbr" \
   ⚠️ `app/build.gradle.kts` 里两道护栏：E51 源码存在性 + E52 源码/资产存在性与清单校验
   （开关打开却没有真源码 ⇒ 直接 `GradleException`，不编「主题可选、效果是兜底」的假包）。
 
-  ⭐ **E52 天空的口径（所有者 2026-11-08 裁决）**：「**每个景色都要云与天在地平线处融进雾色**」
-    · **天顶色**固定取**场景默认天气**的 `skyCol`（Hills 0x68A9F8 / Planet 0x4F4D4A）⇒ 天空**永远有渐变**。
-      （天气表里有一批天气 `skyCol == skyColFar` —— `night`/`moon`/`venus`/`rain` 那些 ——
-      ⛔ 逐天气取它 ⇒ 天空退化成**一整块底色**，云层压在上面 ⇒ 就是 2026-11-08 那次反馈的现象。）
-    · **地平线色** = 当前天气的**雾色**（`HighwayGlScene.drawSky`：`val far = envLook.fogColor`）
-      ⇒ 天空下缘与地形/远景的雾**同色** ⇒ 地平线连续无缝；云与天在同一 shader 里合成 ⇒ 地平线处一起融进雾色。
-    · ⛔ **与上游不同**（上游天色逐天气换）⇒ 这是**观感调整**、不是移植缺陷 ⇒ 记录在 §10.366。
-    · ⛔ 改这两处**不要碰着色器**（`HighwayGlsl.kt` 是生成物、有逐字门禁）⇒ 改的只是 uniform 取值。
-    · 门禁：`HighwaySkyBlendGateTest`（3 例：逐天气天顶色不变 / 纯色天也必须有渐变 / 源码扫描雾色口径）。
+  ⭐ **E52 天空的口径（所有者 2026-11-08 裁决）**：「**要雾化的是云层与天空的交界**」
+    · **天空用自己那套雾距**（`world/HighwaySkyFog.kt`）：近端 = 天空平面深度跨度 × `0.15`、
+      远端 = 跨度 × `1.0`（= 视线方向上天空平面**可见边缘**的视空间深度，真机位姿 ≈ **2655**）。
+      ⛔ **不要**再拿天气的 `pe·fogNear / pe·fogFar` 给天空 ⇒ 天气表里有一批天气 `fogNear = 0`
+      （`sunrise`/`sunset`/`twilight`/`rain`…）⇒ **整片可见天空被雾洗成一块底色**、
+      云层被挤到屏幕最上一条 ⇒ 就是 2026-11-08 那次反馈的现象（§10.366）。
+    · **雾色不变**（仍是当前天气的雾色）⇒ 云与天在地平线处**融进雾色**；
+      远端取「可见边缘深度」⇒ 那里雾正好 = 1 ⇒ 与地形剪影（同一片雾）接得上、不露浅色板。
+    · **天色逐天气取**（上游口径 `weather.skyCol / weather.skyColFar`）⇒ ⛔ 别改成「固定取场景默认天色」
+      （那会让**夜间天色变成白天的蓝**；同一轮做过、已撤销 ⇒ §10.366 §五）。
+    · ⛔ **不要碰着色器**（`HighwayGlsl.kt` 是生成物、有逐字门禁）⇒ 改的只是天空 program 的 uniform 取值。
+    · 门禁：`HighwaySkyBlendGateTest`（4 条：天色逐天气 / 纯色天照旧取 / `HighwaySkyFog.range` 口径 / 源码扫描雾距口径）。
+    · 离线模拟器：`scripts/e52/sky_sim.py`（私有）⇒ 能一次渲染 Hills 全部天气并出拼图对比。
 
 ### Doc lifecycle (archive rule — user-mandated, 2026-09-20)
 

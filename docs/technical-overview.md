@@ -25586,48 +25586,92 @@ APK 里的 `globe.js` 必须含 `var cloneSkeleton`；`index.html` 里不得再�
 **与本次归档无关**（E54 旧路径零命中）；其中 `docs/light-theme-plan.md`（`Theme.kt` 的 KDoc）
 在 `docs/archive/README.md` 里**早已登记为已知遗留**。
 
-### 10.366 v2.39.14 —— E52「旷野公路」第二十四轮：**切换景色后天空退化成一块底色**（天色逐天气取 ⇒ 纯色天）＋「每个景色都要云与天在地平线处融进雾色」（2026-11-08）
+### 10.366 v2.39.14 —— E52「旷野公路」第二十四轮：**切换景色后天空退化成一块底色**（根因 = 天空与地形共用同一套雾距）＋「要雾化的是**云层与天空的交界**」（2026-11-08）
 
-#### 一、现象（所有者 2026-11-08 反馈）
+#### 一、现象与两轮澄清
 
-开屏景色（丘陵 · 夏季 · 晴朗）的**云层与天空是雾化融合的** ✔；
-切到别的景色后 ⇒ **云层还占着上面**，**天空却变成一块底色** ⛘。
+- 所有者反馈（第一轮）：开屏景色（丘陵 · 夏季 · 晴朗）的**云层与天空是雾化融合的** ✔；
+  切到别的景色后 ⇒ **云层还占着上面**，**天空却变成一块底色**。
+- 所有者澄清（第二轮，**推翻第一轮的口径**）：
+  「**我需要雾化的不是地平线，不是天空和地面的交界。而是要雾化云层和天空的交界**」
+  ⇒ 第一轮把它读成「地平线处的雾」是**错的**；真正要雾化的是**云层与天空之间那条交界**。
 
-#### 二、两个根因
+#### 二、根因（用离线模拟器量化，不是猜）
 
-1. **天色逐天气取 ⇒ 纯色天退化成一块底色**
-   天气表里有一批天气的 `skyCol == skyColFar`（`night` #121114、`moon` #111110、`venus` #C0A226、
-   `rain` / `autumnRain` / `springRain` / `winter` 近似相等）⇒ **那块天色本来就是纯色**
-   ⇒ 逐天气取它 ⇒ 天空渲染成**一整块纯色**（＝用户说的「底色」），而云层（白）压在上面。
-   ⚠️ 上游确实逐天气换天色（`weather.skyCol` / `weather.skyColFar`，方案 §2.3 的「weather → 天空色
-   `nearCol/farCol`」）⇒ **这不是移植缺陷**，是上游数据 + 观感问题。
-2. **地平线色不是雾色 ⇒ 云与天在地平线处接不上**
-   天空下缘用地平线色、地形/远景用雾色 ⇒ 两者不同色 ⇒ 云带下缘与地形之间有缝；
-   §10.343 让天空参与雾之后，雾只覆盖了**远处那一条**（雾距按 `pe·fogNear` 起算，`clear` = 700）。
+**天空用的是和地形同一套雾距** —— 上游天空材质是 `MeshBasicMaterial({ fog: true, … })`
+⇒ 天空与地形共用同一套 `Fog(col, pe·fogNear, pe·fogFar)`（`pe = 1400`）。
 
-#### 三、修法（所有者裁决：**每个景色都要云与天在地平线处融进雾色**）
+量化（`scripts/e52/sky_sim.py`，逐行复刻相机 / 天空平面 / 上游 `D1068`·`D1080` / three.js `fog_fragment`）：
 
-| 部位 | 改前 | 改后 |
+| 天气 | `fogNear`（× pe） | 可见天空带的深度范围 | 结果 |
+|---|---|---|---|
+| `clear` 一族 | 0.1 ~ 0.5 | 569 ~ 2655 | 雾只洗到地平线附近 ⇒ **上层保留云层** ⇒ 「雾化融合」✔ |
+| `sunrise` / `sunset` / `twilight` / `rain` / `autumnRain` … | **0** | 同上 | **整片可见天空被雾洗成一块底色** ⇒ 云层被挤到屏幕最上一条 ⛘ |
+
+⇒ 「云层占上面、天空还是底色」= **雾的浓度由地形的雾距决定**，而地形的雾距是按「地形可见范围」定的；
+天气表里有一批天气 `fogNear = 0` ⇒ 天空被整片洗平。
+（真机位姿下的关键数字：相机俯仰 `PITCH_NEAR = 0.3` rad ⇒ 地平线在屏幕上方约 25% 处；
+天空平面 `y = 200`、半宽 `ue ≈ 2838` ⇒ 可见天空带 = 视空间深度 **569（屏幕顶）~ 2655（地平线处）**。）
+
+#### 三、修法：天空用**自己**那套雾距（雾色不变）
+
+| | 改前 | 改后 |
 |---|---|---|
-| **天顶色**（`uNearCol`） | 当前天气的 `skyCol`（纯色天 ⇒ 一块底色） | **场景默认天气的 `skyCol`**（Hills 0x68A9F8 / Planet 0x4F4D4A）⇒ 天空**永远有渐变** |
-| **地平线色**（`uFarCol`） | 当前天气的 `skyColFar` | **当前天气的雾色**（`envLook.fogColor`）⇒ 天空下缘与地形/远景的雾**同色** ⇒ 地平线连续无缝；云层与天空在同一 shader 里合成 ⇒ 地平线处**一起**融进雾色 |
+| 天空的雾**近端** | `pe · weather.fogNear`（**逐天气**，有天气 = 0） | **天空平面深度跨度 × 0.15**（`HighwaySkyFog.NEAR_FRACTION`） |
+| 天空的雾**远端** | `pe · weather.fogFar` | **天空平面深度跨度 × 1.0**（`FAR_FRACTION`）= 视线方向上天空平面可见边缘的视空间深度（真机位姿下 ≈ **2655**） |
+| 天空的雾**颜色** | `weather.col` | **不变**（仍是当前天气的雾色）⇒ 云与天在地平线处**融进雾色** |
+| 天色 `nearCol` / `farCol` | 逐天气 `skyCol` / `skyColFar` | **不变**（上游口径） |
 
-- 代码：`HighwayEnvApply.applySelection`（天顶色改取场景默认天气）+ `HighwayGlScene.drawSky`（地平线色改取雾色）。
-- ⛔ **着色器一个字没改**（`HighwayGlsl.kt` 是生成物、GLSL 逐字门禁仍绿）⇒ 改的只是 uniform 的取值。
-- ⚠️ 与上游不同（上游天色逐天气换）⇒ 这是**所有者裁定的观感调整**，不是移植缺陷 ⇒ 记录在此。
+- 新增纯逻辑类 `world/HighwaySkyFog.kt`（可单测）：算「天空的深度跨度」与雾距。
+  深度跨度 = **视线在水平面的投影方向上、离开天空平面正方形边界的那一点**的视空间深度
+  ⇒ 相机偏航多少都成立，且那里雾正好 = 1 ⇒ 与地形剪影（同一片雾）接得上、不会露出浅色板。
+- ⛔ **着色器一个字没改**（`HighwayGlsl.kt` 是生成物、逐字门禁仍绿）⇒ 改的只是喂给天空 program 的 uniform 值。
+- ⚠️ 与上游不同（上游天空与地形共用雾距）⇒ 这是**所有者裁定的观感调整**，不是移植缺陷。
+
+效果（模拟器并排对比，Hills 全部 18 个天气）：`clear` 一族**几乎不变**（保住所有者喜欢的初始景色），
+其余天气从「一块底色」变成「上层云层 + 宽幅渐变融进雾色」。
 
 #### 四、门禁
 
-新增 `app/src/test/java/com/nasmusic/tv/visualizer/highway/HighwaySkyBlendGateTest.kt`（3 例）：
+重写 `HighwaySkyBlendGateTest.kt`（4 条）：
 
-1. **天顶色 = 场景默认天色**：逐 cursor × 逐天气断言 `env.skyCol` 不随天气变；
-2. **纯色天也必须有渐变**：把 `skyCol == skyColFar` 的天气逐个点出来（并断言天气表里至少 3 个），
-   要求它们的 `env.skyCol` ≠ 那个纯色；
-3. **源码扫描**：`drawSky` 的地平线色必须是 `envLook.fogColor`，且不许再出现 `val far = envLook.skyFar`。
+1. **天色逐天气取**（上游口径）⇒ `env.skyCol` / `env.skyColFar` 等于该天气自己的字段值；
+2. **纯色天照旧按上游取**（`night` / `moon` / `venus` …）⇒ 断言它们的 `env.skyCol` **等于**那个纯色；
+3. **`HighwaySkyFog.range` 口径** ⇒ 真机位姿下远端深度落在 2650..2660、近端 > 0 且 < 可见天空带起点（569）；
+4. **源码扫描** ⇒ 天空的雾距必须来自 `HighwaySkyFog.range(`（不许再用 `envLook.fogNear/fogFar`）、
+   雾色仍取 `envLook.fogColor`、地平线色回到 `envLook.skyFar`。
 
-#### 五、文件清单
+⚠️ 第 3 条的**数值断言不是凑数**：它当场抓住了一个**静默丢项**的坑 ——
+Kotlin 里「换行后以 `+` 开头的行」是**一条独立语句**（一元正号），**不是**上一行的续行
+⇒ `val span = a * b` 换行写 `+ c * d + e * f` 会**只保留第一项**（字节码里后两项直接 `pop2` 扔掉）
+⇒ 深度算成 0 ⇒ 雾距退化成 `1.0` ⇒ **编译通过、单测也只有这一条数值断言能看出来**。
+⇒ 已把 `+` 改到行尾，并把这个坑写进 `AGENTS.md` 的通用注意事项。
 
-- 改：`app/src/main/java/com/nasmusic/tv/visualizer/highway/HighwayGlScene.kt`（`drawSky` 的地平线色 + `EnvLook.skyFar` 的注释）
-- 改：`app/src/main/java/com/nasmusic/tv/visualizer/highway/world/HighwayEnvApply.kt`（天顶色取场景默认天气 + KDoc）
-- 新增：`app/src/test/java/com/nasmusic/tv/visualizer/highway/HighwaySkyBlendGateTest.kt`
+#### 五、⛔ 同轮被撤销的改法（留档，防止再犯）
+
+同一轮里先做过「**天顶色固定取场景默认天色 + 地平线色取雾色**」⇒ **已撤销**：
+
+- 那是把「雾化云/天交界」误读成「雾化地平线」；
+- 而且**天色逐天气取才是上游口径**（`weather.skyCol` / `weather.skyColFar`），
+  改成固定值会让**夜间天色变成白天的蓝**。
+
+⇒ 正确做法是**让雾的浓度由天空自己的深度跨度决定**，而不是改天色。
+
+#### 六、离线模拟器（可复现证据）
+
+`scripts/e52/sky_sim.py`（**私有分支**，⛔ 不外发）：逐行复刻相机（`HighwayCamera.computeUpstream`）、
+天空平面（`upstreamHorizonDistance` / `SKY_OFFSET`）、上游 `D1068` / `D1080`、three.js `fog_fragment`、
+贴图（`REPEAT` + mipmap + **alpha 预乘**，Android `BitmapFactory` 默认）、天气表（`HighwayEnvironmentCatalog`）
+⇒ 一次渲染 Hills 全部 18 个天气并出拼图对比。
+
+⛔ 它只复刻**天空这一路**（地形 / 路面 / 植被不在内）⇒ 观感结论仍需真机复核。
+
+#### 七、文件清单
+
+- 新增：`app/src/main/java/com/nasmusic/tv/visualizer/highway/world/HighwaySkyFog.kt`
+- 改：`app/src/main/java/com/nasmusic/tv/visualizer/highway/HighwayGlScene.kt`（`drawSky` 的雾距 + 撤销地平线色改动 + 新增 `skyHalfSize`）
+- 改：`app/src/main/java/com/nasmusic/tv/visualizer/highway/world/HighwayEnvApply.kt`（撤销「天顶色取场景默认天色」）
+- 改：`app/src/test/java/com/nasmusic/tv/visualizer/highway/HighwaySkyBlendGateTest.kt`（重写）
+- 新增：`scripts/e52/sky_sim.py`（离线模拟器）
 - ⛔ 本节涉及的 E52 代码**只在私有分支** `feat/e51-private`（上游 Slow Roads 无授权 ⇒ 不外发）
+
