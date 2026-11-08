@@ -25446,18 +25446,24 @@ E41 的 `assets/globe/` 与 `WorldGlobeRenderer.kt` **零改动**。
   （16 GLB + 6 贴图 + 3 文件），未压缩 6,935,798 B / **APK 内压缩后 3,607,550 B**
   ⇒ 实际增量比方案预估的 6.6 MB 更小。
 
-**⚠️ 全量单测暴露的 3 处门禁返修**（`testDebugUnitTest` 全量跑，不是只跑 5 个门禁类）：
+**⚠️ 全量单测暴露的门禁返修**（`testDebugUnitTest` **全量**跑 287 类 / 2895 例，⛔ 不是只跑 5 个门禁类）：
 
-1. **`VisualizerThemeTest` 硬编码条目数 `27` → `28`**（连同 `selectable` 的 `25 → 26`、
-   照片墙开/关两份列表的 `24/25 → 25/26`、编号互异与显示名互异两处）。
-   ⚠️ 这类**计数断言**是新增效果时最容易漏的：其它门禁只查「集合是否自洽」，查不出「个数对不对」。
-2. **`UpstreamOriginalsHygieneTest` 白名单补 `assets/eco-globe/`** —— 它只允许 `assets/globe/` 与
+1. **`VisualizerThemeTest` 硬编码条目数 `27` → `28`** —— 条目总数、`selectable`（`25 → 26`，两处）、
+   照片墙开/关两份列表（`24/25 → 25/26`）、编号互异、显示名互异，**共 6 处**。
+2. **`StarrySkyTest`（E42 的门禁）** —— 「注册链 枚举 工厂 计数三处一致」里又一处硬编码 `27` → `28`。
+3. **`UpstreamOriginalsHygieneTest` 白名单补 `assets/eco-globe/`** —— 它只允许 `assets/globe/` 与
    `assets/lx/`，新增目录会被判「上游原件混入」。**依据**（AGENTS.md 的授权判据）：
    `globe.js` 由本项目自己的 `scripts/build_eco_globe_page.py` 从 `docs/globe-present.html`
    （本项目自有演示页）生成；`loaders.es5.js` 是把 **MIT 授权**的 three.js addons
    （GLTFLoader / SkeletonUtils）用本项目自己的 `build_loaders.mjs` 打包而成
    ⇒ **不是「无授权的上游原件」**（MIT 允许再发布），补进白名单并写明理由。
-3. **`PrivateOverlayDriftGateTest`** —— 见下。
+4. **`PrivateOverlayDriftGateTest`** —— 见下。
+
+⚠️ **教训（很贵）**：硬编码的效果计数**散落在多个测试文件**（效果门禁在 `VisualizerThemeTest`、
+E42 门禁在 `StarrySkyTest`），且**只跑自己关心的门禁类会漏**（第一轮 30 例全绿，全量却红 3 类；
+修完再跑全量，又冒出第二轮才暴露的 2 处漏改，其中一处我只改了注释、漏了断言本身）。
+⇒ 正确做法：新增枚举项后**先 `grep` 整个 `app/src/test/java` 的全部 `entries.size` / 套数断言**再逐个对账，
+然后**跑全量**。
 
 ⚠️ **私有分支处置**：漂移门禁会逐字节比对 `app/src/e51-overlay/` 与 `feat/e51-private`
 ⇒ 在覆盖层工厂里加 `ECO_GLOBE` 分支后立刻变红（漂移 1 处：`VisualizerRendererFactory.kt`）。

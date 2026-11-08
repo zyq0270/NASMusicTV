@@ -419,6 +419,8 @@ Choreographer 口径对它是假读数（「显示 59 fps 但画面很卡」）�
 | `compileDebugKotlin` | **BUILD SUCCESSFUL in 3m 9s**（exit=0） |
 | `node scripts/eco_globe_vm_load_test.mjs` | **exit=0**：5 脚本按序加载；`THREE r160` / `ThreeGlobe` / `GLTFLoader` / `SkeletonUtils.clone` / `EcoGlobe.*` 全就位；`setAudio` 对合法/非法/null 均不抛；含「缺 three 时 loaders 明确报错」负向自证 |
 | 门禁单测（5 类） | **30 例全绿**：`FxCoverageScanTest` 8 / `GlobeAssetsHygieneTest` 8 / `ParticleBudgetGateTest` 5 / `VisualizerThemeStringsGateTest` 3 / `EffectFurnitureGateTest` 6 |
+| **全量** `testDebugUnitTest` | **287 类 / 2895 例 / 0 失败 / 0 错误 / 0 跳过**（两轮返修后，2026-11-08） |
+| `lintDebug` | 通过，无新增 error |
 
 ⚠️ vm 测试的 DOM 桩用 `Proxy` 兜底空操作 —— 白名单式桩会因页面新增 2D API 而**假红**。
 vm 里没有 WebGL ⇒ `boot()` 走 `catch` 分支属**预期**，不算失败。
@@ -456,20 +458,30 @@ vm 里没有 WebGL ⇒ `boot()` 走 `catch` 分支属**预期**，不算失败�
 | `VisualizerRendererFactory.kt` | 加 import + `ECO_GLOBE` 分支（与覆盖层那份一致） |
 | 4 个测试文件 | `VisualizerThemeTest`（计数 27→28）、`FxCoverageScanTest`（exempt + 下限 27→28）、`GlobeAssetsHygieneTest`（E54 三例）、`UpstreamOriginalsHygieneTest`（白名单加 `assets/eco-globe/`） |
 
-### 12.9 全量单测暴露的 3 处门禁返修
+### 12.9 全量单测暴露的门禁返修（**跑了两轮才收敛**）
 
-`testDebugUnitTest` 全量（2035+ 例）跑出 **3 类红**，都已修：
+⚠️ **只跑「与本次相关的 5 个门禁类」是不够的** —— 第一轮 30 例全绿，但**全量** `testDebugUnitTest`
+（287 类 / 2895 例）跑出 **3 类红**；修完再跑全量，又冒出**第二轮才暴露的 2 处漏改**。
+⇒ **教训：新增枚举项后必须跑全量，不能只跑自己关心的门禁类**。
 
-1. **`VisualizerThemeTest`** —— 硬编码的条目数 `27` → **`28`**（含 `selectable` 的
-   `25 → 26`、照片墙开/关两份列表的 `24/25 → 25/26`、编号互异与显示名互异两处）。
-   ⚠️ 这类**计数断言**是新增效果时最容易漏的：门禁类只查「集合是否自洽」，查不出「个数对不对」。
-2. **`UpstreamOriginalsHygieneTest`** —— 白名单只允许 `assets/globe/` 与 `assets/lx/` ⇒
-   新增 `assets/eco-globe/` 后被判「上游原件混入」。**依据**（AGENTS.md 的授权判据）：
-   `globe.js` 由本项目自己的 `scripts/build_eco_globe_page.py` 从 `docs/globe-present.html`
-   （本项目自有演示页）生成；`loaders.es5.js` 是把 **MIT 授权**的 three.js addons
-   （GLTFLoader / SkeletonUtils）用本项目自己的 `build_loaders.mjs` 打包而成（MIT 允许再发布）⇒
-   **不是「无授权的上游原件」**，补进白名单并写明理由。
-3. **`PrivateOverlayDriftGateTest`** —— 见 §12.8。
+| # | 门禁 | 现象 | 修法 |
+|---|---|---|---|
+| 1 | `VisualizerThemeTest` | 硬编码条目数 `27` → `28` | 条目总数、`selectable`（`25 → 26`，两处）、照片墙开/关两份列表（`24/25 → 25/26`）、编号互异、显示名互异 —— **共 6 处** |
+| 2 | `UpstreamOriginalsHygieneTest` | 新目录被判「上游原件混入」 | 白名单补 `assets/eco-globe/`，**并写明依据**（见下） |
+| 3 | `PrivateOverlayDriftGateTest` | 覆盖层 ↔ 隐藏分支漂移 1 处 | 见 §12.8（在 `feat/e51-private` 上同样落下改动） |
+| 4 | `StarrySkyTest`（E42 的门禁） | 「注册链 枚举 工厂 计数三处一致」里又一处硬编码 `27` | `27 → 28` |
+| 5 | `VisualizerThemeTest` 编号互异 | 第 1 轮**只改了注释、漏了断言本身** ⇒ 第二轮仍红 | `assertEquals(27, labels.distinct().size)` → `28` |
+
+⚠️ **第 4、5 条的共同教训**：**硬编码计数散落在多个测试文件里**（效果门禁在 `VisualizerThemeTest`、
+E42 门禁在 `StarrySkyTest`），只按「改了哪个枚举就改哪个测试」的直觉去找，必然漏。
+⇒ 正确做法：**先 `grep` 整个 `app/src/test/java` 找全部 `entries.size` / 套数断言**，再逐个对账
+（本次据此复查，确认除这两处外，其余计数断言都是**自推导**的 `VisualizerTheme.entries.size` 两边相等，或与效果数无关）。
+
+⚠️ 第 2 条的**依据**（AGENTS.md 的授权判据）：
+`globe.js` 由本项目自己的 `scripts/build_eco_globe_page.py` 从 `docs/globe-present.html`
+（本项目自有演示页）生成；`loaders.es5.js` 是把 **MIT 授权**的 three.js addons
+（GLTFLoader / SkeletonUtils）用本项目自己的 `build_loaders.mjs` 打包而成（MIT 允许再发布）⇒
+**不是「无授权的上游原件」**，补进白名单并写明理由。
 
 ### 12.10 遗留项
 
