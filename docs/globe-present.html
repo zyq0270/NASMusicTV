@@ -265,9 +265,6 @@
           表现是「花朵昼夜不变暗」、「雪花不飘落」、「落叶不飘落」。
           正确做法:反查 geo.attributes.position.array / .color.array 写它们
           (原 C14 光点就是用 pGeo.attributes.position.array 反查的)。
-          求昼夜系数,再压暗顶点色(去饱和 80% + 亮度压到 28% + 偏冷蓝)。
-          法线变换不用 matrixWorld(旧写法的 Matrix3.getNormalMatrix 算出全 NaN,
-          反而拆成 Rz(tilt)·Ry(earthRot) 解析式自算,不依赖渲染器的更新时序。
       硬约束不变:15 种动物 19 只 + 150 棵树、全部陆地贴地、
     V6.4 山脉层(2026-11-07):
        ① 路线 B(叠加山体,不动球面假设):地球本体保持完美球面 ⇒
@@ -1376,7 +1373,7 @@ async function initApp() {
   var mtnGeo = new THREE.SphereGeometry(1, MTN_W, MTN_H);
   var mtnPos = mtnGeo.attributes.position;
   var mtnAttr = new Float32Array(mtnPos.count);
-  var mtnPeak = 0, mtnLand = 0;
+  var mtnPeak = 0;
   for (var mi2 = 0; mi2 < mtnPos.count; mi2++) {
     var ix = mi2 % (MTN_W + 1), iy = (mi2 / (MTN_W + 1)) | 0;
     var mu = ix / MTN_W, mv = iy / MTN_H;

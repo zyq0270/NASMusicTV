@@ -24972,3 +24972,16 @@ Puppeteer + 本机 Edge 真实渲染：
 
 ⚠️ 期间一次误操作：在仓库外建了同名目录 `MyGithubSoftware\NASMusicTV`（少一层 `NasAudio`），
 把 A/B 脚本写错了地方 ⇒ `MODULE_NOT_FOUND`。已删除该目录，脚本归位到 `logs_temp/`。
+
+### 10.349 v2.39.13（**未升版**） —— 生态地球山脉层（审查后清理：死变量 + header 注释去重）
+
+对 §10.348 交付后的 `docs/globe-present.html` 做独立代码审查后的小清理（无功能性改动）：
+
+1. **`mtnLand` 死变量**：原第 1379 行 `var mtnPeak = 0, mtnLand = 0` 中的 `mtnLand`
+   声明后从未使用（既不赋值也不进 `window.__globeDebug` 输出）⇒ 删除该声明。
+2. **header 注释重复段**：V6.3 注释块里「求昼夜系数,再压暗顶点色… / 法线变换不用 matrixWorld…
+   拆成 Rz(tilt)·Ry(earthRot) 解析式自算」三行，在 ⑫–⑮ 条目之间又被粘贴重复了一遍（该三行
+   本身是⑪的文本）⇒ 删除重复段。
+
+验证：`node --check` 校验从页面抽取出的模块脚本语法（退出码 0）。本次改动是纯删除（注释 + 死变量），
+运行行为零变化，未重跑浏览器渲染验证。
