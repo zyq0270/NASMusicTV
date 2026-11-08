@@ -1,6 +1,6 @@
 ﻿# 频谱效果开发文档 —— 星际四季频谱
 
-> **版本**: v1.0（2026-11-08）
+> **版本**: v1.1（2026-11-08，按代码审阅意见全面对齐仓库真实接口）
 > **状态**: 开发方案评审
 > **关联**: `docs/globe-present.html`（视觉参考源）、`docs/technical-overview.md` §10
 
@@ -10,26 +10,31 @@
 
 ### 1.1 定位
 
-创建一个**独立的音乐频谱可视化效果**，在 NowPlaying 界面中作为播放背景呈现。视觉语言源自 `docs/globe-present.html`（生态地球）的美学体系——星空、大气光晕、四季色调、流星——但**全部用 Android 端 2D Canvas 实现**，不涉及 three-globe / WebView / 3D 地球的技术路线。
+创建一个**独立的音乐频谱可视化效果**，在 NowPlaying 界面中作为播放背景呈现。视觉语言源自 `docs/globe-present.html`（生态地球演示页）的美学体系——星空、大气光晕、四季色调、流星——但**全部用 Compose `DrawScope` 2D 绘制**，不涉及 three-globe / WebView / 3D 地球的技术路线。
 
-### 1.2 与「世界」效果的边界
+### 1.2 与既有渲染路径的边界
 
-| 「世界」效果（E41） | 本频谱效果 |
+> ⚠️ 归因澄清：`docs/globe-present.html` 是「生态地球」**演示页**（星空 / 150 棵树 / 19 只动物 / 龙卷风 / 山脉）。
+> 它**不是** E41「世界」（`VisualizerTheme.WORLD`）——后者是航空地球：Robinson 陆地 + 城市灯火 + 动态航线弧
+> （`data/model/AppSettings.kt:261-294`）。本方案只借鉴演示页的**氛围语言**，与两者均无代码重叠。
+
+| E41「世界」（`WORLD`, 3D 路线） | 本频谱效果 |
 |---|---|
-| WebView + three-globe 3D 球体 | **纯 2D Canvas**（`android.graphics.Canvas`） |
+| WebView + three-globe 3D 球体（`WorldGlobeRenderer`） | **纯 Compose `DrawScope` 2D** |
 | 球面投影 + 球面纹理 | 平面频谱条 / 波形 / 粒子 |
 | WebView JS ↔ Kotlin 桥接 | Kotlin 原生渲染 |
 | 地球自转动画 | 频谱数据驱动动画 |
-| 150 棵树 / 19 只动物 | 频段粒子 / 频谱几何 |
+| 航空航线 / 城市灯火 | 频段粒子 / 频谱几何 |
 
-**核心区别**：本效果是 **2D 平面的频谱分析器**，不是 3D 场景。视觉灵感来自 globe-present.html 的色彩与氛围，但完全脱离球面假设。
+**核心区别**：本效果是 **2D 平面的频谱分析器**，不是 3D 场景。视觉灵感来自演示页的色彩与氛围，但完全脱离球面假设。
 
 ### 1.3 质量要求
 
 - 逐行移植视觉要素（星空、大气、流星、季节色、昼夜），不降低效果与美观
 - 帧率预算：**≥ 30 FPS**（低端设备），**≥ 45 FPS**（主流设备）
-- 零外部依赖：不引入新的第三方库（除非已有依赖满足需求）
-- 与现有 VisualizerRenderer 框架集成（`VisualizerRendererFactory.create(theme, context)`）
+- **零新增依赖**：不引入第三方库（FFT 已由既有 `SpectrumAnalyzer` 提供）
+- 与现有 `VisualizerRenderer` 框架集成（实现接口 + 在 `VisualizerRendererFactory` 注册）
+- **性能红线**：`draw` 内禁止任何对象分配（`Paint` / `Path` / `Color` / 数组一律提到成员变量，见 `VisualizerRenderer.kt:14`）
 
 ---
 
@@ -65,16 +70,16 @@
 | L1 | **星空** | y: 0~30% | LCG 种子随机星点，三档亮度，微弱闪烁 |
 | L2 | **大气光晕** | y: 80~100% | 底部径向渐变暖色雾（随季节变色） |
 | L3 | **频谱条** | y: 30~80% | 主频谱，频段驱动高度，季节色着色 |
-| L4 | **频谱粒子** | y: 20~90% | 高频触发的发光粒子（原 globe 的花/雪花/落叶 → 频谱粒子） |
+| L4 | **频谱粒子** | y: 20~90% | 频段触发的发光粒子（演示页的花/雪花/落叶 → 频谱粒子） |
 | L5 | **波形线** | y: 70~95% | 实时波形，半透明叠加 |
-| L6 | **流星** | 任意位置 | 间歇性流星划过（原 globe 的 V3 流星） |
+| L6 | **流星** | 任意位置 | 间歇性流星划过（演示页的 V3 流星） |
 | L7 | **昼夜光标** | 垂直方向 | 频谱中央有一条昼夜分界线（日间暖光 / 夜间冷光） |
 
 ### 2.3 色彩系统
 
-#### 四季调色板（移植自 `SEASON_PARAMS`）
+#### 四季调色板（改编自演示页 `SEASON_PARAMS`）
 
-每季一组 RGB 三元组，作用于背景渐变、频谱条色、大气雾色。季节按 **歌曲时长比例** 或 **播放列表索引** 映射，无需用户手动切换。
+每季一组 RGB 三元组，作用于背景渐变、频谱条色、大气雾色。季节按**歌曲播放进度**映射（见 §5.1），无需用户手动切换。
 
 | 季节 | 背景 (top→bottom) | 频谱主色 | 频谱次色 | 大气雾色 |
 |---|---|---|---|---|
@@ -85,209 +90,237 @@
 
 #### 季节过渡
 
-移植 globe-present.html 的 **`seasonW` S 曲线** 机制：
+移植演示页的 **`seasonW` S 曲线** 机制：
 - 每个季节周期 = **4 首歌**（一首歌≈3~5min ≈ 12~20min 一个季节）
 - 季末 30% 连续过渡到下一季
 - `seasonW = smooth01(smooth01(fract(sf)))`（双重 smooth01 → 有意平顶 S 曲线）
 - 背景 / 频谱 / 大气三层用**同一** transition 因子，保证同步
 
-#### 频谱条的双色插值
+#### 频谱条的双色插值（频段边界对齐 `SpectrumContract`）
 
-每根频谱条在 **主色 → 次色** 之间按频段能量线性插值：
-- 低频段 (20~200Hz) → 偏向主色
-- 中频段 (200~2000Hz) → 主色/次色混合
-- 高频段 (2000~20000Hz) → 偏向次色
+> ⚠️ 频段边界必须与 `SpectrumContract`（`visualizer/SpectrumContract.kt:29-34`）+ `SpectrumAnalyzer` 的 64 柱感知映射一致：
+> bass = bins 0–39（20–250Hz）、mid = 40–55（250Hz–3kHz）、treble = 56–63（3k–20kHz）。
+
+每根频谱条在 **主色 → 次色** 之间按柱索引线性插值：
+- 低频段（bins 0–39，20–250Hz）→ 偏向主色
+- 中频段（bins 40–55，250Hz–3kHz）→ 主色/次色混合
+- 高频段（bins 56–63，3kHz–20kHz）→ 偏向次色
 
 ### 2.4 频谱几何规格
 
 #### 频谱条
 
 ```
-数量: 64 根（默认） / 可配 32~128
-  ↓ 对应 FFT bin 分组: 64 bins ÷ 64 bars = 1 bin/bar
-  ↓ 或合并高频箱到对数刻度: 低频 1:1, 高频 2~4 bin/bar
-形状: 等宽矩形（宽 = (screenW - padding×2) / barCount）
-圆角: 顶部 2px 圆角（使用 Canvas drawRoundRect）
-最大高度: screenH × 0.50（留出顶部空间）
-最小高度: 2px（保持底边连成一线）
+数量: 64 根 —— ⛔ 不可配置，恒取 frame.spectrum.size（运行时 = SpectrumContract.BAR_COUNT = 64）
+  ↓ SpectrumContract.kt:5-7 明文：「渲染侧不得自行指定柱数，一律取 AudioFrame.spectrum.size」
+  ↓ ⇒ 方案内不提供 barCount 参数，避免「请求 96 柱 / 实际 64 柱」错位（历史 BUG ①）
+形状: 等宽矩形（宽 = (size.width - padding×2) / bars）
+圆角: 顶部 2px（DrawScope.drawRoundRect）
+最大高度: size.height × 0.48
+最小高度: 4px（保持底边连成一线）
 ```
 
 #### 波形线
 
 ```
-采样点数: 128
-采样率: 跟随 Media3 ExoPlayer 的 AudioTrack 数据
-渲染: 二阶贝塞尔曲线平滑，半透明（alpha=0.45）
+采样点数: 128 —— 恒取 frame.waveform.size（SpectrumContract.WAVE_POINTS = 128）
+数据: AudioFrame.waveform（-1..1 时域波形，已由 SpectrumAnalyzer 填好）
+渲染: 二阶贝塞尔曲线平滑，半透明（alpha≈0.45）—— 用预分配的 Path
 ```
 
-### 2.5 频谱粒子系统（移植原 globe 的花/雪花/落叶）
+### 2.5 频谱粒子系统（改编演示页的花/雪花/落叶）
 
-原 globe-present.html 中有三种季节性粒子：花朵（夏）、雪花（冬）、落叶（秋）。频谱版本改为**频段驱动的类型化粒子**：
+演示页有三种季节性粒子：花朵（夏）、雪花（冬）、落叶（秋）。频谱版本改为**频段驱动的类型化粒子**：
 
-| 粒子类型 | 触发条件 | 外观 | 原 globe 对应 |
+| 粒子类型 | 触发条件 | 外观 | 演示页对应 |
 |---|---|---|---|
 | **星尘** | 常驻（低频底噪） | 极小亮点，缓慢飘降 | 森林上方光点 / motes |
-| **能量火花** | 高频峰值 (>15000Hz) | 上升的发光点，到顶后消散 | 夏季花朵 |
+| **能量火花** | 高频能量（`treble`/高 bins）越过阈值 | 上升的发光点，到顶后消散 | 夏季花朵 |
 | **雪晶** | 冬季季 | 旋转的六角雪花，缓慢飘落 | 冬季雪花 |
 | **落叶** | 秋季季 | 旋转的扁椭圆，左右摆动飘落 | 秋季落叶 |
 
-**粒子生命周期**：每个粒子从底部生成（或随机 y），有 maxLife（1.5~4s），在生命周期内做非线性位移 + 旋转。
+**粒子生命周期**：每个粒子有 maxLife（1.5~4s），生命周期内做非线性位移 + 旋转。
 
-**数量控制**（对应原 `flowerCap: 900`）：
+**数量控制**（对象池上限，对应演示页 `flowerCap: 900` 的降档版）：
 - 星尘常驻: 30 个
 - 能量火花: 频段峰值时生成，最多同屏 50
 - 季节粒子 (雪/落叶): 季节强度 × 120 个
 
-**频段对齐**：粒子的生成频率与能量关联——
+**频段对齐**（⛔ 用**线性律动通道**判定强弱，不用已 gamma 压缩的显示通道）：
 ```
-spawnRate = baseRate × (1 + bandEnergy[highBand] × 3.0)
+spawnRate = baseRate × (1 + frame.treble × 3.0)     // treble 为线性能量
 ```
 
 ---
 
 ## 三、技术架构
 
-### 3.1 数据流
+### 3.1 数据流（对齐仓库真实链路，⛔ 不新建分析层）
 
 ```
-ExoPlayer AudioData
+ExoPlayer AudioSink
   ↓
-SpectrumAnalyzer (FFT 分析)
-  ↓ 频段能量 [bins[]]
-SpectrumRepository (帧缓冲 + 平滑)
-  ↓ 平滑后的频段能量
-AudioFrame (带时间戳的帧数据)
+PcmTapProcessor / PcmSpectrumTap（PCM 透传采样，后台 FFT，无需 RECORD_AUDIO）
   ↓
-┌──────────────────────────────────────┐
-│  StarFieldRenderer   ← 常驻地渲染      │
-│  SpectrumBarRenderer ← 频段数据驱动     │
-│  WaveformRenderer    ← 波形数据驱动     │
-│  ParticleSystem      ← 频段+季节 驱动   │
-│  MeteorScheduler     ← 间歇触发         │
-│  AtmosphereRenderer  ← 季节色驱动       │
-└──────────────────────────────────────┘
+SpectrumAnalyzer（player/SpectrumAnalyzer.kt：64 柱感知加权映射 + gamma + AGC）
+  ↓ 零分配回调
+SpectrumRepository（AudioFrame 唯一写入方，双缓冲）
+  ↓ frame（只读单例，渲染层每帧取一次引用）
+AudioFrame（spectrum[64] / waveform[128] / bass·mid·treble·energy / pulse·beat·bpm / timeMs）
   ↓
-Canvas 合成与渲染管线
+StellarSpectrumRenderer（VisualizerRenderer 实现）
+  ├─ StarfieldController   ← 常驻
+  ├─ SpectrumBarController ← 读 frame.spectrum
+  ├─ WaveformController    ← 读 frame.waveform
+  ├─ ParticleController    ← 读 treble / pulse + 季节
+  ├─ MeteorScheduler       ← 时间驱动
+  └─ AtmosphereController  ← 季节色驱动
+  ↓
+Compose DrawScope 绘制管线
 ```
 
-### 3.2 核心类设计
+**关键**：渲染器**只读** `SpectrumRepository.frame`，绝不自己算 FFT、绝不新增录音/权限。
+
+### 3.2 核心类设计（对齐 `VisualizerRenderer` 真实接口）
+
+> `VisualizerRenderer`（`visualizer/VisualizerRenderer.kt:21-90`）的核心方法是
+> **`fun DrawScope.draw(frame: AudioFrame, ctx: RenderContext)`**（DrawScope 扩展，不是 `android.graphics.Canvas`），
+> 生命周期为 `onEnter(ctx)` / `onExit()`。没有 `onAudioFrame`、没有 `draw(canvas, deltaTime)`。
 
 ```kotlin
-// 频谱整体渲染器
-class StellarSpectrumRenderer(
-    private val width: Int,
-    private val height: Int
-) : SpectrumRenderer {
-    // 模块内部渲染管线
+class StellarSpectrumRenderer : VisualizerRenderer {
+
+    override val theme: VisualizerTheme = VisualizerTheme.STELLAR_SPECTRUM
+
+    // ⛔ 全部成员在构造 / onEnter 期分配；draw 内零分配
     private val starfield = StarfieldController()
-    private val bars = SpectrumBarController(barCount = 64)
-    private val waveform = WaveformController(samplePoints = 128)
+    private val bars = SpectrumBarController()      // 柱数 = frame.spectrum.size
+    private val waveform = WaveformController()
     private val particles = ParticleController()
     private val meteors = MeteorScheduler()
     private val atmosphere = AtmosphereController()
     private val seasons = SeasonController()
     private val palette = StellarPalette()
 
-    // 每帧驱动
-    override fun onAudioFrame(frame: AudioFrame) {
-        bars.setBands(frame.bands)
-        waveform.setSamples(frame.samples)
-        particles.onFrame(frame, seasons.currentIntensity())
+    private var lastMs = -1L                         // 单调时钟哨兵（首帧 dt=0）
+
+    override fun onEnter(ctx: RenderContext) {
+        lastMs = -1L
+        // 分配 Path / Brush / 渐变 / 对象池等重资源
     }
 
-    // 每帧渲染
-    override fun draw(canvas: Canvas, deltaTime: Long) {
-        seasons.advance(deltaTime)
-        val bg = palette.background(seasons.tint)
-        canvas.drawColor(bg)
+    override fun onExit() { /* 释放 ImageBitmap 等重资源 */ }
 
-        starfield.draw(canvas)
-        atmosphere.draw(canvas, seasons.tint)
-        bars.draw(canvas, palette.barColors(seasons.tint))
-        waveform.draw(canvas, palette.waveformTint(seasons.tint))
-        particles.draw(canvas)
-        meteors.update()
-        meteors.draw(canvas)
-    }
-}
-```
+    override fun DrawScope.draw(frame: AudioFrame, ctx: RenderContext) {
+        // dt 来自 AudioFrame.timeMs（单调时钟），不是入参
+        val dt = if (lastMs < 0L) 0f else ((frame.timeMs - lastMs) / 1000f).coerceIn(0f, 0.1f)
+        lastMs = frame.timeMs
 
-### 3.3 频谱分析器
+        seasons.advance(dt)
+        particles.onFrame(frame, seasons.currentIntensity(), dt)
 
-复用项目现有的 `SpectrumAnalyzer`（若不存在则新建），输出**两组数据**：
-
-```kotlin
-data class AudioFrame(
-    val timestamp: Long,              // 帧时间戳
-    val bands: FloatArray,            // 频段能量 [64]（对数刻度）
-    val waveform: ShortArray,         // 波形样本 [128]
-    val rhythmTempo: Double,          // 节奏感知（可选）
-)
-```
-
-**FFT 参数**：
-- FFT size: 2048（采样率 44100 / FFT 2048 ≈ 21.5 Hz/bin）
-- 重叠率: 50%（Hann window）
-- 帧率: 与渲染帧率锁定（60fps），跟随 `requestAnimationFrame`
-
-### 3.4 平滑处理
-
-频谱数据必须做平滑，避免条带闪烁：
-
-```kotlin
-class BandSmoother(val bars: Int) {
-    private val history = Array(bars) { FloatArray(SMOOTH_WINDOW) }  // 环形缓冲
-    private val ptr = IntArray(bars)
-
-    fun smooth(band: Int, value: Float): Float {
-        history[band][ptr[band]] = value
-        ptr[band] = (ptr[band] + 1) % SMOOTH_WINDOW
-        var sum = 0f, n = 0f
-        for (i in 0 until bars) {
-            // 加权平均：越新的权重越大
-            val w = 1.0f - ((i + 1) / SMOOTH_WINDOW) * 0.4  // 衰减系数
-            // 实际上用环形缓冲：
-        }
-        return average()
+        drawRect(palette.background(seasons.tint), size = size)   // L0 背景
+        starfield.draw(this, seasons.tint, frame.timeMs)          // L1 星空
+        atmosphere.draw(this, seasons.tint, frame.timeMs)         // L2 大气
+        bars.draw(this, frame.spectrum, palette)                  // L3 频谱条（64 柱）
+        particles.draw(this)                                      // L4 粒子
+        waveform.draw(this, frame.waveform, palette)              // L5 波形
+        meteors.update(dt)
+        meteors.draw(this)                                        // L6 流星
     }
 }
 ```
 
-- **SMOOTH_WINDOW**: 5 帧（约 83ms @60fps）
-- 加权：中心加权，越新的帧权重越高
-- 每帧对 64 条频谱条各做一次 5 帧滑动窗口加权平均
+### 3.3 音频帧契约（对齐 `AudioFrame`，⛔ 不自定义帧结构）
 
-### 3.5 渲染管线（与 VisualizerRenderer 集成）
-
-#### 3.5.1 工厂注册
-
-在 `VisualizerRendererFactory.create(theme, context)` 中添加新主题分支：
+> `AudioFrame`（`visualizer/AudioFrame.kt:16-58`）是分析层唯一输出契约，由 `SpectrumRepository` 独占写入，渲染层只读、不得跨帧持有。
 
 ```kotlin
-fun create(theme: VisualizerTheme, context: Context): VisualizerRenderer {
-    return when (theme) {
-        // ... 现有主题 ...
-        THEME_ID_STELLAR_SPECTRUM -> StellarSpectrumRenderer(
-            width = canvasWidth,
-            height = canvasHeight
-        )
-    }
+class AudioFrame(barCount: Int, wavePoints: Int) {
+    // ── 显示通道（已 gamma ^0.75 压缩）──────────────
+    val spectrum: FloatArray    // 64，0..1，直接用于柱长
+    val waveform: FloatArray    // 128，-1..1 时域波形
+    // ── 律动通道（线性，未压缩）────────────────────
+    var bass/mid/treble: Float  // 20–250 / 250–3k / 3k–20k 线性
+    var energy/sectionEnergy: Float
+    var bassRaw: Float          // 未峰值跟随的原始低频（需强弱差异时用）
+    // ── 节拍 ──
+    var beat: Boolean; var pulse: Float; var bpm: Float
+    // ── 元信息 ──
+    var timeMs: Long; var seq: Long
 }
 ```
 
-#### 3.5.2 主题 ID
+**两个视图字段的用途（铁律，`AudioFrame.kt:11-14`）**：
+
+| 用途 | 用哪个通道 | 原因 |
+|---|---|---|
+| 柱高 / 波形 / 视觉亮度 | `spectrum` / `waveform`（显示通道） | 小信号可见 |
+| 强弱判定 / 粒子触发 / 律动 | `bass` / `mid` / `treble` / `pulse`（线性律动通道） | gamma 会把轻/重差异压平（历史 BUG ⑨-b） |
+
+**FFT 参数不由本方案决定**：既有 `SpectrumAnalyzer` 使用 44100Hz、64 柱感知加权映射、`DISPLAY_GAMMA=0.75`、`AGC_DECAY=0.995`。**⛔ 方案内不出现 FFT size / window / overlap 等参数**，避免与既有实现重复或冲突。
+
+### 3.4 平滑处理（避免重复加工）
+
+> ⚠️ 输入 `frame.spectrum` **已是** gamma 压缩 + AGC 归一化的显示通道；再叠加大窗口平滑会造成
+> 「二次压缩 ⇒ 动态被抹平、反应变钝」。因此：
+
+- **默认不平滑**：直接使用 `frame.spectrum`（分析层已做输出稳定）。
+- 若个别柱仍有轻微抖动，**只允许**加一层**极轻的 EMA**（`smooth = mix(smooth, raw, 0.35)`），
+  且必须在类 KDoc 注明「输入已压缩，此处仅做时间去抖，不做幅度压缩」。
+- **动态强弱**（粒子触发阈值、火花生成）一律走 §3.3 的线性律动通道，⛔ 不要在显示通道上判定强弱。
+
+### 3.5 渲染管线（与 `VisualizerRenderer` 集成）
+
+#### 3.5.1 工厂注册（`VisualizerRendererFactory.createEnabled` 的 `when` 分支）
+
+> 工厂真实签名：`fun create(theme: VisualizerTheme, context: Context): VisualizerRenderer`
+> （`VisualizerRendererFactory.kt:57`）。渲染器是无参构造（零外部资产 ⇒ 不接收 Context）。
 
 ```kotlin
-enum class VisualizerTheme(val id: String) {
-    // ... 现有主题 ...
-    STELLAR_SPECTRUM("stellar_spectrum"),
+private fun createEnabled(theme: VisualizerTheme, context: Context): VisualizerRenderer = when (theme) {
+    // ... 现有分支 ...
+    VisualizerTheme.STELLAR_SPECTRUM -> StellarSpectrumRenderer()
 }
 ```
 
-#### 3.5.3 主题数更新
+#### 3.5.2 主题枚举（对齐 `AppSettings.kt:184-192` 的五参数声明）
 
-- 当前主题数: 27（E41~E50 + 其他）
-- 新增后: **28**
+> ⛔ **不是** `enum class VisualizerTheme(val id: String)`。真实声明为：
+> `displayNameRes(@StringRes) / displayName / tier / ordinalLabel / needsParticleBudget`。
+
+```kotlin
+enum class VisualizerTheme(
+    @StringRes val displayNameRes: Int,
+    val displayName: String,
+    val tier: Tier,
+    val ordinalLabel: String,
+    val needsParticleBudget: Boolean = false
+) {
+    // ... 现有项 ...
+    STELLAR_SPECTRUM(
+        R.string.visualizer_theme_stellar_spectrum,
+        "星际四季频谱",
+        Tier.ADV,                       // 见下方「档位取舍」
+        "54",                           // 下一个未占用两位序号 —— 落地时以仓库实际枚举为准
+        needsParticleBudget = true,     // 见 §10.2 ParticleBudgetGateTest
+    ),
+}
+```
+
+**落地时必须同步的枚举配套项**：
+- **字符串资源**：`R.string.visualizer_theme_stellar_spectrum` 必须**同时**存在于
+  `app/src/main/res/values/strings.xml` 与 `values-en/strings.xml`（缺一份 = 运行时崩溃，见 §10.2 门禁 G1）。
+- **序号 `ordinalLabel`**：取仓库当前未占用的两位序号（E51=51 / E52=52 仅在私有分支、E50=50、E53=53 已占用），
+  ⛔ **不要凭空写死**，落地时读 `VisualizerTheme.entries` 确认。
+- **档位 `tier`**：若 `ParticleController` 读取 `ctx.quality.maxParticles`，则 `needsParticleBudget = true`；
+  否则按 §10.2 门禁如实标注（可选 BASIC/ADV）。本方案默认 `ADV` + `true`（粒子受预算控制）。
+- **`fromKey` 兼容**：枚举名即持久化 key，无需额外映射。
+
+#### 3.5.3 主题数断言（不写死数字）
+
+> ⛔ 不写「27 → 28」这类硬编码：E23 已从独立主题退役、E51/E52 分支门控、E53 已加入，
+> 主题总数会随分支变化。落地时**同步既有门禁**即可（见 §10.2），不要在本方案里钉死总数。
 
 ---
 
@@ -295,7 +328,7 @@ enum class VisualizerTheme(val id: String) {
 
 ### 4.1 星空（Starfield）
 
-**移植依据**：globe-present.html 原装 `stars` 独立 LCG 随机生成。
+**移植依据**：演示页原装 `stars` 独立 LCG 随机生成。
 
 ```
 星点数量: 200 颗
@@ -309,106 +342,100 @@ enum class VisualizerTheme(val id: String) {
 种子: LCG(20261108)，固定种子 ⇒ 可复现
 ```
 
-**绘制**：每个星点一条 `drawCircle`，半径即大小。purity：200 次 `drawCircle` 约 200 draw calls——可接受（Canvas 在低端设备上也可以承受）。
+**绘制**：`DrawScope.drawCircle(color, radius, center)`（非 `android.graphics.Canvas`）。若 200 次 drawCircle 触发掉帧，
+改用 `DrawScope.drawPoints(points, pointMode = PointMode.Points, ...)` **一次绘完**（预分配 `FloatArray(200*2)`）。
 
 ### 4.2 频谱条（Spectrum Bars）
 
 **规格**：
 
 ```
-Band count: 64（默认值）
-Bar width:  动态计算 = (screenWidth - 2×margin) / 64
+Band count: 64 —— ⛔ 恒取 frame.spectrum.size（不可配置，见 §2.4）
+Bar width:  动态计算 = (size.width - 2×margin) / bars
 Bar gap:    2px
-Max height: screenHeight × 0.48
-Min height: 4px  
+Max height: size.height × 0.48
+Min height: 4px
 
-映射方式: 对数刻度
-  bin→bar 映射: 
-    bar[i] 对应 bin 区间 [exp(i * log2(bins/64))] 
-    即低 16 bar 用 1 bin/bar, 高 16 bar 合并 4~8 bin/bar
-  
+频段划分（对齐 SpectrumContract）:
+  bass   bins 0–39   (20–250Hz)
+  mid    bins 40–55  (250Hz–3kHz)
+  treble bins 56–63  (3kHz–20kHz)
+
 视觉优化:
   · 底部连成一线（有 minimum height）
-  · 顶部圆角 2px（roundRect）
-  · 边缘频段向内收缩一列（更漂亮）
-  · 消除相邻帧跳变（加平滑）
+  · 顶部圆角 2px（drawRoundRect）
+  · 消除相邻帧跳变（见 §3.4：分析层已输出稳定，默认不再叠加）
 
 颜色: 见 §2.3 双色插值
-背景: 半透明深色板（0.05 alpha 黑色矩形覆盖在频谱区）
+背景: 半透明深色板（0.05 alpha 黑矩形覆盖在频谱区）
 ```
 
-**频段映射（对数）**：
+**柱宽计算**（仅用于几何换算，非决定柱数）：
 ```kotlin
-val barIndex = (1.0 + Math.log(bandFreq / minFreq) / Math.log(maxFreq / minFreq)) * (bars - 1)
+val barW = size.width / bars   // bars = frame.spectrum.size
 ```
 
 ### 4.3 波形线（Waveform）
 
 ```
-Sample points: 128
-Smoothing: 二次贝塞尔曲线
-Color: 半透明 (alpha=0.45) 的白色/季节次色
-Position: 频谱条下方，y = screenHeight × 0.82
-Amplitude: ±(screenHeight × 0.04) （振幅小，作为辅层）
+Sample points: 128 —— 恒取 frame.waveform.size
+Smoothing: 二次贝塞尔曲线（预分配 Path，draw 内不 new Path）
+Color: 半透明 (alpha≈0.45) 的白色/季节次色
+Position: 频谱条下方，y = size.height × 0.82
+Amplitude: ±(size.height × 0.04) （振幅小，作为辅层）
 ```
 
 ### 4.4 大气光晕（Atmosphere）
 
-**移植依据**：globe-present.html 的 `#fx` canvas 大气光晕（径向渐变 Sprite）。
+**移植依据**：演示页的 `#fx` canvas 大气光晕（径向渐变 Sprite）。
 
 ```
 形状: 底部径向渐变
-尺寸: 宽度 = screenWidth，高度 = screenHeight × 0.35
-锚点: 底部中心 (cx=screenWidth/2, cy=screenHeight)
+尺寸: 宽 = size.width，高 = size.height × 0.35
+锚点: 底部中心 (cx=size.width/2, cy=size.height)
 渐变: 中心 0 alpha → 80% 处最大 alpha → 边缘 0 alpha
 颜色: 随季节变化（见 §2.3 大气雾色表）
 动画: 极慢呼吸式（±10% alpha 周期 8s）
 ```
 
-**渐变色像素占比（频谱区域）**：
-- 上半段屏幕: 深色（星空）
-- 下半段屏幕: 大气光晕自然晕染，在频谱条后方提供暖色底
+⚠️ 径向渐变用 `Brush.radialGradient(...)` 在 `onEnter` 期创建（随季节切换时重建，不入 `draw` 热路径）。
+在频谱条**之下**绘制，为画面下半部提供暖色底。
 
 ### 4.5 流星（Meteors）
 
-**移植依据**：globe-present.html 的 V3 流星。
+**移植依据**：演示页的 V3 流星。
 
 ```
 数量: 0~2 颗同屏
 随机触发:
-  · 基础间隔: 4~9 秒随机间隔
+  · 基础间隔: 4~9 秒随机间隔（时间驱动）
   · 每次触发 1 颗
 生命周期: 约 2.5 秒（淡入 0.3s → 持续 2s → 淡出 0.2s）
 轨迹:
   · 从右上方（80% 宽，10% 高）向左下方（20% 宽，40% 高）
-  · 长度约 screenWidth × 0.35
+  · 长度约 size.width × 0.35
   · 速度 ≈ 屏幕宽度 / 2.5 秒
 外观:
   · 头部: 明亮白/暖色，alpha 1.0，半径 1.5px
   · 尾部: 渐变尾巴，alpha 1.0 → 0，宽度 1.5px → 0.3px
-季节影响:
-  · 春: 偏绿色
-  夏: 偏白色
-  · 秋: 偏橙色
-  · 冬: 偏蓝色
+季节影响（颜色）:
+  · 春: 偏绿   夏: 偏白   秋: 偏橙   冬: 偏蓝
 ```
 
 **LCG 种子**：与星空共用 20261108
 
 ### 4.6 粒子系统（Particle System）
 
-**架构**：对象池 + 每帧更新。
+**架构**：对象池 + 每帧更新；绘制走 `DrawScope`。
 
 ```kotlin
 class ParticleController {
-    // 对象池
-    private val pool = Array(MAX_POOL = 200) { Particle() }
-    private val active = ArrayDeque<Particle>()  // 活跃列表
+    private val pool = Array(MAX_POOL) { Particle() }   // MAX_POOL=200，构造期分配
+    private val active = IntArray(MAX_POOL)             // 活跃索引（避免 ArrayDeque 分配）
     private val rng = LCG(20261108)
 
-    fun spawn(type: ParticleType, x: Float, y: Float) { ... }
-    fun update(dt: Float, seasons: Float) { ... }
-    fun draw(canvas: Canvas) { ... }
+    fun onFrame(frame: AudioFrame, seasonIntensity: Float, dt: Float) { ... }
+    fun draw(scope: DrawScope) { ... }                  // ⛔ 不是 draw(canvas: Canvas)
 }
 ```
 
@@ -431,13 +458,15 @@ enum class ParticleType {
 | SNOWFLAKE | x: sin 摆动 ±1; y: +20~+40 px/s | 微风 | 自转 1~2 rad/s | 4~8s |
 | LEAF | x: sin ×2; y: +30~+50 px/s | 无 | 3~5 rad/s | 5~9s |
 
-**频段触发逻辑**：
+**频段触发逻辑**（⛔ 用线性律动通道）：
 ```
-SPARK 生成阈值: bandEnergy[highBin] > 0.75
-SPARK 生成频率: 基础 1 个/s + 频段能量超阈值频次 × 3
-冬季雪花密度: season.w × 0.3 个/帧  （30fps × 0.3 = 9 个/s）
-秋季落叶密度: season.w × 0.4 个/帧
+SPARK 生成阈值: frame.treble > 0.75（线性）
+SPARK 生成频率: 基础 1 个/s + 阈值命中次数 × 3
+冬季雪花密度: seasonIntensity × 0.3 个/帧
+秋季落叶密度: seasonIntensity × 0.4 个/帧
 ```
+
+⚠️ 若本控制器读取 `ctx.quality.maxParticles` 做粒子上限，**必须**在枚举标 `needsParticleBudget = true`（见 §10.2）。
 
 ---
 
@@ -447,34 +476,32 @@ SPARK 生成频率: 基础 1 个/s + 频段能量超阈值频次 × 3
 
 | 参数 | 值 |
 |---|---|
-| 周期 | 4 首歌（≈12~20 分钟） |
+| 周期 | 4 首歌（≈12~20 分钟），由播放进度驱动 |
 | 季内占比 | 前 70% 保持当前季，末 30% 过渡 |
 | 过渡曲线 | 双重 `smoothstep`（平顶 S 曲线） |
 | 颜色插值 | 所有颜色参数同一因子 |
+| 驱动源 | `frame.timeMs`（单调时钟），⛔ 不用音轨进度做相位（复位会跳） |
 
 ### 5.2 动画帧率控制
 
-```kotlin
-// 渲染帧率与音频帧率同步
-// 60fps 渲染目标，低于 45fps 触发降级
-```
-
 - 目标帧率：**60 fps**
 - 最低帧率：**30 fps**（低端设备）
-- 自适应降级（移植原 globe 的 quality 控制）：
-  - 若连续 30 帧 < 45 fps → 粒子数量减半
-  - 若连续 60 帧 < 30 fps → 星星减半 + 关闭气象效果
+- 自适应降级（`draw` 内按 `ctx` 画质档，或按 `dt` 平滑降级）：
+  - 连续多帧 `dt` 偏大（帧率不足）→ 粒子数量减半
+  - 继续不足 → 星星减半 + 关闭气象效果（雪/落叶）
+
+> ⚠️ 本渲染器**无 View 旁路** ⇒ 帧率走舞台 Choreographer 口径，无需覆写 `renderFps()`。
 
 ### 5.3 昼夜交替
 
-**概念**：一个 **昼夜相位** 在频谱中央摆动。
+**概念**：一个**昼夜相位**在频谱上缓慢摆动。
 ```
 白天: 频谱条整体提亮 15%，背景顶部偏暖，大气雾色偏暖
 夜晚: 频谱条保持不变，背景顶部加深，大气雾色偏冷，添加微光点
 过渡: 约 8 秒的正弦过渡
 ```
 
-实现方式：不需要实际的时间判断，而是歌曲播放进度驱动的伪昼夜。
+实现：由 `frame.timeMs` 驱动的伪昼夜（不做真实 UTC 判断）。
 
 ---
 
@@ -484,65 +511,63 @@ SPARK 生成频率: 基础 1 个/s + 频段能量超阈值频次 × 3
 
 | 操作 | 预估 draw calls | 估算时间 |
 |---|---|---|
-| 背景填充 | 1 | ~0.5ms |
-| 星空 200 星点 | 200 | ~2ms |
+| 背景填充（drawRect） | 1 | ~0.5ms |
+| 星空 200 星点 | 200（或 1 次 drawPoints） | ~2ms（合批后 <0.5ms） |
 | 大气渐变 | 1 | ~0.5ms |
 | 频谱条 64 根 | 64 | ~1.2ms |
 | 波形线 | 1 | ~0.2ms |
 | 粒子 ~30 个 | ~30 | ~1.0ms |
 | 流星 0~2 | ~1 | ~0.1ms |
-| **合计** | ~300 | **≈ 5~6ms** |
+| **合计** | ~300（合批后 ~100） | **≈ 5~6ms** |
 
 ### 6.2 内存预估
 
 | 对象 | 数量 | 内存 |
 |---|---|---|
-| 星点 offsets | 200 × 3 floats | 2.4 KB |
-| 频谱条软件缓冲 | 64 × 5 floats | 1.3 KB |
+| 星点 offsets（FloatArray） | 200 × 2 floats | 1.6 KB |
+| 频谱条缓冲 | 64 × 若干 floats | ~1.3 KB |
 | 粒子对象池 | 200 instances | ~40 KB |
-| AudioFrame 缓冲 | 64 float + 128 short | 1.0 KB |
+| 波形 Path | 1 | ~1 KB |
 | **合计** | | **≈ 45 KB** |
 
 ### 6.3 优化策略
 
-1. **星空合批**：若 draw calls 过多，用 `drawPoints` **一次绘制所有星点**（`Canvas.drawPoints` 一次调用绘 N 点）
-2. **频谱条 top-level roundRect**：可用 `Path.addRoundRect` 批量构建路径
-3. **粒子 alpha 合并**：同种粒子用同一 shader 实例（没有 shader ⇒ 低优先）
-4. **备用降级方案**：
-   - L1（最低）: 星空合并 + 频谱条用纯矩形 + 关闭粒子 + 关闭流星
-   - L1+L0: 全简单模式，仅频谱条 + 背景
+1. **星空合批**：`DrawScope.drawPoints` **一次绘制所有星点**（预分配 `FloatArray`）。
+2. **频谱条路径**：64 条可合并进一个预分配 `Path`（每帧 `reset()` 复用，不 `new`）。
+3. **零分配红线**：`draw` 内不 `new Paint/Path/Color`，全部提为成员（`VisualizerRenderer.kt:14` 明文）。
+4. **降级方案**：
+   - L1（最低）: 星空合批 + 频谱条用纯矩形 + 关闭粒子 + 关闭流星
+   - L0: 仅频谱条 + 背景
 
 ---
 
 ## 七、频谱接入点与数据来源
 
-### 7.1 ExoPlayer 音频回调
-
-```kotlin
-// 在 PlayerManager 中新增频谱数据回调
-player.addAudioFrameCallback listener:
-  onAudioFrame(frameData: ByteArray) {
-    // 解析 → FFT → bands + waveform
-    // 通过回调传递给 SpectrumRepository
-  }
-```
-
-### 7.2 频谱数据源优先级
-
-1. **ExoPlayer 的 AudioFrameCallback**（首选，直接从解码后的 PCM 计算）
-2. **Visualizer API**（兜底：Android 系统内置 `Visualizer` 类，但有 75ms 延迟）
-3. **FFT 模拟数据**（无音频输入时的占位动画）
-
-### 7.3 频谱数据平滑
+### 7.1 数据链路（已存在，⛔ 不改）
 
 ```
-输入: LIVE bands (64 นาที)
-处理:
-  1. 5-frame 滑动窗口加权平均(SMOOTH_WINDOW)
-  2. 峰值抑制：若带宽超过 3×临时能量，标记为"峰值"，不参与亮度估计
-  3. 最小保持：连续 10 帧大于 0.1 的频段，额外保底值
+ExoPlayer AudioSink
+  → PcmTapProcessor / PcmSpectrumTap（PCM 透传，后台 FFT）
+  → SpectrumAnalyzer（64 柱感知加权 + gamma + AGC）
+  → SpectrumRepository（双缓冲，唯一写入方）
+  → AudioFrame（渲染层只读）
+```
 
-输出: SMOOTH_BANDS
+渲染器**只读** `SpectrumRepository.frame`（`val frame: AudioFrame`，`SpectrumRepository.kt:40`）。
+现有 27 套渲染器全部这样接入，本效果同源。
+
+### 7.2 数据源优先级（⛔ 只有一条）
+
+1. **`SpectrumRepository.frame`**（唯一）
+2. ~~ExoPlayer AudioFrameCallback~~ —— ⛔ 不存在该通道，不要新增
+3. ~~Visualizer API~~ —— ⛔ 已随 v2.37.6 移除（`SpectrumAnalyzer.kt:14`）；且项目明文「不用 AudioRecord/Visualizer」（`AppSettings.kt:290-292`）
+4. ~~自建 FFT~~ —— ⛔ 违反「复用现有分析层」
+
+### 7.3 通道选择规则（重申 §3.3 铁律）
+
+```
+柱高 / 波形     ← spectrum / waveform（显示通道，已 gamma）
+强弱 / 粒子阈值 ← bass / mid / treble / pulse（线性律动通道）
 ```
 
 ---
@@ -551,52 +576,54 @@ player.addAudioFrameCallback listener:
 
 ### 8.1 架构约束
 
-- **不引入 three-globe / WebView**（已有 E41 世界效果，本频谱为独立 2D 替代）
-- **不引入新第三方依赖**（除非已有的 FFTW/KissFFT 类库可复用）
-- **Kotlin 原生实现**，不混入 JS 或 Web assembly
-- **与现有 VisualizerRenderer 兼容**（实现 `VisualizerRenderer` 接口）
+- **不引入 three-globe / WebView**（那是 E41 `WORLD` 的路线，本效果为独立 2D）
+- **不引入新第三方依赖**（FFT 由既有 `SpectrumAnalyzer` 提供，无需 FFTW/KissFFT）
+- **纯 Kotlin（Compose DrawScope）**，不混入 JS / WASM
+- **实现 `VisualizerRenderer` 接口**：`fun DrawScope.draw(frame, ctx)` + `onEnter/onExit`
 
 ### 8.2 设备兼容
 
 | API Level | 能力 | 适配 |
 |---|---|---|
-| 22 (minSdk) | 基础 Canvas drawPoints/roundRect/阴影 | 可用 |
-| 23 | 动态权限（无影响） | — |
-| 24+ | 支持 `Canvas.drawPoints` 批量星点 | 优化路径 |
+| 22 (minSdk) | Compose DrawScope 全基础图元、`drawPoints` | 可用 |
+| 24+ | 更稳的批量绘制性能 | 优化路径 |
+
+> ⚠️ 本效果走 Compose `DrawScope`（与其余 20+ 套 Canvas 渲染器一致），不是 `android.graphics.Canvas`。
 
 ### 8.3 无障碍
 
 - 频谱为纯视觉（非交互），无需 `contentDescription`
 - 帧率自适应降级为自动行为
-- 不使用 α 通道闪烁（防晕动症）：闪烁频率 < 3Hz
+- 闪烁频率 < 3Hz（防晕动症）
 
 ---
 
 ## 九、开发里程碑
 
-### Phase 0: 骨架（1~2 天）
-- [ ] 创建 `StellarSpectrumRenderer` 类骨架
-- [ ] 实现 `VisualizerRenderer` 接口空壳
-- [ ] 在工厂注册主题
-- [ ] 简单验证：编译通过 + 不 crash
+### Phase 0: 骨架 + 门禁接入（1~2 天）
+- [ ] 创建 `StellarSpectrumRenderer : VisualizerRenderer`（`fun DrawScope.draw(frame, ctx)`）
+- [ ] `onEnter` / `onExit` 分配与释放资源
+- [ ] 枚举新增 `STELLAR_SPECTRUM`（**五参数** + 两份 `strings.xml` key）
+- [ ] `VisualizerRendererFactory.createEnabled` 加 `when` 分支
+- [ ] **登记 §10.2 的三条源码扫描门禁**（`FxCoverageScanTest` / `ParticleBudgetGateTest` / `VisualizerThemeStringsGateTest`）
+- [ ] 验证：`./gradlew.bat testDebugUnitTest` 通过 + 不 crash
 
 ### Phase 1: 频谱核心（2~3 天）
-- [ ] 频段能量 → 64 频谱条（对数映射 + 平滑）
-- [ ] 基础颜色 + 圆角 + 间隙
-- [ ] 波形线
+- [ ] `frame.spectrum` → 64 频谱条（宽度均分 + 圆角 + 间隙，柱数取 `.size`）
+- [ ] 基础颜色（双色插值）+ 波形线（`frame.waveform`）
 - [ ] 帧率监控（自适应降级）
 - [ ] 验证：播放音乐时频谱条有效响应
 
 ### Phase 2: 氛围层（2~3 天）
-- [ ] 星空（200 颗 + LCG 固定种子 + 闪烁)
-- [ ] 大气渐变
+- [ ] 星空（200 颗 + LCG 固定种子 + 闪烁，`drawPoints` 合批）
+- [ ] 大气渐变（`Brush.radialGradient`，onEnter 期建）
 - [ ] 背景径向渐变
 - [ ] 验证：静态帧美观
 
 ### Phase 3: 季节 + 粒子（3~5 天）
-- [ ] SeasonController（S 曲线 + 双色插值）
+- [ ] `SeasonController`（S 曲线 + 双色插值）
 - [ ] 四季调色板映射
-- [ ] 粒子系统：星尘 + 火花
+- [ ] 粒子系统：星尘 + 火花（用 `treble` 判定）
 - [ ] 冬季雪花 / 秋季落叶
 - [ ] 验证：季节切换视觉效果
 
@@ -606,11 +633,11 @@ player.addAudioFrameCallback listener:
 - [ ] 验证：流星触发 + 昼夜交替
 
 ### Phase 5: 性能 + 收尾（2~3 天）
-- [ ] draw calls 优化（drawPoints 合批 star）
+- [ ] draw call 优化（`drawPoints` 合批 star；`Path.reset()` 复用）
 - [ ] 帧率降级验证
-- [ ] 单测（BandSmoother / SeasonController / LCG 种子）
-- [ ] lint 通过
-- [ ] 文档归档
+- [ ] 单测（见 §10.1）
+- [ ] lint + 三条门禁全绿
+- [ ] 技术文档 §10 归档
 
 **总计**: 约 11~17 个工作日
 
@@ -623,25 +650,36 @@ player.addAudioFrameCallback listener:
 | 测试类 | 测什么 |
 |---|---|
 | `StellarPaletteTest` | 季节插值数学正确（双重 smoothstep 边界） |
-| `BandSmootherTest` | 5 帧滑动窗口加权（衰减 0.4） |
 | `StarfieldControllerTest` | LCG 种子可复现性（同种子同输出） |
 | `ParticleControllerTest` | 对象池不泄漏、pool 正确回收 |
-| `SpectrumBarControllerTest` | FFT bin → bar 映射对数刻度正确 |
 | `SeasonControllerTest` | 季节折叠、过渡带、边界值 |
+| `SpectrumBarControllerTest` | 柱数恒等于 `frame.spectrum.size`、柱宽均分正确 |
 
-### 10.2 集成验证
+> ⚠️ 不单测平滑窗口：默认不平滑（§3.4），输入已由 `SpectrumAnalyzer` 稳定。
 
-- [ ] Release 包中能跑（APK ≤ 50MB 无增量）
+### 10.2 既有门禁（⛔ 新增主题必须全部通过）
+
+| 门禁 | 文件 | 新主题要做什么 |
+|---|---|---|
+| **G7 `FxCoverageScanTest`** | `app/src/test/.../visualizer/fx/FxCoverageScanTest.kt` | 渲染器必须登记进 `covered`（有 `postFx` 或 `draw` 内调 `OverlayFx`）或 `exempt`（写明理由）。本效果默认**加一步后处理**（暗角）落 `covered`，最省事 |
+| **`ParticleBudgetGateTest`** | `app/src/test/.../data/model/ParticleBudgetGateTest.kt` | 若 `ParticleController` 读 `ctx.quality.maxParticles` ⇒ 枚举 `needsParticleBudget = true`；不读则 `false`。二者必须与源码一致 |
+| **G1 `VisualizerThemeStringsGateTest`** | `app/src/test/.../data/model/VisualizerThemeStringsGateTest.kt` | `R.string.visualizer_theme_stellar_spectrum` 必须**同时**存在于 `values/strings.xml` 与 `values-en/strings.xml` |
+
+> 这三个门禁都会**源码扫描** `renderers/` + 枚举声明 ⇒ 只加类/枚举而不登记 = 门禁直接失败。
+
+### 10.3 集成验证
+
+- [ ] Release 包中能跑（APK 无异常增量）
 - [ ] API 22 设备（创维 5.1.1）有帧率
 - [ ] 频谱与播放同步（无延迟 > 100ms）
 - [ ] 后台 → 前台切换时频谱恢复正常
 - [ ] 省电模式降级
 
-### 10.3 性能基线
+### 10.4 性能基线
 
-- Waze 中端机 (API 24)：> 45fps
+- 中端机 (API 24)：> 45fps
 - 低端机 (API 22)：> 30fps
-- draw call 总数 ≤ 320 的同时在 **60fps** 下运行
+- draw call 总数（合批后）≤ 120 的同时在 **60fps** 下运行
 
 ---
 
@@ -652,20 +690,21 @@ player.addAudioFrameCallback listener:
 - [ ] 频谱条对音乐有效响应（不仅仅是常量动画）
 - [ ] 星空 / 大气 / 流星 / 粒子构成完整的「星际四季」氛围
 - [ ] 四季色调变化一眼可见（色相差异 ±20%）
-- [ ] 整体美观度不输 globe-present.html（比例缩放后）
+- [ ] 整体美观度不输 `globe-present.html`（比例缩放后）
 
 ### 11.2 性能验收 ✅
 
 - [ ] 60fps 低端机 / 中端机
-- [ ] 无 ANR、无跳帧（> 3 连续丢帧）
-- [ ] APK 增量 ≤ 50KB（无新增依赖）
+- [ ] 无 ANR、无跳变（`draw` 内零分配）
+- [ ] APK 无新增依赖
 
 ### 11.3 架构验收 ✅
 
 - [ ] 不使用 three-globe / WebView
-- [ ] 复用现有 SpectrumAnalyzer（不许另起 FFT）
-- [ ] 进入 VisualizerRenderer 框架
-- [ ] 紧跟 §10 技术文档编写规范
+- [ ] 复用现有 `SpectrumAnalyzer`（⛔ 不另起 FFT、不用 Visualizer、不新增权限）
+- [ ] 实现 `VisualizerRenderer`（`fun DrawScope.draw(frame, ctx)`）
+- [ ] 通过 §10.2 三条门禁
+- [ ] 技术文档 §10 记录
 
 ---
 
@@ -673,7 +712,11 @@ player.addAudioFrameCallback listener:
 
 - `docs/globe-present.html` —— 视觉参考源（星空 / 大气 / 季节 / 流星 / 昼夜）
 - `docs/technical-overview.md` §10 —— 项目开发史
-- `app/src/main/java/com/nasmusic/tv/visualizer/` —— 现有渲染器框架
-- `app/src/main/java/com/nasmusic/tv/visualizer/fx/` —— 现有 FX 效果库
-- `app/src/main/java/com/nasmusic/tv/visualizer/renderers/` —— Renderer 实现先例
-
+- `app/src/main/java/com/nasmusic/tv/visualizer/VisualizerRenderer.kt` —— 渲染器接口（`fun DrawScope.draw`）
+- `app/src/main/java/com/nasmusic/tv/visualizer/AudioFrame.kt` —— 音频帧契约（显示/律动双通道）
+- `app/src/main/java/com/nasmusic/tv/visualizer/SpectrumContract.kt` —— 柱数 / 频段边界常量
+- `app/src/main/java/com/nasmusic/tv/visualizer/SpectrumRepository.kt` —— 唯一写入方
+- `app/src/main/java/com/nasmusic/tv/player/SpectrumAnalyzer.kt` —— 既有 FFT 分析器
+- `app/src/main/java/com/nasmusic/tv/visualizer/VisualizerRendererFactory.kt` —— 工厂注册
+- `app/src/main/java/com/nasmusic/tv/data/model/AppSettings.kt` —— `VisualizerTheme` 枚举
+- `app/src/main/java/com/nasmusic/tv/visualizer/renderers/` —— 渲染器实现先例

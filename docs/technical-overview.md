@@ -25036,3 +25036,31 @@ Puppeteer + 本机 Edge 真实渲染：
 
 **关键设计决策**：原 globe 中的"花/雪花/落叶"三种季节粒子 → 频谱版本改写为**频段驱动的类型化粒子**
 （低频→星尘，高频峰值→能量火花，冬季→雪花，秋季→落叶），既能体现"四季"又直接响应音频内容。
+
+### 10.352 v2.39.13（**未升版**） —— 频谱开发文档 v1.1 —— 按代码审阅对齐仓库真实接口（11 项修正）（2026-11-08）
+
+对 §10.351 的 `docs/stellar-spectrum-plan.md` v1.0 做代码审阅后，逐条对齐仓库真实接口并重写（v1.0 → v1.1）：
+
+1. **`VisualizerRenderer` API**：v1.0 用 `onAudioFrame` + `draw(canvas, deltaTime)`（不存在）⇒ 改为真实接口
+   `fun DrawScope.draw(frame: AudioFrame, ctx: RenderContext)` + `onEnter/onExit`；`dt` 改由 `frame.timeMs` 推导。
+2. **`AudioFrame` 结构**：v1.0 杜撰 `AudioFrame(timestamp, bands, waveform, rhythmTempo)` ⇒ 改为真实字段
+   `spectrum[64]`（gamma 显示通道）/ `waveform[128]` / `bass·mid·treble·energy·bassRaw`（线性律动通道）/ `pulse·beat·bpm` / `timeMs`。
+3. **`VisualizerTheme` 枚举**：v1.0 用 `enum class VisualizerTheme(val id: String)`（不存在）⇒ 改为五参数声明
+   `displayNameRes(@StringRes)/displayName/tier/ordinalLabel/needsParticleBudget`。
+4. **`SpectrumAnalyzer` 已存在**：v1.0「若不存在则新建 + FFT 2048/50% overlap/ExoPlayer AudioFrameCallback」全部删除；
+   链路改回真实 `PcmTapProcessor→SpectrumAnalyzer→SpectrumRepository→AudioFrame`（PCM 唯一通道，无需 RECORD_AUDIO）。
+5. **柱数不可配**：v1.0「可配 32~128」违反 `SpectrumContract.kt:5-7`「渲染侧不得自行指定柱数」⇒ 恒取 `frame.spectrum.size`（=64）。
+6. **三个源码扫描门禁**：补 §10.2，明确 `FxCoverageScanTest`（G7：新渲染器须入 covered/exempt）+
+   `ParticleBudgetGateTest`（读 maxParticles ⇒ needsParticleBudget=true）+ `VisualizerThemeStringsGateTest`
+   （G1：两份 strings.xml 都要有 key），并纳入里程碑 Phase 0。
+7. **数据源**：v1.0 把 `Visualizer API` 列为兜底 ⇒ 标为 ⛔ 禁止（已随 v2.37.6 移除，且项目明文不用 AudioRecord/Visualizer）。
+8. **平滑去重**：v1.0 自带 5 帧平滑窗口 ⇒ 改为「默认不平滑（输入已 gamma+AGC）、极轻 EMA 仅去抖」；
+   强弱/粒子阈值改走线性律动通道（`treble`/`pulse`），不用显示通道。
+9. **主题数断言**：删除写死的「27→28」，改为「落地时同步既有门禁与 `VisualizerTheme.entries`」。
+10. **频段边界**：v1.0「20–200/200–2000/2000–20000Hz」⇒ 对齐 `SpectrumContract` 的 20–250 / 250–3k / 3k–20k
+    （bins 0–39 / 40–55 / 56–63）。
+11. **E41 归因**：澄清 `globe-present.html` 是「生态地球演示页」（150 树/19 动物），**不是** E41 `WORLD`
+    （航空地球：Robinson 陆地 + 城市灯火 + 航线弧）；本方案只借氛围语言。
+
+另：`draw` 内零分配红线（`VisualizerRenderer.kt:14`）、DrawScope 图元（`drawRect/drawCircle/drawPoints/drawRoundRect`）
+全部写入文档；里程碑 Phase 0 增加门禁接入；测试计划补 §10.2 三条门禁表。
