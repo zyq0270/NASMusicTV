@@ -125,7 +125,7 @@ class VisualizerThemeTest {
         // 28 个编号互异 —— 千里江山取 "50"（E51 占 "51"、E52 占 "52"、E53 占 "53"、E54 占 "54"），不再与 E43「海边」重号。
         // ⚠️ E18「反馈残像」("18")、E24「心跳」("24") 与 E23「歌词点阵」("23") 已于 2026-11-07 下线
         //    ⇒ 随主题一同消失，存活主题的 `ordinalLabel` **一个都没动**（它们是稳定的展示编号，不是序号）。
-        assertEquals(27, labels.distinct().size)
+        assertEquals(28, labels.distinct().size)
     }
 
     @Test
