@@ -25585,3 +25585,49 @@ APK 里的 `globe.js` 必须含 `var cloneSkeleton`；`index.html` 里不得再�
 `docs/light-theme-plan.md`、`docs/starry-sky-*.md`、`docs/index.html` 等），
 **与本次归档无关**（E54 旧路径零命中）；其中 `docs/light-theme-plan.md`（`Theme.kt` 的 KDoc）
 在 `docs/archive/README.md` 里**早已登记为已知遗留**。
+
+### 10.366 v2.39.14 —— E52「旷野公路」第二十四轮：**切换景色后天空退化成一块底色**（天色逐天气取 ⇒ 纯色天）＋「每个景色都要云与天在地平线处融进雾色」（2026-11-08）
+
+#### 一、现象（所有者 2026-11-08 反馈）
+
+开屏景色（丘陵 · 夏季 · 晴朗）的**云层与天空是雾化融合的** ✔；
+切到别的景色后 ⇒ **云层还占着上面**，**天空却变成一块底色** ⛘。
+
+#### 二、两个根因
+
+1. **天色逐天气取 ⇒ 纯色天退化成一块底色**
+   天气表里有一批天气的 `skyCol == skyColFar`（`night` #121114、`moon` #111110、`venus` #C0A226、
+   `rain` / `autumnRain` / `springRain` / `winter` 近似相等）⇒ **那块天色本来就是纯色**
+   ⇒ 逐天气取它 ⇒ 天空渲染成**一整块纯色**（＝用户说的「底色」），而云层（白）压在上面。
+   ⚠️ 上游确实逐天气换天色（`weather.skyCol` / `weather.skyColFar`，方案 §2.3 的「weather → 天空色
+   `nearCol/farCol`」）⇒ **这不是移植缺陷**，是上游数据 + 观感问题。
+2. **地平线色不是雾色 ⇒ 云与天在地平线处接不上**
+   天空下缘用地平线色、地形/远景用雾色 ⇒ 两者不同色 ⇒ 云带下缘与地形之间有缝；
+   §10.343 让天空参与雾之后，雾只覆盖了**远处那一条**（雾距按 `pe·fogNear` 起算，`clear` = 700）。
+
+#### 三、修法（所有者裁决：**每个景色都要云与天在地平线处融进雾色**）
+
+| 部位 | 改前 | 改后 |
+|---|---|---|
+| **天顶色**（`uNearCol`） | 当前天气的 `skyCol`（纯色天 ⇒ 一块底色） | **场景默认天气的 `skyCol`**（Hills 0x68A9F8 / Planet 0x4F4D4A）⇒ 天空**永远有渐变** |
+| **地平线色**（`uFarCol`） | 当前天气的 `skyColFar` | **当前天气的雾色**（`envLook.fogColor`）⇒ 天空下缘与地形/远景的雾**同色** ⇒ 地平线连续无缝；云层与天空在同一 shader 里合成 ⇒ 地平线处**一起**融进雾色 |
+
+- 代码：`HighwayEnvApply.applySelection`（天顶色改取场景默认天气）+ `HighwayGlScene.drawSky`（地平线色改取雾色）。
+- ⛔ **着色器一个字没改**（`HighwayGlsl.kt` 是生成物、GLSL 逐字门禁仍绿）⇒ 改的只是 uniform 的取值。
+- ⚠️ 与上游不同（上游天色逐天气换）⇒ 这是**所有者裁定的观感调整**，不是移植缺陷 ⇒ 记录在此。
+
+#### 四、门禁
+
+新增 `app/src/test/java/com/nasmusic/tv/visualizer/highway/HighwaySkyBlendGateTest.kt`（3 例）：
+
+1. **天顶色 = 场景默认天色**：逐 cursor × 逐天气断言 `env.skyCol` 不随天气变；
+2. **纯色天也必须有渐变**：把 `skyCol == skyColFar` 的天气逐个点出来（并断言天气表里至少 3 个），
+   要求它们的 `env.skyCol` ≠ 那个纯色；
+3. **源码扫描**：`drawSky` 的地平线色必须是 `envLook.fogColor`，且不许再出现 `val far = envLook.skyFar`。
+
+#### 五、文件清单
+
+- 改：`app/src/main/java/com/nasmusic/tv/visualizer/highway/HighwayGlScene.kt`（`drawSky` 的地平线色 + `EnvLook.skyFar` 的注释）
+- 改：`app/src/main/java/com/nasmusic/tv/visualizer/highway/world/HighwayEnvApply.kt`（天顶色取场景默认天气 + KDoc）
+- 新增：`app/src/test/java/com/nasmusic/tv/visualizer/highway/HighwaySkyBlendGateTest.kt`
+- ⛔ 本节涉及的 E52 代码**只在私有分支** `feat/e51-private`（上游 Slow Roads 无授权 ⇒ 不外发）

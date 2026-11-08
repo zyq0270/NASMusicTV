@@ -333,6 +333,16 @@ JAVA_HOME="C:/Program Files/Android/Android Studio/jbr" \
   ⚠️ `app/build.gradle.kts` 里两道护栏：E51 源码存在性 + E52 源码/资产存在性与清单校验
   （开关打开却没有真源码 ⇒ 直接 `GradleException`，不编「主题可选、效果是兜底」的假包）。
 
+  ⭐ **E52 天空的口径（所有者 2026-11-08 裁决）**：「**每个景色都要云与天在地平线处融进雾色**」
+    · **天顶色**固定取**场景默认天气**的 `skyCol`（Hills 0x68A9F8 / Planet 0x4F4D4A）⇒ 天空**永远有渐变**。
+      （天气表里有一批天气 `skyCol == skyColFar` —— `night`/`moon`/`venus`/`rain` 那些 ——
+      ⛔ 逐天气取它 ⇒ 天空退化成**一整块底色**，云层压在上面 ⇒ 就是 2026-11-08 那次反馈的现象。）
+    · **地平线色** = 当前天气的**雾色**（`HighwayGlScene.drawSky`：`val far = envLook.fogColor`）
+      ⇒ 天空下缘与地形/远景的雾**同色** ⇒ 地平线连续无缝；云与天在同一 shader 里合成 ⇒ 地平线处一起融进雾色。
+    · ⛔ **与上游不同**（上游天色逐天气换）⇒ 这是**观感调整**、不是移植缺陷 ⇒ 记录在 §10.366。
+    · ⛔ 改这两处**不要碰着色器**（`HighwayGlsl.kt` 是生成物、有逐字门禁）⇒ 改的只是 uniform 取值。
+    · 门禁：`HighwaySkyBlendGateTest`（3 例：逐天气天顶色不变 / 纯色天也必须有渐变 / 源码扫描雾色口径）。
+
 ### Doc lifecycle (archive rule — user-mandated, 2026-09-20)
 
 `docs/` root holds **only active docs** — after the third pass it is down to **2 living docs**
