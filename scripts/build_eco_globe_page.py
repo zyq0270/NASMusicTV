@@ -32,6 +32,67 @@ def must(cond, msg):
         sys.exit(1)
 
 
+def collect_esm_local_names(lines):
+    """抽出 ESM import 语句里的**局部绑定名**。
+
+    `import * as THREE from "three"`      → THREE（命名空间）
+    `import { GLTFLoader } from "..."`     → GLTFLoader
+    `import { clone as cloneSkeleton }`    → cloneSkeleton（**别名才是局部名**）
+
+    ⚠️ 这是「去掉 import 后必须补回绑定」的清单来源：少一个绑定就是运行期
+    `ReferenceError`，而且往往被业务代码的 catch 吞掉 ⇒ 页面看着正常、内容却缺。
+    """
+    names = []
+    for line in lines:
+        s = line.strip()
+        m = re.match(r'import\s+\*\s+as\s+(\w+)\s+from', s)
+        if m:
+            names.append(m.group(1))
+            continue
+        m = re.match(r'import\s*\{([^}]*)\}\s*from', s)
+        if m:
+            for part in m.group(1).split(','):
+                part = part.strip()
+                if not part:
+                    continue
+                names.append(part.split('as')[-1].strip() if 'as' in part else part)
+    return names
+
+
+def strip_text_overlays(body_lines):
+    """去掉画面上的**演示页文案**（App 里不需要标题/说明文字）。
+
+    只留一条进度条；`#status` 整块去掉（页面里 `setStatus` 是 null-safe 的，
+    `setLoadProgress` 的 `lab` 也有 `if (lab)` 守卫 ⇒ 删掉元素不会炸）。
+    """
+    out = []
+    removed = []
+    i = 0
+    while i < len(body_lines):
+        s = body_lines[i].strip()
+        if s.startswith('<div class="title">'):
+            removed.append('title')
+            i += 1
+            continue
+        if s.startswith('<div class="status" id="status">'):
+            removed.append('status')
+            i += 1
+            continue
+        if s.startswith('<div class="loading" id="loading">'):
+            removed.append('loading-text')
+            out.append('  <div class="loading" id="loading"><div class="bar">'
+                       '<i id="loadBar"></i></div></div>')
+            i += 1
+            # 吞掉原「<h2>…</h2><p>…</p> … <small id="loadPct">」那一行
+            while i < len(body_lines) and 'loadPct' not in body_lines[i]:
+                i += 1
+            i += 1
+            continue
+        out.append(body_lines[i])
+        i += 1
+    return out, removed
+
+
 def main():
     with io.open(SRC, encoding='utf-8') as f:
         src = f.read()
@@ -55,7 +116,40 @@ def main():
     body = lines[i_body + 1:i_importmap]           # body 内容（含注释与 DOM）
     js = lines[i_module + 1:i_module_end]           # module script 内容
 
+    # ── 0. UI：去掉画面上的演示页文案（标题「生态地球」/「…演示」等） ───────────────
+    #    App 里这些字是多余的（效果名由 App 的效果列表显示），而且它们盖在画面上。
+    body, removed_overlays = strip_text_overlays(body)
+    must(sorted(removed_overlays) == ['loading-text', 'status', 'title'],
+         '文字遮罩没按预期移除（实际 %s）' % removed_overlays)
+    # 错误框保留（失败时需要提示），但文案要改成 App 语境（本主题运行时零网络）
+    body = [l.replace('3D 引擎加载失败，请检查网络后刷新页面重试。',
+                      '3D 引擎加载失败（WebView 不可用）。')
+            for l in body]
+    # <title> 不在画面上，但「…自动旋转演示」是演示页口径，一并去掉
+    head = [l.replace('生态地球 · 自动旋转演示', '生态地球') for l in head]
+
     # ── 1. 去掉 ESM import（改用 E41 的全局 THREE 与本页 loaders 产物） ──────────────
+    #
+    # ⚠️⚠️ **具名导入的局部绑定必须补回来**（2026-11-08 真机踩坑）：
+    #   原页面 `import { clone as cloneSkeleton } from "three/addons/utils/SkeletonUtils.js"`
+    #   去掉 import 行后若不定义 `cloneSkeleton` ⇒ 动物摆位时抛
+    #   `ReferenceError: cloneSkeleton is not defined` ⇒ 被 runPlan 的 catch 吞成
+    #   「加载失败，已跳过」⇒ **树能出来、动物一只都没有**，而且页面不报任何错。
+    #   ⇒ 这里显式定义，并加一道「每个 ESM 导入名都必须有供给方」的门禁。
+    imported = collect_esm_local_names(js)
+    must(imported, '源文件里没解析到任何 ESM 导入（解析规则失效了？）')
+
+    # 每个 ESM 导入名的「现在的供给方式」。⛔ 源文件新增一条 import 就必须在这里加一行，
+    # 否则门禁直接失败 —— 不允许「悄悄少一个绑定」。
+    PROVIDERS = {
+        # 名字: (供给方式, 局部绑定片段 或 提供该全局的 assets 文件)
+        'THREE': ('全局 UMD', 'globe/three.es5.js'),
+        'GLTFLoader': ('全局 UMD', 'eco-globe/loaders.es5.js'),
+        'cloneSkeleton': ('局部绑定', 'var cloneSkeleton = (window.SkeletonUtils'),
+    }
+    for name in imported:
+        must(name in PROVIDERS, 'ESM 导入 `%s` 没有登记供给方 —— 请在 PROVIDERS 里补一条' % name)
+
     must(any('import * as THREE from "three"' in l for l in js), '找不到 THREE 的 ESM import')
     i_imp0 = next(i for i, l in enumerate(js) if 'import * as THREE from "three"' in l)
     i_imp1 = next(i for i, l in enumerate(js)
@@ -67,6 +161,14 @@ def main():
         '// ⛔ 已去掉 ESM import：THREE 来自 /globe/three.es5.js 的 UMD 全局，',
         '//    GLTFLoader / SkeletonUtils 来自 /eco-globe/loaders.es5.js（本页 esbuild 产物）。',
         '//    由 scripts/build_eco_globe_page.py 从 docs/globe-present.html 生成。',
+        '',
+        '/* ---------- ESM 具名导入 → 局部绑定 ----------',
+        '   ⚠️ 少了这一行，动物会**一只都出不来**（树不受影响）：',
+        '   摆位路径调用 cloneSkeleton(...) ⇒ ReferenceError ⇒ 被 runPlan 的 catch',
+        '   吞成「加载失败，已跳过」，页面不报错、只是没有动物。 */',
+        'var cloneSkeleton = (window.SkeletonUtils && window.SkeletonUtils.clone)',
+        '  ? window.SkeletonUtils.clone',
+        "  : function () { throw new Error('SkeletonUtils.clone 未定义：/eco-globe/loaders.es5.js 没加载成功'); };",
     ] + js
 
     text = '\n'.join(js)
@@ -152,6 +254,18 @@ def main():
     ]
     # 插到注释 3 行之后（即原 js 的第一个空行前）
     text = '\n'.join(audio_decl) + text
+
+    # ── 4.5 供给方自证：登记在案的供给方必须真的成立 ──────────────────────────────
+    #  （只登记不验证 = 门禁空转；这里逐条落地核对）
+    for name in imported:
+        kind, what = PROVIDERS[name]
+        if kind == '局部绑定':
+            must(what in text,
+                 '供给方缺失：ESM 导入 `%s` 应在产物里有局部绑定 `%s`' % (name, what))
+        else:
+            p = os.path.join(ROOT, 'app', 'src', 'main', 'assets', what.replace('/', os.sep))
+            must(os.path.isfile(p),
+                 '供给方缺失：ESM 导入 `%s` 的全局来自 %s，但该文件不存在' % (name, what))
 
     # ── 5. 包成 IIFE（module 作用域 → 函数作用域），只暴露 window.EcoGlobe ─────────
     footer = [

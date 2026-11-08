@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <link rel="icon" href="data:,">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>生态地球 · 自动旋转演示</title>
+<title>生态地球</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body { width: 100%; height: 100%; overflow: hidden;
@@ -310,11 +310,8 @@
 <canvas id="sky"></canvas>
 <canvas id="fx"></canvas>
 <div id="stage"></div>
-<div class="title"><h1>生态地球</h1><p>CARTOON GLOBE · 自动旋转演示</p></div>
-<div class="loading" id="loading"><h2>生态地球</h2><p>正在唤醒绿色星球…</p>
-  <div class="bar"><i id="loadBar"></i></div><small id="loadPct">0%</small></div>
-<div class="status" id="status">正在放置动物与树木…</div>
-<div class="err" id="errBox"><h3>加载失败</h3><p id="errMsg">3D 引擎加载失败，请检查网络后刷新页面重试。</p></div>
+  <div class="loading" id="loading"><div class="bar"><i id="loadBar"></i></div></div>
+<div class="err" id="errBox"><h3>加载失败</h3><p id="errMsg">3D 引擎加载失败（WebView 不可用）。</p></div>
 
 
 <!-- 共享产物：E41「世界」的 ES5 UMD（⛔ 不复制，直接引用 /globe/）；顺序不可换 -->

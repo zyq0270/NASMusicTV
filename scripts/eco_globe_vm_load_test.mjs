@@ -244,6 +244,33 @@ try {
     '缺 three 时 loaders 明确报错（' + (e && e.message) + '）');
 }
 
+// ── ③ ESM 具名导入 → 产物的绑定/全局必须真的存在 ─────────────────────────────
+// ⚠️ 2026-11-08 真机踩坑：去掉 import 行后漏了 `cloneSkeleton` 这个局部绑定 ⇒
+//    动物摆位抛 ReferenceError，被业务代码的 catch 吞成「加载失败，已跳过」
+//    ⇒ 页面不报错、树能出来、**动物一只都没有**。
+//    ⇒ 这里从**源页面**动态抽导入名，逐个核对产物里有没有定义。
+const srcHtml = fs.readFileSync(path.join(ROOT, 'docs', 'globe-present.html'), 'utf8');
+const importNames = [];
+for (const m of srcHtml.matchAll(/^\s*import\s+(?:\*\s+as\s+(\w+)|\{([^}]*)\})\s+from/gm)) {
+  if (m[1]) { importNames.push(m[1]); continue; }
+  for (const part of m[2].split(',')) {
+    const p = part.trim();
+    if (!p) continue;
+    importNames.push(/\bas\b/.test(p) ? p.split(/\bas\b/)[1].trim() : p);
+  }
+}
+ok(importNames.length > 0, '从源页面抽出 ' + importNames.length + ' 个 ESM 导入名');
+
+const globeSrc = fs.readFileSync(A('eco-globe/globe.js'), 'utf8');
+// 由前置脚本提供的全局（三个 <script src> 的产物）
+const PROVIDED_GLOBALS = ['THREE', 'ThreeGlobe', 'GLTFLoader', 'SkeletonUtils'];
+for (const name of importNames) {
+  const declared = new RegExp('\\b(?:var|let|const|function)\\s+' + name + '\\b').test(globeSrc);
+  const provided = PROVIDED_GLOBALS.indexOf(name) >= 0 && typeof ctx[name] !== 'undefined';
+  ok(declared || provided,
+    'ESM 导入 `' + name + '` 在产物里有供给方（局部绑定=' + declared + '，脚本全局=' + provided + '）');
+}
+
 console.log('');
 if (failures) {
   console.log('✗ ' + failures + ' 项失败');

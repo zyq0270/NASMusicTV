@@ -26,6 +26,14 @@ function setAudio(json) {
 //    GLTFLoader / SkeletonUtils 来自 /eco-globe/loaders.es5.js（本页 esbuild 产物）。
 //    由 scripts/build_eco_globe_page.py 从 docs/globe-present.html 生成。
 
+/* ---------- ESM 具名导入 → 局部绑定 ----------
+   ⚠️ 少了这一行，动物会**一只都出不来**（树不受影响）：
+   摆位路径调用 cloneSkeleton(...) ⇒ ReferenceError ⇒ 被 runPlan 的 catch
+   吞成「加载失败，已跳过」，页面不报错、只是没有动物。 */
+var cloneSkeleton = (window.SkeletonUtils && window.SkeletonUtils.clone)
+  ? window.SkeletonUtils.clone
+  : function () { throw new Error('SkeletonUtils.clone 未定义：/eco-globe/loaders.es5.js 没加载成功'); };
+
 /* P10: 严格 CSP 的预览环境常把 blob: 排除在 connect-src 之外(WorkBuddy 预览面板),
    而 GLTFLoader 的 GLTFParser 构造时会按 typeof createImageBitmap 选择
    ImageBitmapLoader(fetch(blob:) 被拦 ⇒ 贴图全丢、模型变纯白剪影)。
