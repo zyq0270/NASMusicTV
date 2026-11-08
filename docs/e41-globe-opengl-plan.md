@@ -7,6 +7,20 @@
 
 ---
 
+## 〇、决策记录（2026-11-08 所有者裁决）
+
+方案评审提出的三个待裁决点，**所有者 2026-11-08 裁决「按建议处理」** ⇒ 全部转为已决：
+
+| # | 决策点 | 裁决 | 落地要点 |
+|---|---|---|---|
+| **D1** | **E41 档位下放**（ULTRA → ADV / 三档全可选） | ✅ **下放** | ⛔ **但不是现在改**：当前 WebView 版确实读 `ctx.quality.maxParticles` 且 TV 端黑屏 ⇒ 提前下放会把黑屏效果暴露给 MEDIUM/LOW 用户（**功能级回归**）⇒ 枚举改动**绑定在 GL 版上线那一刻**（Phase 7）。详见 §6.2 |
+| **D2** | `app/src/globe-upstream/` 的 three.js / three-globe **ES6 原版** | ✅ **保留**（不删） | 三条理由：① **MIT 上游件**（three.js / three-globe），保留**无版权风险**；② 是 ES5 产物的**逐字节 diff 基线**（AGENTS.md 明文「永不删除、永不修改、永不移回 assets」）⇒ 该规则**继续有效**，不需要改 AGENTS.md；③ WebView 版若因任何原因回滚/对照，缺了再生源就无法复现。⇒ **GL 版落地后 `globe-upstream/` 五个文件全部留存**，只是不再有运行时消费者 |
+| **D3** | **GL 基础层收敛**（避免写第三套） | ✅ **收敛到 `visualizer/gl/`** | 拆成两层：**通用部分上 main**（公开，两分支一致）＋ **上游派生部分留私有分支**。详见 §4.1 |
+
+**D1 的一句话结论**：GL 版上线 ⇒ E41 从「只有最高画质档提供」变为「三档全可选」⇒ **老电视（创维 9R54_G8S）也能看到这个效果** —— 这是整个 GL 重写最大的用户可感知收益。
+
+---
+
 ## 一、为什么重写（动机与既有事实）
 
 ### 1.1 阻断点不在渲染能力，在宿主
@@ -112,8 +126,12 @@ E41 当前走 **WebView + three-globe（WebGL）**，而 `docs/technical-overvie
 | `index.html` | 3,377 | 装配页 |
 | **合计** | **≈ 3.09 MB** | ⇒ APK 显著缩小 |
 
-⚠️ 但 `app/src/globe-upstream/` 里的 **ES6 原版（`three.min.js` / `three-globe.min.js`）永不删除**（它们是 ES5 产物的再生源与逐字节 diff 基线，见 AGENTS.md）—— ⛔ 但若 GL 版落地后 ES5 产物不再需要再生，**这两个原版也失去存在理由** ⇒ 需所有者裁决（它们是 MIT 上游件，保留也无版权风险）。
+✅ **D2 已裁决：保留**。`app/src/globe-upstream/` 的五个文件（`three.min.js` / `three-globe.min.js` / `earth.jpg` / `cities.json` / `downlevel_libs.mjs`）**全部留存**：
+① **MIT 上游件**，保留无版权风险；② 是 ES5 产物的逐字节 diff 基线（AGENTS.md 明文「永不删除、永不修改」）⇒ **该规则继续有效，不需要改 AGENTS.md**；③ WebView 版若回滚或需对照，缺了再生源就无法复现。
+⇒ GL 版落地后它们**不再有运行时消费者**，但**不删除**。
+
 ⚠️ `GlobeAssetsHygieneTest`（5 例）会扫描 `assets/globe/` ⇒ 删文件后必须同步该测试。
+⚠️ `app/src/globe-upstream/` 里**不得装 npm 依赖**（⛔ 装在 `assets/` 下会被 `mergeDebugAssets` 打进 APK，2026-09-06 实测一次多 23 MB）—— 依赖必须装在 `globe-upstream/` 本目录。
 
 ---
 
@@ -138,9 +156,20 @@ app/src/main/java/com/nasmusic/tv/visualizer/
     └── GlobeCityPoints.kt       光点属性打包
 ```
 
-> ⚠️ **`gl/` 共享层与私有覆盖层的冲突**：E52 的 `HighwayGLSurfaceView` / `HighwayBridge` / `HighwayProjection` / `HighwayGlCaps` 已在覆盖层实现同类能力。
-> 两条路：① **让 E52 改用 main 的共享层**（需同时改覆盖层副本，⛔ 覆盖层会掩蔽仓库同名文件）；② **暂时各写各的**（重复代码，但零冲突）。
-> **建议 ①**（长期收敛），但必须按 AGENTS.md 的覆盖层规则操作：改覆盖层副本 + `python scripts/sync_private_overlay.py` 同步 + `--check` 零漂移。
+> ✅ **D3 已裁决：收敛到 `visualizer/gl/`，不写第三套。**
+> E52 的 `HighwayGLSurfaceView` / `HighwayBridge` / `HighwayProjection` / `HighwayGlCaps` 已在覆盖层实现同类能力 ⇒ **拆成两层**：
+>
+> | 层 | 内容 | 归属 | 理由 |
+> |---|---|---|---|
+> | **通用层** | `GlHost`（GLSurfaceView 承载）/ `GlBridge`（数据桥）/ `GlCaps`（能力探测）/ `GlProjection`（透视·lookAt·乘法）/ `GlShader`（编译链接） | **main 源集**（公开，两分支一致） | 我们自己的通用基础设施，**不含上游代码** ⇒ 按 AGENTS.md 判据属公开 |
+> | **上游派生层** | `HighwayGlsl.kt`（逐字搬运的 GLSL）、`HighwayProjection` 里的 `UPSTREAM_PE_FACTOR` / `UPSTREAM_FAR_SIZE` / `upstreamHorizonDistance` / `upstreamCamera` 等**上游常量** | **留私有分支** | E52 上游（Slow Roads）衍生件 ⇒ 按判据属私有 |
+>
+> ⇒ **落地动作**：
+> ① main 新增 `visualizer/gl/` 五个文件；
+> ② 私有分支的 E52 文件改为**委托**共享层（`HighwayGLSurfaceView` 继承/包装 `GlHost`，`HighwayBridge` 包装 `GlBridge`…）；
+> ③ ⛔ 覆盖层会掩蔽仓库同名文件 ⇒ 改覆盖层副本后跑 `python scripts/sync_private_overlay.py` 同步，`--check` 必须零漂移；
+> ④ `visualizer/gl/` 属**公开代码** ⇒ 必须**同时存在于 `main` 与 `feat/e51-private`**（`git checkout main -- visualizer/gl/` 覆盖过去，⛔ 不要 cherry-pick 手工合并）。
+> ⑤ ⚠️ 共享层**不得**包含任何上游常量或上游 GLSL —— 一旦混进去就变成"公开的上游衍生件" ⇒ 泄漏。
 
 ### 4.2 渲染器（View 型）
 
@@ -376,7 +405,25 @@ WebView 侧用的是 `TubeGeometry`（管）。GL 版两条路：
 ⇒ 若 LOW 档也提供 ⇒ 枚举改 `Tier.ADV`（ADV 的门槛是 `!needsParticleBudget || maxParticles > 0`；**若不读 `maxParticles`** ⇒ 标 `false` ⇒ 三档全可选）。
 ⇒ **裁决点**：GL 版**自己按 `ctx.quality` 分档**（View 型渲染器拿不到 `fx.level`，但 `ctx.quality` 有）⇒ 数量按档位表 ⇒ **`needsParticleBudget = false`** ⇒ LOW 档也可选。
 
-> ⚠️ 这是**行为变更**：E41 从「ULTRA 独占」变成「三档全可选」。需要所有者裁决（这正是 §10.197 当初把它提到 ULTRA 的原因：WebView 黑屏 ⇒ 限定到最高档，让「能显示它的设备」与「该用最高档的设备」尽量重合）。**GL 版没有黑屏问题 ⇒ 这个理由自动失效 ⇒ 应当下放。**
+> ✅ **D1 已裁决：下放。** 这是**行为变更**（E41 从「ULTRA 独占」变成「三档全可选」），理由链已闭环：
+> §10.197 当初把它提到 ULTRA，是因为 WebView 在电视端黑屏 ⇒ 限定到最高档，让「能显示它的设备」与「该用最高档的设备」尽量重合；
+> **GL 版没有黑屏问题 ⇒ 这条理由自动失效 ⇒ 应当下放。**
+>
+> **⛔ 但改动时点绑定在 GL 版上线那一刻（Phase 7），不是现在。** 当前 WebView 版**确实读** `ctx.quality.maxParticles`
+> （`WorldGlobeRenderer.kt:391` → `WorldNetwork.maxActiveFlights(quality.maxParticles, 100f)`）且 TV 端黑屏
+> ⇒ 提前把枚举改成 `ADV` + `needsParticleBudget = false`，会把**黑屏效果暴露给 MEDIUM/LOW 用户** ⇒ **功能级回归**。
+>
+> **具体改动（Phase 7 与 GL 渲染器同一个提交）**：
+> ```kotlin
+> // data/model/AppSettings.kt
+> - WORLD(R.string.visualizer_theme_world, "世界", Tier.ULTRA, "41", needsParticleBudget = true),
+> + WORLD(R.string.visualizer_theme_world, "世界", Tier.ADV,   "41", needsParticleBudget = false),
+> ```
+> ⚠️ 连带：`Tier.ADV` 不再受 `allowFramebuffer` 门控（那是 ULTRA 的门槛，`AppSettings.kt:649`）⇒ 天然三档全可选。
+> ⚠️ **GL 渲染器不得再读 `ctx.quality.maxParticles`** —— 它必须按 `ctx.quality` 枚举（HIGH/MEDIUM/LOW）自己定数量；
+> ⚠️ 调用 `WorldNetwork.maxActiveFlights(...)` 时**不要**把 `ctx.quality.maxParticles` 传进去（LOW 档它是 0 ⇒ 会算成 10 条下限），
+> ⇒ **改传本渲染器自己的按档常量**（HIGH 350 / MEDIUM 150 / LOW 80）。
+> ⚠️ `ParticleBudgetGateTest` 会源码扫描渲染器是否读 `maxParticles` ⇒ 枚举标注与源码必须一致（都改成不读）。
 
 ---
 
@@ -411,7 +458,7 @@ WebView 侧用的是 `TubeGeometry`（管）。GL 版两条路：
 | **4** | 城市光点（GL_POINTS + clamp） | 37 个光点 + 呼吸 | 3~4 天 |
 | **5** | 航线弧（slerp + 管 + dash） | 主干/支线/毛细三级 | 5~7 天 |
 | **6** | 星空 + 月亮 + 太阳 | 完整场景 | 4~5 天 |
-| **7** | 音频驱动 + 画质分档 + **档位下放** + `renderFps` + 生命周期接线 | 可交付 | 4~6 天 |
+| **7** | 音频驱动 + 画质分档 + **档位下放（D1：枚举 `Tier.ULTRA → Tier.ADV` + `needsParticleBudget → false`，与 GL 渲染器同一提交）** + `renderFps` + 生命周期接线 | 可交付 | 4~6 天 |
 | **8** | 真机验证（需所有者）+ 资产清理（删 ~3.09 MB）+ 门禁同步 | 收尾 | 3~5 天 |
 
 **合计**: 约 **32~46 个工作日**（单人）

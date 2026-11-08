@@ -93,10 +93,12 @@ image48294fcc-0da3-4613-8282-68ab5cc6e499.png
 # 会话级工具状态目录（2026-10-16 追加）：由 agent 运行时在**项目根**自动创建，与上面同族。
 #   .dumate/ = 交付清单 + 收件箱 + 会话流（deliveries / inbox / ses_*）
 #   .tmp/    = 一次性渲染/运行临时文件（dv-render-* / dv-run）
+#   .textus/ = 文本/附件约定探测器的本地设置（settings.json：conventions.attachments / detected）
 # ⚠️ 是**工具自己的状态目录**，⛔ 不要手动删（删了会话状态会丢）。
 # ⚠️ 用 `/` 前缀只挡**根目录**同名项 ⇒ 将来源码树里若出现合法嵌套 `.tmp/` 不会被误挡。
 /.dumate/
 /.tmp/
+/.textus/
 
 # WorkBuddy 设计文件（*.miora）与其导出素材
 docs/*.miora

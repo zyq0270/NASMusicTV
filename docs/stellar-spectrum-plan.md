@@ -9,6 +9,20 @@
 
 ---
 
+## 〇、决策记录（2026-11-08 所有者裁决）
+
+与 E41 GL 方案同批评审的三个待裁决点，**所有者 2026-11-08 裁决「按建议处理」** ⇒ 全部转为已决：
+
+| # | 决策点 | 裁决 | 本方案的影响 |
+|---|---|---|---|
+| **D1** | E41 档位下放 | ✅ 下放 | 与本方案**无直接耦合**（E41 自己的枚举改动）。但**同一条规则适用于本效果**：本效果不读 `ctx.quality.maxParticles` ⇒ `needsParticleBudget = false` ⇒ 三档全可选（§5.2 / §10.2）—— 这条在 v1.2 就已定，v2.0 沿用 |
+| **D2** | `globe-upstream/` 的 three.js / three-globe ES6 原版 | ✅ **保留** | 本方案**不碰** `assets/globe/` ⇒ 无影响（E41 侧处置见 `docs/e41-globe-opengl-plan.md` §3.4） |
+| **D3** | GL 基础层收敛 | ✅ **收敛到 `visualizer/gl/`** | ⇒ 本方案的 `GlHost` / `GlBridge` / `GlCaps` / `GlProjection` / `GlShader` **不另起炉灶**，直接落在共享层；E52 的同类件改为委托共享层。拆分规则见 `docs/e41-globe-opengl-plan.md` §4.1 |
+
+⚠️ **⛔ 共享层纪律**：通用层**不得**包含任何上游常量或上游 GLSL —— 一旦混进去就变成「公开的上游衍生件」⇒ 泄漏（origin 是 public 仓库）。
+
+---
+
 ## 一、设计目标
 
 ### 1.1 定位
@@ -233,8 +247,12 @@ SpectrumRepository（AudioFrame 唯一写入方，双缓冲）
 | `GlProjection` | 透视 / lookAt / 乘法 | column-major（下标 `m[col*4+row]`），零分配变体 `xxxInto` |
 | `GlShader` | program 编译链接 / uniform & attribute location 缓存 | 编译失败打 logcat 并返回 0（⛔ 不抛） |
 
-**⚠️ 与私有覆盖层的冲突**：E52 的 `HighwayGLSurfaceView` / `HighwayBridge` / `HighwayProjection` / `HighwayGlCaps` 已在覆盖层实现同类能力。
-建议**收敛到共享层**（改覆盖层副本 + `python scripts/sync_private_overlay.py` 同步 + `--check` 零漂移），而不是写第三套。
+✅ **D3 已裁决（2026-11-08 所有者）：收敛到共享层，不写第三套。** 拆分与落地动作详见
+`docs/e41-globe-opengl-plan.md` §4.1，摘要：
+- **通用层**（`GlHost` / `GlBridge` / `GlCaps` / `GlProjection` / `GlShader`）⇒ **main 源集**，公开、两个分支一致；
+- **上游派生层**（E52 的逐字搬运 GLSL、上游常量）⇒ 留私有分支；
+- 改覆盖层副本后跑 `python scripts/sync_private_overlay.py` 同步，`--check` 必须零漂移；
+- ⛔ 共享层**不得**含任何上游常量或上游 GLSL（混进去就变成公开的上游衍生件 ⇒ 泄漏）。
 
 ### 3.3 频谱侧专用件
 
