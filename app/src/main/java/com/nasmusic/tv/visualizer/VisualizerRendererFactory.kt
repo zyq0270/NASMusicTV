@@ -9,6 +9,7 @@ import com.nasmusic.tv.visualizer.renderers.BirdsFlockRenderer
 import com.nasmusic.tv.visualizer.renderers.CircularRingRenderer
 import com.nasmusic.tv.visualizer.renderers.ConstellationRenderer
 import com.nasmusic.tv.visualizer.renderers.DesertSmokeRenderer
+import com.nasmusic.tv.visualizer.renderers.EcoGlobeRenderer
 import com.nasmusic.tv.visualizer.renderers.LiquidGridRenderer
 import com.nasmusic.tv.visualizer.renderers.LiquidRippleRenderer
 import com.nasmusic.tv.visualizer.renderers.MatrixRainRenderer
@@ -117,6 +118,9 @@ object VisualizerRendererFactory {
         // （点阵 / 逐字行光 / 全屏纵览 / 倾斜律动 / 分栏引导）。
         // 零外部资产 ⇒ ⛔ 不收 Context。
         VisualizerTheme.LYRICS_STAGE -> LyricsStageRenderer()
+        // E54「生态地球」：WebView + three.js（与 E41「世界」并列的独立场景）。
+        // ⚠️ 传 Context（WebView 需要）；渲染器内部只持有 applicationContext。
+        VisualizerTheme.ECO_GLOBE -> EcoGlobeRenderer(context)
     }
 
     /**

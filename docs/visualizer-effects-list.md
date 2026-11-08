@@ -48,6 +48,7 @@
 | E51 | LOFI_CITY | 像素城市 ⚠️ |
 | E52 | HIGHWAY | 旷野公路 ⚠️ |
 | E53 | LYRICS_STAGE | 歌词舞台 |
+| E54 | ECO_GLOBE | 生态地球 |
 
 > ⚠️ **`E51 像素城市` / `E52 旷野公路` 只存在于带变体开关的构建**：受编译期开关
 > `BuildConfig.LOFI_CITY_ENABLED`（Gradle 属性 `lofi.city`）/ `BuildConfig.HIGHWAY_ENABLED`

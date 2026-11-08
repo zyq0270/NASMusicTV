@@ -1413,6 +1413,7 @@
     <string name="visualizer_theme_tripod_fog">迷雾之战</string>
     <string name="visualizer_theme_vintage_tv">怀旧</string>
     <string name="visualizer_theme_world">世界</string>
+    <string name="visualizer_theme_eco_globe">生态地球</string>
     <!-- E51 像素城市：右下角城市卡。城市名与标语存在 CityRegistry 生成表里（方案 §12.6），这里只放 UI 文案 -->
     <string name="visualizer_city_time_label">当地时间</string>
     <!-- photo_transition -->

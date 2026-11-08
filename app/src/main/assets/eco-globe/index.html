@@ -1,0 +1,327 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" href="data:,">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>生态地球 · 自动旋转演示</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden;
+    background: radial-gradient(circle at 50% 30%, #4f9fd4 0%, #2a6fa8 55%, #103f66 100%);
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; }
+  #sky { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 0; pointer-events: none; }
+  #stage { position: fixed; inset: 0; z-index: 1; }
+  #stage canvas { display: block; width: 100% !important; height: 100% !important; }
+  .title { position: fixed; top: 14px; left: 0; right: 0; text-align: center; pointer-events: none; z-index: 20; }
+  .title h1 { font-size: 22px; font-weight: 900; color: #fff; letter-spacing: 4px; text-shadow: 0 2px 10px rgba(10,60,110,.55); }
+  .title p { display: inline-block; margin-top: 6px; font-size: 11px; font-weight: 700; color: #0d4f84;
+    background: rgba(255,255,255,.85); padding: 3px 12px; border-radius: 999px; box-shadow: 0 2px 8px rgba(10,60,110,.18); }
+  .loading { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; z-index: 30; transition: opacity .5s; }
+  .loading.hide { opacity: 0; pointer-events: none; }
+  .loading h2 { font-size: 20px; font-weight: 900; color: #fff; letter-spacing: 5px; text-shadow: 0 2px 10px rgba(10,60,110,.5); }
+  .loading p { font-size: 13px; color: rgba(255,255,255,.85); }
+  .err { position: fixed; inset: 0; display: none; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 32px; text-align: center; z-index: 31; color: #fff; }
+  .err h3 { font-size: 18px; letter-spacing: 2px; }
+  .err p { font-size: 13px; line-height: 1.8; color: rgba(255,255,255,.88); }
+  .status { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 20;
+    pointer-events: none; white-space: nowrap; font-size: 12px; font-weight: 700; color: #fff;
+    background: rgba(10,60,110,.55); padding: 6px 16px; border-radius: 999px;
+    box-shadow: 0 2px 8px rgba(10,60,110,.25); transition: opacity .5s; }
+  .status.hide { opacity: 0; }
+  #fx { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 0; pointer-events: none; }
+  .loading .bar { width: 190px; height: 4px; border-radius: 999px;
+    background: rgba(255,255,255,.24); overflow: hidden; }
+  .loading .bar i { display: block; width: 0%; height: 100%; background: #d8f4ff;
+    border-radius: 999px; transition: width .25s; }
+  .loading small { font-size: 11px; color: rgba(255,255,255,.72); letter-spacing: 1px; }
+</style>
+</head>
+<body>
+<!--
+  动物 / 树木模型（开源）:
+    鹿 / 兔 / 树 — Quaternius Ultimate Animal & Vegetation Pack (CC0 1.0 Universal)
+      https://quaternius.com/packs.html
+    长颈鹿 — elkiotbear via Poly Pizza (CC-BY 3.0)
+      https://poly.pizza/
+    熊猫 — Poly by Google via Poly Pizza (CC-BY 3.0)
+    牛 / 驴 / 羊驼 / 公牛 / 马 / 白马 / 雄鹿 / 狐狸 / 柴犬 / 哈士奇 / 狼
+      — Quaternius Ultimate Animated Animals (CC0 1.0 Universal),
+        经 Poly Pizza 分发 https://poly.pizza/bundle/Animated-Animal-Pack-ILAPXeUYiS
+        (与上面的鹿同属一个 12 种动物包,每个都自带骨骼 Walk 动画)
+  三维引擎: three.js r160 (MIT) https://threejs.org/
+
+  尺寸约定: 动物 / 树木均「不按地球真实比例」渲染,统一使用固定的展示高度
+  (见 MODELS.height,单位 = 地球半径 R=1),分散在全球陆地上。
+  同源的 12 种 Quaternius 动物统一 height=0.115,且一律 setScalar 均匀
+  缩放 ⇒ 彼此大小一致,模型自身长宽高比例也不会被拉伸。
+  树共 150 棵,按「森林中心 + 簇内密集撒点」分布,簇内不设最小间距,
+  允许挨在一起甚至局部重叠,以形成连片森林而不是均匀平铺。
+
+  模型本地副本: docs/assets/glb/*.glb (16 个 GLB,精简后合计约 5.58MB,
+    来源与许可同上;原始 11.2MB 的下载件留在 logs_temp/glb_probe/quaternius_raw/)。
+    poly.pizza CDN 实测仅约 100KB/s,单个 tree GLB 就要 30s+,
+    故页面优先加载本地副本实现秒开;未携带 assets/ 时自动回退 CDN。
+
+  按最终屏幕显示尺寸(模型仅约 40~60px)做过精简: 5.29MB -> 2.43MB (-54%):
+    - tree 两张 1024x1024 RGB PNG -> 256x256 JPEG(第 3 张带 alpha,保持 PNG);
+    - deer/rabbit 及 11 种新动物各删除未使用的 23~29 个动画剪辑
+      (只保留 Walk),重建 bufferViews/accessors 并清除死字节;
+      几何未减面以保住轮廓。新增 11 个模型 10.68MB -> 2.89MB (-73%)。
+    未精简的原始 GLB 备份于 logs_temp/glb_probe/before_opt/(该目录被 gitignore)。
+
+  行走: deer/rabbit 自带骨骼 Walk 剪辑,用 SkeletonUtils.clone + 每实例
+    AnimationMixer 播放真实步态。giraffe/panda 的 GLB 只有「1 节点 + 1 mesh、
+    0 骨骼」,没有任何可动子节点 ⇒ 程序化补两套动作:
+      ① gait 容器上的 AnimationClip(摇摆 / 点头 / 前后微摆;不动画
+         scale 与高度,保证尺寸恒定、脚底不离地);
+      ② 网格的两个 relative morph target,按局部高度 + 左右/前后分组,
+         让对角腿交替前后摆动( Influence 与 gait clip 同一时钟驱动)。
+    树固定不动。动物沿 (u,v) 参数空间步进,以 elevation >= LAND_MIN
+    判定陆地,撞海岸或极区自动转向;动画速率与实际位移速度成正比,不滑步。
+
+  贴地: 不再把模型统一抬到 SURF=R+0.012(那会浮起约 10% 身高)。
+    改成按每个模型缩放后的半宽计算球面凹陷 sag = R - sqrt(R²-a²),
+    下沉 sag*0.6 + 0.0015,让平底与球面切平;行走时不再叠加 bob 起伏。
+
+  变更记录:
+    v1 (2026-11-07) 固定展示尺寸 / 全球陆地散布 / 渐进加载 / CSP 兼容 /
+       骨骼 Walk 步态 / GLB 精简至 2.43MB
+    v2 (2026-11-07) 树 10→30 且允许成片;无骨骼动物补程序化步态;
+       行走与自转减速;按 footprint 计算贴地下沉量消除悬空;
+       树叶由 alphaMode=BLEND 改 alphaTest 镂空,消除 30 棵时的半透明「幽灵树」
+    v2.1 (2026-11-07) 删除 gait 的 scale / 高度起伏轨道,模型尺寸恒定;
+       leg morph 改存绝对顶点位置,杜绝 clone 丢失 morphTargetsRelative 后
+       顶点被拉向原点造成的周期性「长大缩小」
+    v3 (2026-11-07) 加入 Quaternius Animated Animal Pack 全部 12 种动物
+       (deer 已有,新增 11 种),每种 1 个实例;原有 4 种动物各减到 2 个,
+       保证所有物种都出现;新动物统一 height=0.115 并复用骨骼 Walk 动画
+    v4 (2026-11-07) 树 30→150(5 倍);新增 pickForestSpots() 森林簇分配:
+       14 个中心 + 每簇密集撒点、簇内无最小间距,体现堆积成林的效果
+    v5 (2026-11-07) 纯视觉美化(明确不加交互):
+      A 接触阴影贴片 / elevation 复用为 bumpMap + 海陆 roughnessMap /
+        海岸浪花线 / 地球纹理 480x240→768x384
+        (1024x512 实测生成 2.8s,首屏太慢;降到 768x384 + elevationP() 后仅 0.4s);
+      B 独立 LCG 星空 / 大气云雾光晕(v5.1 改为径向渐变 Sprite) /
+        双层反向云 + 地表云影 / 多层太阳光晕与光斑;
+      C 鸟群改 40 个 Sprite 三帧扇翅并挂 tiltPivot / 树只旋转不缩放的
+        微摆 / 动物走走停停(腿频同步) / 森林上方漂浮光点。
+      星空 / 光点一律走独立 LCG,不消耗全局 rand ⇒ 不干扰落点采样;
+      但纹理分辨率变化会改变 grass/forest 候选池大小,落点仍可复现、
+      全部在陆地贴地,与 v4 的具体坐标不同。
+       ⑯ 统一的「季节推进权重」seasonW:本季前 70% 保持本季参数,
+          季末 30% 连续过渡到下一季。之前是跨【整季】lerp 的 ⇒ 每季参数只在
+          季初那一瞬间成立,余下时间都在往下一季漂 ⇒ 季节感被稀释,也让「雪融化」与
+          「树变绿」的时序对不上。现在地面与树的颜色切换发生在同一刻。
+       ⑰ 草地只有两档:【原贴图绿】与【枯黄】,
+          由单一强度 grassYellowK 连续插值,强度归零时露出的就是原贴图 ⇒ 与春季逐像素一致,
+          不会跳变。之前把「颜色」与「强度」分开插值 ⇒ 夏秋交界颜色瞬间跳变、
+          冬春交界露出平涂深绿后又跳回贴图浅绿(用户 2026-11-07 实测反馈)。
+       ⑱ 树叶四季都换色:春淡绿 / 夏深绿 / 秋黄橙红深红 / 冬冷蓝灰。
+          之前夏季是【不换色】(使用原贴图绿) ⇒ 夏天看起来和春天一样淡。
+       ⑲ 顺序约束:顺序上必须不能用量化的上下文变量。
+          本轮修复了 seasonW 定义位于使用之后的顺序错误(var 提升 ⇒ undefined ⇒ NaN ⇒ 全部变量为 null)。
+      硬约束不变:15 种动物 19 只 + 150 棵树、全部陆地贴地、
+      动画过程零缩放、无 CSP / 贴图异常。
+    v5.1 (2026-11-07) 两处视觉/行为修正:
+      ① 大气不再用几何球(BackSide 大球泛蓝、FrontSide 贴边球成细亮环,
+         都像玻璃罩);改为面向相机的径向渐变云雾光晕,中心透明、
+         贴轮廓最亮、向外平滑归零并叠云絮斑块 + 极慢旋转;云层回调到
+         0.44/0.20 恢复朦胧感。
+      ② 长颈鹿改为朝头的方向前进:orient_probe.html 实测头顶顶点
+         100% 在局部 +X(其它物种在 +Z),MODELS 加 facing:-π/2,
+         stepWalkers 右乘局部 Y 旋转把 +X 摆到前进轴。
+    v5.2 (2026-11-07) 增加 3 个间歇性龙卷风(用户:「偶尔出现的」):
+      程序化 LatheGeometry 双层漏斗 + 螺旋云纹 CanvasTexture +
+      4 球云帽 + 贴地尘埃环,全部无外部资源。
+      生命周期:周期 38~60s,仅 0.58~0.90 相位可见(淡入/持续/淡出),
+      三个相位错开、0 号开场落点锁定正面半球(否则首个龙卷风在球背面
+      看不见)、每轮换陆地落点,并在可见期间沿陆地缓慢行进
+      (与 walkers 同一套 u/v 步进,撞海岸 / 极区转向);只改 opacity /
+      visible / position / quaternion,不缩放;独立 LCG 不消耗全局 rand
+      ⇒ 169 个原有实例落点不变。
+      ?debug=1 的 tornadoTrace 记录可见数量起伏与 (u,v) 位移作为金标准。
+    v5.2c (2026-11-07) 按反馈再调龙卷风:
+      ① 高度 0.30→0.19、顶部半径收窄(用户「太高了」);
+      ② 新增 swirl 子 Group 整团公转 + 三层漏斗差速反向旋转 +
+         更强 UV 滚动,与沿陆地位移叠加 ⇒「一边旋转一边运动」;
+      ③ 三层漏斗(含更宽更淡的雾壳)+ 4 云帽 + 3 雾团 +
+         更宽上下淡出 + 灰蓝暗部条纹 ⇒「更加雾化」而非硬边锥体;
+      开场相位改到 0.66(完整可见段),保证打开页面就能看到;
+    v5.2e: 落点额外避开森林簇(树点 1/4 抽样 + 0.14 rad 约束),
+      让灰白雾团落在开阔陆地,不与绿色树冠混成一团。
+    v6 (2026-11-07) 优化 + 新视觉(用户选定「P9 拆分文件不做,其余全做」):
+      P1 阴影贴片 / 150 棵树改 InstancedMesh 合批;
+      P2 按滚动 FPS 自适应画质(可用 ?quality=0|1|2 钉住便于校对);
+      P3 elevation() 改为「与地球纹理同一次循环产生的 W×H 网格」双线性查表,
+        零额外噪声计算;网格同时导出 clsGrid 供灯光 / 海面 / 城市使用;
+      P4 window.__globeDebug.stats 常驻输出 fps / calls / tris / geometries /
+        textures / programs / quality / baked / csp;
+      P5 五张程序化纹理 + 一张 terrain 数据图预烘焙到 docs/assets/tex/,
+        首屏直接 TextureLoader 载入,失败自动回退程序化生成;
+      P6 loading 改为「首帧 + 首个模型就绪」才淡出,带真实百分比进度条;
+      P7 16 个 GLB 按 tier 分级 + 并发上限加载,先出主角动物与森林;
+      P8 全部可调参数集中到模块顶部 CONFIG(window.__globeConfig 可查);
+      P10 createImageBitmap 不再全局永久置空:先探测 blob: 是否被 CSP 拦,
+        仅在被拦时临时禁用,全部 GLB 加载完毕立刻恢复原值;
+      V1 昼夜分界 + 城市灯火(ShaderMaterial,随地球自转);
+      V2 四季色调缓慢循环(地球与树冠);V3 月亮 / 极光 / 流星;
+      V4 海面流动高光(ShaderMaterial + 海陆掩膜);
+      V5 龙卷风联动:附近动物惊走、树冠摇动加剧、林间光点亮起;
+      V6 动物脚印拖尾(单 Points 批,环形复用 240 槽,6.5s 淡出)。
+      硬约束不变:15 种动物 19 只 + 150 棵树、全部陆地贴地、
+      动画过程零缩放、无 CSP / 贴图异常、无交互控件。
+    v6.1 (2026-11-07) 龙卷风不再限定陆地(用户:「海上也有龙卷风的」):
+      落点池按索引交替生成「陆龙卷」(e>=0.52,仍避开动物与森林簇)与
+      「水龙卷」(e<0.44,离岸一段距离的海面);18 个落点海陆各半,
+      每个槽位每轮换点时 spotIdx+1 ⇒ 自然在两种环境间切换。
+      移动约束由「撞海岸就转向」改为「按自身环境判定」:水龙卷只在
+      海面走、陆龙卷只在陆地走,两者都仍避开极区、边旋转边移动。
+      水龙卷的漏斗与贴地水花环改偏冷蓝(只改 material.color,零缩放)。
+      开场相位 [0.66,0.66,0.84]:一海一陆同时可见 + 一枚正在消散,
+      之后照旧进入间歇期。tornadoTrace 追加 kinds 与 stats.tornado
+      作为「海陆都出现」的金标准。
+    v6.1c (2026-11-07) 收尾复核:
+      ① 开场三个落点进一步限定 z>0.58 且 v∈[0.33,0.64],
+         漏斗不再从球下缘伸出轮廓、月亮完整入画且不与标题重叠;
+      ② ⚠️ 修掉一个 URL 参数踩坑:'nobake=1' 字符串里含 'bake=1',
+         旧的 indexOf('bake=1') 会把「强制程序化回退」误判成
+         「只导出 PNG 不启动 WebGL」,页面静默停在纹理生成后。
+         改成 /(?:^|[?&])bake=1(?:&|$)/ 精确匹配参数名;
+      ③ ?nobake=1 复验:候选池 82404 grass / 1399 forest 与烘焙路径
+         逐点一致 ⇒ terrain.png 的 R(高程)/G(类别)回读无损;
+      ④ CSP 模拟(connect-src 禁 blob:)复验:P10 探测到拦截后临时
+         禁用 createImageBitmap、加载完毕恢复原值,GLB 贴图零丢失。
+    v6.1d (2026-11-07) 修「月亮没看到」:
+      旧位置是硬编码世界坐标 (-2.45,0.95,-1.30),只有 aspect>=1.35 才入画,
+      近方形 / 竖屏预览面板里投影到 NDC x=-1.35 / -1.58,整个跑出视野。
+      改成用相机 right/up/forward 基向量把固定 NDC 锚点反投影到世界:
+      宽屏锚点 (-0.84,0.60)、窄屏 (-0.72,0.68),屏幕尺寸按视口高度恒定
+      (NDC 高 0.26),resize 时重算 ⇒ 横屏 / 竖屏 / 近方形都完整入画,
+      既不压标题也不与地球重叠。每帧只改 position 做极慢漂移,零缩放。
+      debug hook 追加 moon.ndc / aspect / onScreen 作为可见性金标准。
+    v6.1e (2026-11-07) 修「四季和昼夜看不到」:
+      V1 根因:旧太阳方向 (3,4,6) 几乎正对相机(+Z),正面圆盘 dot≈0.84
+      全是白昼,晨昏线落在球背面;环境光 0.75 + 半球光 0.7 又把暗部提亮,
+      城市灯火(3400 个 1~2px 点、亮度 1.35)只在左下边沿零星露出。
+      ① SUN_DIR 改侧光 (1,0.45,0.55) 并提前定义,供 sunLight /
+         nightLayer / nightShade / oceanLayer 共用(单一数据源);
+         环境光 0.75→0.42、半球光 0.7→0.45、太阳 2.2→2.4 拉开明暗;
+      ② 新增 nightShade 贴地压暗层(半径 1.0025):夜半球压深蓝
+         alpha 0.62、晨昏带透暖橙霞光,renderOrder 1 在灯火之下;
+      ③ 城市灯火 3400→6500 点、点径 0.6~2.1→1.0~3.2px、
+         alpha 0.30~0.92→0.55~1.0、shader 亮度 1.35→2.6、闪烁加深。
+      V2 根因:四组色温最大偏差仅 ±7%、树冠只吃 35%、96s 一轮,
+      肉眼无法察觉。④ 色差拉到 ±20%(春嫩绿/夏暖黄/秋橙红/冬冷蓝),
+      树冠系数 0.35→0.9,周期 96s→60s(每季 15s),太阳亮度同步 ±12%;
+      ⑤ 新增 ?season=0|1|2|3 钉档参数(精确参数匹配)与
+      debug hook season.index/sf/pinned/tint/leaf 作为四季色差金标准;
+      ⑥ 首轮截图复核发现仅乘 earthMat.color 仍偏含蓄(饱和绿贴图 + ACES
+         压缩),补强:树冠改用独立 LEAF 季节色(春嫩绿/夏浓绿/秋金橙/
+         冬冷灰蓝),大气光晕同步按 tint 染色 ⇒ 四季一眼可辨。
+    V6.3 四季返工(2026-11-07,实测驱动):
+       ① 根因一:季节「出现强度」用 sin(π*(sf-季号)),sin 在季号边界恒为 0
+          ⇒ ?season=3 的冬天强度是 0,雪花/积雪永远看不见。
+          改为与 tint 同一套线性插值,钉档 season=N 即纯净第 N 季。
+       ② 根因二:材质名是复数 "NormalTree_Leaves" —— "Leaves" 不含子串
+          "Leaf"(L-e-a-v ≠ L-e-a-f)⇒ /leaf/ 正则全部落空,树冠一个都
+          识别不到(10 个材质全被当成树干)。正则改为接受 leaf/leaves。
+       ③ 根因三:乘法染色(color *= tint)无法把绿叶贴图变成冷蓝灰/正红,
+          绿通道压不下去 ⇒ 冬天是「深绿」不是「冷蓝灰」。
+          改为 onBeforeCompile 注入:取贴图亮度当明暗、季节色当色相,
+          二者相乘;树冠材质另给 customProgramCacheKey(否则树皮会复用
+          树叶的着色器而被一起换色)。
+       ④ 夏季草地开花:落点改取自 earthRes.grass 候选池(此前是随机经纬度
+          ⇒ 花会开在海里/沙漠/树上),并加 0.030 rad 最小间距避免扎堆;
+          颜色用高饱和红/粉/紫/橙/黄 + 少量白;材质加 toneMapped:false
+          (ACES 会把小花点的饱和度压成白色);数量 72→900、尺寸 0.033→0.042。
+       ⑤ 冬季积雪:新增半径 1.0012 的球壳 + alphaMap 陆地掩膜
+          (cls=0 是海);陆地像素必须完全不透明(alphaTest 丢弃海洋),
+          否则下方的绿色草地透出来、冬天大陆不是全白。
+       ⑥ 秋季落叶飘落每帧抛 "tang.normalize is not a function"
+          (cross() 返回普通数组,没有 .normalize())⇒ 改为手动除以模长。
+       ⑦ 花朵每帧更新时硬加 Y 分量 ⇒ 花被推离球面,改为沿法线方向浮动。
+       ⑧ 积雪延迟曲线:秋冬交界的前 25% 过渡带保持 0,避免深秋就下雪。
+       ⑨ 夜面城市灯火按用户要求先关掉(CONFIG.nightLights=false,
+          换成全黑纹理;夜面压暗与晨昏霞光保留)。
+       ⑩ 花量按季节调整:春 0.06(几乎无) / 夏 1.0 / 秋 0.55 / 冬 0。
+       ⑪ 花朵昼夜变暗:点云材质不吃场景灯光 ⇒ 自己按「世界法线·太阳方向」
+          求昼夜系数,再压暗顶点色(去饱和 80% + 亮度压到 28% + 偏冷蓝)。
+          法线变换不用 matrixWorld(旧写法的 Matrix3.getNormalMatrix 算出全 NaN,
+          反而拆成 Rz(tilt)·Ry(earthRot) 解析式自算,不依赖渲染器的更新时序)。
+       ⑫ ⚠⚠⚠ Float32BufferAttribute 是【复制】数组的(内部 new Float32Array(array)),
+       ⑬ 秋冬交界的合成顺序(用户 2026-11-07 明确指出):
+          必须是 over 合成(底层草地色 + 上层雪),不能是「二选一」。
+          「二选一」(snowA > a 就换成雪)会让草地黄的 alpha 先掉、透出下面的绿
+          ⇒ 看起来「黄跳变成绿,再逐渐变白」。正确做法:草地底色也逐季插值(秋黄→冬绿),
+          这个变化被逐渐增加的白色盖住 ⇒ 只看到「连续变白」;冬春交界雪消融后
+          ⇒ 白色连续显出绿色。
+       ⑭ 秋天草地变黄:用一层「陆地季节色层」的 alphaMap 实现,只染 cls=2/6 的草地
+          (沙漠 cls=1 / 森林 cls=3 / 岩石 cls=4 不变色),避免沙漠和草地混成一块。
+       ⑮ 冬秋交界的出现要【集中在交界】:直线插值会让深秋(sf=2.07)就有一半积雪
+          ⇒ 季节感错位。改用「末尾过渡带」:只有 st 接近 1 那一小段才渐变,
+          带内用 smooth01 加速(仍是连续函数 ⇒ 不会突变)。
+          不是引用 ⇒ 直接改自己的 fCol/fPos/nPos/lPos 对 GPU 无效,
+          表现是「花朵昼夜不变暗」、「雪花不飘落」、「落叶不飘落」。
+          正确做法:反查 geo.attributes.position.array / .color.array 写它们
+          (原 C14 光点就是用 pGeo.attributes.position.array 反查的)。
+      硬约束不变:15 种动物 19 只 + 150 棵树、全部陆地贴地、
+    V6.4 山脉层(2026-11-07):
+       ① 路线 B(叠加山体,不动球面假设):地球本体保持完美球面 ⇒
+          动物 / 树 / 接触阴影 / 脚印 / 龙卷风的贴地逻辑零改动,
+          硬约束「全部陆地贴地、动画零缩放」不受影响。
+          山体是独立的 256×128 球壳,顶点径向抬起,高度场用页面同源的
+          hash3/vnoise3/fbm3 现场算(不读 terrain.png ⇒ 无需重烘焙贴图)。
+       ② 山脚与大陆【同源】:山脚颜色直接取地球贴图原色,草地染色复用
+          landSeason 层的同一张掩膜(tMask.R)与同一个季节强度
+          (uMtnGrassAmt ≡ 大陆的 grassYellowK)⇒ 春夏露出原贴图绿、
+          秋天随大陆一起泛黄,两者不会各变各的。
+       ③ 草裙 / 岩石 / 雪帽按【相对峰顶高度】划分(vMtnRel = 高度 / 本座山
+          峰顶高度,±10 格局部 max 包络)⇒ 矮山不会整座都是草、高山不会
+          半身是雪;按绝对高度划分时这两个问题同时存在。
+       ④ 山体是独立材质 ⇒ 必须跟大陆用同一个季节 tint(mtnMat.color),
+          否则秋冬山体与大陆色调对不上。
+       ⑤ 山脚裁切:山体壳与地球面(64×64 多面体)在山脚一圈几乎共面 ⇒
+          互相穿插。低于裁切高度(MTN_SINK + 0.0018)的片元直接丢弃,
+          那里本来就该由地球面露出,颜色本就一致。
+       ⑥ 岩石用固有色(中性偏暖灰)而不是脚下地表色 ⇒ 山体落在沙滩上
+          时不会变成「一座沙山」;再乘季节染色与大陆四季色调一致。
+       ⑦ 树木 / 动物避开山体(mtnBlock)⇒ 不会埋在岩里。
+      动画过程零缩放、无交互、无 CSP / 贴图异常。
+     v6.5 评审修复(2026-11-08,按 logs_temp/glb_probe/_review_report.md 逐条处理):
+       ① P0-1:frame() 的 flowerLight / flowerD 调试分支改为 debugMode 门控 ——
+         window.__globeDebug 常驻且恒真,此前不开 ?debug=1,夏季每帧仍多跑
+         约 900 次花朵 d 值重算 + 排序;修复后关闭时零开销。
+       ② P0-2:山高归一化注释与代码矛盾 —— 旧注释称归一化「把典型山势
+         (0.1~0.3)压到 0.005 半径、几乎看不见」,该算式对应早期
+         MTN_AMP≈0.0625;当前 MTN_AMP=0.185 数值复算 peak≈0.139 半径、
+         起伏带 0.02~0.08、63% 非零顶点 ≥1% 半径,山体清晰可见
+         (脚本 logs_temp/glb_probe/mtn_peak_check.mjs)。归一化保留为
+         最终决定,理由与测算写入行内注释。
+       ③ P1:grassGreenK / GRASS_GREEN 仅存于注释的误导清理(3 处:
+         草地底色头注释 / 四季过渡注释 / landSeason 色层注释):实现不是
+         「底色插值颜色」,是「枯黄强度 grassYellowK 在雪盖期退 0、
+         露出原贴图绿」,用户可见时序不变(秋→冬连续变白、冬→春消融显绿)。
+       ④ P2:pushFootprint 主动置 aAlpha.needsUpdate(新脚印 alpha 不再
+         延迟一帧);seasonW 双重 smooth01 补注释(有意平顶 S 曲线)。
+       硬约束不变:15 种动物 19 只 + 150 棵树、全部陆地贴地、零缩放、
+       无交互、无视觉异常。
+-->
+<canvas id="sky"></canvas>
+<canvas id="fx"></canvas>
+<div id="stage"></div>
+<div class="title"><h1>生态地球</h1><p>CARTOON GLOBE · 自动旋转演示</p></div>
+<div class="loading" id="loading"><h2>生态地球</h2><p>正在唤醒绿色星球…</p>
+  <div class="bar"><i id="loadBar"></i></div><small id="loadPct">0%</small></div>
+<div class="status" id="status">正在放置动物与树木…</div>
+<div class="err" id="errBox"><h3>加载失败</h3><p id="errMsg">3D 引擎加载失败，请检查网络后刷新页面重试。</p></div>
+
+
+<!-- 共享产物：E41「世界」的 ES5 UMD（⛔ 不复制，直接引用 /globe/）；顺序不可换 -->
+<script src="/globe/polyfill.es5.js"></script>
+<script src="/globe/three.es5.js"></script>
+<script src="/globe/three-globe.es5.js"></script>
+<script src="/eco-globe/loaders.es5.js"></script>
+<script src="/eco-globe/globe.js"></script>
+</body>
+</html>

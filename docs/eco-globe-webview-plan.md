@@ -1,7 +1,7 @@
 # 「生态地球」WebView 主题实施方案
 
-> **版本**: v1.0（2026-11-08）
-> **状态**: 开发方案评审
+> **版本**: v1.1（2026-11-08 落地定稿）
+> **状态**: **已落地**（Phase 0~4 完成；§7.2 手机真机项待所有者执行）
 > **关联**:
 > - `docs/globe-present.html` —— **视觉与参数的唯一来源**（本主题要移植的对象）
 > - `docs/e41-globe-opengl-plan.md` —— E41 地球的**原生 OpenGL ES 重写**方案（本主题的替代路线）
@@ -339,3 +339,109 @@ app/src/main/assets/eco-globe/           ← 运行时（进 APK）
 
 ⇒ **两条路线不冲突**：本方案**先落地**，产出「观感基准」；原生 GL 重写以它为**逐元素对账的参照**，
 其唯一价值就是解决电视端可用性。
+
+---
+
+## 十二、落地记录（2026-11-08，实测）
+
+### 12.1 实际产出与体积
+
+| 项 | 路径 | 实测 |
+|---|---|---|
+| 页面 | `app/src/main/assets/eco-globe/index.html` | 25,144 B |
+| 业务代码 | `app/src/main/assets/eco-globe/globe.js` | 168,124 B |
+| loader 产物 | `app/src/main/assets/eco-globe/loaders.es5.js` | **114,432 B** |
+| 模型 | `app/src/main/assets/eco-globe/glb/` | 16 个 / 5,578,096 B |
+| 贴图 | `app/src/main/assets/eco-globe/tex/` | 6 张 / 1,050,002 B |
+| 构建输入（不进 APK） | `app/src/eco-upstream/` | `build_loaders.mjs` / `entry.mjs` / `three-shim.mjs` / `check_shim_names.mjs` |
+| 页面生成器 | `scripts/build_eco_globe_page.py` | 幂等；⛔ 不手改产物 |
+| vm 加载测试 | `scripts/eco_globe_vm_load_test.mjs` | exit=0 |
+
+**APK 增量 ≈ 6.6 MB**，与 §八 预估一致。
+
+### 12.2 ⭐ 偏离 R1：`--target=es5` 不可用 ⇒ 改 **es2015**
+
+§4.4 与 R1 原写 `--target=es5`（顺带规避 Chrome 39 的 `Proxy` 缺失）。实测 **esbuild 0.24.0 根本降不到 ES5**：
+
+```
+Transforming class syntax to the configured target environment ("es5") is not supported yet
+Transforming default arguments to the configured target environment ("es5") is not supported yet
+...
+892 errors
+```
+
+⇒ 按 R1 预告的退路改 **`--target=es2015`**。**损失为零**：
+电视端本来就是 WebView 黑屏（`technical-overview.md` §10.215），手机 WebView 均 ≥ Chrome 60。
+
+⚠️ 由此带来的两点必须知道：
+1. **文件名 `loaders.es5.js` 是沿用命名习惯**，产物实际是 ES2015 —— 不要因为文件名去怀疑内容。
+2. vm 测试**不再模拟「Chrome 39 缺失 API」**（那会让测试因"本来就放弃的目标"而恒红），
+   改为验证「按真实顺序加载不抛 + 契约对象齐全 + 负向自证」。
+
+### 12.3 shim 的具名导出**自动生成**（⛔ 不手抄）
+
+`build_loaders.mjs` 递归解析两个 loader 可达源文件里所有 `import { … } from 'three'`，
+收集到 **69 个**具名导入，生成 `three-shim.mjs`；`check_shim_names.mjs` 对 three r160 逐个核验
+⇒ `names 69 / missing []`。
+
+> 手抄漏一个的后果：`export var X = T.X` 拿到 `undefined` ⇒ **不报错、但运行时静默出错**。
+> 这是本方案里最容易埋的雷，因此把"生成"而不是"抄写"作为唯一路径。
+
+`three` 本体不进包：esbuild 的 `onResolve` 插件把 `^three$` 别名到 shim（只读 `window.THREE`）。
+
+### 12.4 页面生成器的五处硬断言（防静默产残页）
+
+`scripts/build_eco_globe_page.py` 在改动源文本前后逐项断言，任一不满足即 `exit 1`：
+
+1. GLB 路径 `'assets/glb/*.glb'` 必须正好 **16** 处（改后 `/eco-globe/glb/` 也是 16 处）；
+2. CDN `url: 'https://static.poly.pizza/*.glb'` 字段必须正好 **16** 个（全部删除）；
+3. `bakedDir: 'assets/tex/'` 必须存在（⇒ `/eco-globe/tex/`）；
+4. `earth.rotation.y += dt * SPIN_RATE;` 与 `clouds.rotation.y += dt * CLOUD_RATE;` 必须存在（音频注入锚点）；
+5. `renderer.render(scene, camera);` 必须存在（帧率采样锚点）；
+   工具：改完必须 `static.poly.pizza` 计数 **0**。
+
+> ⚠️ 这些都是为了「源文件结构一变就立刻失败」，而不是静默产出少几个模型的残页。
+
+### 12.5 追加的两个宿主契约（原型页本没有）
+
+| 契约 | 语义 |
+|---|---|
+| `EcoGlobe.setAudio({energy,bass,mid,treble,beat})` | 只映射到**自转 / 云层转速**：`SPIN_RATE * (1 + energy*0.85 + beat*0.35)`、`CLOUD_RATE * (1 + energy*0.6)`。⛔ 不引入随机性、不碰摆放/季节/龙卷风时序 ⇒ 观感可与演示页逐帧对账 |
+| `EcoGlobe.fps()` | 页面内 **500ms 滑窗**统计真实 rAF 帧率，供 `EcoGlobeRenderer.renderFps()` 覆写 |
+
+`fps()` 存在的原因：**View 型渲染器有自己独立的渲染循环**，舞台 `withFrameNanos` 的
+Choreographer 口径对它是假读数（「显示 59 fps 但画面很卡」）⇒ 必须由页面自报。
+
+### 12.6 验证结果
+
+| 手段 | 结果 |
+|---|---|
+| `compileDebugKotlin` | **BUILD SUCCESSFUL in 3m 9s**（exit=0） |
+| `node scripts/eco_globe_vm_load_test.mjs` | **exit=0**：5 脚本按序加载；`THREE r160` / `ThreeGlobe` / `GLTFLoader` / `SkeletonUtils.clone` / `EcoGlobe.*` 全就位；`setAudio` 对合法/非法/null 均不抛；含「缺 three 时 loaders 明确报错」负向自证 |
+| 门禁单测（5 类） | **30 例全绿**：`FxCoverageScanTest` 8 / `GlobeAssetsHygieneTest` 8 / `ParticleBudgetGateTest` 5 / `VisualizerThemeStringsGateTest` 3 / `EffectFurnitureGateTest` 6 |
+
+⚠️ vm 测试的 DOM 桩用 `Proxy` 兜底空操作 —— 白名单式桩会因页面新增 2D API 而**假红**。
+vm 里没有 WebGL ⇒ `boot()` 走 `catch` 分支属**预期**，不算失败。
+
+### 12.7 门禁登记的真实改动
+
+- 枚举：`ECO_GLOBE(R.string.visualizer_theme_eco_globe, "生态地球", Tier.ULTRA, "54", needsParticleBudget = false)`
+  - `ULTRA` 与 E41 同档 ⇒ **只在 HIGH 画质提供**；
+  - `false`：数量全部写死在 JS 的 `CONFIG`，渲染器**不读** `ctx.quality.maxParticles`
+    （`ParticleBudgetGateTest` 按源码反推真值，标错直接红）。
+- `FxCoverageScanTest`：`exempt` + `structuralExempt` 加 `EcoGlobeRenderer`（View 型），**类数下限 26 → 27**。
+- `GlobeAssetsHygieneTest`：新增 3 例 —— assets 禁依赖/构建输入、运行时资产齐全（16 GLB + 6 贴图，
+  `terrain.png` 单列）、构建输入确实在 `eco-upstream/`。
+- `docs/visualizer-effects-list.md`：新增 `| E54 | ECO_GLOBE | 生态地球 |`。
+
+### 12.8 遗留项
+
+1. ⚠️ **私有分支同步**：本机构建用覆盖层 `app/src/e51-overlay/.../VisualizerRendererFactory.kt`（掩蔽仓库同名文件）。
+   覆盖层那份已手工补 `ECO_GLOBE` 分支，但 **`feat/e51-private` 上那份也必须加同一行** ——
+   否则 `scripts/sync_private_overlay.py` 下次同步会覆盖掉 ⇒ 本地构建因 `when` 不穷尽而编译失败。
+   （仓库里那份 `VisualizerRendererFactory.kt` 已改，两者现在一致。）
+2. ⏳ **§7.2 手机真机项全部待所有者执行**：主题出现/进出场/骨骼步态/四季/龙卷风/音频驱动/零网络。
+   验收清单里已核对的只有「编译 + 门禁 + vm 加载」三项。
+3. 📌 **踩坑（给后来者）**：`EcoGlobeRenderer.kt` 的 KDoc 里写 `glb/*.glb` 与 `/globe/*` 会触发
+   Kotlin 的**可嵌套块注释** ⇒ `Unclosed comment`，报错位置却指向文件末尾（极具误导性，本次踩了两次）。
+   改完 Kotlin 源码先跑 `python scripts/kotlin_comment_balance.py`。

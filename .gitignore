@@ -119,6 +119,18 @@ __pycache__/
 app/src/main/assets/globe/node_modules/
 app/src/main/assets/globe/package.json
 app/src/main/assets/globe/package-lock.json
+# 同上，E54「生态地球」：esbuild 打 loaders 的依赖也必须装在本文件之外的位置。
+#   构建输入（build_loaders.mjs / entry.mjs / three-shim.mjs / check_shim_names.mjs）**入仓**，
+#   依赖与 lock 不入仓（版本已写死在 build_loaders.mjs 的用法注释里：
+#   esbuild@0.24.0 + three@0.160.0，后者必须与 assets/globe/three.es5.js 的 r160 同版本）。
+app/src/eco-upstream/node_modules/
+app/src/eco-upstream/package.json
+app/src/eco-upstream/package-lock.json
+# 兜底：万一有人把依赖装进 E54 的 assets 目录（会被 mergeDebugAssets 打进 APK）。
+#   ⛔ .gitignore 挡不住打包 ⇒ 真正的护栏是 `GlobeAssetsHygieneTest`。
+app/src/main/assets/eco-globe/node_modules/
+app/src/main/assets/eco-globe/package.json
+app/src/main/assets/eco-globe/package-lock.json
 # E51「像素城市」上游原件（loficities.com 的 app-*.js 按模块切分出来的 165 份原文）。
 # ⛔ 与 app/src/globe-upstream/（那是 MIT/Apache 授权的库原件、已入仓）**不同**：上游无开源授权，
 #    原文不进 git，只作本机对账基线（docs/archive/e51-lofi-city-plan.md §2 第二条纪律、§9 P1）。

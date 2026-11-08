@@ -133,6 +133,71 @@ class GlobeAssetsHygieneTest {
         }
     }
 
+    // ─────────────────────────── E54「生态地球」 ───────────────────────────
+
+    /**
+     * E54 的 assets 目录同样只允许放**运行时装载**的文件。
+     *
+     * 本主题的构建输入（`build_loaders.mjs` / `entry.mjs` / `three-shim.mjs` /
+     * `check_shim_names.mjs`）与 `node_modules` 一律留在 `app/src/eco-upstream/`
+     * ——它和 `globe-upstream/` 一样在模块内、`main` 源集之外，⛔ 不进 APK。
+     */
+    @Test
+    fun `E54 生态地球 assets 下不得有 node 依赖与构建输入`() {
+        val dir = ecoAssetsDir()
+        val forbidden = listOf(
+            "node_modules",
+            "package.json",
+            "package-lock.json",
+            // 构建输入（esbuild 打包脚本与 shim）——它们的家在 app/src/eco-upstream/
+            "build_loaders.mjs",
+            "entry.mjs",
+            "three-shim.mjs",
+            "check_shim_names.mjs"
+        )
+        forbidden.forEach { name ->
+            val f = File(dir, name)
+            assertFalse(
+                "⛔ ${f.absolutePath} 存在：assets 下的一切都会被 mergeDebugAssets 打进 APK。" +
+                    " 构建输入与依赖请放 app/src/eco-upstream/（模块内、main 源集之外）。",
+                f.exists()
+            )
+        }
+    }
+
+    /**
+     * 正向自证：E54 的运行时资产**确实齐了**（否则上一条是恒真的空门禁）。
+     *
+     * ⚠️ `tex/terrain.png` 是**必需**项：缺它会回退到程序化噪声
+     * （`elevationP`）⇒ 地形、陆海分布、草地/森林候选池全变 ⇒ 与演示页不一致
+     * （方案 §4.2）。
+     */
+    @Test
+    fun `E54 生态地球运行时资产齐全（页面 脚本文档 loader 16 GLB 6 贴图）`() {
+        val dir = ecoAssetsDir()
+        listOf("index.html", "globe.js", "loaders.es5.js").forEach { name ->
+            assertTrue("定位失败：缺少预期资产 $name（user.dir=${File("").absolutePath}）", File(dir, name).isFile)
+        }
+        val glb = File(dir, "glb").listFiles { f -> f.isFile && f.name.endsWith(".glb") } ?: emptyArray()
+        assertTrue("glb/ 下应有 16 个 GLB，实测 ${glb.size}", glb.size == 16)
+        listOf("earth.png", "bump.png", "rough.png", "cloud-a.png", "cloud-b.png", "terrain.png")
+            .forEach { name ->
+                assertTrue("定位失败：缺少贴图 tex/$name", File(dir, "tex/$name").isFile)
+            }
+    }
+
+    /** 正向自证：E54 的构建输入确实在 `app/src/eco-upstream/`（否则「不得在 assets」是空话）。 */
+    @Test
+    fun `E54 构建输入确实在 eco-upstream`() {
+        val dir = ecoUpstreamDir()
+        listOf("build_loaders.mjs", "entry.mjs", "three-shim.mjs").forEach { name ->
+            assertTrue(
+                "定位失败：缺少构建输入 $name（user.dir=${File("").absolutePath}）",
+                File(dir, name).isFile
+            )
+        }
+    }
+
     // ─────────────────────────── 工具 ───────────────────────────
 
     /** 2026-10-07 从 `assets/globe/` 移出到 `app/src/globe-upstream/` 的 5 个文件。 */
@@ -154,6 +219,43 @@ class GlobeAssetsHygieneTest {
         val found = candidates.firstOrNull { it.isDirectory }
         assertTrue(
             "找不到 app/src/globe-upstream 目录（user.dir=${File("").absolutePath}）；" +
+                "已尝试：${candidates.joinToString { it.absolutePath }}",
+            found != null
+        )
+        return found!!
+    }
+
+    /**
+     * 定位 `assets/eco-globe/`（E54「生态地球」的运行时资产）。
+     *
+     * 与 [globeAssetsDir] 同口径：AGP 单测的 `user.dir` 是**模块目录**（`…/app`），
+     * 但同时尝试仓库根与相对上级。找不到就 fail —— 静默跳过会让门禁变成空话。
+     */
+    private fun ecoAssetsDir(): File {
+        val candidates = listOf(
+            File("src/main/assets/eco-globe"),
+            File("app/src/main/assets/eco-globe"),
+            File("../app/src/main/assets/eco-globe")
+        )
+        val found = candidates.firstOrNull { it.isDirectory }
+        assertTrue(
+            "找不到 assets/eco-globe 目录（user.dir=${File("").absolutePath}）；" +
+                "已尝试：${candidates.joinToString { it.absolutePath }}",
+            found != null
+        )
+        return found!!
+    }
+
+    /** 定位 `app/src/eco-upstream/`（E54 的构建输入，不进 APK）。 */
+    private fun ecoUpstreamDir(): File {
+        val candidates = listOf(
+            File("src/eco-upstream"),
+            File("app/src/eco-upstream"),
+            File("../app/src/eco-upstream")
+        )
+        val found = candidates.firstOrNull { it.isDirectory }
+        assertTrue(
+            "找不到 app/src/eco-upstream 目录（user.dir=${File("").absolutePath}）；" +
                 "已尝试：${candidates.joinToString { it.absolutePath }}",
             found != null
         )

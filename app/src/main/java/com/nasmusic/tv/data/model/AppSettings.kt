@@ -512,6 +512,28 @@ enum class VisualizerTheme(
      * LOW/MEDIUM 档由子渲染器自行降级到「逐字行光」。
      */
     LYRICS_STAGE(R.string.visualizer_theme_lyrics_stage, "歌词舞台", Tier.ADV, "53", needsParticleBudget = false),
+
+    /**
+     * E54「生态地球」——移植自 `docs/globe-present.html`（150 棵树 / 19 只动物 / 山脉 /
+     * 龙卷风 / 三层云 / 极光 / 流星 / 四季），与 E41「世界」**并列**的两个独立场景。
+     *
+     * 实现走 WebView + WebGL（three.js r160），宿主 = `EcoGlobeRenderer`；
+     * 页面与资产在 `assets/eco-globe/`，三份 ES5 库**直接复用** E41 的 `assets/globe/`。
+     * 方案与改造清单见 `docs/eco-globe-webview-plan.md`。
+     *
+     * ## 归 [Tier.ULTRA] + `needsParticleBudget = false`
+     * - **ULTRA**：与 E41 同档（`ULTRA -> allowFramebuffer`，而 `allowFramebuffer` 只有
+     *   HIGH 画质档为 true）⇒ 本效果**只在 HIGH 档提供**，与 E41 完全一致。
+     *   ⚠️ 电视若把画质设成 HIGH，本主题仍会被选中且仍然黑屏 —— 这是 WebView 宿主的
+     *   **既有问题**（§10.215），⛔ 本主题不做设备门控（与 E41 现状保持一致）。
+     * - **false**：数量（150 树 / 19 动物 / 40 鸟 / 150 微尘 …）全部写死在 JS 侧的
+     *   `CONFIG` 里，渲染器**不读** `ctx.quality.maxParticles` ⇒ 按
+     *   `ParticleBudgetGateTest` 的判据必须标 `false`。
+     *
+     * ⚠️ 序号 `"54"` 是落地时按 `entries` 现场核对的（当时最大占用是 `"53"`），
+     * 新增效果请往后顺延，⛔ 不要复用空号。
+     */
+    ECO_GLOBE(R.string.visualizer_theme_eco_globe, "生态地球", Tier.ULTRA, "54", needsParticleBudget = false),
     ;
 
     /** 效果分级：决定画质档位可用性 */
