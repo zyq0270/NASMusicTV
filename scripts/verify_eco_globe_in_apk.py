@@ -49,6 +49,32 @@ def main():
         if c == 0:
             ok = False
 
+    # ── 回归判据（2026-11-08 真机故障直接固化进打包门禁）────────────────────────
+    js = z.read('assets/eco-globe/globe.js').decode('utf-8')
+    html = z.read('assets/eco-globe/index.html').decode('utf-8')
+
+    # ① 动物加载：ESM 具名导入的局部绑定必须补回（漏了 ⇒ ReferenceError ⇒ 动物全挂）
+    if 'var cloneSkeleton' not in js:
+        print('[FAIL] globe.js 缺少 cloneSkeleton 局部绑定 ⇒ 动物会全部加载失败')
+        ok = False
+    else:
+        print('globe.js cloneSkeleton binding : ok')
+
+    # ② 画面上不能有演示页文案（标题 / 加载遮罩文案 / 状态条 / 百分比）
+    banned = [
+        ('class="title"', '标题遮罩'),
+        ('id="status"', '状态条'),
+        ('loadPct', '加载百分比文字'),
+        ('正在唤醒', '加载遮罩文案'),
+        ('自动旋转演示', '标题里的演示字样'),
+    ]
+    for needle, label in banned:
+        if needle in html:
+            print('[FAIL] index.html 仍有画面文案：%s（%s）' % (label, needle))
+            ok = False
+        else:
+            print('index.html no %-14s: ok' % label)
+
     print('[ok] E54 fully packaged' if ok else '[FAIL] packaging incomplete')
     return 0 if ok else 1
 
