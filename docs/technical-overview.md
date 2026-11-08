@@ -25352,3 +25352,39 @@ C 类移植后画面主体会从「星空」变成「一张世界地图」），
 
 **文档改动**：§0.4 新增「HTML 其余要素的处置（三分类，v2.3 订正）」小节，替换原「⛔ 已确认不可移植的 HTML 要素」清单；
 并记下 C 类所需资产已就位（`docs/assets/tex/`：`terrain.png` 184 KB / `earth.png` 419 KB / `cloud-a|b.png` / `bump.png` / `rough.png`）。
+
+### 10.362 v2.39.13（**未升版**） —— 「生态地球」WebView 主题实施方案（新建 `docs/eco-globe-webview-plan.md`）（2026-11-08）
+
+所有者问「用『世界』这个效果的技术方案，是不是这些全都可以完美移植？」⇒ 复核后确认：
+**可以，且是三条路里最省事的一条**（目标运行时就是同一套 three.js ⇒ `globe.js` 可近乎逐行搬）。
+
+**新建 `docs/eco-globe-webview-plan.md`**：把 `docs/globe-present.html`（生态地球演示页）作为 App 里的**新主题**搬进来，
+**复用 E41「世界」现有的 WebView + three-globe 技术方案**。
+
+**方案要点**：
+
+1. **架构**：新增 `VisualizerTheme.ECO_GLOBE`（「生态地球」）与 E41「世界」**并列**（两个独立场景，不合并 ——
+   前者 Robinson 陆地 + 真卫星图 + 大圆航线，后者程序化生态地球 + 动物树木 + 山脉 + 龙卷风 + 城市灯火 + 三层云 + 极光）。
+   新增 `EcoGlobeRenderer`（View 型），**复用** `WorldGlobeRenderer` 的宿主能力（虚拟 HTTPS 资产域、console 转发、
+   禁焦三件套、异步销毁、100ms tick）。
+2. **⭐ three / three-globe / polyfill 直接复用 E41 的现成 ES5 UMD 产物**（`assets/globe/three.es5.js` 987 KB /
+   `three-globe.es5.js` 2007 KB / `polyfill.es5.js`），页面用**绝对路径** `/globe/xxx` 引用
+   ⇒ **零重复、零新增 APK 体积、不碰 E41 的生产链**。
+3. **⭐ 不为电视做 ES5 兼容**（所有者提问的关键）：电视端反正黑屏（§10.215 宿主问题）⇒ 兼容 Chrome 39 **零收益**；
+   且 three/three-globe 已是 UMD ⇒ 本来就与浏览器版本无关。真正必须做的只有**离线化**（库进 assets，不依赖 unpkg CDN）。
+4. **唯一的新构建产物**：`GLTFLoader` + `SkeletonUtils`（r160 只有 ESM 版 ⇒ 不能照抄现有 `module: None` 转译，
+   因为 `module: None` 会保留 `import` 语句）⇒ 改用 **esbuild 打包**（`--format=iife --target=es5`，
+   `--alias:three` 指向只读 `window.THREE` 的 shim）⇒ **不碰 `downlevel_libs.mjs`** ⇒ E41 零风险，
+   且 ES5 target 顺带规避 Chrome 39 的 `Proxy` 缺失坑。
+5. **页面改造 6 处**：删 importmap（`:319-326`）⇒ 普通 `<script src>`；4 个 ESM import ⇒ 全局引用；
+   16 处 `assets/glb/x.glb` ⇒ `/eco-globe/glb/x.glb`；⛔ 删掉 CDN 回退（保"运行时零网络"）。
+   业务代码主体已是 ES5 语法（`var`/`function`）⇒ **不动**。
+6. **资产**：16 个 GLB（5.58 MB）+ 6 张贴图（0.87 MB，其中 **`terrain.png` 必需** ——
+   缺失会回退程序化噪声 ⇒ 地形/陆海/草地候选池全变）⇒ **APK +约 6.6 MB**。
+7. **门禁**：`FxCoverageScanTest` 登记 `exempt`（View 型）、`ParticleBudgetGateTest` 标 `needsParticleBudget = false`、
+   G1 双语 strings、⚠️ **`GlobeAssetsHygieneTest` 需扩展到新目录**（它的已知失效模式：只改 assets 不改源码时
+   Gradle 可能判 UP-TO-DATE 不重跑 ⇒ 人工验证必须带 `--rerun-tasks`）。
+8. **验证**：⛔ acorn 的 `ecmaVersion: 5` 只验语法 ⇒ **必须配 vm 加载测试**（§10.215 那个 `Proxy` 坑就是从语法校验溜过去的）。
+
+**工作量：约 4~6.5 天**（5 个 Phase），对比原生 GL 重写的 31~45 天。
+**两条路线不冲突**：本方案先落地并产出「观感基准」，原生 GL 重写以它为逐元素对账的参照，其唯一价值是解决电视端可用性。

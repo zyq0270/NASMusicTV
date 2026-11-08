@@ -1,0 +1,341 @@
+# 「生态地球」WebView 主题实施方案
+
+> **版本**: v1.0（2026-11-08）
+> **状态**: 开发方案评审
+> **关联**:
+> - `docs/globe-present.html` —— **视觉与参数的唯一来源**（本主题要移植的对象）
+> - `docs/e41-globe-opengl-plan.md` —— E41 地球的**原生 OpenGL ES 重写**方案（本主题的替代路线）
+> - `docs/technical-overview.md` §10.215 / §10.216 —— E41 的宿主问题与资产纪律
+
+---
+
+## 一、目标与定位
+
+把 `docs/globe-present.html`（「生态地球」演示页：150 棵树 / 19 只动物 / 山脉 / 龙卷风 / 城市灯火 / 三层云 / 极光 / 流星 / 四季）**作为 App 里的一个新主题**搬进来。
+
+**技术路线**：**复用 E41「世界」现有的 WebView + three-globe 技术方案**（`assets/globe/` 里那套现成的 ES5 UMD 产物 + `WorldGlobeRenderer` 的宿主代码）。
+
+**为什么不走原生 GL**：`docs/e41-globe-opengl-plan.md` 那条路（31~45 工作日）的唯一目的是**解决电视端黑屏**；本主题若只追求「画面与 HTML 完全一致」，WebView 路线保真度更高、工作量约 **1/6**。
+
+**已知代价（明写在前面）**：
+- ⛔ **电视端仍黑屏**（宿主问题，§10.215）⇒ 本主题在创维那类电视上与 E41 同样不可用；
+- ⛔ **APK +约 6.6 MB**（16 个 GLB 5.58 MB + 贴图 0.87 MB + loader 打包产物 ~0.15 MB）。
+
+---
+
+## 二、范围
+
+### 2.1 做
+
+- [ ] 新增 `VisualizerTheme` 一项（如 `ECO_GLOBE` / 「生态地球」），与 E41「世界」**并列**（两个独立场景，不合并）
+- [ ] 新增 assets 目录 `app/src/main/assets/eco-globe/`（页面 + 业务 JS + GLB + 贴图）
+- [ ] 新增 `EcoGlobeRenderer`（View 型，**复用** `WorldGlobeRenderer` 的宿主逻辑）
+- [ ] 扩展 `WorldGlobeRenderer` 的虚拟资产域路由，使 `/eco-globe/*` 与 `/globe/*` 共存
+- [ ] loader 打包脚本（esbuild）+ 门禁扩展
+
+### 2.2 不做（并说明理由）
+
+| 不做项 | 理由 |
+|---|---|
+| 合并 E41「世界」与「生态地球」为同一场景 | 两套**完全不同的场景逻辑**（前者 Robinson 陆地+真卫星图+大圆航线；后者程序化生态地球+动物树木+山脉+龙卷风）⇒ 合并成本远高于并列 |
+| 为电视做 ES5 兼容工作 | 电视端反正黑屏 ⇒ **零收益**（详见 §4.3） |
+| 改动 `downlevel_libs.mjs` | 它是 **E41 现役资产的生产链** ⇒ 碰它一旦搞坏，**现在在手机上工作正常的 E41 也会挂** ⇒ 本方案**完全不碰**（见 §4.4） |
+| 修 TV 黑屏 | 那是 `e41-globe-opengl-plan.md` 的活 |
+| 移植 `globe-present.html` 的交互 | 演示页本身「明确不加交互」（无鼠标/无点击） |
+
+---
+
+## 三、总体方案
+
+```
+┌─ 主线程 ────────────────────────────────────────────────┐
+│ EcoGlobeRenderer : VisualizerRenderer                   │
+│   isViewBased = true                                     │
+│   createView() → WebView（配置照抄 WorldGlobeRenderer）      │
+│   onFrame()    → 100ms tick 读 spectrumRepository.frame      │
+│                   → evaluateJavascript("WorldGlobe.setAudio")│
+│                                                          │
+│   WebViewClient.shouldInterceptRequest:                  │
+│     appassets.androidplatform.net/globe/*     → assets/globe/*      │
+│     appassets.androidplatform.net/eco-globe/* → assets/eco-globe/*  │
+│     appassets.androidplatform.net/favicon.ico → 空 body             │
+│     其他 host → return null（真联网）                                 │
+└──────────────────────────────────────────────────────────┘
+        │  https://appassets.androidplatform.net/eco-globe/index.html
+        ▼
+┌─ WebView 内 ────────────────────────────────────────────┐
+│ <script src="/globe/polyfill.es5.js"></script>   ← 复用 E41 的（共享，不复制）│
+│ <script src="/globe/three.es5.js"></script>     ← 复用 E41 的（共享，不复制）│
+│ <script src="/globe/three-globe.es5.js"></script> ← 复用 E41 的（共享，不复制）│
+│ <script src="/eco-globe/loaders.es5.js"></script>  ← 新增（esbuild 打包）       │
+│ <script src="/eco-globe/globe.js"></script>        ← 新增（演示页业务代码改造）   │
+└──────────────────────────────────────────────────────────┘
+```
+
+⭐ **关键**：three / three-globe / polyfill 三个产物**直接复用 E41 的**，用**绝对路径**引用
+⇒ **零重复、零新增 APK 体积**、**不碰 E41 的生产链**。
+
+---
+
+## 四、资产与产物
+
+### 4.1 新目录 `app/src/main/assets/eco-globe/`
+
+| 文件 | 来源 | 大小 | 说明 |
+|---|---|---|---|
+| `index.html` | 改自 `docs/globe-present.html` 的 `<style>` + `<body>` + 加载 UI | ~4 KB | 脚本引用改成绝对路径 |
+| `globe.js` | 改自 `docs/globe-present.html` 的 `<script type="module">` 全体 | ~120 KB | 见 §4.5 的 6 处改造 |
+| `loaders.es5.js` | **esbuild 新产物** | ~150 KB | 暴露 `window.GLTFLoader` / `window.SkeletonUtils` |
+| `glb/*.glb` | **从 `docs/assets/glb/` 复制**（16 个） | **5.58 MB** | 动物 15 + 树 1 |
+| `tex/*.png` | 从 `docs/assets/tex/` 复制（6 个） | ~0.87 MB | `earth` / `bump` / `rough` / `cloud-a` / `cloud-b` / `terrain` |
+
+> ⛔ **`docs/assets/` 不在 app 源集 ⇒ 现在不打包** ⇒ 必须复制进 `app/src/main/assets/eco-globe/`。
+> ⛔ 复制而非软链：assets 目录是打包单元，软链在 `mergeDebugAssets` 下不可靠。
+
+### 4.2 `tex/terrain.png` 是**必需**项（不是可选优化）
+
+`elevationFast()` 在 `ELEV.data` 为空时**回退到程序化噪声** `elevationP()`（`globe-present.html:556`）
+⇒ 地形、陆海分布、草地/森林候选池**全部会变** ⇒ 与演示页不一致。
+⇒ `terrain.png`（185 KB）**必须**带；其余 5 张（`earth/bump/rough/cloud-a/cloud-b`）可由程序化回退生成，
+但带上能保证**首屏更快**且**贴图与演示页逐字节一致** ⇒ 建议全带（+0.69 MB）。
+
+### 4.3 为什么不需要「为电视降级」
+
+| 事项 | 结论 |
+|---|---|
+| 电视端可用性 | ⛔ **反正黑屏**（§10.215 宿主问题）⇒ 兼容 Chrome 39 **零收益** |
+| three / three-globe | ⛔ **不用重新降级** —— E41 的 ES5 **UMD** 产物**已在 `assets/globe/`**（`three.es5.js` 987 KB / `three-globe.es5.js` 2007 KB），UMD 用普通 `<script src>` 加载，任何浏览器都行 ⇒ **直接复用** |
+| 离线 | ✅ 仍需把库放进 assets（不依赖 unpkg CDN）—— 但**复用 E41 的即可**，不新增 |
+| 唯一的新产物 | `GLTFLoader` + `SkeletonUtils`（r160 只有 ESM 版）⇒ **打包**，不是降级（§4.4） |
+
+### 4.4 `loaders.es5.js` 的打包（**不碰 `downlevel_libs.mjs`**）
+
+`three.min.js` / `three-globe.min.js` 之所以能被现有脚本用 `module: None` 直接转译，是因为它们是 **UMD**；
+而 r160 的 `examples/jsm/loaders/GLTFLoader.js` 与 `utils/SkeletonUtils.js` 是 **ESM**
+（`import { ... } from 'three'`），`module: None` 会**保留 import 语句** ⇒ Chrome 39 语法错误。
+
+⇒ 改用**打包**（bundle）而非降级：
+
+```bash
+# ⛔ 依赖装在 app/src/eco-upstream/（构建输入目录，⛔ 不在 assets 下）
+cd app/src/eco-upstream
+npm install --no-save esbuild@0.24.0 three@0.160.0
+node build_loaders.mjs
+# 产物 → app/src/main/assets/eco-globe/loaders.es5.js
+rm -rf node_modules package.json package-lock.json
+```
+
+`build_loaders.mjs` 核心（**别名 three ⇒ 一个只读全局的 shim**，避免把 987KB 的 three 再打进包里）：
+
+```js
+// three-shim.mjs —— 只读 window.THREE，不打包 three 本体
+const T = globalThis.THREE;
+export default T;
+export const { AnimationClip, AnimationMixer, Box3, BufferAttribute, BufferGeometry,
+  Color, FileLoader, ImageBitmapLoader, LinearFilter, LinearMipmapLinearFilter, Loader,
+  Matrix3, Matrix4, Mesh, MeshStandardMaterial, Object3D, PointLight, PropertyBinding,
+  Quaternion, RGBAFormat, SRGBColorSpace, TextureLoader, Vector2, Vector3, Vector4 } = T;
+```
+
+> ⚠️ **具名导出的清单不要手写** —— 按 `GLTFLoader.js` / `SkeletonUtils.js` 里**实际的 `import { … } from 'three'`** 生成
+> （漏一个 ⇒ 该名字在 shim 里是 `undefined` ⇒ **不报错、但运行时静默出错**）。
+> 建议在 `build_loaders.mjs` 里**解析源文件的 import 语句自动生成 shim**，避免手抄漏项。
+
+```
+esbuild --bundle --format=iife --target=es5 \
+  --alias:three=./three-shim.mjs \
+  --outfile=app/src/main/assets/eco-globe/loaders.es5.js \
+  node_modules/three/examples/jsm/loaders/GLTFLoader.js \
+  node_modules/three/examples/jsm/utils/SkeletonUtils.js
+```
+
+> `--target=es5` 顺带规避 Chrome 39 的 `Proxy` 缺失问题（§10.215 那个 `three-globe.es5.js:10976` 的坑）。
+> ⚠️ **产物必须验运行时**：acorn 的 `ecmaVersion: 5` 只验语法 ⇒ 必须配 **vm 加载测试**（§7.1）。
+
+### 4.5 `globe-present.html` → `index.html` / `globe.js` 的改造清单（6 处）
+
+| # | 位置 | 现状 | 改成 |
+|---|---|---|---|
+| 1 | `index.html` 的 importmap（`:319-326`） | `{"three": "https://unpkg.com/three@0.160.0/build/three.module.js", "three/addons/": ...}` | **整块删除** ⇒ 改用普通 `<script src>`（绝对路径引 E41 的共享产物） |
+| 2 | `index.html` 的脚本段 | `<script type="module">` | 拆成 5 个普通 `<script src>`（顺序不可换：`polyfill → three → three-globe → loaders → globe.js`） |
+| 3 | `globe.js` 的 `import * as THREE from "three"`（`:329`） | ESM import | 改用全局 `THREE`（E41 的 `globe.js` 同款：`window.THREE`） |
+| 4 | `globe.js` 的 `import { GLTFLoader }`（`:330`） | ESM import | 改用 `window.GLTFLoader`（`loaders.es5.js` 暴露） |
+| 5 | `globe.js` 的 `import { clone as cloneSkeleton }`（`:333`） | ESM import | 改用 `window.SkeletonUtils.clone` |
+| 6 | `globe.js` 的模型路径（`:1933-1958`，16 处 `assets/glb/x.glb`） | 相对路径（依赖页面同目录） | 改成 `/eco-globe/glb/x.glb`（虚拟资产域绝对路径） |
+
+**保留不动**：
+- CDN 回退逻辑（`:2135`「本地副本优先，缺失则回退 CDN」）—— 可保留作兜底，但**运行时零网络**是硬要求 ⇒
+  ⇒ **建议删掉回退**（否则缺资源时会真联网，违反离线纪律）；改为「加载失败 ⇒ 报错并停」。
+- 业务代码主体（已是 ES5 语法 `var`/`function`）⇒ **不动**。
+
+---
+
+## 五、宿主接线（Kotlin）
+
+### 5.1 复用清单（`WorldGlobeRenderer` 的可复用点）
+
+| 能力 | 现状（`WorldGlobeRenderer.kt`） | 复用方式 |
+|---|---|---|
+| 虚拟资产域 | `ASSET_HOST = "appassets.androidplatform.net"`、`ASSET_BASE = ".../globe"` | **共用 host**，新增 `/eco-globe` 前缀 |
+| 资源拦截 | `shouldInterceptRequest` 按 host 精确匹配 + MIME 猜测 + favicon 空 body | 抽成**共用函数**，加一个前缀参数 |
+| console 转发 | `WebChromeClient.onConsoleMessage` → `AppLog`（含 three.js 已知噪音降级） | 抽成共用 |
+| 禁焦三件套 | `isFocusable=false` / `isFocusableInTouchMode=false` / `descendantFocusability=FOCUS_BLOCK_DESCENDENTS` | 照抄（否则遥控方向键被 WebView 吃掉） |
+| 异步销毁 | `onViewDetached` 里 `wv.post { removeView; destroy() }` | 照抄（同步 destroy 会崩） |
+| 100ms tick | `Handler(Looper.getMainLooper())` + `evaluateJavascript("WorldGlobe.setAudio(...)")` | 照抄（改 JS 函数名） |
+| 音频 JSON | `{"energy":f,"bass":f,"mid":f,"treble":f,"beat":f}` | 照抄 |
+
+### 5.2 新增 `EcoGlobeRenderer`
+
+```kotlin
+class EcoGlobeRenderer : VisualizerRenderer {
+    override val theme: VisualizerTheme = VisualizerTheme.ECO_GLOBE
+    override val isViewBased: Boolean get() = true
+    override fun DrawScope.draw(frame: AudioFrame, ctx: RenderContext) {}   // View 旁路，空实现
+    override fun createView(context: Context): View = /* WebView，配置见 §5.1 */
+    override fun onViewAttached() { /* 起 100ms tick */ }
+    override fun onViewDetached() { /* 停 tick + 异步 destroy */ }
+    override fun renderFps(): Float = lastFps     // ⛔ 必须覆写（见下）
+    override fun onFrame(frame: AudioFrame, ctx: RenderContext) { /* 推数据 */ }
+}
+```
+
+⚠️ **两个必须覆写的方法**（`VisualizerRenderer.kt:46-56` / `:80-90`）：
+- `renderFps()`：View 型有独立渲染循环，舞台徽章量的是 Compose Choreographer 回调率 ⇒ 不覆写会「显示 59 fps 但画面很卡」。
+- `onFrame(frame, ctx)`：View 旁路下 `RenderContext.update(...)` 不在 draw 块里被调用 ⇒ `ctx.songId` 永远是旧值。
+  ⚠️ **但 main 源集当前没有这两个方法的调用点**（只有私有覆盖层的 `VisualizerStage.kt:294-314, 351` 调）⇒
+  ⇒ **照 E41 现状**：自己起 `Handler` tick 直接读 `spectrumRepository.frame`（`WorldGlobeRenderer.kt:380-384` 同款）。
+
+### 5.3 枚举与门禁
+
+```kotlin
+// data/model/AppSettings.kt
+ECO_GLOBE(R.string.visualizer_theme_eco_globe, "生态地球", Tier.ULTRA, "54", needsParticleBudget = false),
+```
+- ⚠️ **`ordinalLabel` 取号要现场确认**：E50=50、E51=51 / E52=52（仅私有分支）、E53=53 已占用 ⇒ "54" 是当前推算值，
+  ⛔ **落地前读 `VisualizerTheme.entries` 核对**，不要凭空写死。
+- **两份 strings**：`values/strings.xml` + `values-en/strings.xml` 都要加 `visualizer_theme_eco_globe`（G1 门禁，缺一 ⇒ 运行时崩溃）。
+- **`Tier.ULTRA`**：与 E41 同档（`Tier.ULTRA -> allowFramebuffer`，而 `allowFramebuffer` **只有 HIGH 画质档为 true**
+  ⇒ **只有 HIGH 档提供本主题**，MEDIUM / LOW 不提供）。
+  ⚠️ 注意：**电视若把画质设成 HIGH，本主题仍会被选中 ⇒ 仍然黑屏**（宿主问题）⇒
+  ⇒ 若希望电视上完全不可见，需另加设备门控；本方案**不做**（与 E41 现状保持一致：E41 在 HIGH 档的电视上同样黑屏）。
+- **`needsParticleBudget = false`**：本主题**不读** `ctx.quality.maxParticles`（数量在 JS 侧写死）⇒ 按 `ParticleBudgetGateTest` 的判据必须标 `false`。
+- **`FxCoverageScanTest`**：新渲染器是 View 型 ⇒ **必须登记进 `exempt`**（照 `WorldGlobeRenderer` 的条目）。
+- **`VisualizerRendererFactory.createEnabled`**：加 `VisualizerTheme.ECO_GLOBE -> EcoGlobeRenderer()` 分支。
+
+---
+
+## 六、构建流水线
+
+```
+app/src/eco-upstream/                    ← 构建输入（不进 APK）
+  build_loaders.mjs                     ← esbuild 打包脚本
+  three-shim.mjs                        ← 只读 window.THREE 的 shim
+  node_modules/                         ← ⛔ 用完即删（装在 assets 下会被打进 APK）
+
+app/src/main/assets/eco-globe/           ← 运行时（进 APK）
+  index.html  globe.js  loaders.es5.js  glb/*.glb  tex/*.png
+```
+
+⚠️ **`npm install` 必须装在 `app/src/eco-upstream/`**，⛔ 不能装 `assets/` 下
+（2026-09-06 实测：`typescript` + `acorn` 的 `node_modules` 共 **23.3 MB** 被 `mergeDebugAssets` 打进 APK）。
+
+---
+
+## 七、验证
+
+### 7.1 vm 加载测试（**必须**）
+
+`downlevel_libs.mjs` 的 `assertEs5()`（acorn `ecmaVersion: 5`）**只证明语法，不证明运行时**
+（§10.215 那个 `Proxy` 坑就是从语法校验里溜过去的）⇒ `loaders.es5.js` 必须配 vm 加载测试：
+
+- 在 Node `vm` 沙箱里删掉 Chrome 39 缺失的 API（`Proxy` / `Object.assign` / `Array.from` …）
+- 按 `polyfill → three → three-globe → loaders → globe.js` 顺序加载
+- 断言 `THREE` / `ThreeGlobe` / `GLTFLoader` / `SkeletonUtils` 均已定义
+- 断言 `globe.js` 里的 `initApp()` 能跑通（起一个 WebGL stub 即可）
+
+### 7.2 手机真机（需所有者执行）
+
+- [ ] 主题出现在效果列表，显示名正确（中/英）
+- [ ] 进出场正常（无黑屏、无崩溃）
+- [ ] 150 棵树 / 19 只动物都出现、骨骼步态正常（`SkeletonUtils.clone` 生效）
+- [ ] 四季循环正常（60 s/轮，HTML 原值 `CONFIG.seasonPeriod`）
+- [ ] 龙卷风间歇出现、城市灯火只在陆地、三层云反向视差
+- [ ] 音频驱动生效（自转速度 / 粒子 / 流星）
+- [ ] **运行时零网络**（抓包或日志确认无 unpkg / poly.pizza 请求）
+- [ ] FPS 徽章读数与实际相符（`renderFps()` 覆写生效）
+
+### 7.3 电视（**预期黑屏**，需确认"黑屏而非崩溃"）
+
+- [ ] 电视上选到该主题 ⇒ 画面黑（或明确提示），**不崩溃、不 ANR**
+- [ ] 切走该主题后内存回落（WebView 异步销毁生效）
+
+### 7.4 门禁
+
+| 门禁 | 要求 |
+|---|---|
+| `GlobeAssetsHygieneTest` | ⚠️ 当前只扫 `assets/globe/` ⇒ **需扩展**到 `assets/eco-globe/`：① `node_modules` 不得在 assets ② `package.json`/`package-lock.json` 不得在 assets ③ 构建输入不得在 assets |
+| `FxCoverageScanTest` | 新渲染器登记 `exempt` |
+| `ParticleBudgetGateTest` | 枚举 `needsParticleBudget = false` 与源码一致 |
+| `VisualizerThemeStringsGateTest`（G1） | 两份 strings 都有 key |
+| `RendererBaseContractTest`（G12） | ⚠️ **不适用**（只扫 `RendererFx` 子类；本主题是 View 型） |
+
+> ⚠️ `GlobeAssetsHygieneTest` 的**已知失效模式**（其 KDoc `:28-37`）：它只读文件系统、不引用 Gradle 输入 ⇒
+> 只改 assets 不改源码时，Gradle 可能判测试 **UP-TO-DATE 根本不重跑** ⇒
+> **人工验证必须带 `--rerun-tasks`**。
+
+---
+
+## 八、里程碑与工作量
+
+| Phase | 内容 | 产出 | 工作量 |
+|---|---|---|---|
+| **0** | 资产准备：复制 16 个 GLB + 6 张贴图；建 `app/src/eco-upstream/`；写 `build_loaders.mjs` + `three-shim.mjs`；产出 `loaders.es5.js` | 可加载的 loader 包 | **1~1.5 天** |
+| **1** | 页面改造：`globe-present.html` → `index.html` + `globe.js`（§4.5 的 6 处） | 可离线加载的页面 | **1~1.5 天** |
+| **2** | Kotlin 宿主：`EcoGlobeRenderer` + 虚拟域多前缀路由 + 枚举 + strings + 门禁登记 | 主题可被选中 | **1.5~2 天** |
+| **3** | 验证：vm 加载测试 + 手机真机 + 电视黑屏确认 | 验收证据 | **0.5~1 天** |
+| **4** | 收尾：CHANGELOG + `docs/technical-overview.md` §10 + 本文档定稿 | 归档 | **0.5 天** |
+
+**合计：约 4~6.5 天**（单人）
+
+**APK 增量：约 +6.6 MB**（GLB 5.58 + 贴图 0.87 + loader ~0.15）
+
+---
+
+## 九、风险
+
+| # | 风险 | 缓解 |
+|---|---|---|
+| R1 | **esbuild 产物在 Chrome 39 上跑不起来**（`GLTFLoader` 用到 `Object3D.copy` / `BufferAttribute` 等，ES5 target 可能引入 `__spreadArray` 之类的辅助） | `--target=es5` 出产物 + **vm 加载测试必须真跑**（§7.1）；失败则退 `--target=es2015`（放弃电视兼容，反正黑屏） |
+| R2 | **`SkeletonUtils.clone` 在 ES5 化后骨骼引用断裂**（仓库历史上踩过：普通 `clone(true)` 不重建 `skeleton.bones` ⇒ 多实例串台，见 `globe-present.html:331-333` 的注释） | 必须在真机上验证**多实例步态不串台**（§7.2） |
+| R3 | **5.58 MB GLB 进包后 APK 体积** | 已核对；必要时可只带**用到的** GLB（演示页 16 个全用） |
+| R4 | **运行时零网络被破坏**（演示页的 CDN 回退逻辑） | **删掉回退**（§4.5），缺资源直接报错 |
+| R5 | **电视上崩溃而非黑屏** | `Tier.ULTRA` + 电视上不可选；且 `WebView` 崩溃要能降级（见 §5.2 的兜底） |
+| R6 | **E41 被牵连** | ⛔ **不碰 `downlevel_libs.mjs`、不碰 `assets/globe/` 现有文件**（只新增 `eco-globe/`）⇒ E41 零风险 |
+| R7 | **`GlobeAssetsHygieneTest` 覆盖不到新目录** ⇒ 依赖残留被打进 APK | §7.4 要求**扩展该测试**到新目录 |
+
+---
+
+## 十、验收标准
+
+- [ ] 主题可选、显示名中/英正确、进出场无崩溃
+- [ ] **观感与 `docs/globe-present.html` 一致**（150 树 / 19 动物 / 山脉 / 龙卷风 / 城市灯火 / 三层云 / 极光 / 流星 / 四季）
+- [ ] 骨骼步态正常、多实例不串台
+- [ ] **运行时零网络**
+- [ ] APK 增量 ≤ 7 MB
+- [ ] 门禁全绿（含扩展后的 `GlobeAssetsHygieneTest`）
+- [ ] 电视上"黑屏但不崩溃"
+- [ ] `docs/technical-overview.md` §10 记录 + CHANGELOG 一行
+
+---
+
+## 十一、与「原生 GL 重写」的关系
+
+| | 本方案（WebView） | `e41-globe-opengl-plan.md`（原生 GL） |
+|---|---|---|
+| 保真度 | **100%**（同一个 three.js 运行时） | 需逐元素重写，靠人工对账 |
+| 电视可用 | ⛔ 黑屏 | ✅ |
+| 工作量 | **4~6.5 天** | 31~45 天 |
+| APK | +6.6 MB | ~0 |
+
+⇒ **两条路线不冲突**：本方案**先落地**，产出「观感基准」；原生 GL 重写以它为**逐元素对账的参照**，
+其唯一价值就是解决电视端可用性。
