@@ -25064,3 +25064,41 @@ Puppeteer + 本机 Edge 真实渲染：
 
 另：`draw` 内零分配红线（`VisualizerRenderer.kt:14`）、DrawScope 图元（`drawRect/drawCircle/drawPoints/drawRoundRect`）
 全部写入文档；里程碑 Phase 0 增加门禁接入；测试计划补 §10.2 三条门禁表。
+
+### 10.353 v2.39.13（**未升版**） —— 频谱开发文档 v1.2 —— 接入 `RendererFx` 模板方法 + `fx.dt` 时钟 + 第四条门禁（2026-11-08）
+
+对 v1.1 做第二轮代码审阅（深挖 `RendererFx` 基类层）后修正 10 项：
+
+**高危 3 项**
+1. **漏掉 `RendererFx` 基类**：v1.1 §3.2 示例写成裸 `VisualizerRenderer`（`override fun DrawScope.draw` + 自写 `onEnter/onExit`）——
+   正是该基类被创建出来消灭的旧写法（`renderers/RendererFx.kt:34`；其 KDoc：「29 个渲染器…`dt` 钳制 6 种写法」）。
+   ⛔ 且与 v1.1 §10.2 自相矛盾（G7 要求「有 `postFx` **或** `draw` 内调 `OverlayFx`」，示例两者皆无 ⇒ 必挂门禁）。
+   ⇒ v1.2 改为 `class StellarSpectrumRenderer : RendererFx()`，只实现 `drawContent(frame, ctx, fx)` + `onEnterContent/onExitContent`，
+   并给出 `override val postFx = PostFx(vignette = 0.42f, vignetteEdge = Color(0xFF0A2E4A))`
+   （⚠️ `vignetteEdge` 固定身份色：默认会用封面 accent 色，换歌时整幅画面被封面染掉，`PostFx.kt:167-171` 记的数字雨实测）。
+2. **`dt` 不该自算**：v1.1 手写 `lastMs` + `coerceIn(0f, 0.1f)` ⇒ 重复实现 `FrameClock`（`RendererFx.kt:195-213`，
+   含首帧 0 / 负差钳 0 / 上界 0.1s / `reset()`，且有 5 条行为 + 负向自证保护）⇒ 改为直接用 `fx.dt`。
+3. **漏掉 `RendererBaseContractTest` 门禁**：该门禁扫 `renderers/`+`photo/` 全部 `RendererFx` 子类，
+   判三条违规（覆写 `draw`/`onEnter`/`onExit`；用 `ctx.nowMs`；自建 `private val rng = VisualizerRandom()`）
+   ⇒ 补入 §10.2 门禁表（v1.2 起共四条）。
+
+**中危 4 项**
+4. **`drawPoints` 做不出三档星点**：Compose 一次 `drawPoints` 共用一个 `strokeWidth` 与一个 `color`
+   ⇒ v1.1「一次绘完」会丢尺寸分档与逐星闪烁 ⇒ 改为 tier-1/tier-2 各一次合批 + tier-3（≈30 颗）逐颗 `drawCircle`。
+5. **季节驱动自相矛盾**：v1.1 §2.3「按歌曲播放进度映射」/§5.1「由播放进度驱动」与同表「驱动源 `frame.timeMs`，⛔ 不用音轨进度」互斥
+   ⇒ v1.2 统一为**唯一驱动源 = `fx.dt` 累加**（周期 15min/季）；若需按歌重置，用 `ctx.songId`（未被门禁禁止）。
+6. **大气渐变逐帧重建会破零分配红线**：季节连续插值 ⇒ `Brush` 必须逐帧重建（分配）或只在 `onEnter` 建（颜色不随季节变）
+   ⇒ 改为**烘焙位图**（`ProceduralTexture.ensureFullscreenOnly` + `SizeCache` 双键缓存），并标注 4 张全屏 ARGB 的 native 内存风险与优化方向。
+7. **`needsParticleBudget` 取值反了**：v1.1 默认 `true` ⇒ `VisualQuality.LOW` 的 `maxParticles = 0`（`AppSettings.kt:637`）
+   ⇒ 本效果在 LOW 档**不可选**（"能渲染却不可选、切走即永久回不来"那类缺陷）
+   ⇒ 改为 `false` + 粒子数量按 `fx.level` 三档表调（与 E42/E43/E47/E48/E49/E50 一致）。
+
+**低危 3 项**
+8. **§5.2 降级判据含糊**（「按 ctx 画质档」）⇒ 明确用 `fx.level`（= `FxBudget.of(ctx.quality)`，`FxLevel.kt:25`）。
+9. **像素尺寸缺分辨率适配** ⇒ 一切 px 尺寸改为按 `ctx.minDim`（`RenderContext.kt:92`）比例化的 dp。
+10. **相位类动画缺禁忌** ⇒ 补「⛔ 绝不用 `nowMs × 系数` 推进相位，一律 `phase += dt`」
+    （`photo/PhotoTransitionClock.kt:17` 明文：1.7e12 量级乘系数会把每帧抖动放大千万倍 → 画面闪现跳档）。
+
+**另修一处随机源反模式**：v1.1 §4.1/§4.5/§4.6 用自建 `LCG(20261108)` 固定种子 ⇒ 撞上仓库明文禁忌
+「不能给所有渲染器同一个常量种子 —— 那样每个渲染器的首帧图案会完全一致（交叉淡入时两层图案重合），且每次进入都重复同一套图案」
+（`VisualizerRandom.kt:17-19`）⇒ v1.2 改用基类 `protected val rng`；单测需要可复现时**另起名**注入种子（⛔ 不得命名为 `rng`）。
