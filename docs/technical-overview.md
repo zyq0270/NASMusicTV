@@ -25438,8 +25438,34 @@ E41 的 `assets/globe/` 与 `WorldGlobeRenderer.kt` **零改动**。
   `setAudio` 对合法/非法/null 输入均不抛，并含**负向自证**「缺 `three` 时 loaders 必须明确报错」。
   ⚠️ 该测试的 DOM 桩用的是 `Proxy` 兜底空操作（页面还在演进，白名单式桩会因新增 2D API 而假红）；
   vm 里**没有 WebGL** ⇒ `boot()` 走 `catch` 分支属**预期**，不算失败。
-- 5 个门禁类 **30 例全绿**：`FxCoverageScanTest` 8 / `GlobeAssetsHygieneTest` 8 /
-  `ParticleBudgetGateTest` 5 / `VisualizerThemeStringsGateTest` 3 / `EffectFurnitureGateTest` 6。
+- `node scripts/check_eco_globe_refs.py` **exit=0**（本次新增）：静态核对页面/脚本引用的每个资产
+  是否真实存在 —— vm 测试**不发起 fetch** ⇒ 抓不到「引用了但文件不存在」的缺件。
+  覆盖两种引用形态（完整路径字面量 / `CONFIG.bakedDir` + 文件名拼接），并反向核对磁盘上没有白带的 GLB。
+  实测：GLB 引用 **16/16**、贴图 **6/6**、三份共享库全被引用、`missing = 0`、多余 GLB **0**。
+- `assembleDebug` **BUILD SUCCESSFUL in 25s**（exit=0）；APK 内 `assets/eco-globe/` **25 项齐全**
+  （16 GLB + 6 贴图 + 3 文件），未压缩 6,935,798 B / **APK 内压缩后 3,607,550 B**
+  ⇒ 实际增量比方案预估的 6.6 MB 更小。
+
+**⚠️ 全量单测暴露的 3 处门禁返修**（`testDebugUnitTest` 全量跑，不是只跑 5 个门禁类）：
+
+1. **`VisualizerThemeTest` 硬编码条目数 `27` → `28`**（连同 `selectable` 的 `25 → 26`、
+   照片墙开/关两份列表的 `24/25 → 25/26`、编号互异与显示名互异两处）。
+   ⚠️ 这类**计数断言**是新增效果时最容易漏的：其它门禁只查「集合是否自洽」，查不出「个数对不对」。
+2. **`UpstreamOriginalsHygieneTest` 白名单补 `assets/eco-globe/`** —— 它只允许 `assets/globe/` 与
+   `assets/lx/`，新增目录会被判「上游原件混入」。**依据**（AGENTS.md 的授权判据）：
+   `globe.js` 由本项目自己的 `scripts/build_eco_globe_page.py` 从 `docs/globe-present.html`
+   （本项目自有演示页）生成；`loaders.es5.js` 是把 **MIT 授权**的 three.js addons
+   （GLTFLoader / SkeletonUtils）用本项目自己的 `build_loaders.mjs` 打包而成
+   ⇒ **不是「无授权的上游原件」**（MIT 允许再发布），补进白名单并写明理由。
+3. **`PrivateOverlayDriftGateTest`** —— 见下。
+
+⚠️ **私有分支处置**：漂移门禁会逐字节比对 `app/src/e51-overlay/` 与 `feat/e51-private`
+⇒ 在覆盖层工厂里加 `ECO_GLOBE` 分支后立刻变红（漂移 1 处：`VisualizerRendererFactory.kt`）。
+⛔ **不能直接跑 `python scripts/sync_private_overlay.py`** —— 它的方向是「私有分支 → 覆盖层」，
+会把覆盖层新增的 `ECO_GLOBE` 分支**覆盖掉** ⇒ `when` 不穷尽 ⇒ 本地构建编译失败。
+⇒ 正解：用 `git worktree` 在 `feat/e51-private` 上**同样落下 E54 的改动**
+（渲染器 + 资产 + 枚举 + 双语 strings + 工厂分支 + 4 个测试文件），**全程本地提交、不 push**
+（与仓库纪律一致）。资产与 main 逐字节相同 ⇒ git 对象去重，**不额外占空间**。
 
 **门禁登记的改动**：
 `VisualizerTheme.ECO_GLOBE(R.string.visualizer_theme_eco_globe, "生态地球", Tier.ULTRA, "54", needsParticleBudget = false)`

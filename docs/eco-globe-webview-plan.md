@@ -434,14 +434,50 @@ vm 里没有 WebGL ⇒ `boot()` 走 `catch` 分支属**预期**，不算失败�
   `terrain.png` 单列）、构建输入确实在 `eco-upstream/`。
 - `docs/visualizer-effects-list.md`：新增 `| E54 | ECO_GLOBE | 生态地球 |`。
 
-### 12.8 遗留项
+### 12.8 私有分支处置（`feat/e51-private`）
 
-1. ⚠️ **私有分支同步**：本机构建用覆盖层 `app/src/e51-overlay/.../VisualizerRendererFactory.kt`（掩蔽仓库同名文件）。
-   覆盖层那份已手工补 `ECO_GLOBE` 分支，但 **`feat/e51-private` 上那份也必须加同一行** ——
-   否则 `scripts/sync_private_overlay.py` 下次同步会覆盖掉 ⇒ 本地构建因 `when` 不穷尽而编译失败。
-   （仓库里那份 `VisualizerRendererFactory.kt` 已改，两者现在一致。）
-2. ⏳ **§7.2 手机真机项全部待所有者执行**：主题出现/进出场/骨骼步态/四季/龙卷风/音频驱动/零网络。
-   验收清单里已核对的只有「编译 + 门禁 + vm 加载」三项。
+⚠️ **覆盖层 ↔ 隐藏分支的漂移门禁**（`PrivateOverlayDriftGateTest`）会逐字节比对
+`app/src/e51-overlay/` 与本地分支 `feat/e51-private` ⇒ **在覆盖层工厂里加 `ECO_GLOBE` 分支后，
+该门禁立刻变红**（漂移 1 处：`visualizer/VisualizerRendererFactory.kt`）。
+
+⛔ **不能直接跑 `python scripts/sync_private_overlay.py`** —— 它的方向是「私有分支 → 覆盖层」，
+会把覆盖层里新增的 `ECO_GLOBE` 分支**覆盖掉** ⇒ `when` 不穷尽 ⇒ 本地构建编译失败。
+
+⇒ 正解：**把 E54 的改动同样落到私有分支**（用 `git worktree` 在 `feat/e51-private` 上做，
+⛔ 全程**本地提交、不 push**）。落到私有分支的内容：
+
+| 文件 | 处理 |
+|---|---|
+| `EcoGlobeRenderer.kt` | 新增（与 main 逐字节相同） |
+| `assets/eco-globe/**` | 新增（与 main 相同 ⇒ git 对象去重，**不额外占空间**） |
+| `app/src/eco-upstream/**` + 3 个脚本 | 新增（与 main 相同） |
+| `AppSettings.kt` | 加 `ECO_GLOBE` 枚举（序号 `"54"`） |
+| `values/strings.xml` / `values-en/strings.xml` | 各加 1 个 key |
+| `VisualizerRendererFactory.kt` | 加 import + `ECO_GLOBE` 分支（与覆盖层那份一致） |
+| 4 个测试文件 | `VisualizerThemeTest`（计数 27→28）、`FxCoverageScanTest`（exempt + 下限 27→28）、`GlobeAssetsHygieneTest`（E54 三例）、`UpstreamOriginalsHygieneTest`（白名单加 `assets/eco-globe/`） |
+
+### 12.9 全量单测暴露的 3 处门禁返修
+
+`testDebugUnitTest` 全量（2035+ 例）跑出 **3 类红**，都已修：
+
+1. **`VisualizerThemeTest`** —— 硬编码的条目数 `27` → **`28`**（含 `selectable` 的
+   `25 → 26`、照片墙开/关两份列表的 `24/25 → 25/26`、编号互异与显示名互异两处）。
+   ⚠️ 这类**计数断言**是新增效果时最容易漏的：门禁类只查「集合是否自洽」，查不出「个数对不对」。
+2. **`UpstreamOriginalsHygieneTest`** —— 白名单只允许 `assets/globe/` 与 `assets/lx/` ⇒
+   新增 `assets/eco-globe/` 后被判「上游原件混入」。**依据**（AGENTS.md 的授权判据）：
+   `globe.js` 由本项目自己的 `scripts/build_eco_globe_page.py` 从 `docs/globe-present.html`
+   （本项目自有演示页）生成；`loaders.es5.js` 是把 **MIT 授权**的 three.js addons
+   （GLTFLoader / SkeletonUtils）用本项目自己的 `build_loaders.mjs` 打包而成（MIT 允许再发布）⇒
+   **不是「无授权的上游原件」**，补进白名单并写明理由。
+3. **`PrivateOverlayDriftGateTest`** —— 见 §12.8。
+
+### 12.10 遗留项
+
+1. ⏳ **§7.2 手机真机项全部待所有者执行**：主题出现 / 进出场 / 骨骼步态 / 四季 / 龙卷风 / 音频驱动 / 零网络。
+   已核对的只有「编译 + 门禁 + vm 加载 + 静态引用核对」四项。
+2. 📌 **静态引用核对脚本**（`scripts/check_eco_globe_refs.py`，本次新增）：
+   vm 加载测试**不发起 fetch** ⇒ 抓不到「引用了但文件不存在」的缺件。该脚本覆盖两种引用形态
+   （完整路径字面量 / `bakedDir` + 文件名拼接），并反向核对磁盘上没有白带的 GLB。
 3. 📌 **踩坑（给后来者）**：`EcoGlobeRenderer.kt` 的 KDoc 里写 `glb/*.glb` 与 `/globe/*` 会触发
    Kotlin 的**可嵌套块注释** ⇒ `Unclosed comment`，报错位置却指向文件末尾（极具误导性，本次踩了两次）。
    改完 Kotlin 源码先跑 `python scripts/kotlin_comment_balance.py`。

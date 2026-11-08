@@ -25,6 +25,7 @@ import java.io.File
  * |---|---|
  * | `assets/globe/` | E41 地球仪的运行时资产（three.js 的 ES5 产物，§11 既有事实） |
  * | `assets/lx/` | 洛雪自定义源宿主的 JS 垫片 —— **本项目自己写的**协议层（与 loficities.com 无关） |
+ * | `assets/eco-globe/` | E54 生态地球的运行时资产：`globe.js` **由本项目自己的** `scripts/build_eco_globe_page.py` 从 `docs/globe-present.html`（本项目自有演示页）生成；`loaders.es5.js` 是把 **MIT 授权**的 three.js addons（GLTFLoader / SkeletonUtils）用本项目自己的 `app/src/eco-upstream/build_loaders.mjs` 打包而成（MIT 允许再发布，已保留署名） |
  *
  * 其余一律判为「上游原件混入」⇒ **构建失败**。
  *
@@ -46,6 +47,8 @@ class UpstreamOriginalsHygieneTest {
         val allowed = listOf(
             Regex("""assets[/\\]globe[/\\]"""),
             Regex("""assets[/\\]lx[/\\]"""),
+            // E54：本项目自有生成页 + MIT 授权的 three.js addons 打包产物（见类注释表格）
+            Regex("""assets[/\\]eco-globe[/\\]"""),
         )
         val offenders = leaked.filterNot { p -> allowed.any { it.containsMatchIn(p) } }
         assertTrue(
