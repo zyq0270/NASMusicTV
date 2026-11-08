@@ -49,8 +49,12 @@ APPENDIX_MIN_TOKENS = 100
 # 玩法词与仓库名同形的：只用「明确指向仓库」的写法判（owner/repo、URL、反引号裸名）。
 # 判据是「这个词离开某个具体仓库还有没有意义」——`tetris` 有（俄罗斯方块玩法），
 # `supertux` / `spacehuggers` 没有（只可能是那个项目）⇒ 后者走严格禁词。
+# ⭐ v5.0（2026-11-08）：`contra`（魂斗罗）同理 —— 池内同名 ❌ 候选（附录 C 留档）的
+#   basename 就是玩法词；而 v5.0 正文必须写「素材来源 `nes-contra-us`」（上游 ROM 提取精灵库，
+#   UEFI_Contra README 自认）⇒ 裸 `contra` 走 genre 桶：`nes-contra-us` / `UEFI_Contra` 放行；
+#   `owner/contra`、GitHub URL、反引号裸名 `contra` 仍命中 —— 池内全路径驱逐候选不被放宽。
 GENRE_WORDS = {"asteroids", "snake", "tetris", "breakout", "arkanoid", "pong",
-               "life-game", "game-of-life", "tower-defense"}
+               "life-game", "game-of-life", "tower-defense", "contra"}
 
 # 允许出现在正文的 ✅ 池成员（10 条）——它们不是弃用候选
 # （由判定自动得出，不在此硬编码名单，⛔ 别在这里加白名单，否则池一变就漏）

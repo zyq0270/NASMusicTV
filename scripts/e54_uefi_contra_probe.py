@@ -6,7 +6,7 @@ r"""池外候选逐条取证：MikeWuPing/UEFI_Contra（所有者 2026-11-04 指
 附录 A 那 122 条（`e54_upstream_verify.py` 的 GROUP_A/GROUP_B）是**两份原表的池子**，
 往里塞一条「所有者后来另外指定的仓库」会把正文里十几处「84 条大池 / 122 条」的计数全部弄脏，
 还会让 A.1/A.2 的行数不再等于原表行数。所以本仓库**不进 GROUP_A/B**，单独由本脚本取证，
-结论落在**附录 C.12**。⛔ 本文档正文不许点它的名字 —— 名字进禁词表的机制见
+结论落在**附录 C.12**。⛔ 正文点名规则**随 `VERDICT` 反转**（v5.0 起 `VERDICT = ✅` ⇒ 正文可点名；禁词机制见下一行 —— 只是自动闸门，不替代 `VERDICT` 本身）。
 `e54_body_clean_check.OUT_OF_POOL_NOGO`（它从本脚本的 `REPO` + `VERDICT` 反推，不另立名单）。
 
 取证的三层数字（全部由本脚本再生，⛔ 不许手抄进文档）
@@ -45,10 +45,10 @@ MIRROR = "logs_temp/uefi_contra_probe"
 
 # 判定口径与 `e54_upstream_verify.e54_verdict` 的三档一致；本条是本脚本的**结论**，
 # 归堆理由同时写进 HARD_EXCLUDE 语义的附录 C.12。⚠️ 改这里 = 改正文禁词表。
-VERDICT = ("❌ 不做",
-           "① 无 LICENSE 文件（README 自称 MIT ⇒ 附录 A.5 的假 MIT 形态，C4 不成立）；"
-           "②《Contra》是 Konami 商业 IP，README 自认素材取自 NES ROM、上游 nes-contra-us 亦无许可"
-           "（§8.7 第⑤道）；③ 精灵资源运行期从 FAT 磁盘读 .spr，仓库内 .py/.spr/PNG 全为 0 ⇒ 克隆不可运行")
+VERDICT = ("✅ 采用",
+           "① 所有者 2026-11-08 裁决：README 自称 MIT（无 LICENSE 文件）且「完全可以继续移植后开源」⇒ 许可与 IP 顾虑不阻塞；"
+           "②《Contra》是 Konami 商业 IP、素材取自 NES ROM、上游 nes-contra-us 无许可 —— 均已如实记录（§8.7 第⑤道、附录 C.12）；"
+           "③ 第一阶段目标定为「只建立效果、只移植魂斗罗这一个游戏、实现自动演示」（§5.8 实测事实、§十八 Phase 1）；精灵资源运行期读 .spr、仓库内无素材管线 ⇒ 这正是要补齐的部分（素材来源 nes-contra-us 精灵库实测 232 PNG + 1 GIF，见 §5.8）")
 
 # 素材头（ROM 提取的图形/关卡数据）——按 README 与文件头注释认定，逐条在本脚本里打印证据行
 ASSET_HDRS = {"tiles_c.h", "tiles_full.h", "level_data.h", "intro_tiles.h",
