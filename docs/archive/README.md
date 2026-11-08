@@ -685,6 +685,18 @@
 > ⚠️ 未进 `CHANGELOG.md`：本轮是**纯文档移动 + 归档登记**，按本仓规矩（文档改动不入 CHANGELOG）不登记；无代码变更。
 > 📌 **`docs/` 根口径**（2026-11-08 实测 `git ls-tree --name-only HEAD docs/ | grep -c '\.md$'`）：入库 Markdown **11 → 10 篇** = 活文档 2（`technical-overview.md` / `conventions-adaptive-ui.md`）+ 现役名册 1（`visualizer-effects-list.md`）+ 在办方案 5（`blackhole-visualizer-plan.md` / `e41-globe-opengl-plan.md` / `e45-orbital-plan.md` / `stellar-spectrum-plan.md` / `e54-run-and-gun-survey.md`）+ 其它 2 篇（`开源横版卷轴游戏总表_核验报告.md` / `开源横版卷轴游戏总表_更新版.md`）。⚠️ 上文各轮里的旧计数一律以本段为准。
 
+## 第二十一轮（2026-11-08，1 个）—— E54「生态地球」定稿归档（随 v2.39.14 出包）
+
+| 文档 | 判定依据 | 被谁引用（已改写） | 挂起决策 |
+|---|---|---|---|
+| `eco-globe-webview-plan.md` | ✅ **已落地并定稿**：E54「生态地球」随 **v2.39.14 / `versionCode 199`** 出包（本地包，⛔ 未推送）。Phase 0~4 全部闭合：新主题 `ECO_GLOBE`（与 E41「世界」**并列**，非子模式）+ `EcoGlobeRenderer`（WebView + three.js r160）+ 16 个 GLB / 6 张贴图全部离线内置 + 三份 three.js 库**复用** `assets/globe/`（零重复打包）+ 运行时**零网络**。⚠️ 真机第 1 轮暴露的两个问题（① **动物一只都没出来** —— 生成页面时删掉 ESM 具名导入 `import { clone as cloneSkeleton }` 却没补回**局部绑定** ⇒ 摆位抛 `ReferenceError` 被业务 catch 吞成「加载失败，已跳过」；② 画面上的演示页文案）**均已修复并复测通过** ⇒ 方案文档不再是进行中的活文档。移动方式 = **`git mv`**（历史保留），正文 §一～§十二 **一字未删**，只改状态头 + 加 v1.2 版本行 | **8 处引用 / 6 个文件**（`app/src/eco-upstream/build_loaders.mjs` ×1、`AppSettings.kt` ×1、`EcoGlobeRenderer.kt` ×1、`docs/technical-overview.md` ×2、`docs/visualizer-effects-list.md` ×1、`scripts/build_eco_globe_page.py` ×1）⇒ 全部改写为 `docs/archive/eco-globe-webview-plan.md`；**裸文件名引用 0 处**（2026-11-08 `git grep` 实测：旧路径零残留）⇒ 死链 **0 新增** | ⏳ **电视端仍黑屏**（E41 同源的**宿主**问题，§10.215）—— ⚠️ **不是本方案的未决项**，是 WebView 宿主在该机上的既有限制；原生 GL 重写路线见 `docs/e41-globe-opengl-plan.md`（**仍在推进，未归档**）。⏳ §7.2 的手机真机逐项判读（骨骼步态 / 四季 / 龙卷风 / 音频驱动 / 零网络）由所有者执行 |
+
+**归档时仍未关闭的事项（⛔ 归档 ≠ 已解决，逐条留痕）**：
+
+1. ⏳ **电视端黑屏**：E41 与 E54 共用同一宿主路径（Compose `AndroidView` 承载的 WebView 在创维电视上只画首帧）⇒ 本方案**不做电视兼容**（§4.3，零收益）。解法在 `docs/e41-globe-opengl-plan.md`（原生 GL 重写，**仍在推进**）⇒ 该文档因此**未随本篇归档**。
+2. ⏳ **`stellar-spectrum-plan.md` 仍有未落地要素清单**（§0.4 的 A/B/C 三分类）⇒ 它的命运**尚未落定** ⇒ 按归档纪律（❗「只是暂时没排期的在办方案」不满足归档判据）**留在 `docs/` 根目录**，⛔ 不要把本篇的归档读成「频谱线全部收工」。
+3. ⏳ **`docs/globe-present.html` 留在 `docs/` 根目录**：它**不是**历史快照，而是 E54 页面生成器的**唯一再生源**（`scripts/build_eco_globe_page.py` 从它幂等生成 `assets/eco-globe/{index.html,globe.js}`）⇒ ⛔ 不得归档、不得手工改产物。
+
 ## 回滚
 
 归档为**纯移动**（`git mv`，历史保留），未删除任何内容。整体回滚：

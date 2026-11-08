@@ -28,7 +28,7 @@ import com.nasmusic.tv.visualizer.VisualizerRenderer
 /**
  * E54「生态地球」渲染器 —— 把 `docs/globe-present.html` 那份演示页搬进 App。
  *
- * 方案与改造清单：`docs/eco-globe-webview-plan.md`（§4.5 六处改造 / §5 宿主接线）。
+ * 方案与改造清单：`docs/archive/eco-globe-webview-plan.md`（§4.5 六处改造 / §5 宿主接线）。
  *
  * ## 与 E41「世界」的关系
  * **并列的两个独立场景**，不合并：E41 是「航线地球」，本类是一次性摆满

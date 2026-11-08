@@ -7,7 +7,7 @@
 //
 // ⛔ 依赖必须装在本目录（构建输入），⛔ 绝不装进 assets/（会被 mergeAssets 打进 APK）。
 //
-// 设计要点（见 docs/eco-globe-webview-plan.md §4.4）：
+// 设计要点（见 docs/archive/eco-globe-webview-plan.md §4.4）：
 //  - r160 的 GLTFLoader / SkeletonUtils 只有 ESM 版，`module: None` 降级会保留 import 语句 ⇒ 走 bundle；
 //  - three 本体（987 KB）已由 E41 的 assets/globe/three.es5.js 提供 ⇒ 别名到一个只读 window.THREE 的 shim，
 //    ⛔ 不要把 three 再打进这个包；

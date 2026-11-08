@@ -4,7 +4,7 @@
 用法（仓库根目录）：
     python scripts/build_eco_globe_page.py
 
-设计（见 docs/eco-globe-webview-plan.md §4.5）：
+设计（见 docs/archive/eco-globe-webview-plan.md §4.5）：
   * 页面结构与样式来自源文件（`<style>` … `</head>` 与 `<body>` 内的 DOM）；
   * 业务代码来自 `<script type="module">` 全体，改成**普通 `<script src>`** 加载；
   * ⛔ ESM importmap / import 语句全部去掉 ⇒ 复用 E41 的 ES5 UMD 产物（绝对路径 /globe/…）；

@@ -1,6 +1,6 @@
 # 可视化效果列表
 
-> **版本**：v2.39.13（versionCode 198）
+> **版本**：v2.39.14（versionCode 199）
 > **更新日期**：2026-11-08
 > **来源**：`app/src/main/java/com/nasmusic/tv/data/model/AppSettings.kt` — `VisualizerTheme` 枚举
 
@@ -79,7 +79,7 @@
 > 150 棵树 / 19 只动物 / 山脉 / 龙卷风 / 三层云 / 极光 / 流星 / 四季循环，
 > 页面与 16 个模型、6 张贴图全部离线内置，三份 three.js 库**复用** E41 的 `assets/globe/`。
 > 归 ULTRA 的理由与 E41 **完全相同**（WebView 宿主的设备上限，见 §10.215）⇒ 电视端同样会黑屏。
-> 实现：`docs/eco-globe-webview-plan.md`。
+> 实现：`docs/archive/eco-globe-webview-plan.md`。
 
 ## 门控的三个特殊项（容易漏）
 

@@ -519,7 +519,7 @@ enum class VisualizerTheme(
      *
      * 实现走 WebView + WebGL（three.js r160），宿主 = `EcoGlobeRenderer`；
      * 页面与资产在 `assets/eco-globe/`，三份 ES5 库**直接复用** E41 的 `assets/globe/`。
-     * 方案与改造清单见 `docs/eco-globe-webview-plan.md`。
+     * 方案与改造清单见 `docs/archive/eco-globe-webview-plan.md`。
      *
      * ## 归 [Tier.ULTRA] + `needsParticleBudget = false`
      * - **ULTRA**：与 E41 同档（`ULTRA -> allowFramebuffer`，而 `allowFramebuffer` 只有
