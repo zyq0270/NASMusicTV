@@ -317,14 +317,23 @@ app/src/main/assets/eco-globe/           ← 运行时（进 APK）
 
 ## 十、验收标准
 
-- [ ] 主题可选、显示名中/英正确、进出场无崩溃
+**已核对（2026-11-08，证据见 §12.6 / §12.9）**
+
+- [x] **门禁全绿**（含扩展后的 `GlobeAssetsHygieneTest`）：全量 287 类 / 2895 例 / 0 失败；
+      `lintDebug` 0 error（新增 4 个 `UseKtx` warning 与 E41 `WorldGlobeRenderer` 完全同款）。
+- [x] **APK 增量 ≤ 7 MB**：实测 APK 内 `assets/eco-globe/` 压缩后 **3,607,550 B**（未压缩 6,935,798 B）。
+- [x] **运行时零网络**（静态侧）：CDN 回退与 16 个 `url` 字段已删、`static.poly.pizza` 计数 0；
+      `scripts/check_eco_globe_refs.py` 核对全部引用可解析、磁盘无冗余资产。
+- [x] **显示名中/英正确**：`visualizer_theme_eco_globe` 双语 key 由 `VisualizerThemeStringsGateTest` 守住。
+- [x] `docs/technical-overview.md` §10 记录（§10.363）+ CHANGELOG 一行 + 本文档定稿（v1.1）。
+
+**待真机（⏳ 需所有者执行，见 §7.2）**
+
+- [ ] 主题出现在效果列表、进出场正常（无黑屏、无崩溃）
 - [ ] **观感与 `docs/globe-present.html` 一致**（150 树 / 19 动物 / 山脉 / 龙卷风 / 城市灯火 / 三层云 / 极光 / 流星 / 四季）
 - [ ] 骨骼步态正常、多实例不串台
-- [ ] **运行时零网络**
-- [ ] APK 增量 ≤ 7 MB
-- [ ] 门禁全绿（含扩展后的 `GlobeAssetsHygieneTest`）
-- [ ] 电视上"黑屏但不崩溃"
-- [ ] `docs/technical-overview.md` §10 记录 + CHANGELOG 一行
+- [ ] 音频驱动生效（自转速度随能量变化）
+- [ ] 电视上「黑屏但不崩溃」（与 E41 同源的宿主问题，§10.215）
 
 ---
 
