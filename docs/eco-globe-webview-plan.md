@@ -494,11 +494,33 @@ E42 门禁在 `StarrySkyTest`），只按「改了哪个枚举就改哪个测试
 
 ### 12.10 遗留项
 
-1. ⏳ **§7.2 手机真机项全部待所有者执行**：主题出现 / 进出场 / 骨骼步态 / 四季 / 龙卷风 / 音频驱动 / 零网络。
-   已核对的只有「编译 + 门禁 + vm 加载 + 静态引用核对」四项。
-2. 📌 **静态引用核对脚本**（`scripts/check_eco_globe_refs.py`，本次新增）：
-   vm 加载测试**不发起 fetch** ⇒ 抓不到「引用了但文件不存在」的缺件。该脚本覆盖两种引用形态
+1. ⏳ **§7.2 手机真机项待所有者复测**：2026-11-08 真机第 1 轮报了两个问题（动物全挂 + 画面文案），
+   **均已修复**（§12.11）⇒ 需要**用新包复测**：主题出现 / 进出场 / 150 树 19 动物与骨骼步态 /
+   四季循环 / 龙卷风 / 音频驱动 / 运行时零网络。
+2. 📌 **静态引用核对脚本**（`scripts/check_eco_globe_refs.py`）：vm 加载测试**不发起 fetch**
+   ⇒ 抓不到「引用了但文件不存在」的缺件。该脚本覆盖两种引用形态
    （完整路径字面量 / `bakedDir` + 文件名拼接），并反向核对磁盘上没有白带的 GLB。
-3. 📌 **踩坑（给后来者）**：`EcoGlobeRenderer.kt` 的 KDoc 里写 `glb/*.glb` 与 `/globe/*` 会触发
+3. 📌 **GLB 自包含性核对**（`scripts/check_eco_globe_glb.py`）与
+   **真实 loader 解析**（`scripts/eco_globe_glb_parse_test.mjs`）：前者查 GLB 有没有外部贴图引用，
+   后者用真实产物在 vm 里解析真实 GLB ⇒ 两者合起来才能区分「资产问题」与「加载链路问题」。
+4. 📌 **踩坑（给后来者）**：`EcoGlobeRenderer.kt` 的 KDoc 里写 `glb/*.glb` 与 `/globe/*` 会触发
    Kotlin 的**可嵌套块注释** ⇒ `Unclosed comment`，报错位置却指向文件末尾（极具误导性，本次踩了两次）。
    改完 Kotlin 源码先跑 `python scripts/kotlin_comment_balance.py`。
+
+### 12.11 真机第 1 轮的两个问题（2026-11-08，已修）
+
+**① 画面上的演示页文案**（「生态地球」「CARTOON GLOBE · 自动旋转演示」等）
+⇒ 生成脚本里去掉 `<div class="title">`、加载遮罩的 `<h2>/<p>/<small id="loadPct">`、
+以及 `#status` 状态条；**只留一条进度条与错误框**（错误框文案也改成 App 语境：
+本主题运行时零网络 ⇒ 不能写「请检查网络」）。`<title>` 里的「· 自动旋转演示」一并改掉。
+
+**② 动物一只都没加载出来**（树正常）
+⇒ 根因：生成时删掉了 `import { clone as cloneSkeleton } from "three/addons/utils/SkeletonUtils.js"`，
+却**没补回 `cloneSkeleton` 这个局部绑定** ⇒ 动物摆位调用它时抛
+`ReferenceError: cloneSkeleton is not defined` ⇒ 被 `runPlan` 的 catch 吞成「加载失败，已跳过」
+⇒ **页面不报错、树能出来、动物全没有**。
+
+修法 + 两道防复发门禁（生成脚本的 `PROVIDERS` 登记 + 落地核对；vm 测试从源页面动态抽导入名核对）
+详见 `docs/technical-overview.md` §10.364。两条回归判据已固化进打包门禁
+`scripts/verify_eco_globe_in_apk.py`（APK 内 `globe.js` 必须含 `var cloneSkeleton`；
+`index.html` 不得再有那几处文案）。

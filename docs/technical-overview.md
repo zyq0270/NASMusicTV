@@ -25481,10 +25481,59 @@ E42 门禁在 `StarrySkyTest`），且**只跑自己关心的门禁类会漏**�
 类数下限 **26 → 27**。`GlobeAssetsHygieneTest` 新增 3 例：assets 禁依赖/构建输入、
 运行时资产齐全（含 16 GLB + 6 贴图，`terrain.png` 单列）、构建输入确实在 `eco-upstream/`。
 
-⚠️ **私有分支遗留**：本机构建用的是覆盖层 `app/src/e51-overlay/.../VisualizerRendererFactory.kt`（它掩蔽仓库同名文件），
-已手工补 `ECO_GLOBE` 分支；`feat/e51-private` 上那份**也必须**加同一行，否则
-`scripts/sync_private_overlay.py` 下次同步会把它覆盖掉 ⇒ 本地构建因 `when` 不穷尽而编译失败。
+✅ **私有分支已同步**（2026-11-08）：`feat/e51-private` 上用 `git worktree` 同样落下了 E54 的
+渲染器 / 资产 / 枚举 / 双语 strings / 工厂分支 / 4 个测试文件（**本地提交，不 push**）⇒
+`sync_private_overlay.py --check` 漂移 **0 处**（8 条路径逐字节一致）。
 
 ⚠️ **踩坑记录**：`EcoGlobeRenderer.kt` 的 KDoc 里写 `glb/*.glb` 与 `/globe/*` 触发了 Kotlin 的
 **可嵌套块注释** ⇒ `Unclosed comment`，而报错位置指向文件第 354 行（= EOF），极具误导性。
 这是 AGENTS.md 已记录的坑，本次仍踩了两次 —— 改完 Kotlin 源码先跑 `python scripts/kotlin_comment_balance.py`。
+
+### 10.364 v2.39.13（**未升版**） —— E54 真机第 1 轮：动物全挂 + 画面文案，两个都修（2026-11-08）
+
+所有者手机实测报了两个问题：① 画面上有「生态地球 / …演示」等文字；② **动物一只都没加载出来**。
+
+**问题 ② 的根因（`ReferenceError`，被业务代码的 catch 吞掉 ⇒ 页面不报错）**
+
+页面生成时把源文件的 ESM 导入整行删了：
+
+```
+import { clone as cloneSkeleton } from "three/addons/utils/SkeletonUtils.js";
+```
+
+`cloneSkeleton` 是这条导入的**局部绑定**（不是全局）⇒ 删掉 import 却不补回定义 ⇒
+**动物摆位**调用 `cloneSkeleton(partSrc)` 时抛
+`ReferenceError: cloneSkeleton is not defined` ⇒ 被 `runPlan` 的 `.catch` 吞成
+「`[globe-present] <名> 加载失败,已跳过`」⇒ **树能出来（实例化路径不碰它）、动物一只都没有**，
+而页面**不报任何错**（错误框也不弹，因为 `okCount !== 0`）。
+
+⇒ 修法：生成时补回绑定 `var cloneSkeleton = window.SkeletonUtils.clone`（缺失时抛明确错误），
+并加两道门禁防止复发：
+1. `scripts/build_eco_globe_page.py` —— 从**源页面**动态抽出所有 ESM 导入名，
+   每一条都要在 `PROVIDERS` 里登记供给方（没登记 ⇒ 生成失败），
+   且登记之后还要**落地核对**（局部绑定片段必须出现在产物里；全局供给者的文件必须存在）
+   ⇒ 源文件以后新增一条 import，必须同时补供给方，否则生成直接失败；
+2. `scripts/eco_globe_vm_load_test.mjs` —— 同样从源页面抽导入名，逐个核对产物里
+   有局部绑定或由前置脚本提供（`THREE` / `GLTFLoader` / `SkeletonUtils`）。
+
+**问题 ① 的修法（画面文案）**：在生成脚本里去掉演示页的文字遮罩 ——
+`<div class="title">`（标题「生态地球」+「CARTOON GLOBE · 自动旋转演示」）、加载遮罩里的
+`<h2>/<p>/<small id="loadPct">`、以及 `#status` 状态条。**只保留一条进度条与错误框**。
+（页面里 `setStatus` 是 null-safe 的、`setLoadProgress` 的 `lab` 有 `if (lab)` 守卫 ⇒ 删元素不会炸。）
+`<title>` 里的「· 自动旋转演示」也一并改掉（它不在画面上，但仍是演示页口径）。
+
+**顺带把两条回归判据固化进打包门禁** `scripts/verify_eco_globe_in_apk.py`：
+APK 里的 `globe.js` 必须含 `var cloneSkeleton`；`index.html` 里不得再出现
+`class="title"` / `id="status"` / `loadPct` / 「正在唤醒」/「自动旋转演示」。
+
+**排查过程留痕**（下次同类问题照抄）：
+1. 先验**资产**：新增 `scripts/check_eco_globe_glb.py` ⇒ 16 个 GLB **全部自包含**
+   （无外部贴图引用）、与 `docs/assets/glb/` 同尺寸、glTF v2 结构正常 ⇒ **排除资产问题**；
+2. 再验**加载器**：新增 `scripts/eco_globe_glb_parse_test.mjs` ⇒ 用**真实产物**
+   （`three.es5.js` + `loaders.es5.js`）在 vm 里解析真实 GLB；
+   ⚠️ 该测试第一次跑就暴露了 three r160 的 `FileLoader` 走 `fetch` + `Request`/`Headers`
+   （不是 XHR）⇒ 沙箱里必须提供 `Request`，否则报 `Request is not defined`；
+3. 最后用**静态**手段定位到未定义绑定（`grep cloneSkeleton`）⇒ 命中。
+
+⇒ **教训**：把 ESM 改写成「普通 `<script>`」时，**具名导入的局部绑定必须逐条补回**；
+漏一个的表现是「内容静默缺失 + 页面不报错」，极难靠肉眼发现。
