@@ -25537,3 +25537,51 @@ APK 里的 `globe.js` 必须含 `var cloneSkeleton`；`index.html` 里不得再�
 
 ⇒ **教训**：把 ESM 改写成「普通 `<script>`」时，**具名导入的局部绑定必须逐条补回**；
 漏一个的表现是「内容静默缺失 + 页面不报错」，极难靠肉眼发现。
+
+### 10.365 v2.39.14 —— E54「生态地球」定稿出包 + 方案文档归档（2026-11-08）
+
+所有者裁决：「这个效果定稿，版本升到 v2.39.14，本地提交，编译 release，最后将相关文档归档」。
+
+**版本升号**：`app/build.gradle.kts` **198 / 2.39.13 → 199 / 2.39.14**；
+`CHANGELOG.md` 新增 `## [v2.39.14] - 2026-11-08` 段（Added：E54 + 音频驱动；Fixed：动物全挂 + 画面文案）；
+`docs/visualizer-effects-list.md` 抬头同步为 `v2.39.14（versionCode 199）`；
+`technical-overview.md` 里 **18 条**「v2.39.13（未升版）」标记归入 v2.39.14
+（⚠️ 另有 6 条 `v2.39.10（未升版）` 属 E52 通道的**陈旧标记**，非本次范围，**未动**）。
+
+**release 出包**：`assembleRelease "-Plofi.city=true"` ⇒ **BUILD SUCCESSFUL in 8m 28s**。
+
+| 项 | 实测 |
+|---|---|
+| 产物 | `app/build/outputs/apk/release/NASMusicTV-release-v2-39-14.apk`（**42.34 MB**） |
+| 版本 | `versionCode 199 / versionName 2.39.14`（`aapt2 dump badging`） |
+| 签名 | `apksigner verify` ⇒ **Verifies**（v1 JAR signing true + v2 APK Signature Scheme v2 true） |
+| min/target | minSdk 22 / targetSdk 34 |
+| E54 资产 | `assets/eco-globe/` **25 项齐全**（16 GLB + 6 贴图 + 3 文件）；R8 后 dex 里 `EcoGlobeRenderer` 仍在（6 处引用） |
+| 本地变体 | `assets/e52_highway/` 108 项 + dex 里 `LofiCityRenderer` / `HighwayGLSurfaceView` / `QianliUpstreamRenderer` / `EcoGlobeRenderer` **四套渲染器都在** ⇒ 确认「main 本地编译携带隐藏分支效果」 |
+
+⚠️ **本包带 E51 ⇒ 本地专用**：⛔ **不 push / 不 tag / 不发 release**（AGENTS.md 的 E51 纪律）。
+本次**只做本地提交**（`main` 与 `feat/e51-private` 各一次，均未推送）。
+
+**文档归档**：`docs/eco-globe-webview-plan.md` → `docs/archive/eco-globe-webview-plan.md`
+（`git mv`，历史保留；正文 §一～§十二**一字未删**，只改状态头 + 加 v1.2 版本行）。
+- **入链引用 8 处 / 6 个文件全部改写**为 `docs/archive/…` 路径；
+  裸文件名引用 **0 处**（`git grep` 实测旧路径零残留）⇒ 死链 0 新增。
+- 新增两个**可复用**脚本：`scripts/sweep_archive_refs.py`（归档引用改写）
+  与 `scripts/check_docs_links.py`（死链检查：区分 **OK / PRIVATE**（只在私有分支，
+  main 上缺失属预期）/ **MISSING**（真死链））。
+- `docs/archive/README.md` 追加**第二十一轮**记录（判定依据 / 引用改写清单 / 3 条挂起项）。
+- 📌 **docs/ 根口径**（2026-11-08 实测 `git ls-tree --name-only HEAD docs/ | grep -c '\.md$'`）：
+  入库 Markdown **9 → 8 篇** = 活文档 2（`technical-overview.md` / `conventions-adaptive-ui.md`）
+  + 现役名册 1（`visualizer-effects-list.md`）+ 在办方案 5
+  （`blackhole-visualizer-plan.md` / `e41-globe-opengl-plan.md` / `e45-orbital-plan.md` /
+  `stellar-spectrum-plan.md` / `e54-run-and-gun-survey.md`）。
+  ⚠️ `stellar-spectrum-plan.md` **故意留在根目录**：它仍有「未落地要素清单」（§0.4 的 A/B/C 三分类）
+  ⇒ 命运未落定 ⇒ 不满足归档判据（❗「只是暂时没排期的在办方案」不算放弃）。
+  ⚠️ `docs/globe-present.html` 也**故意留在根目录**：它是 E54 页面生成器的**唯一再生源**
+  ⇒ ⛔ 不得归档、不得手工改产物。
+
+**归档后死链复查**：全仓 158 条 `docs/…` 引用 ⇒ OK 139 / PRIVATE 6（只在 `feat/e51-private`）/
+**MISSING 13 —— 全部是历轮归档遗留**（`docs/AGENTS.md`、`docs/features-plan.md`、
+`docs/light-theme-plan.md`、`docs/starry-sky-*.md`、`docs/index.html` 等），
+**与本次归档无关**（E54 旧路径零命中）；其中 `docs/light-theme-plan.md`（`Theme.kt` 的 KDoc）
+在 `docs/archive/README.md` 里**早已登记为已知遗留**。
