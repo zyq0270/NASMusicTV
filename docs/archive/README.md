@@ -697,6 +697,42 @@
 2. ⏳ **`stellar-spectrum-plan.md` 仍有未落地要素清单**（§0.4 的 A/B/C 三分类）⇒ 它的命运**尚未落定** ⇒ 按归档纪律（❗「只是暂时没排期的在办方案」不满足归档判据）**留在 `docs/` 根目录**，⛔ 不要把本篇的归档读成「频谱线全部收工」。
 3. ⏳ **`docs/globe-present.html` 留在 `docs/` 根目录**：它**不是**历史快照，而是 E54 页面生成器的**唯一再生源**（`scripts/build_eco_globe_page.py` 从它幂等生成 `assets/eco-globe/{index.html,globe.js}`）⇒ ⛔ 不得归档、不得手工改产物。
 
+## 第二十二轮（2026-11-08，2 个）—— 所有者裁决：E55「夜城天际」放弃，视觉调性不符预期
+
+| 文档 | 判定依据 | 被谁引用（已改写） | 挂起决策 |
+|---|---|---|---|
+| `e55-cityscape-port-plan.md` | ❌ **所有者 2026-11-08 主动放弃**（原话「算了，这个不做了，不好看」⇒ **视觉调性不符预期**）。方案本身**完全可行**：上游 `@marianmeres/cityscape`（MIT）架构清晰、HTML 原型已出 —— 但所有者在查看原型后判定效果**不符合期望**，遂放弃。原路径 `docs/e55-cityscape-port-plan.md`；本文件从未入库（untracked 时直接移入 archive） | **零引用**（`grep -rIn "e55-cityscape-port-plan" docs/ AGENTS.md CHANGELOG.md` → 除 README 本行外 0 命中；HTML 预览里提到的「上游源码 `cityscape-master`」是指 `D:\hxzhang\...\cityscape-master`，不是对本文件的引用） | ⚠️ **两个**已识别但未开洞的开放项：① 上游可移植性已通过原型间接验证，但**从未进入 NASMusicTV 代码库** ⇒ 未来若要做类似"城市夜景"主题，可从本方案借鉴架构而非重走调研；② `docs/archive/tendrils-visualizer-plan.md`（11-09 亦随归档）**已建议占用 `"55"` 编号**但它当时写的是 `TENDRIL`。⚠️ **2026-11-09 追记**：所有者选择方案 A 再次放弃 E55 藤蔓（GPGPU 路线被实测证伪，见该文头部及附录 A）⇒ 本开放项已成死项，**E55 编号现无归属** |
+| `e55-night-city-skyline-preview.html` | ❌ 配套 HTML 原型，与方案一同归档。上机前的最后一轮 review 暴露了致命问题：**楼房高度跳变**（bass `1 + fakeBass * 0.25` 逐帧调制楼高）与现实矛盾（新出现的楼可以高低各异，但已出现的场景内楼高必须恒定）—— 改完后我们要重新审视整体调性，所有者裁决不值得继续投入。原路径 `docs/e55-night-city-skyline-preview.html`；从未入库（untracked 直接移入 archive） | **零引用**（浏览器打开即用的工具，不是被代码引用；`grep -rIn "e55-night-city-skyline-preview" .` → 除自身与 README 本行外 0 命中） | 无（原型只用于当初的视觉评审；未来做类似城市夜景需重新出原型） |
+
+> ⚠️ **移动方式 = 普通 `mv`，不是 `git mv`**：本批两份文档创建于本轮（2026-11-08），**从未提交入库**（`git ls-files --error-unmatch` 报 `did not match any file(s) known to git`，`git status --porcelain` 显示 `??`），无历史可保留 → 与第七轮 `deskworlds-port-feasibility.md`、第十四轮 `quark-drive-integration-plan.md` 同先例。文件头部已加归档状态说明（HTML 走 `<!DOCTYPE html><!-- ... -->` 注释，md 走正文顶部引用块）。
+>
+> ⚠️ **E54 与 E55「夜城天际」容易混淆的编号澄清**（同一日、同一 docs/root 出来的）：
+> - **E54** = `ECO_GLOBE`「生态地球」—— WebView + three.js r160，已在 `VisualizerTheme` 枚举中，2026-11-08 随 v2.39.14 出货，主题代码存在。
+> - **E55** = 本批归档的 `e55-cityscape-port-plan.md` —— 从未进入 Kotlin 代码，`VisualizerTheme` 枚举里**没有** `NIGHT_CITY` 成员 ⇒ 方案主文档的场景描述（windows 亮灭、地平线喷雾等）已经完成，但被所有者判定"不好看"而放弃。
+> - 两者都于 2026-11-08 归档，但命运完全不同（E54 shipped / E55 abandoned）⇒ 后续文档历史下笔常混淆，⚠️ 显式记录在此处。
+>
+> ⚠️ 未进 `CHANGELOG.md`：本批为**纯文档移动 + 所有者裁决**，按本仓规矩（文档改动不入 CHANGELOG）不登记；无代码变更。
+>
+> 📌 **`docs/` 根目录计数**（11-08 本轮归档后）：入库 Markdown 0 篇新增；`tendrils-visualizer-plan.md` 仍留在 `docs/` 根（活方案，与 E55 cityscape 的 `ordinalLabel="55"` 不同主题 ⇒ 同时存在是历史事实，不冲突）。
+>
+> ⚠️ **2026-11-09 追记（第二十三轮）**：该活方案 `tendrils-visualizer-plan.md` 已随 **E55 藤蔓放弃**（所有者选方案 A；原生 GLES GPGPU 路线被 Phase 0 实测证伪）一并归档 ⇒ `docs/` 根回落 **3 篇 Markdown**（2 篇活文档 + `visualizer-effects-list.md` 现役名册）。
+
+## 第二十三轮（2026-11-09，1 个）—— 所有者裁决：执行方案 A，放弃 E55「藤蔓」
+
+| 文档 | 判定依据 | 被谁引用（已改写） |
+|---|---|---|
+| `tendrils-visualizer-plan.md` | ❌ **所有者选择方案 A，放弃 E55 藤蔓**（A/B/C 三案裁决后立即执行、无附加条件）。既非「无法实现」也非「暂时不排期」：方案本身（v1.0 同日）已完成上游 MIT `tendrils` 源码审查 + 三段 pass 数学分析；**Phase 0 真机实测（v1.1）将原生 GLES GPGPU 路线证伪**——创维 9R54_G8S 上 `EXT_color_buffer_float` 上报 true 但**浮点 FBO 渲染目标不可用**（float / half 全为 `GL_FRAMEBUFFER_UNSUPPORTED`，显式内部格式变体纹理创建亦失败；6 变体矩阵见附录 A.3）；GLES3 + `#version 300 es` fallback 同样无效（附录 A.4：shader 链接正常但浮点渲染仍不可）。Bench 稳态 42.7 FPS 证明渲染管线健康，缺的恰好是 GPGPU 唯一必要能力。原文一字未删；附录 A.5 的 A/B/C 路线与 A.6 复测指引仍可作未来重估种子 | 2 处（见下） |
+
+> **移动方式 = 普通 `mv`（非 `git mv`）**：本文件创建于 2026-11-08（第二十二轮同日），**从未提交入库**（`git status` 显示 `??`、`git ls-files --error-unmatch` 报 not known to git），无历史可保留 → 与第七轮 `deskworlds-port-feasibility.md`、第十四轮、第二十二轮先例相同。文件头部状态栏已改「已归档」，末尾追加 V1.2 变更记录（E55 编号归属说明 + 可复用资产说明：`output/tendrils-probe/` 与 `logs_temp/tendrils_probe_es3_r3.log` 为 gitignored 不入库；上游 MIT 源码 `D:\hxzhang\MyGithubSoftware\NasAudio\tendrils-master` 可供类似 GPGPU 移植调研重估）。
+
+**归档时遗留（⛔ 归档 ≠ 已解决，逐条留痕）**：
+
+1. ⛔ 无需闭环项：方案 A 整体放弃，无未完工代码、无未验证验收。保留的是**未来种子**：① 若再做「有机粒子流场」类主题，**方案 B（CPU 物理 + GL 点/线渲染）** 是本电视上唯一可行路径（工作量与画质取舍需另评，届时按 Appendix A.5 决策）；② 电视端 GPU 唯一可用 FBO 渲染目标 = **RGBA8**（附录 A.3 控制组 + 矩阵）⇒ 硬件级事实，未来任何主题都不应依赖浮点渲染目标。
+2. ⛔ **E55 编号已无归属**：2026-11-08 E55 夜城天际放弃 → 2026-11-09 E55 藤蔓放弃 ⇒ `"55"` 可用但未指派任何主题。日后启用须与所有者确认新主题归属；⚠️ **勿单凭编号推断主题**（两个 E55 候选均已放弃，但效果名册不受影响——E55 从未进入 `VisualizerTheme`）。
+
+> 引用改写 **2 处 / 2 文件**：`docs/archive/e55-cityscape-port-plan.md` ×1（头部 ⭐ 行：路径改归档路径 + 11-09 追记）、`docs/archive/README.md` 第二十二轮表格 ② 列 ×1（活方案 → 同批归档）。📌 计数注后追加 1 段状态补记（本轮之历史记录佐证，非引用改写）。裸文件名 0 处。死链 **0 新增**（终检：全仓 `docs/tendrils-visualizer-plan` 旧路径引用为 0，除本节自引说明外）。
+> ⚠️ 未进 `CHANGELOG.md`：本轮为**纯文档移动 + 所有者裁决**，按本仓规矩（文档改动不入 changelog）不登记；无代码变更。电视探针已 force-stop，真机已恢复原状。
+
 ## 回滚
 
 归档为**纯移动**（`git mv`，历史保留），未删除任何内容。整体回滚：

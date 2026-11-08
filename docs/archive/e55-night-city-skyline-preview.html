@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<!-- ⚠️ 已归档（2026-11-08）：E55「夜城天际」浏览器原型。
+     所有者裁决「算了，这个不做了，不好看」⇒ 原型仅作历史参考，不再维护。
+     原路径：docs/e55-night-city-skyline-preview.html → docs/archive/
+     这不是上游 cityscape 的克隆 —— 正文是按方案 §二 的视觉构成刻意重现的原创 Canvas 2D 实现。 -->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>E55 夜城天际 — 效果预览</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #0203; overflow: hidden; }
+  #c { display:block; width: 100vw; height: 100vh; }
+  #hud {
+    position: fixed; left: 8px; top: 8px;
+    color: rgba(220,230,255,0.6);
+    font: 12px/1.5 ui-monospace, Menlo, Consolas, monospace;
+    user-select: none;
+    pointer-events: none;
+  }
+  #hud b { color: #ffd9a0; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hud">E55 夜城天际 · 概念预览 — <b>按 A</b> 切换模拟节拍强度</div>
+<script>
+"use strict";
+
+// ── E55 夜城天际 — 概念预览（纯 Canvas 2D，单文件，无依赖）
+// 这里不是上游 cityscape 的直接克隆而是按 §二的"视觉构成 + 音频映射"设计精心重现，
+// 目的是让所有者一眼看明白 E55 的视觉调性与频谱反馈意图。
+
+// ──────────────────────────────────────────────────────────────────────
+// 0. Canvas + DPR 自适应
+// ──────────────────────────────────────────────────────────────────────
+const canvas = document.getElementById("c");
+const ctx = canvas.getContext("2d", { alpha: false });
+let W = 0, H = 0;
+function resize() {
+  const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+  W = window.innerWidth;
+  H = window.innerHeight;
+  canvas.width = Math.floor(W * dpr);
+  canvas.height = Math.floor(H * dpr);
+  canvas.style.width = W + "px";
+  canvas.style.height = H + "px";
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.fillStyle = "#0406";
+  ctx.fillRect(0, 0, W, H);
+  buildScene();
+}
+window.addEventListener("resize", resize);
+
+// ──────────────────────────────────────────────────────────────────────
+// 1. 确定性 RNG (mulberry32)
+// ──────────────────────────────────────────────────────────────────────
+function mulberry32(seed) {
+  let a = seed >>> 0;
+  return function () {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// 2. 调色板 (cityscape 4 套之一：navy)
+// ──────────────────────────────────────────────────────────────────────
+const PAL = {
+  warm: {
+    skyTop:    "#0a1030", skyMid:    "#141d44", skyBottom: "#26305f",
+    horizonGlow: "#3a4a86",
+    buildingFar: "#2b376b", buildingMid: "#1a2350", buildingNear: "#0a1026",
+    window: "#ffd9a0", moon: "#eef2ff", star: "#dfe8ff",
+  },
+  cool: {
+    skyTop:    "#05070f", skyMid:    "#0a1022", skyBottom: "#121a3c",
+    horizonGlow: "#1d2a55", buildingFar: "#1b2450", buildingMid: "#151c38", buildingNear: "#060912",
+    window: "#bfe0ff", moon: "#eaf0ff", star: "#cfe0ff",
+  }
+};
+
+// ──────────────────────────────────────────────────────────────────────
+// 3. Mood engine (单相位时钟驱动全部颜色)
+// ──────────────────────────────────────────────────────────────────────
+const moodCycleSec = 6;
+let moodPhase = 0;
+const mood = { warmth: 1, darkness: 0.5, t: 0 };
+function updateMood(dt, timeMs) {
+  moodPhase = (timeMs / 1000) % moodCycleSec / moodCycleSec;
+  const breath = (Math.cos(moodPhase * Math.PI * 2) + 1) / 2;
+  mood.warmth = breath;
+  mood.t = breath;
+  mood.darkness = 0.45 + (Math.cos(moodPhase * Math.PI * 2 + 1.0) * 0.12 + 0.5) * 0.12;
+}
+function mixHex(a, b, t) {
+  // 输出格式：#RRGGBB hex —— 与 darkenHex / withAlpha 链式调用保持一致
+  const ah = a.replace("#",""), bh = b.replace("#","");
+  const r = Math.round(parseInt(ah.substr(0,2),16) * (1-t) + parseInt(bh.substr(0,2),16) * t);
+  const g = Math.round(parseInt(ah.substr(2,2),16) * (1-t) + parseInt(bh.substr(2,2),16) * t);
+  const bl = Math.round(parseInt(ah.substr(4,2),16) * (1-t) + parseInt(bh.substr(4,2),16) * t);
+  const hex = (n) => Math.max(0, Math.min(255, n)).toString(16).padStart(2, "0");
+  return "#" + hex(r) + hex(g) + hex(bl);
+}
+function darkenHex(hex, e) {
+  // 输出 #RRGGBB —— 与 mixHex / withAlpha 链式调用保持一致
+  const h = hex.replace("#","");
+  const r = Math.max(0, Math.round(parseInt(h.substr(0,2),16) * (1 - e)));
+  const g = Math.max(0, Math.round(parseInt(h.substr(2,2),16) * (1 - e)));
+  const b = Math.max(0, Math.round(parseInt(h.substr(4,2),16) * (1 - e)));
+  const hx = (n) => Math.max(0, Math.min(255, n)).toString(16).padStart(2, "0");
+  return "#" + hx(r) + hx(g) + hx(b);
+}
+function withAlpha(hex, a) {
+  const h = hex.replace("#","");
+  const r = parseInt(h.substr(0,2),16);
+  const g = parseInt(h.substr(2,2),16);
+  const b = parseInt(h.substr(4,2),16);
+  return `rgba(${r},${g},${b},${a})`;
+}
+function moodColor(key) {
+  const blend = (k) => mixHex(PAL.warm[k], PAL.cool[k], mood.t);
+  if (key === "skyTop")    return darkenHex(blend("skyTop"), mood.darkness * 0.55);
+  if (key === "skyMid")    return darkenHex(blend("skyMid"), mood.darkness * 0.5);
+  if (key === "skyBottom") return darkenHex(blend("skyBottom"), mood.darkness * 0.42);
+  if (key === "horizonGlow") return darkenHex(blend("horizonGlow"), mood.darkness * 0.35);
+  if (key === "buildingFar")  return darkenHex(blend("buildingFar"), mood.darkness * 0.5);
+  if (key === "buildingMid")  return darkenHex(blend("buildingMid"), mood.darkness * 0.55);
+  if (key === "buildingNear") return darkenHex(blend("buildingNear"), mood.darkness * 0.6);
+  if (key === "window")    return blend("window");
+  if (key === "moon")      return darkenHex(blend("moon"), mood.darkness * 0.2);
+  if (key === "star")      return blend("star");
+  return blend("star");
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// 4. 天空元素：星场、月亮、云
+// ──────────────────────────────────────────────────────────────────────
+let stars = [];
+let moon = { x: 0, y: 0, r: 0 };
+let cloud = [];
+function buildSky() {
+  // 星场
+  const starRng = mulberry32(12345);
+  stars = [];
+  const starCount = Math.round(W * H * 0.000025 * 2); // 不太密集
+  for (let i = 0; i < starCount; i++) {
+    stars.push({
+      x: starRng() * W,
+      y: starRng() * (H * 0.6),
+      r: 0.5 + starRng() * 1.2,
+      twinkle: starRng() * Math.PI * 2,
+      phase: starRng(),
+    });
+  }
+  // 月亮
+  moon = { x: W * 0.68, y: H * 0.24, r: Math.max(40, Math.min(W, H) * 0.05) };
+  // 云（少量）
+  const cloudRng = mulberry32(77777);
+  cloud = [];
+  for (let i = 0; i < 4; i++) {
+    cloud.push({
+      x: cloudRng() * W,
+      y: H * (0.08 + cloudRng() * 0.22),
+      w: 120 + cloudRng() * 220,
+      h: 20 + cloudRng() * 35,
+      opacity: 0.06 + cloudRng() * 0.09,
+      speed: 0.08 + cloudRng() * 0.16,
+    });
+  }
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// 5. 建筑天际线（多层，对象池 + 视口裁剪）
+// ──────────────────────────────────────────────────────────────────────
+const LAYER_DEFS = [
+  { depth: 0.10, baseH: 0.55, spread: 0.08, colorKey: "buildingFar",  winH: 3, winW: 2, lightChance: 0.18, parallax: 0.3 },
+  { depth: 0.30, baseH: 0.45, spread: 0.10, colorKey: "buildingFar",  winH: 4, winW: 3, lightChance: 0.22, parallax: 0.6 },
+  { depth: 0.55, baseH: 0.35, spread: 0.12, colorKey: "buildingMid",  winH: 6, winW: 4, lightChance: 0.30, parallax: 0.9 },
+  { depth: 0.80, baseH: 0.25, spread: 0.14, colorKey: "buildingNear", winH: 8, winW: 5, lightChance: 0.40, parallax: 1.2 },
+];
+
+let layers = [];
+let buildingRng = null;
+function buildScene() {
+  buildSky();
+  // 建筑对象池（每层 50 栋）
+  layers = LAYER_DEFS.map((def, i) => {
+    const buildings = [];
+    const rng = mulberry32(1000 + i * 77);
+    const count = 50;
+    const layerWidth = W * 1.5; // 视口外的余量
+    const startX = -W * 0.3;
+    const gap = layerWidth / count;
+    for (let j = 0; j < count; j++) {
+      const bx = startX + j * gap + (rng() - 0.5) * gap * 0.7;
+      const bw = 20 + rng() * 60;
+      const bh = def.baseH * H * (0.6 + rng() * 0.8) * (1 + (j % 5) * 0.04);
+      const floors = Math.max(2, Math.round(bh / (def.winH * 5)));
+      const windows = [];
+      for (let f = 0; f < floors; f++) {
+        const cols = Math.max(1, Math.round(bw / (def.winW * 4)));
+        for (let c = 0; c < cols; c++) {
+          windows.push({
+            lit: rng() < def.lightChance,
+            flick: rng() * Math.PI * 2,
+            warm: rng() < 0.4,
+          });
+        }
+      }
+      buildings.push({
+        x: bx, y: -bh, w: bw, h: bh,
+        color: def.colorKey, def,
+        parallax: def.parallax,
+        windows: windows,
+        flash: 0, dark: rng() * 0.15,
+      });
+    }
+    return {
+      depth: def.depth,
+      buildings: buildings,
+      colorKey: def.colorKey,
+      parallax: def.parallax,
+    };
+  });
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// 6. 水面 / 岸边 / 雾
+// ──────────────────────────────────────────────────────────────────────
+const waterLevel = 0.72;
+const shoreHeight = H * 0.018;
+
+// ──────────────────────────────────────────────────────────────────────
+// 7. 相机（水平滚动 + 垂直飘移 + sway）
+// ──────────────────────────────────────────────────────────────────────
+let camX = 0;
+let camY = 0;
+let scrollSpeed = 0.25; // 屏宽 / 秒
+
+// ──────────────────────────────────────────────────────────────────────
+// 8. 模拟节拍输入（A 键切换：关 / 中 / 强）
+// ──────────────────────────────────────────────────────────────────────
+let audioMode = 1; // 0 = off, 1 = medium, 2 = strong
+let audioPhase = 0;
+let beatTime = 0;
+let fakeSpectrum = new Array(64).fill(0);
+let fakeBass = 0.2;
+let fakeEnergy = 0.3;
+let fakeTreble = 0.1;
+window.addEventListener("keydown", (e) => {
+  if (e.key === "a" || e.key === "A") {
+    audioMode = (audioMode + 1) % 3;
+  }
+});
+function updateAudio(dt) {
+  audioPhase += dt;
+  // 节拍：中/强节奏正弦脉冲
+  const bpm = 90 + audioMode * 20;
+  const beat = Math.sin((audioPhase * bpm / 60) * Math.PI * 2);
+  fakeBass = Math.abs(beat) * (0.6 + audioMode * 0.2);
+  fakeEnergy = fakeBass * 0.8 + Math.random() * 0.05 * audioMode;
+  fakeTreble = Math.abs(Math.sin(audioPhase * 3.7)) * (0.3 + audioMode * 0.3);
+  if (audioMode === 0) {
+    fakeBass = 0;
+    fakeEnergy = 0;
+    fakeTreble = 0;
+    beatTime = 0;
+    for (let i = 0; i < fakeSpectrum.length; i++) fakeSpectrum[i] = 0;
+  } else {
+    beatTime = Math.max(beatTime, beat);
+    // 模拟 64-band spectrum：低频与 bass 同相，高频与 treble 同相
+    for (let i = 0; i < fakeSpectrum.length; i++) {
+      const t = i / fakeSpectrum.length; // 0=低频 1=高频
+      const base = Math.sin((audioPhase * (2 + t * 6)) * Math.PI * 2);
+      const noise = Math.random() * 0.12 * audioMode;
+      fakeSpectrum[i] = Math.max(0, Math.abs(base) * (0.3 + t * (fakeTreble + 0.1)) + noise);
+    }
+    // 低频 band 受 bass 驱动
+    for (let i = 0; i < 12; i++) fakeSpectrum[i] = Math.max(fakeSpectrum[i], fakeBass * (0.8 - i * 0.06));
+  }
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// 9. 主渲染循环
+// ──────────────────────────────────────────────────────────────────────
+let lastT = performance.now();
+function frame(now) {
+  const dt = Math.min(0.1, (now - lastT) / 1000);
+  lastT = now;
+  const timeMs = now;
+
+  updateMood(dt, timeMs);
+  updateAudio(dt);
+
+  // 相机滚动（受节拍驱动，安静时慢，强节拍时快）
+  const speedMul = 0.5 + fakeEnergy * 1.2;
+  camX += scrollSpeed * speedMul * dt * W;
+  // 相机垂直飘移（更快的呼吸）
+  camY = Math.sin(timeMs * 0.00042) * H * 0.022;
+  // 云层位移
+  for (const c of cloud) {
+    c.x -= c.speed * dt * W;
+    if (c.x < -c.w * 2) c.x = W + c.w;
+  }
+  // 星场 twinkle 相位
+  for (const s of stars) {
+    s.twinkle += dt * (3.0 + s.phase * 4.5);
+  }
+  // 建筑 flash 衰减
+  for (const layer of layers) {
+    for (const b of layer.buildings) {
+      if (b.flash > 0) b.flash = Math.max(0, b.flash - dt * 1.2);
+    }
+  }
+
+  // ── 绘制 ────────────────────────────────────────────────
+  ctx.fillStyle = "#000";
+  ctx.fillRect(0, 0, W, H);
+
+  // ① 天空渐变
+  const skyGrad = ctx.createLinearGradient(0, 0, 0, H * waterLevel);
+  skyGrad.addColorStop(0, moodColor("skyTop"));
+  skyGrad.addColorStop(0.55, moodColor("skyMid"));
+  skyGrad.addColorStop(1, moodColor("skyBottom"));
+  ctx.fillStyle = skyGrad;
+  ctx.fillRect(0, 0, W, H * waterLevel);
+
+  // ② 星场（treble 调制亮度）
+  const starAlpha = 0.3 + fakeTreble * 0.7;
+  ctx.save();
+  ctx.fillStyle = moodColor("star");
+  for (const s of stars) {
+    const tw = 0.4 + 0.6 * Math.abs(Math.sin(s.twinkle));
+    ctx.globalAlpha = starAlpha * tw * (0.4 + 0.6 * s.phase);
+    ctx.fillRect(s.x, s.y, s.r, s.r);
+  }
+  ctx.restore();
+  ctx.globalAlpha = 1;
+
+  // ②b 月亮 + halo (beat flare)
+  const beatFlare = 1 + beatTime * 1.5;
+  const moonR = moon.r * beatFlare;
+  const halo = ctx.createRadialGradient(moon.x, moon.y, 0, moon.x, moon.y, moonR * 3.5);
+  halo.addColorStop(0, withAlpha(moodColor("moon"), 0.25 + fakeEnergy * 0.25));
+  halo.addColorStop(0.4, withAlpha(moodColor("moon"), 0.08));
+  halo.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.fillStyle = halo;
+  ctx.fillRect(moon.x - moonR * 4, moon.y - moonR * 4, moonR * 8, moonR * 8);
+  ctx.fillStyle = moodColor("moon");
+  ctx.beginPath();
+  ctx.arc(moon.x, moon.y, moonR, 0, Math.PI * 2);
+  ctx.fill();
+
+  // ②c 云层
+  for (const c of cloud) {
+    ctx.fillStyle = `rgba(160,180,220,${c.opacity * (0.5 + fakeEnergy * 0.5)})`;
+    ctx.beginPath();
+    ctx.ellipse(c.x, c.y, c.w * 0.5, c.h * 0.5, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // ③ 从远到近绘制建筑层
+  for (const layer of layers) {
+    const camShift = -camX * layer.parallax;
+    const silhouette = moodColor(layer.colorKey);
+    // 选中可见建筑
+    for (const b of layer.buildings) {
+      const px = b.x + camShift;
+      // 视口裁剪
+      if (px < -b.w - 20 || px > W + 20) continue;
+      // 建筑高度固定（已出现内容不跳）；bass 通过窗户亮度 / 雾 / glow 体现
+      const bh = b.h;
+      const py = H * waterLevel - bh - b.dark * H * 0.05;
+      // 建筑 silhouette
+      ctx.fillStyle = withAlpha(silhouette, 1 - layer.depth * 0.15);
+      ctx.fillRect(px, py, b.w, bh);
+      // 窗户网格（亮度按 spectrum band 调制）
+      ctx.save();
+      const floorH = Math.max(5, 4 + b.winH - 1);
+      const colW = Math.max(4, 3 + b.winW - 1);
+      for (let f = 0; f < b.windows.length; f++) {
+        const w = b.windows[f];
+        const wx = px + 3 + Math.floor(f * 0.999) % 4 * 2;
+        const wy = py + 5 + Math.floor(f / 4) * floorH;
+        // 使用 spectrum band 索引（伪）
+        const bandIdx = (Math.floor(f / 8)) % 16;
+        const specVal = bandIdx < fakeSpectrum.length ? fakeSpectrum[bandIdx] : 0;
+        const target = w.lit ? (0.25 + specVal * 0.75) : 0.04;
+        const flicker = w.lit ? 0.7 + 0.3 * Math.sin(w.flick + timeMs * 0.003) : 1;
+        ctx.globalAlpha = target * flicker * (0.8 + b.flash * 0.5);
+        ctx.fillStyle = w.warm ? `rgb(255,217,160)` : `rgb(191,224,255)`;
+        // 近似窗格位置
+        const fx = px + 3 + (f % 3) * colW * 0.8;
+        const fy = py + 5 + Math.floor(f / 3) * floorH * 0.7;
+        if (fy < py + bh - 4) {
+          ctx.fillRect(fx, fy, Math.max(2, colW - 2), Math.max(2, floorH - 2));
+        }
+      }
+      ctx.restore();
+      // beat 触发整楼 flash（伪）
+      if (fakeBass > 0.6 && Math.random() < 0.12) {
+        b.flash = Math.max(b.flash, 1);
+      }
+    }
+  }
+
+  // ④ 地平线光污染 glow（beat 脉冲）
+  const glowAlpha = 0.15 + fakeEnergy * 0.4 + beatTime * 0.3;
+  const glowH = H * 0.06;
+  const glow = ctx.createLinearGradient(0, H * waterLevel - glowH, 0, H * waterLevel);
+  glow.addColorStop(0, "rgba(0,0,0,0)");
+  glow.addColorStop(0.7, withAlpha(moodColor("horizonGlow"), glowAlpha));
+  glow.addColorStop(1, withAlpha(moodColor("horizonGlow"), glowAlpha * 0.5));
+  ctx.fillStyle = glow;
+  ctx.fillRect(0, H * waterLevel - glowH, W, glowH);
+
+  // ⑤ 水面（晕染 + 反射波纹）
+  const waterY = H * waterLevel;
+  ctx.fillStyle = "rgba(2,4,8,0.95)";
+  ctx.fillRect(0, waterY, W, H - waterY);
+
+  // 水面反射：用比建筑暗得多的色块 + 垂直拉伸
+  ctx.save();
+  ctx.globalAlpha = 0.25 + fakeEnergy * 0.25;
+  ctx.globalCompositeOperation = "lighter";
+  for (const layer of layers) {
+    const camShift = -camX * layer.parallax;
+    // 水面反射亮度 = 建筑亮度 × 0.3 + 波纹
+    const wave = Math.sin(timeMs * 0.002 + layer.depth * 10) * 0.03 + 0.95;
+    for (const b of layer.buildings) {
+      const px = b.x + camShift;
+      if (px < -b.w - 20 || px > W + 20) continue;
+      const bh = b.h;
+      const reflectH = Math.min(bh * 0.5 * wave, H * 0.15);
+      const reflectY = waterY + 2;
+      ctx.fillStyle = withAlpha(moodColor(layer.colorKey), 0.15 * wave);
+      ctx.fillRect(px, reflectY, b.w, reflectH);
+    }
+  }
+  ctx.restore();
+
+  // ⑥ 岸线
+  ctx.fillStyle = withAlpha(moodColor("horizonGlow"), 0.4 + fakeEnergy * 0.2);
+  ctx.fillRect(0, waterY, W, shoreHeight);
+
+  // ⑦ 雾（energy 调制浓度）
+  const fogAlpha = 0.05 + fakeEnergy * 0.2;
+  const fogGrad = ctx.createLinearGradient(0, waterY - H * 0.12, 0, waterY);
+  fogGrad.addColorStop(0, "rgba(0,0,0,0)");
+  fogGrad.addColorStop(0.6, withAlpha(moodColor("horizonGlow"), fogAlpha * 0.5));
+  fogGrad.addColorStop(1, withAlpha(moodColor("horizonGlow"), fogAlpha));
+  ctx.fillStyle = fogGrad;
+  ctx.fillRect(0, waterY - H * 0.12, W, H * 0.12);
+
+  // ⑧ HUD
+  const hud = document.getElementById("hud");
+  hud.innerHTML = `E55 夜城天际 · audioMode=<b>${["off","medium","strong"][audioMode]}</b> · bass ${fakeBass.toFixed(2)} · energy ${fakeEnergy.toFixed(2)} · treble ${fakeTreble.toFixed(2)}`;
+
+  requestAnimationFrame(frame);
+}
+
+resize();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
