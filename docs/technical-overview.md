@@ -25137,29 +25137,6 @@ Puppeteer + 本机 Edge 真实渲染：
 7. **里程碑 8 个 Phase**，约 **32~46 工作日**（共享 GL 层占 5~8 天）。
 8. ⚠️ **设备操作边界**（所有者 2026-11-07 明示）：真机验证段明确标注**须由所有者本人执行**（装包 / 运行 / 截图）。
 
-### 10.356 v2.39.13（**未升版**） —— GL 方案三项裁决落地（所有者 2026-11-08「按建议处理」）+ `.textus/` 入 gitignore（2026-11-08）
-
-§10.354 / §10.355 两份方案评审提出的三个待裁决点，**所有者 2026-11-08 裁决「按建议处理」** ⇒ 全部转为已决并写进方案正文：
-
-1. **D1 —— E41 档位下放**（`Tier.ULTRA` → `Tier.ADV` + `needsParticleBudget` `true` → `false`）✅
-   - 理由链闭环：§10.197 当初提到 ULTRA 是因为 WebView 在电视端黑屏 ⇒ 限定最高档；**GL 版无黑屏 ⇒ 该理由自动失效** ⇒ 应当下放。
-   - ⛔ **改动时点绑定在 GL 版上线那一刻（Phase 7），不是现在**：当前 WebView 版**确实读** `ctx.quality.maxParticles`
-     （`WorldGlobeRenderer.kt:391` → `WorldNetwork.maxActiveFlights(quality.maxParticles, 100f)`）且 TV 端黑屏
-     ⇒ 提前下放会把**黑屏效果暴露给 MEDIUM/LOW 用户** ⇒ 功能级回归。
-   - ⚠️ 连带细节已写进方案：GL 渲染器改按 `ctx.quality` 枚举自定数量；调 `WorldNetwork.maxActiveFlights(...)` 时
-     **不要**传 `ctx.quality.maxParticles`（LOW 档它是 0 ⇒ 会算成 10 条下限），改传本渲染器自己的按档常量（HIGH 350 / MEDIUM 150 / LOW 80）。
-2. **D2 —— `app/src/globe-upstream/` 的 three.js / three-globe ES6 原版** ✅ **保留（不删）**
-   - 三条理由：① **MIT 上游件**，保留无版权风险；② 是 ES5 产物的**逐字节 diff 基线**（AGENTS.md 明文「永不删除、永不修改」）⇒ **该规则继续有效，AGENTS.md 无需修改**；③ WebView 版若回滚或需对照，缺了再生源无法复现。
-   - ⇒ GL 版落地后这五个文件**不再有运行时消费者**，但**不删除**；同时补记「⛔ npm 依赖不得装在 `assets/` 下」（会被 `mergeDebugAssets` 打进 APK，2026-09-06 实测一次多 23 MB）。
-3. **D3 —— GL 基础层收敛**（不写第三套）✅ 拆成两层：
-   - **通用层**（`GlHost` / `GlBridge` / `GlCaps` / `GlProjection` / `GlShader`）⇒ **main 源集**（公开、两分支一致，判据：不含上游代码）；
-   - **上游派生层**（E52 逐字搬运的 GLSL、`UPSTREAM_PE_FACTOR` / `UPSTREAM_FAR_SIZE` / `upstreamHorizonDistance` / `upstreamCamera` 等上游常量）⇒ **留私有分支**；
-   - 落地动作：main 新增共享层 → 私有分支 E52 文件改为委托共享层 → 改覆盖层副本后 `python scripts/sync_private_overlay.py` 同步（`--check` 零漂移）→ `visualizer/gl/` 用 `git checkout main --` 覆盖到私有分支（⛔ 不 cherry-pick 手工合并）。
-   - ⛔ 纪律：共享层**不得**混入任何上游常量或上游 GLSL —— 一旦混入就变成「公开的上游衍生件」⇒ 泄漏（origin 是 public 仓库）。
-
-**另**：`.textus/`（文本/附件约定探测器的本地状态目录，与 `.box-agent/` / `.dumate/` / `.tmp/` 同族）已按既有约定加入 `.gitignore`
-（`/.textus/` 一行 + 注释说明）⇒ 不再出现在 `git status`；该目录**不手动删**（工具自己的状态）。
-
 ### 10.355 v2.39.13（**未升版**） —— 频谱开发文档 v2.0 —— 渲染栈由 Compose Canvas 改为原生 OpenGL ES（2026-11-08）
 
 按所有者指示「用 OpenGL ES 方案改本文档」，`docs/stellar-spectrum-plan.md` 由 v1.2（Canvas 2D）重写为 v2.0（原生 GL）。
@@ -25190,3 +25167,54 @@ Puppeteer + 本机 Edge 真实渲染：
 7. **档位下放**：不读 `maxParticles` ⇒ `needsParticleBudget = false` ⇒ 三档全可选（LOW 档 `maxParticles = 0` 的坑）。
 
 **里程碑 6 个 Phase**，约 **17~26 工作日**（不含共享层；共享层与 §10.354 合并计算）。
+
+### 10.356 v2.39.13（**未升版**） —— GL 方案三项裁决落地（所有者 2026-11-08「按建议处理」）+ `.textus/` 入 gitignore（2026-11-08）
+
+§10.354 / §10.355 两份方案评审提出的三个待裁决点，**所有者 2026-11-08 裁决「按建议处理」** ⇒ 全部转为已决并写进方案正文：
+
+1. **D1 —— E41 档位下放**（`Tier.ULTRA` → `Tier.ADV` + `needsParticleBudget` `true` → `false`）✅
+   - 理由链闭环：§10.197 当初提到 ULTRA 是因为 WebView 在电视端黑屏 ⇒ 限定最高档；**GL 版无黑屏 ⇒ 该理由自动失效** ⇒ 应当下放。
+   - ⛔ **改动时点绑定在 GL 版上线那一刻（Phase 7），不是现在**：当前 WebView 版**确实读** `ctx.quality.maxParticles`
+     （`WorldGlobeRenderer.kt:391` → `WorldNetwork.maxActiveFlights(quality.maxParticles, 100f)`）且 TV 端黑屏
+     ⇒ 提前下放会把**黑屏效果暴露给 MEDIUM/LOW 用户** ⇒ 功能级回归。
+   - ⚠️ 连带细节已写进方案：GL 渲染器改按 `ctx.quality` 枚举自定数量；调 `WorldNetwork.maxActiveFlights(...)` 时
+     **不要**传 `ctx.quality.maxParticles`（LOW 档它是 0 ⇒ 会算成 10 条下限），改传本渲染器自己的按档常量（HIGH 350 / MEDIUM 150 / LOW 80）。
+2. **D2 —— `app/src/globe-upstream/` 的 three.js / three-globe ES6 原版** ✅ **保留（不删）**
+   - 三条理由：① **MIT 上游件**，保留无版权风险；② 是 ES5 产物的**逐字节 diff 基线**（AGENTS.md 明文「永不删除、永不修改」）⇒ **该规则继续有效，AGENTS.md 无需修改**；③ WebView 版若回滚或需对照，缺了再生源无法复现。
+   - ⇒ GL 版落地后这五个文件**不再有运行时消费者**，但**不删除**；同时补记「⛔ npm 依赖不得装在 `assets/` 下」（会被 `mergeDebugAssets` 打进 APK，2026-09-06 实测一次多 23 MB）。
+3. **D3 —— GL 基础层收敛**（不写第三套）✅ 拆成两层：
+   - **通用层**（`GlHost` / `GlBridge` / `GlCaps` / `GlProjection` / `GlShader`）⇒ **main 源集**（公开、两分支一致，判据：不含上游代码）；
+   - **上游派生层**（E52 逐字搬运的 GLSL、`UPSTREAM_PE_FACTOR` / `UPSTREAM_FAR_SIZE` / `upstreamHorizonDistance` / `upstreamCamera` 等上游常量）⇒ **留私有分支**；
+   - 落地动作：main 新增共享层 → 私有分支 E52 文件改为委托共享层 → 改覆盖层副本后 `python scripts/sync_private_overlay.py` 同步（`--check` 零漂移）→ `visualizer/gl/` 用 `git checkout main --` 覆盖到私有分支（⛔ 不 cherry-pick 手工合并）。
+   - ⛔ 纪律：共享层**不得**混入任何上游常量或上游 GLSL —— 一旦混入就变成「公开的上游衍生件」⇒ 泄漏（origin 是 public 仓库）。
+
+**另**：`.textus/`（文本/附件约定探测器的本地状态目录，与 `.box-agent/` / `.dumate/` / `.tmp/` 同族）已按既有约定加入 `.gitignore`
+（`/.textus/` 一行 + 注释说明）⇒ 不再出现在 `git status`；该目录**不手动删**（工具自己的状态）。
+
+### 10.357 v2.39.13（**未升版**） —— E41 GL 方案 D4 裁决：航线改为**固定的细实线**（⛔ 不用虚线体现飞行效果）（2026-11-08）
+
+所有者指示「e41方案中，航线改为固定的细线，不要用虚线体现飞行效果」⇒ `docs/e41-globe-opengl-plan.md` 记为 **D4 裁决**并改写 §5.6。
+
+**变更内容**：
+
+1. **整条 dash 机制废弃**（⛔ 一律不移植）：`arcDashLength(0.6)` / `arcDashGap(0.15)` / `arcDashInitialGap(lane)` /
+   `arcDashAnimateTime(1600/2600/3800 ms)` 与 three-globe 内部的 `discard` 片元
+   （`if (vRelDistance < dashOffset) discard; if (mod(...) > dashSize) discard;`）
+   ⇒ 航线是**静态的细实线**，**不做沿线流动**。
+2. **几何由 `TubeGeometry` 改 camera-facing ribbon**：⛔ 弃用"管"（管径是世界单位 ⇒ 屏幕粗细随球面位置变化，做不到恒定的"细线"观感）；
+   ⇒ 改**面向相机的带**：每个顶点沿屏幕空间垂直于弧线切向撑开 ⇒ **屏幕宽度恒定**；
+   三角数由 768/条 降到 **128/条**（26 条：20,000 → **3,328**）。
+3. **线宽改屏幕空间分档**（⛔ 不再移植 WebView 的 `arcStroke` 1.1/0.75/0.5 世界单位管径）：
+   TRUNK **2.4px** / REGIONAL **1.8px** / FEEDER **1.4px**，按视口高度比例（`base × viewportHeight/1080`）。
+4. **三级层级的区分改由三件事承担**：① 颜色/亮度 ② **弧高**（`lane` 分层，`arcAltitude × (1 + lane×0.34)`）③ alpha。
+5. **⛔ limb 退化保护（新增必做项）**：球面轮廓处弧线切向与视线近乎平行 ⇒ `cross(tangent, viewDir)` 趋零 ⇒
+   ribbon 法向无定义 ⇒ 线会**消失或翻面** ⇒ 顶点着色器内按 `deg < 0.08` 判退化并切到世界空间上方向撑开。
+   ⇒ 记为风险 **R14**，并给 `GlobeArcTest` 加负向用例（`deg → 0` 时不得除零、不得零宽）。
+6. **「活动感」改由集合变化承担**（dash 原本的职责被接管）⇒ 记为风险 **R15**：
+   航线随节拍**生长**（`WorldNetwork.pickRoute` + `BeatClassifier`）+ 旧航线**淡出**消退
+   （WebView 侧 `arcsTransitionDuration` = 1000 ms 补间 ⇒ GL 版自己实现淡入淡出）+ 整体亮度随 `energy` 起伏 ≤ ±10%。
+   ⛔ **不做**沿线流动的亮点 / 彗尾 / 飞机图标；若将来要「正在飞」的指示 ⇒ 另作独立决策（沿线跑亮点，而不是把线变虚线）。
+
+**连带**：§3.3 数值移植表新增两行（航线线宽 / 航线 dash，均标「不移植」+ 出处）；Phase 5 里程碑由「slerp + 管 + dash」改为
+「slerp + camera-facing ribbon 细实线」且工时 5~7 天 → **4~6 天**（总计 32~46 → **31~45 工作日**）；
+真机验证项改为「细实线 / 无虚线无沿线流动 / limb 处不消失不翻面」。

@@ -16,8 +16,11 @@
 | **D1** | **E41 档位下放**（ULTRA → ADV / 三档全可选） | ✅ **下放** | ⛔ **但不是现在改**：当前 WebView 版确实读 `ctx.quality.maxParticles` 且 TV 端黑屏 ⇒ 提前下放会把黑屏效果暴露给 MEDIUM/LOW 用户（**功能级回归**）⇒ 枚举改动**绑定在 GL 版上线那一刻**（Phase 7）。详见 §6.2 |
 | **D2** | `app/src/globe-upstream/` 的 three.js / three-globe **ES6 原版** | ✅ **保留**（不删） | 三条理由：① **MIT 上游件**（three.js / three-globe），保留**无版权风险**；② 是 ES5 产物的**逐字节 diff 基线**（AGENTS.md 明文「永不删除、永不修改、永不移回 assets」）⇒ 该规则**继续有效**，不需要改 AGENTS.md；③ WebView 版若因任何原因回滚/对照，缺了再生源就无法复现。⇒ **GL 版落地后 `globe-upstream/` 五个文件全部留存**，只是不再有运行时消费者 |
 | **D3** | **GL 基础层收敛**（避免写第三套） | ✅ **收敛到 `visualizer/gl/`** | 拆成两层：**通用部分上 main**（公开，两分支一致）＋ **上游派生部分留私有分支**。详见 §4.1 |
+| **D4** | **航线表达方式** | ✅ **固定的细实线**（⛔ **不用虚线体现飞行效果**） | 整条 dash 机制废弃（`arcDashLength` / `arcDashGap` / `arcDashInitialGap` / `arcDashAnimateTime` 与三档 dash 周期全部不移植）；航线改为**屏幕空间恒定宽度的细实线**（camera-facing ribbon）。「活动感」改由**航线集合随节拍生长/消退**承担。详见 §5.6 |
 
 **D1 的一句话结论**：GL 版上线 ⇒ E41 从「只有最高画质档提供」变为「三档全可选」⇒ **老电视（创维 9R54_G8S）也能看到这个效果** —— 这是整个 GL 重写最大的用户可感知收益。
+
+**D4 的一句话结论**：航线不再是「流动的虚线」，而是**静态的细实线**（像缠绕在球面上的发丝）⇒ 画面更安静、更像"地球上的真实航线网络"，而不是"动画特效"。
 
 ---
 
@@ -107,10 +110,11 @@ E41 当前走 **WebView + three-globe（WebGL）**，而 `docs/technical-overvie
 | 城市光点半径 | `TIER_RADIUS = {1:0.20, 2:0.15, 3:0.11, 4:0.08}`（**单位是地球度数** ⇒ 实际世界半径 = `pointRadius × 1.74533`）；`pointAltitude 0.02` ⇒ 高 2.0 世界单位 | `globe.js:569` |
 | 城市光点色 | `{1:#fff1b8, 2:#ffc14d, 3:#ff7a5c, 4:#5ec8b5}` | `globe.js:563-568` |
 | 城市呼吸 | `r = base × (1 + 0.18 sin(t×0.0005×2π + φ))`，`φ = (i × 2.39996323) mod 2π`（黄金角）；拍点 `×(1 + 0.5×beatEnv)`，`beatEnv ×= 0.94`/帧；刷新限流 30 Hz | `globe.js:684-702` |
-| 航线弧高 | `max(0.05, span/180 × 0.22) × (1 + lane × 0.34)`（`arcAltitude` = **球半径倍数** ⇒ 半径 = `100×(1+alt)`） | `globe.js:598-629` |
-| 航线配色 | TRUNK `rgba(150,205,255,0.5/0.95)` stroke 1.1 dash 1600 ms；REGIONAL `rgba(90,150,230,0.5/0.8)` stroke 0.75 dash 2600 ms；FEEDER `rgba(60,110,180,0.45/0.7)` stroke 0.5 dash 3800 ms | `globe.js:589-596` |
-| 航线几何 | `arcStroke` 非 null ⇒ **`TubeGeometry`**（`radius = stroke/2`）；`arcCurveResolution=64`，`arcCircularResolution=6` | three-globe 内部 |
-| dash 片元 | `if (vRelDistance < dashOffset) discard; if (mod(vRelDistance - dashOffset, dashSize + gapSize) > dashSize) discard;` | three-globe 内部 |
+| 航线弧高 | `max(0.05, span/180 × 0.22) × (1 + lane × 0.34)`（`arcAltitude` = **球半径倍数** ⇒ 半径 = `100×(1+alt)`）—— ✅ **保留**（`lane` 仍是并行航道的分层依据） | `globe.js:598-629` |
+| 航线配色 | TRUNK `rgba(150,205,255,…)`；REGIONAL `rgba(90,150,230,…)`；FEEDER `rgba(60,110,180,…)` —— ✅ **保留色相与 alpha**（层级区分改由**颜色 + 弧高**承担，不再靠线宽与 dash 周期） | `globe.js:589-596` |
+| 航线线宽 | ⛔ **不移植** WebView 的 `arcStroke`（1.1 / 0.75 / 0.5 世界单位管径）⇒ 改为**屏幕空间恒定宽度**的细实线，见 §5.6 | — |
+| **航线 dash** | ⛔ **整条机制废弃**：`arcDashLength(0.6)` / `arcDashGap(0.15)` / `arcDashInitialGap(lane)` / `arcDashAnimateTime(1600/2600/3800 ms)` 与对应的 `discard` 片元 **一律不移植** ⇒ 航线是**固定的细实线**，不做沿线流动 | D4 裁决 |
+| 航线几何 | ⛔ **不用 `TubeGeometry`**（管）⇒ 改 **camera-facing ribbon**（面向相机的带），见 §5.6 | D4 裁决 |
 | 音频驱动 | `energy`→自转速度 / 夜面亮度(`0.88+0.22×energy`) / 大陆辉光(`0.95+0.45×energy`) / 太阳尺寸；`beat`→光点半径；`bass/mid/treble` **JS 侧只存不用**（Kotlin 侧用于选航线） | `globe.js:721-812` |
 | 数据下发 | **100 ms** 一次（`TICK_MS`），经 `Handler(Looper.getMainLooper())`；3 个入口 `evaluateJavascript`：`WorldGlobe.initCities/updateRoutes/setAudio` | `WorldGlobeRenderer.kt:354-588` |
 | 像素比 | `renderer.setPixelRatio(1)` —— 锁 1.0（1.5× ⇒ 2.25× 像素量，真机 WebView 渲染进程曾占 133% CPU） | `globe.js:55` |
@@ -335,26 +339,99 @@ void main() {
 - `uPointScale = viewportHeight / 2`。
 - 呼吸与拍点：照 §3.3 的公式，**30 Hz 限流**（不要每帧重算 37 个点的三角函数）。
 
-### 5.6 航线弧
+### 5.6 航线弧 —— **固定的细实线**（D4 裁决）
 
-WebView 侧用的是 `TubeGeometry`（管）。GL 版两条路：
+> ⛔ **不移植 dash**：WebView 侧的 `arcDashLength` / `arcDashGap` / `arcDashInitialGap` / `arcDashAnimateTime` 与对应 `discard` 片元**整条废弃**。
+> ⇒ 航线是**静态的细实线**，**不做沿线流动**，**不用虚线体现飞行效果**。
+
+#### 几何：camera-facing ribbon（面向相机的带）
 
 | 方案 | 三角数 | 说明 |
 |---|---|---|
-| **A 管（照搬）** | 64 段 × 6 截面 × 2 = **768 / 条**；26 条 = **20,000** | 与 WebView 观感一致（`arcStroke` 有粗细） |
-| B ribbon（面向相机的带） | 64 × 2 = **128 / 条**；26 条 = **3,300** | 粗细靠顶点色 alpha 表达，dash 仍可做 |
+| ~~A 管（照搬 `TubeGeometry`）~~ | 768 / 条；26 条 = 20,000 | ⛔ 已弃用：管径是世界单位 ⇒ 屏幕上的粗细随球面位置变化，**做不到「细线」的恒定观感** |
+| **B ribbon（采用）** | 64 段 × 2 = **128 / 条**；26 条 = **3,328** | ✅ 每个顶点沿**屏幕空间垂直于弧线切向**的方向撑开 ⇒ **屏幕宽度恒定**，正是「细实线」 |
 
-**建议 A**（几何预算充足，且能保住「主干粗、支线细」的分层观感）。
+**ribbon 的顶点展开**（在顶点着色器里做，⛔ 不在 CPU 侧生成几何）：
 
-- 弧线生成：沿大圆 **slerp** 采样 64 点（`fe(lat,lng,alt)` 的球面公式）⇒ 半径 = `100×(1+alt)`，`alt = max(0.05, span/180×0.22)×(1+lane×0.34)`。
-- 管截面：6 边形（照 `arcCircularResolution = 6`），半径 = `stroke/2`。
-- dash：顶点属性带 `aRelDistance`（弧长归一化 0..1），片元：
-  ```glsl
-  if (vRelDistance < uDashOffset) discard;
-  if (mod(vRelDistance - uDashOffset, uDashSize + uDashGap) > uDashSize) discard;
-  ```
-  推进：`uDashOffset += dt × 1000 / dashAnimateTime`（**按 dt 推进，不要按帧**）。
+```glsl
+attribute vec3 aPos;      // 弧线采样点（世界坐标，已含 arcAltitude）
+attribute vec3 aDir;      // 该点的弧线切向（世界坐标）
+attribute vec4 aColor;    // per-vertex 颜色（含 klass 的色相与 alpha）
+uniform mat4  uViewProj;
+uniform vec3  uCamPos;
+uniform vec2  uViewport;  // 像素尺寸
+uniform float uWidthPx;   // 该 klass 的线宽（像素）
+void main() {
+  vec4 clip     = uViewProj * vec4(aPos, 1.0);
+  vec4 clipNext = uViewProj * vec4(aPos + aDir, 1.0);
+  vec2 s0 = clip.xy     / clip.w     * uViewport * 0.5;
+  vec2 s1 = clipNext.xy / clipNext.w * uViewport * 0.5;
+  vec2 dir = normalize(s1 - s0);      // 屏幕空间切向
+  vec2 nrm = vec2(-dir.y, dir.x);     // 屏幕空间法向
+  clip.xy += nrm * (uWidthPx * 0.5) / (uViewport * 0.5) * clip.w;
+  gl_Position = clip;
+}
+```
 
+- 每段 4 顶点（两个采样点 × 左右两侧）⇒ 三角形条带（`GL_TRIANGLE_STRIP`）⇒ 26 条弧可**合并进同一个 VBO 一次 draw**。
+- ⚠️ **w < 0 的点（相机后方）必须丢弃**（否则 ribbon 会翻面并拉出跨屏长条）。
+
+#### ⛔ limb 退化保护（必做，否则边缘处航线会突然消失）
+
+球面轮廓（limb）处弧线切向与视线方向近乎平行 ⇒ `cross(tangent, viewDir)` 趋零 ⇒ ribbon 法向无定义 ⇒ 线会**瞬间消失或翻面**。
+
+**处理**：在顶点着色器里判断退化量，退化时切换到世界空间的上方向做撑开：
+
+```glsl
+vec3 viewDir = normalize(uCamPos - aPos);
+vec3 side    = cross(normalize(aDir), viewDir);
+float deg    = length(side);
+if (deg < 0.08) {                       // 退化阈值
+  side = normalize(cross(normalize(aDir), vec3(0.0, 1.0, 0.0)) + vec3(1e-4));
+} else {
+  side = side / deg;
+}
+```
+
+⇒ 退化处线宽会略粗于标称值（肉眼几乎不可辨），但**不会消失**。
+
+#### 线宽分档（屏幕空间，⛔ 不是世界单位）
+
+| klass | 线宽 | 观感 |
+|---|---|---|
+| TRUNK（主干） | **2.4 px** | 最亮最粗，仍是细线 |
+| REGIONAL（支线） | **1.8 px** | 中等 |
+| FEEDER（毛细） | **1.4 px** | 最细 |
+
+- 宽度按**视口高度比例**（`uWidthPx = base × viewportHeight / 1080`）⇒ 4K 与 720p 观感一致。
+- ⚠️ 1080p 下 2.4px 是**一条发丝**，不要为了「看得清」往粗里调 —— 细是这版的设计目标。
+- **层级区分改由三件事承担**：① 颜色/亮度（TRUNK 最亮）② **弧高**（`lane` 分层，`arcAltitude × (1 + lane×0.34)`）③ alpha。
+
+#### 弧线生成（保留）
+
+- 沿大圆 **slerp** 采样 **64 点**（`fe(lat,lng,alt)` 球面公式）⇒ 半径 = `100×(1+alt)`；
+  `alt = max(0.05, span/180×0.22) × (1 + lane×0.34)`。
+- ⛔ **不再需要** `aRelDistance`（弧长归一化）顶点属性（只有 dash 用得到）。
+
+#### 「活动感」改由什么承担（⛔ dash 原本的职责被接管）
+
+去掉沿线流动后，航线的**活**体现在**集合本身的变化**，而不是线在动：
+
+| 信号 | 实现 | 位置 |
+|---|---|---|
+| 航线随节拍**生长** | 拍点驱动 `WorldNetwork.pickRoute` + `BeatClassifier` ⇒ 强度越高、生成越多 | `WorldNetwork.kt:364` |
+| 航线**消退** | 航线集合每 tick 重建，未被复用的旧航线淡出移除（WebView 侧 `arcsTransitionDuration` 默认 1000 ms 补间 ⇒ GL 版自己实现淡入淡出） | `globe.js` `arcsTransitionDuration` |
+| 呼吸感 | 整体亮度随 `energy` 轻微起伏（≤ ±10%，⛔ 不要做明显的明暗闪烁） | 本方案新增 |
+
+⇒ **不做**：沿线流动的亮点、彗尾、飞机图标。
+⇒ **如果**将来想要一个「正在飞」的指示，应当是**独立的决策**（例如沿线跑一个亮点，而不是把线变虚线），⛔ 不要在本次实现里夹带。
+
+#### 观感对照（真机验证要点）
+
+- [ ] 细线在 1080p 下是否「细得恰到好处」（不粗、不虚、不断续）
+- [ ] limb（球面边缘）处航线**不消失、不翻面**（退化保护生效）
+- [ ] 三级层级的区分是否仍可辨（靠颜色 + 弧高）
+- [ ] 航线集合随音乐生长/消退是否可感知（否则画面会显得「死」）
 ### 5.7 星空
 
 - 两层 `GL_POINTS`：`1500`（星尘，size 2.6, alpha 0.80）+ `380`（亮星，size 4.8, alpha 1.00）。
@@ -444,6 +521,8 @@ WebView 侧用的是 `TubeGeometry`（管）。GL 版两条路：
 | R11 | **程序数门禁**：`FxCoverageScanTest` 要求 View 型必须登记 `exempt` | `FxCoverageScanTest.kt:82`, `:333-340` | 新渲染器登记进 `exempt`（写明「View 型」） |
 | R12 | **删 2D 遗留类连带删测试** | `WorldProjection` / `WorldTerminator` / `WorldMapData` 零生产调用点 | 删类前跑全仓 grep（含 test）；同步删 `WorldMapDataTest` / `WorldLogicTest` 里的对应用例 |
 | R13 | **WebView 侧资产清理后 `GlobeAssetsHygieneTest` 失败** | 该测试 5 例 | 同步更新该测试的期望清单 |
+| R14 | **limb（球面边缘）处 ribbon 退化**：弧线切向与视线近乎平行 ⇒ `cross(tangent, viewDir)` 趋零 ⇒ 线**消失或翻面** | §5.6 的 ribbon 方案自带此风险 | ⛔ **必须实现退化保护**（§5.6 的 `deg < 0.08` 阈值 + 切到世界空间上方向）；单测 `GlobeArcTest` 加负向用例（`deg → 0` 时不得除零、不得零宽） |
+| R15 | **去掉 dash 后画面变"死"**：原本"沿线流动"是航线唯一的持续运动信号 | D4 裁决的副作用 | 「活动感」改由**航线集合随节拍生长/消退**承担（§5.6 的三行信号表）⇒ 实现时必须做**淡入淡出补间**（WebView 侧 `arcsTransitionDuration` = 1000 ms），否则只在生成瞬间有动静、其余时间画面静止 |
 
 ---
 
@@ -456,12 +535,12 @@ WebView 侧用的是 `TubeGeometry`（管）。GL 版两条路：
 | **2** | 夜面 + 晨昏 + 大陆辉光（合并进地球 program） | 昼夜分界 | 3~4 天 |
 | **3** | 大气层（合并进地球 program） | 边缘辉光 | 2~3 天 |
 | **4** | 城市光点（GL_POINTS + clamp） | 37 个光点 + 呼吸 | 3~4 天 |
-| **5** | 航线弧（slerp + 管 + dash） | 主干/支线/毛细三级 | 5~7 天 |
+| **5** | 航线弧（slerp + **camera-facing ribbon 细实线**，D4：⛔ 无 dash、⛔ 无管） | 主干/支线/毛细三级（靠颜色 + 弧高区分） | 4~6 天 |
 | **6** | 星空 + 月亮 + 太阳 | 完整场景 | 4~5 天 |
 | **7** | 音频驱动 + 画质分档 + **档位下放（D1：枚举 `Tier.ULTRA → Tier.ADV` + `needsParticleBudget → false`，与 GL 渲染器同一提交）** + `renderFps` + 生命周期接线 | 可交付 | 4~6 天 |
 | **8** | 真机验证（需所有者）+ 资产清理（删 ~3.09 MB）+ 门禁同步 | 收尾 | 3~5 天 |
 
-**合计**: 约 **32~46 个工作日**（单人）
+**合计**: 约 **31~45 个工作日**（单人；Phase 5 因去掉 dash 与管几何而略降）
 
 > ⚠️ **设备操作边界**（AGENTS.md 所有者 2026-11-07 明示）：⛔ 代理**不得自主** `adb connect` / `install` / 启动 / 截屏 / 操作电视。
 > ⇒ Phase 8 的真机验证必须由**所有者本人**执行（装包、运行、截图），代理只负责出包与判定标准。
@@ -486,7 +565,7 @@ WebView 侧用的是 `TubeGeometry`（管）。GL 版两条路：
 | `GlobeGeometryTest` | 球体网格顶点数/索引上限/UV 范围；弧线 slerp 端点误差；管截面朝向 |
 | `GlobeGlslParityTest` | ESSL 常量与 WebView 侧原值**逐字对账**（照 E52 的 `HighwayGlslParityTest` 做法） |
 | `GlobeBridgeTest` | 双缓冲 + 版本号的撕裂检测（负向：版本号奇数时 `consume` 必须返回 false） |
-| `GlobeArcTest` | `arcAltitude` 公式、`lane` 分层、dash 相位推进按 dt |
+| `GlobeArcTest` | `arcAltitude` 公式、`lane` 分层（弧高差）、**ribbon 线宽按视口比例**、**limb 退化保护的分母不为零**（负向：`deg → 0` 时不得除零/不得退化为零宽） |
 | `GlobePointSizeTest` | `gl_PointSize` clamp 到 64（负向：`-mvPosition.z → 0` 时必须为 0） |
 
 ### 9.3 真机验证（需所有者执行）
@@ -495,7 +574,7 @@ WebView 侧用的是 `TubeGeometry`（管）。GL 版两条路：
 - [ ] 首帧黑屏时长（分帧预热策略的实际表现）
 - [ ] 帧率（`renderFps()` 上报值 vs `dumpsys gfxinfo`）
 - [ ] 昼夜分界位置（对照 `globe.js` 的 `smoothstep(0.10,-0.10,ndl)`）
-- [ ] 航线弧观感（管 vs WebView 的 TubeGeometry）
+- [ ] 航线弧观感：**细实线**（屏幕宽度恒定）、**无虚线、无沿线流动**、limb 处不消失不翻面
 - [ ] 切后台 → 回来：GL 线程是否重建、显存是否释放（R6）
 - [ ] 遥控方向键不被吃掉（R5）、滑动切主题可用（R4）
 
