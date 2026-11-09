@@ -26016,3 +26016,22 @@ Kotlin 里「换行后以 `+` 开头的行」是**一条独立语句**（一元�
 - 改：`HighwaySkyBlendGateTest.kt`（⑤⑥⑧⑨）
 - 未改：`HighwaySkyFog.kt` / 版本号 —— 五轮同属 **v2.39.15 / versionCode 200**
 - ⛔ 本节涉及的 E52 代码**只在私有分支** `feat/e51-private`（上游 Slow Roads 无授权 ⇒ 不外发）
+
+### 10.372 v2.39.15 定稿 —— 去掉 `·rXX` 构建标记（2026-11-09）
+
+第五轮交付后所有者定稿：
+
+> 「好，暂时这样定稿吧，以后编译去掉 ·r5」
+
+`BUILD_TAG` 是第四轮为「同版本号多次交付、APK 文件名与 versionCode 完全相同」而加的临时手段
+（挂到右下角景色标签，截图上区分装的是哪一轮）。第五轮已确认修复有效、口径定稿 ⇒ 标记使命结束。
+
+| 项 | 处理 |
+|---|---|
+| `HighwayGlScene.BUILD_TAG` 常量 | 删除，原位置留注释说明「不要再往标签里加任何构建 / 轮次后缀」 |
+| 两处 `envLabel` 拼接（初值 + 换环境） | 恢复为 `HighwayEnvLabel.label(...) + diagSuffix()` |
+| 门禁 ⑨ | 断言由「必须含 `BUILD_TAG = ·r5`」反转为「不许有 `BUILD_TAG` 常量、`envLabel` 末尾不许再拼后缀」 |
+| 已交付的 `NASMusicTV-release-v2-39-15.apk` | **不重编**：该包仍是本轮定稿包（标签带 `·r5`）；下一次编译起标签自动变干净 |
+
+- 改：`HighwayGlScene.kt`（删常量 + 两处拼接）、`HighwaySkyBlendGateTest.kt`（⑨ 反转）
+- 未改：着色器 / 版本号 —— 仍是 **v2.39.15 / versionCode 200**
