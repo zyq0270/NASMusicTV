@@ -196,7 +196,7 @@ Update `CHANGELOG.md` (Added/Changed/Fixed/Removed) and `docs/technical-overview
 
 ## E51 Branch Context (feat/e51-private)
 
-> 📌 **2026-11-09 更新（分支使用模式）**：主目录 `NASMusicTV` 现在在 `main` ⇄ `feat/e51-private` 之间直接 `git checkout` 切换（单目录双分支，所有者确认）；`NASMusicTV-private` 是 detached HEAD 的遗留 worktree，勿再检出任何分支，否则主目录切不过去。两个分支的本地构建都带真 E51/E52 效果；改完私有分支源码必须跑 `scripts/sync_private_overlay.py` 并用 `--check` 验收 0 漂移。完整机制与纪律见 `AGENTS.md`「分支布局：单目录双分支」一节。下方 Implementation Status 是 2026-10-22 历史快照，数字已过时。
+> 📌 **2026-11-09 更新（分支使用模式）**：主目录 `NASMusicTV` 在 `main` ⇄ `feat/e51-private` 之间直接 `git checkout` 切换（单目录双分支，所有者确认）；独立 worktree `NASMusicTV-private` 已于 2026-11-09 删除（删除前全量备份在 `logs_temp/backup_private_dirs_2026-11-09/`），`git worktree list` 只剩主目录一条。两个分支的本地构建都带真 E51/E52 效果；改完私有分支源码必须跑 `scripts/sync_private_overlay.py` 并用 `--check` 验收 0 漂移。完整机制与纪律见 `AGENTS.md`「分支布局：单目录双分支」一节。下方 Implementation Status 是 2026-10-22 历史快照，数字已过时。
 
 **Current branch（2026-10-22 快照）**: `feat/e51-private` — Pixel City (LoFi Cities) visualizer effect port
 

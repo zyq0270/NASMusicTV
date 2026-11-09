@@ -17,9 +17,11 @@ Android TV music player (Kotlin + Jetpack Compose for TV) that connects to **Jel
 | 目录 | 状态 | 用途 |
 |---|---|---|
 | `NASMusicTV` | 检出分支可变（main 或 feat/e51-private） | 唯一工作目录：IDE、构建、提交都在这里 |
-| `NASMusicTV-private` | **detached HEAD**（停在 5d0dbef） | 2026-11-08 为两分支文档同步临时建的 worktree，现仅作遗留视图保留；目录及其中 gitignored 本地文件（keystore.properties、logs_temp 等）未删 |
+| 两个 `NASMusicTV-private` | **2026-11-09 已删除** | 原 11-08 临时 worktree + 误建的草稿目录；删除前已全量备份，见下 |
 
-⛔ **不要在 `NASMusicTV-private` 里 `git switch feat/e51-private` 或 `git switch main`** —— Git 同一分支只允许一个 worktree 持有，一旦占用，主目录就切不过去（`fatal: already checked out at ...`）。释放办法是在该目录 `git switch --detach`；目录本身可用 `git worktree remove --force` 删除（会连带删掉 gitignored 本地文件，先备份），而**删目录本身不会丢私有分支代码**（对象库与 refs 都在主仓库 `.git`，分支引用仍在 `refs/heads/feat/e51-private`）。
+⭐ `git worktree list` 现在**只剩 `NASMusicTV` 一条**，`.git/worktrees/` 已清空，没有任何分支被其它 worktree 占用 ⇒ 主目录可自由 `git checkout main` ⇄ `feat/e51-private`（2026-11-09 实测往返切换畅通）。删除 worktree **不会丢私有分支代码**：对象库与 `refs/heads/feat/e51-private` 都在主仓库 `.git` 里。
+
+📦 **删除前的全量备份**：`logs_temp/backup_private_dirs_2026-11-09/`（被 `.gitignore:106` 的 `logs_temp/` 忽略 ⇒ 含密钥的文件不会泄漏、不污染 git status），按原件父路径分两个子目录、保留原名：`MyGithubSoftware/NASMusicTV-private/`（4 文件 / 6470 B，临时脚本与 §10.366 旧草稿）与 `NasAudio/NASMusicTV-private/`（10440 文件 / 269312810 B，含 keystore.properties / logs_temp / build 缓存）。`diff -rq` 全量逐字节 0 差异。原件位置：`D:/hxzhang/MyGithubSoftware/NASMusicTV-private` 与 `D:/hxzhang/MyGithubSoftware/NasAudio/NASMusicTV-private`。
 
 **为什么两个分支都能本地编出真 E51/E52 效果**：`~/.gradle/init.d/10-nasmusic-e51-local.gradle`（仅本机）按 `repoHasHiddenSources` 二选一 —— 在 `feat/e51-private` 上编译仓库自带的 `visualizer/e51/**`、`visualizer/highway/**`、`assets/e52_highway/**`，并在 Kotlin 编译任务层排除覆盖层同名文件；在 `main` 上（仓库内 0 个 e51 文件）改编译 gitignored 的 `app/src/e51-overlay/`（250 文件）。`app/build.gradle.kts` 的 `lofi.city` / `highway.enabled` 护栏只要任一来源存在即放行。覆盖层是 gitignored 的，切分支不会被删，两份来源同时在盘上、由 init 脚本二选一，不是冲突。
 
@@ -31,7 +33,7 @@ Android TV music player (Kotlin + Jetpack Compose for TV) that connects to **Jel
 
 ⚠️ **已知噪音（未修）**：两分支 `.gitignore` 不一致，main 多 `/.textus/`、`app/src/eco-upstream/node_modules/`、`/.superpowers/` 等规则 ⇒ 切到 `feat/e51-private` 后 `.textus/settings.json`（1 KB 工具状态）显示为未跟踪。不影响构建。待所有者决定：把私有分支 `.gitignore` 与 main 对齐（需提交），或写入 `.git/info/exclude`（仅本机、不入仓）。
 
-> 反向参考：若确需回到双 worktree，主目录 `git checkout main` → 私有目录 `git switch feat/e51-private`；但按所有者 2026-11-09 确认，默认不用。
+> 若确需重建独立 worktree：`git -C <主目录> worktree add <新目录> <分支>`；但按所有者 2026-11-09 确认，默认只用单目录切换，重建前先想清楚「同一分支只能被一个 worktree 持有」的占用问题。
 
 ## Build (Windows)
 
