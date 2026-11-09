@@ -10,6 +10,29 @@ Android TV music player (Kotlin + Jetpack Compose for TV) that connects to **Jel
 - Kotlin 2.3.10; TV Compose `androidx.tv:tv-material` is **alpha** (`ExperimentalTvMaterial3Api` opt-in set in `app/build.gradle.kts`, used throughout)
 - GPL v3
 
+## 分支布局：单目录双分支（所有者确认，2026-11-09）
+
+⭐ **只用 `D:/hxzhang/MyGithubSoftware/NasAudio/NASMusicTV` 这一个目录，靠 `git checkout main` / `git checkout feat/e51-private` 切换版本。这是所有者 2026-11-09 确认的工作方式，不要退回双 worktree 分工。**
+
+| 目录 | 状态 | 用途 |
+|---|---|---|
+| `NASMusicTV` | 检出分支可变（main 或 feat/e51-private） | 唯一工作目录：IDE、构建、提交都在这里 |
+| `NASMusicTV-private` | **detached HEAD**（停在 5d0dbef） | 2026-11-08 为两分支文档同步临时建的 worktree，现仅作遗留视图保留；目录及其中 gitignored 本地文件（keystore.properties、logs_temp 等）未删 |
+
+⛔ **不要在 `NASMusicTV-private` 里 `git switch feat/e51-private` 或 `git switch main`** —— Git 同一分支只允许一个 worktree 持有，一旦占用，主目录就切不过去（`fatal: already checked out at ...`）。释放办法是在该目录 `git switch --detach`；目录本身可用 `git worktree remove --force` 删除（会连带删掉 gitignored 本地文件，先备份），而**删目录本身不会丢私有分支代码**（对象库与 refs 都在主仓库 `.git`，分支引用仍在 `refs/heads/feat/e51-private`）。
+
+**为什么两个分支都能本地编出真 E51/E52 效果**：`~/.gradle/init.d/10-nasmusic-e51-local.gradle`（仅本机）按 `repoHasHiddenSources` 二选一 —— 在 `feat/e51-private` 上编译仓库自带的 `visualizer/e51/**`、`visualizer/highway/**`、`assets/e52_highway/**`，并在 Kotlin 编译任务层排除覆盖层同名文件；在 `main` 上（仓库内 0 个 e51 文件）改编译 gitignored 的 `app/src/e51-overlay/`（250 文件）。`app/build.gradle.kts` 的 `lofi.city` / `highway.enabled` 护栏只要任一来源存在即放行。覆盖层是 gitignored 的，切分支不会被删，两份来源同时在盘上、由 init 脚本二选一，不是冲突。
+
+⚠️ **改完私有分支的 E51/E52 源码必做**（在 `feat/e51-private` 上跑，源取工作树、含未提交改动）：
+`python scripts/sync_private_overlay.py` → `python scripts/sync_private_overlay.py --check`（须 0 漂移）。
+否则切回 main 时本地包仍用旧覆盖层，而 CI 无覆盖层反倒能编过 ⇒ 本地/CI 行为分叉（2026-11-02 踩过），由 `PrivateOverlayDriftGateTest` 判红。在 main 上跑同一脚本时源取分支 ref `feat/e51-private`（`git archive`，不含未提交改动）。
+
+⛔ `feat/e51-private` 无 upstream、含不可再分发上游衍生源码 ⇒ **永不 push / tag / release**。含 E51/E52 的包只在本机用。`local.properties` 已固定 `lofi.city=true` + `highway.enabled=true`；本地构建必须 `--no-daemon` + Kotlin in-process（见下节）。
+
+⚠️ **已知噪音（未修）**：两分支 `.gitignore` 不一致，main 多 `/.textus/`、`app/src/eco-upstream/node_modules/`、`/.superpowers/` 等规则 ⇒ 切到 `feat/e51-private` 后 `.textus/settings.json`（1 KB 工具状态）显示为未跟踪。不影响构建。待所有者决定：把私有分支 `.gitignore` 与 main 对齐（需提交），或写入 `.git/info/exclude`（仅本机、不入仓）。
+
+> 反向参考：若确需回到双 worktree，主目录 `git checkout main` → 私有目录 `git switch feat/e51-private`；但按所有者 2026-11-09 确认，默认不用。
+
 ## Build (Windows)
 
 JDK comes from Android Studio's bundled JetBrains Runtime. Gradle wrapper points at a **local file URL** (`file:///C:/Users/hxzha/Downloads/gradle-9.5.0-bin.zip`) — intentional for offline builds; do not "fix" it to a network URL.
