@@ -26035,3 +26035,33 @@ Kotlin 里「换行后以 `+` 开头的行」是**一条独立语句**（一元�
 
 - 改：`HighwayGlScene.kt`（删常量 + 两处拼接）、`HighwaySkyBlendGateTest.kt`（⑨ 反转）
 - 未改：着色器 / 版本号 —— 仍是 **v2.39.15 / versionCode 200**
+
+### 10.373 v2.39.15 定稿（二）—— 清掉天空 program 的 6 个死 uniform（2026-11-09）
+
+第五轮把天空片元改成「只采样上游世界坐标云 `vUUv` + 天顶色平铺」后，下列 uniform 在**天空 program** 里
+一个都不再被引用：
+
+| uniform | 原用途 | 现状 |
+|---|---|---|
+| `uFogColor` | 天空自己的雾色 | 片元不用 |
+| `uFogNear` / `uFogFar` | 天空自己的雾距（`world/HighwaySkyFog` 计算） | 片元不用 |
+| `uCloudFadeTop` / `uCloudFadeBottom` | 云层顶 / 底淡出范围 | 片元不用 |
+| `uScreenSize` | 第三/四轮屏幕空间远景云的屏幕基准 | 片元不用 |
+
+**为什么必须清掉而不是留着**：GLSL 编译器会把未使用的 uniform 优化掉 ⇒ `glGetUniformLocation`
+恒返回 `-1` ⇒ 场景侧的 `if (loc >= 0) glUniform*` 全部走不到，**看上去在传、其实什么也没做**。
+历次排查（第三/四轮）正是被这一点误导过——以为「雾参数已经喂进去了」。
+
+改动：
+
+- `SKY_FS`：删 6 个声明（生成源 `e52_gen_glsl_kotlin.mjs`）⇒ 重跑生成器
+- `HighwayGlScene`：删 6 个句柄字段、6 处 `glGetUniformLocation`、整段逐帧上传
+  （含 `HighwaySkyFog.range(...)` 调用与 `camX/camZ`），并删掉 `HighwaySkyFog` 的 import
+- `world/HighwaySkyFog.kt`：**保留**（纯函数 + 有单测），头部标注「已无生产调用方」与保留原因
+- 门禁：④ 重写为「天空 program 不许再出现这 6 个句柄、不许再调 `HighwaySkyFog.range`」；
+  ⑦ 的 `planeHalf` 断言换成「投影 `far` 同倍数联动」
+
+清理后天空 program 只剩：`uViewProj` / `uView` / `uNearCol` / `uFarCol` / `uHasClouds` / `uCloudMap`
+（+ 顶点侧 `uTime` / `uCamPos`）。
+
+- 未改：版本号 —— 仍是 **v2.39.15 / versionCode 200**；已交付 APK 不重编
