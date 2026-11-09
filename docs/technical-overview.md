@@ -25862,3 +25862,89 @@ Kotlin 里「换行后以 `+` 开头的行」是**一条独立语句**（一元�
 - 改：`CHANGELOG.md` / `docs/technical-overview.md`（本节）
 - 未改：`HighwayGlScene.kt` / `HighwaySkyFog.kt` / 版本号 —— 按所有者裁定三轮同属 **v2.39.15 / versionCode 200**
 - ⛔ 本节涉及的 E52 代码**只在私有分支** `feat/e51-private`（上游 Slow Roads 无授权 ⇒ 不外发）
+
+
+---
+
+### 10.370 v2.39.15（同版本内第四轮）—— 丘陵·夏季·晴朗「最新测试，还是有问题」：根因 = **远景云被后处理洗掉**（2026-11-09）
+
+#### 一、现象与决定性证据
+
+真机截图 `clipboard-2026-11-09T07-10-10-475Z-e54c0b1a.jpg`（1920×863，右下角标签
+「丘陵 · 夏季 · 晴朗 · 普通」）。取左侧无山丘遮挡的竖条 x=200..350 做纵向颜色剖面：
+
+| 屏幕 y | R/G/B | 行内 std | 判读 |
+|---|---|---|---|
+| 0..190 | 云纹起伏（172..230） | 4~15 | 上游云纹正常 |
+| 200 | 203 / 250 / 252 | 3.5 | **纯色板上沿**：`clear.skyColFar = 13368830 = (203,253,254)` |
+| 208..248 | 204..242 / 252..255 / 253..255 | 0.3~2.5 | **一整条纯色/极缓渐变板**，纵向梯度 <1 |
+| 240 | 240 / 255 / 255 | 0.7 | **纯色板下沿**：`clear.col = 15794175 = (240,255,255)` 雾色 |
+| 256 起 | 土黄绿 | 62.5 | 地形 |
+
+⇒ 板 = 天空底色（纯 `farCol`）被线性雾一路混到雾色 `uFogColor` 的**渐变带**，云纹在这 50px 里完全消失。
+这也说明上一轮 §10.369 结尾那句「接管后的云纹再走原有的 cloudFade 与 fogFactor ⇒ 云 → 雾 → 地形连续」
+**是错的**：那两道后处理恰恰会把云洗掉。
+
+#### 二、三个叠加根因（按致命程度排序）
+
+| # | 根因 | 证据 |
+|---|---|---|
+| ① | **注入顺序错**：第三轮把远景云 `mix` 进 `diffuseColor.rgb`，后面却还有 `diffuseColor.rgb = mix(skyCol.rgb, ..., cloudFade)` 和 `gl_FragColor.rgb = mix(..., uFogColor, fogFactor)` 两道洗色 | 远景云在地平线前先被 `cloudFade` 洗回 `skyCol`、再被 `fogFactor` 洗成纯雾色 ⇒ 真机上等于没改 |
+| ② | **天空底色退化**：上游 `dist = max(0, 1 - sqrt(vX²+vY²))`，`vUv.y >= 0.7`（屏幕 y≈105px / H=863）起恒 0 ⇒ `skyCol` 此后是纯 `uFarCol` 常量 | 板上沿颜色精确 = `(203,253,254)` = `skyColFar` |
+| ③ | **雾起得太早 + 几何缝偏大**：`SKY_QUAD_SCALE = 8` 时 `HighwaySkyFog.range(planeHalf = ue×8)` 给出 `uFogNear=3245`（屏幕 y≈120.6 / H=540 ≈ 193 / H=863），`fogFactor` 从那里就开始洗；`farBand = smoothstep(0.10,0.24,screenDown)` 在 H=863 要到 y≈207 才满 | 雾与 farBand 的作用区间重叠，等云接管时雾已经铺满；8× 几何缝 3.9px（H=540）≈ 6.2px（H=863） |
+
+#### 三、修法（全部落在自写 SKY_FS 段落，上游 13 个 GLSL 常量一字未改）
+
+| 改动 | 内容 |
+|---|---|
+| ① 顺序根治 | 远景云的 `gl_FragColor.rgb = mix(gl_FragColor.rgb, farTint, farBand * (1.0 - fogFactor))` 移到 `cloudFade` / `fogFactor` **之后**；`(1 - fogFactor)` 让云只在最后那道窄雾带里溶进地形雾色 |
+| ② 底色不退化 | `skyGradient = mix(uNearCol, uFarCol, smoothstep(0.0, 0.58, screenDown))`，用 `smoothstep(0.10, 0.26, screenDown)` 接管 `skyCol.rgb`；近景 10% 保持原观感 |
+| ③ 雾窄带收口 | `fogFactor = smoothstep(uFogFar * 0.90, uFogFar, vFogDepth)`，不再从 `uFogNear` 起洗整片天空；`uFogNear` 仍用于 `fadeStart` |
+| ④ farBand 提前 | `smoothstep(0.04, 0.14, screenDown)`（原 0.10..0.24），屏幕上部就开始接管 |
+| ⑤ 几何 + 雾距 | `SKY_QUAD_SCALE` 8.0 → **64.0**。`skyProjMatrix` 的 far 与 `planeHalf` 都按该倍数联动，自动放大 |
+
+`SKY_QUAD_SCALE` 的参数化复核（`logs_temp/sky_seam_2026-11-09/verify_scale.py`，H=540 / 地平线 y≈146.2）：
+
+| SCALE | 几何覆盖到 | 几何缝 | fogNear | fogFar | fog=1 在 | fadeStart 在 |
+|---|---|---|---|---|---|---|
+| 8 | 142.3 | 3.89 | 3245 | 21633 | 142.3 | 140.7 |
+| 64 | 145.5 | **0.65** | 26021 | 173474 | **145.7** | 145.5 |
+| 128 | 145.8 | 0.38 | 52051 | 347007 | 145.9 | 145.8 |
+
+取 64 而非 128/256：几何缝已到亚像素、雾饱和点距地平线 0.5px，再放大只会无谓拉大 far 投影
+（64 时 far ≈ 272,458）与顶点坐标幅度，收益趋零。
+
+#### 四、可见构建标记（终结「装的到底是哪一轮包」）
+
+同版本号 `v2.39.15 / versionCode 200` 已连续交付 4 次，APK 文件名完全相同 ⇒ 复测截图很容易是旧包。
+本轮在 `HighwayGlScene` 的 companion object 加 `const val BUILD_TAG = " ·r4"`，两处 `envLabel` 拼接
+（开屏初值 + 换环境）都追加它 ⇒ 右下角标签变为 `丘陵 · 夏季 · 晴朗 · 普通 ·r4`，
+截图一眼可辨。此标记不动 `HighwayEnvLabel.label()` 的逐字门禁口径。
+
+#### 五、门禁与文件清单
+
+`HighwaySkyBlendGateTest`：⑦ 的 SCALE 断言 8.0 → 64.0；⑧ 的 `farBand` 阈值与「写入最终颜色」断言更新；
+新增 ⑨，源码扫描守住「远景云注入必须在 fogFactor 之后」「雾不许再从 uFogNear 起」「底色屏幕渐变」
+「farBand 提前」「SCALE=64」「BUILD_TAG 存在」。
+
+- 改：`scripts/e52/e52_gen_glsl_kotlin.mjs`（SKY_FS）⇒ 重跑生成器刷新 `HighwayGlsl.kt`
+- 改：`HighwayGlScene.kt`（SCALE + BUILD_TAG + 两处 envLabel）
+- 改：`HighwaySkyBlendGateTest.kt`（⑦ ⑧ ⑨）
+- 改：`CHANGELOG.md` / `docs/technical-overview.md`（本节）
+- 未改：`HighwaySkyFog.kt` / 版本号 —— 按所有者裁定四轮同属 **v2.39.15 / versionCode 200**
+- ⛔ 本节涉及的 E52 代码**只在私有分支** `feat/e51-private`（上游 Slow Roads 无授权 ⇒ 不外发）
+
+
+#### 六、所有者裁定：不雾化，云直接拉到地平线
+
+第四轮初版本想「把雾收窄到地平线附近」，所有者随后裁定：
+**「可以不用雾化，只要把云层拉到地平线就行了吧」** ⇒ 最终实现**天空侧完全不计算 `fogFactor`**、
+不把颜色混向 `uFogColor`；`farBand` 从屏幕 4%..14% 平滑接管后一路保持 1，云纹一直可见到
+天空四边形边界，再直接与地形相接。
+
+| 取舍 | 说明 |
+|---|---|
+| 为什么可行 | `SKY_QUAD_SCALE = 64` 把几何缝压到 0.65px（H=540）/ ≈1.0px（H=863）⇒ 清屏色没有机会成为可见层；不需要靠雾去「补」那条缝 |
+| 为什么反而更稳 | 前三轮所有纯色板的直接来源都是 `fogFactor` / `cloudFade` 两道 RGB 洗色；去掉它们就没有可被洗成常量的中间态 |
+| 地平线长什么样 | 一条自然的「云 / 地」边界（地形远处仍带它自己的雾），而不再是「云 → 纯色天空板 → 地形」的三段结构 |
+| 没动什么 | 地形 / 路面 / 植被的雾、天气雾色、上游 13 个 GLSL 常量、版本号 |
