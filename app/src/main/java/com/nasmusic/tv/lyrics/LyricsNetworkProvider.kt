@@ -7,6 +7,7 @@ import com.nasmusic.tv.util.EncodingUtils
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.Dispatcher
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.logging.HttpLoggingInterceptor
@@ -388,7 +389,18 @@ class LyricsNetworkProvider(
 
             if (id != null && accessKey != null) {
                 // 获取实际歌词内容
-                val lrcUrl = "${kugouLrcUrl.trimEnd('/')}/download?ver=1&client=pc&id=$id&accesskey=$accessKey&fmt=lrc&charset=utf8"
+                // M18：⛔ 不能手拼 query —— id/accesskey 来自**不可信的第三方响应**，
+                // 含 & / # / 空格就会注入或截断查询串，而异常又被下游吞掉 ⇒ 歌词静默失败。
+                // 用 HttpUrl.Builder 让每个参数各走一次编码。
+                val lrcUrl = kugouLrcUrl.trimEnd('/').toHttpUrlOrNull()?.newBuilder()
+                    ?.addPathSegment("download")
+                    ?.addQueryParameter("ver", "1")
+                    ?.addQueryParameter("client", "pc")
+                    ?.addQueryParameter("id", id)
+                    ?.addQueryParameter("accesskey", accessKey)
+                    ?.addQueryParameter("fmt", "lrc")
+                    ?.addQueryParameter("charset", "utf8")
+                    ?.build() ?: return null
                 val lrcRequest = Request.Builder()
                     .url(lrcUrl)
                     .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")

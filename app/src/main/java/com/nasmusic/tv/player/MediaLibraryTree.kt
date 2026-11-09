@@ -16,6 +16,7 @@ import com.nasmusic.tv.data.model.Playlist
 import com.nasmusic.tv.data.model.Song
 import com.nasmusic.tv.data.model.StorageType
 import com.nasmusic.tv.util.AppLog
+import com.nasmusic.tv.util.rethrowIfCancellation
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -255,6 +256,10 @@ class MediaLibraryTree(
                 else -> emptyList()
             }
         } catch (e: Exception) {
+            // M04：与同文件 search() 的口径对齐 —— 吞掉 CancellationException 会把
+            // onGetChildren 的 withTimeoutOrNull 语义破坏掉（车机端一直转圈，
+            // 且超时后任务仍在跑）。
+            e.rethrowIfCancellation()
             AppLog.w(TAG, "loadChildren($parentId) failed: ${e.message}", e)
             emptyList()
         }

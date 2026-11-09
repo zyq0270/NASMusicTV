@@ -4,6 +4,7 @@ import com.google.gson.JsonArray
 import com.google.gson.JsonObject
 import com.google.gson.JsonParseException
 import com.google.gson.JsonParser
+import com.nasmusic.tv.util.AppLog
 
 /**
  * 本应用自导 JSON v2 解析器（`formatVersion` = "nasmusic-playlist-v2"）。
@@ -15,6 +16,9 @@ class JsonPlaylistParser : PlaylistParser, PlaylistNameProvider {
 
     companion object {
         const val FORMAT_VERSION = "nasmusic-playlist-v2"
+
+        /** M12：解析期诊断日志的 TAG */
+        private const val TAG = "JsonPlaylistParser"
     }
 
     /** 最近一次 parse 提取的歌单名 hint（`playlistName` 字段，§4.2 取名兜底链）。 */
@@ -61,6 +65,11 @@ class JsonPlaylistParser : PlaylistParser, PlaylistNameProvider {
             JsonParser.parseString(text).asJsonObject
         } catch (e: JsonParseException) {
             return emptyList()
+        } catch (e: IllegalStateException) {
+            // M12：根是数组/标量时 asJsonObject 抛 IllegalStateException（不是 JsonParseException）
+            // ⇒ 原实现让它一路抛到上层，一张格式不对的文件就毁掉整次导入。
+            AppLog.w(TAG, "parse: root is not a JSON object (${e.message})")
+            return emptyList()
         }
         val version = root.get("formatVersion")?.takeIf { it.isJsonPrimitive }?.asString
         if (version != FORMAT_VERSION) return emptyList()
@@ -69,7 +78,9 @@ class JsonPlaylistParser : PlaylistParser, PlaylistNameProvider {
             ?.takeIf { it.isNotEmpty() }?.let { innerName = it }
 
         val entries = mutableListOf<RawSongEntry>()
-        val songs = root.getAsJsonArray("songs") ?: return emptyList()
+        // M12：`getAsJsonArray` 在字段存在但类型不符（对象/字符串）时抛 IllegalStateException；
+        // 安全转换后类型不符等价于「没有歌曲」。
+        val songs = (root.get("songs") as? JsonArray) ?: return emptyList()
         var index = 0
         for (el in songs) {
             if (!el.isJsonObject) continue

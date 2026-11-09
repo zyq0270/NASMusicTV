@@ -43,6 +43,7 @@ import com.nasmusic.tv.R
 import com.nasmusic.tv.data.model.Song
 import com.nasmusic.tv.ui.MainActivity
 import com.nasmusic.tv.util.AppLog
+import com.nasmusic.tv.util.rethrowIfCancellation
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -62,6 +63,15 @@ import kotlinx.coroutines.withTimeoutOrNull
 class PlaybackService : MediaLibraryService() {
 
     private var mediaLibrarySession: MediaLibrarySession? = null
+    /**
+     * 本服务在 [onCreate] 里创建的那个 ExoPlayer。
+     *
+     * ⛔ 必须显式持有引用：旧实现只在 `mediaLibrarySession` 非空时释放 player，
+     * 而 session 要到**首次起播**才创建 ⇒「服务已拉起但从未播放」这条分支
+     * 永远不会 release，player 连同它的 playback Looper 与 AudioTrack 一直挂着
+     * 直到进程结束（服务被反复重建还会叠加）。见 [onDestroy]。
+     */
+    private var servicePlayer: ExoPlayer? = null
     private var lastNotificationState: Pair<String?, Boolean>? = null
     private lateinit var mediaLibraryTree: MediaLibraryTree
     /**
@@ -273,6 +283,8 @@ class PlaybackService : MediaLibraryService() {
             .build()
 
         player.addListener(playerListener)
+        // 显式持有，供 onDestroy 无条件释放（见字段注释）
+        servicePlayer = player
 
         // 注入高质量人声分离组件（HT-Demucs FT ONNX 模式）
         // 注意：模型不在 APK 内，需在设置页下载。初始化延迟到 enableHighQualityRemoval 时（PlayerManager 内部检查模型）
@@ -298,9 +310,38 @@ class PlaybackService : MediaLibraryService() {
         (application as NasMusicApp).playerManager.setDemucsSeparator(demucsSeparator)
         (application as NasMusicApp).playerManager.setAccompanimentCache(accompanimentCache)
 
-        // 不在 onCreate 中创建 MediaSession 或 startForeground
-        // MediaSession 和前台通知延迟到首次播放时创建，避免 app 启动即显示锁屏小窗
+        // 不在 onCreate 中创建 MediaSession，也不无条件 startForeground：
+        // MediaSession 与真实媒体通知延迟到首次播放时创建，避免 app 启动即出现锁屏小窗。
+        // ⚠️ 例外见 [onStartCommand]：被 startForegroundService 拉起时必须立刻前台化。
         AppLog.d("PlaybackService", "onCreate: player created, MediaSession deferred to first play")
+    }
+
+    /**
+     * 前台化时机（API 26+ 「5 秒内必须 startForeground」）。
+     *
+     * 正常路径走 `startService`（见 [startPlaybackServiceSafely]），**不受** 5 秒约束，
+     * 所以仍保持「不起播就不显示通知」的既有体验。
+     *
+     * 但当 `startService` 被后台启动限制拒绝、降级到 `startForegroundService` 时，
+     * 系统从**调用那一刻**开始计时：若 5 秒内没起播（车机/蓝牙冷启动唤醒、
+     * 首曲还在解析 streamUrl），本服务会被判 `ForegroundServiceDidNotStartInTimeException`
+     * 直接 ANR 崩溃。旧实现把 `startForeground` 放在 `ensureMediaSessionActive()` 里，
+     * 只在首次 `onIsPlayingChanged(true)` 触发 ⇒ 这条降级路径必炸。
+     *
+     * 现在降级入口会带上 [EXTRA_FOREGROUND_START]，此处据此先起一个占位通知；
+     * 首次播放时 `ensureMediaSessionActive()` 用同一 NOTIFICATION_ID 覆盖成真实媒体通知。
+     */
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (!isForeground && intent?.getBooleanExtra(EXTRA_FOREGROUND_START, false) == true) {
+            runCatching {
+                startForeground(NOTIFICATION_ID, buildNotification(null, false))
+                isForeground = true
+                AppLog.d("PlaybackService", "onStartCommand: 前台化占位通知（startForegroundService 路径）")
+            }.onFailure {
+                AppLog.w("PlaybackService", "onStartCommand: 占位前台化失败", it)
+            }
+        }
+        return super.onStartCommand(intent, flags, startId)
     }
 
     /**
@@ -434,6 +475,7 @@ class PlaybackService : MediaLibraryService() {
                             }.orEmpty()
                             future.set(LibraryResult.ofItemList(ImmutableList.copyOf(children), params))
                         } catch (e: Exception) {
+                            e.rethrowIfCancellation()
                             // 超时/异常返回空列表：宁可显示为空，也不要让车机端一直转圈
                             AppLog.w("PlaybackService", "onGetChildren($parentId) failed", e)
                             future.set(LibraryResult.ofItemList(ImmutableList.of(), params))
@@ -464,6 +506,7 @@ class PlaybackService : MediaLibraryService() {
                             session.notifySearchResultChanged(browser, query, items.size, params)
                             future.set(LibraryResult.ofVoid(params))
                         } catch (e: Exception) {
+                            e.rethrowIfCancellation()
                             AppLog.w("PlaybackService", "onSearch('$query') failed", e)
                             future.set(
                                 LibraryResult.ofError(LibraryResult.RESULT_ERROR_UNKNOWN, params)
@@ -500,6 +543,7 @@ class PlaybackService : MediaLibraryService() {
                             val items = searchItemsCached(query)
                             future.set(LibraryResult.ofItemList(ImmutableList.copyOf(items), params))
                         } catch (e: Exception) {
+                            e.rethrowIfCancellation()
                             AppLog.w("PlaybackService", "onGetSearchResult('$query') failed", e)
                             future.set(LibraryResult.ofItemList(ImmutableList.of(), params))
                         }
@@ -589,6 +633,7 @@ class PlaybackService : MediaLibraryService() {
                         val resolved = try {
                             resolveItemsSuspend(mediaItems)
                         } catch (e: Exception) {
+                            e.rethrowIfCancellation()
                             AppLog.w("PlaybackService", "onSetMediaItems resolve failed", e)
                             mediaItems
                         }
@@ -697,6 +742,7 @@ class PlaybackService : MediaLibraryService() {
             val resolved = try {
                 resolveItemsSuspend(items)
             } catch (e: Exception) {
+                e.rethrowIfCancellation()
                 AppLog.w("PlaybackService", "resolveItems failed", e)
                 items
             }
@@ -741,6 +787,7 @@ class PlaybackService : MediaLibraryService() {
             val resolved = try {
                 resolveItemsSuspend(searchItemsCached(query))
             } catch (e: Exception) {
+                e.rethrowIfCancellation()
                 AppLog.w("PlaybackService", "resolveVoiceSearch('$query') failed", e)
                 emptyList()
             }
@@ -868,16 +915,26 @@ class PlaybackService : MediaLibraryService() {
         browseCache.clear()
         // 释放 PlayerManager 资源（Handler、listener），防止内存泄漏
         try {
-            (application as NasMusicApp).playerManager.release()
+            val pm = (application as NasMusicApp).playerManager
+            pm.release()
+            // 两个回调都是**捕获本 Service 实例**的 lambda，而 PlayerManager 是 app 级单例
+            // ⇒ 不清空的话已销毁的 Service（连带 Context）会被单例长期持有（C09）。
+            pm.onSleepTimerExpired = null
+            pm.builtinStreamUrlResolver = null
         } catch (e: Exception) {
             AppLog.w("PlaybackService", "PlayerManager.release failed", e)
         }
         // 释放 MediaSession（先释放 Session 再释放 Player，防止发布后资源竞争）
-        mediaLibrarySession?.run {
-            release()
-            player.release()
-        }
+        mediaLibrarySession?.release()
         mediaLibrarySession = null
+        // C10：主 ExoPlayer 无条件释放。onCreate 必然创建过一次，旧实现只在
+        // mediaLibrarySession 非空时释放 ⇒「服务起来了但从未起播」时永不释放，
+        // player 连同 playback Looper 与 AudioTrack 一直挂到进程结束。
+        servicePlayer?.let { p ->
+            runCatching { p.release() }
+                .onFailure { AppLog.w("PlaybackService", "servicePlayer.release failed", it) }
+        }
+        servicePlayer = null
         // 移除前台通知
         if (isForeground) {
             try {
@@ -949,14 +1006,25 @@ class PlaybackService : MediaLibraryService() {
                 if (bitmap != null && isActive &&
                     mediaLibrarySession?.player?.currentMediaItem?.mediaId == originMediaId
                 ) {
+                    // L05：旧封面 bitmap 不回收会随切歌一直累积（256×256 ARGB_8888 ≈ 256KB/首，
+                    // `allowHardware(false)` 的位图不参与 GC 的 native 内存管理，长时间连续播放
+                    // 会稳定涨到几十 MB）。
+                    // ⚠️ 但**不能**在赋值前就 recycle：当前正在展示的通知仍持有它，
+                    //    中间若插进一次 updateNotification，就会拿到已回收对象。
+                    // 顺序固定为：先换引用 → 重建通知（用的是新 bitmap）→ 再回收旧的。
+                    val previous = cachedArtworkBitmap
                     cachedArtworkBitmap = bitmap
                     // 重置去重状态，强制下次 updateNotification 重建通知（含新封面）
                     lastNotificationState = null
                     serviceScope.launch(Dispatchers.Main) {
                         updateNotification()
+                        if (previous != null && previous !== bitmap && !previous.isRecycled) {
+                            previous.recycle()
+                        }
                     }
                 }
             } catch (e: Exception) {
+                e.rethrowIfCancellation()
                 AppLog.w("PlaybackService", "loadArtwork failed: ${e.message}")
             }
         }

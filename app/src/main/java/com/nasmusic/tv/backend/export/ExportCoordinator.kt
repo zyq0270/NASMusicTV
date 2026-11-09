@@ -34,7 +34,9 @@ class ExportCoordinator(
     private val downloadRepository: DownloadRepository,
     private val downloadPathBuilder: DownloadPathBuilder,
     /** F-4：注入应用级 scope（NasMusicApp.applicationScope，SupervisorJob+IO，进程级单例语义） */
-    private val externalScope: CoroutineScope? = null
+    private val externalScope: CoroutineScope? = null,
+    /** M11：导出后重建设备曲库索引的回调（见 `SongExporter.usbIndexRefresh`） */
+    private val usbIndexRefresh: (suspend (String) -> Unit)? = null
 ) {
     companion object { private const val TAG = "ExportCoordinator" }
 
@@ -51,7 +53,8 @@ class ExportCoordinator(
             context,
             downloadRepository,
             DownloadDatabase.get(context).exportRecordDao(),
-            appPreferences
+            appPreferences,
+            usbIndexRefresh
         )
     }
 

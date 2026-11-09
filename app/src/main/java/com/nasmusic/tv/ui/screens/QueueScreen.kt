@@ -56,6 +56,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nasmusic.tv.R
+import com.nasmusic.tv.ui.RegisterDialogBackHandler
 import androidx.tv.material3.Icon
 import androidx.tv.material3.Text
 import com.nasmusic.tv.data.model.PlayMode
@@ -455,6 +456,10 @@ private fun QueueItemActionMenu(
     onPlayNow: () -> Unit,
     onDismiss: () -> Unit,
 ) {
+    // M24：本菜单是自建 Box 覆盖层（不是真 Dialog 窗口），BACK 必须显式接管，
+    // 否则手机竖屏按返回键会穿透到 Level 1.5（列表回顶）/ Level 2（页面返回）——
+    // 用户看到的是「菜单还在、页面已经退了一层」。约定见 DialogBackHandler.kt 文件头。
+    RegisterDialogBackHandler(onDismiss)
     Box(
         modifier = Modifier
             .fillMaxSize()

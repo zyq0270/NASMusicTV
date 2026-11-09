@@ -96,13 +96,17 @@ class PhotoTransitionPoolTest {
 
         assertTrue("新平台池里应有 LIQUIFY", PhotoTransitionId.LIQUIFY.ordinal in modern)
         assertTrue("新平台池里也应有 NOISE_DISSOLVE", PhotoTransitionId.NOISE_DISSOLVE.ordinal in modern)
+        // 老平台（sdk 22）有**两类**降级，二者都表现为池内去重：
+        // ① shader 降级：LIQUIFY → degradeTo；
+        // ② clipPath 降级（C46）：CLIP_BASED 全部 → CROSSFADE。
+        val collapsed = collapsedOnOldPlatform()
         assertTrue(
-            "两条路的池大小应恰好差 1（老平台把 LIQUIFY 去重掉了）：old=${old.size} modern=${modern.size}",
-            modern.size - old.size == 1,
+            "两条路的池大小应恰好差 ${collapsed.size}（老平台把降级项去重掉了）：old=${old.size} modern=${modern.size}",
+            modern.size - old.size == collapsed.size,
         )
         assertTrue(
-            "老平台池应是新平台池去掉 LIQUIFY 后的子集",
-            old == modern - PhotoTransitionId.LIQUIFY.ordinal,
+            "老平台池应是新平台池去掉降级项后的子集",
+            old == modern - collapsed,
         )
     }
 
@@ -111,14 +115,16 @@ class PhotoTransitionPoolTest {
     /** 池大小可精确核算 ⇒ 「多了 / 少了」都能被发现 */
     @Test
     fun `pool size matches the rules exactly`() {
-        // 76 项 − 5 音频反应 = 71；老平台再减去被去重的 LIQUIFY = 70
+        // 76 项 − 5 音频反应 = 71；老平台在此基础上再折叠降级项（LIQUIFY + clip 类）= 62
+        val modern = PhotoTransitionId.randomPool(all, 33)
         assertTrue(
-            "老平台池应为 70 项（76 − 5 音频 − 1 降级去重），实际 ${PhotoTransitionId.randomPool(all, 22).size}",
-            PhotoTransitionId.randomPool(all, 22).size == 70,
+            "新平台池应为 71 项（76 − 5 音频），实际 ${modern.size}",
+            modern.size == 71,
         )
+        val collapsed = collapsedOnOldPlatform().count { it in modern }
         assertTrue(
-            "新平台池应为 71 项（76 − 5 音频），实际 ${PhotoTransitionId.randomPool(all, 33).size}",
-            PhotoTransitionId.randomPool(all, 33).size == 71,
+            "老平台池应为 ${71 - collapsed} 项（71 − 降级去重 $collapsed），实际 ${PhotoTransitionId.randomPool(all, 22).size}",
+            PhotoTransitionId.randomPool(all, 22).size == 71 - collapsed,
         )
     }
 
@@ -155,15 +161,37 @@ class PhotoTransitionPoolTest {
      */
     @Test
     fun `phase overload follows the phase plan`() {
-        val p0 = PhotoTransitionId.randomPool(PhotoTransitionId.Phase.P0, sdkInt = 22)
-        assertTrue("P0 池应为 15 项（P0 无音频反应类），实际 ${p0.size}", p0.size == 15)
-
-        val p1 = PhotoTransitionId.randomPool(PhotoTransitionId.Phase.P1, sdkInt = 22)
-        assertTrue("P1 池应为 41 项（43 − 2 音频反应），实际 ${p1.size}", p1.size == 41)
-
-        val p2 = PhotoTransitionId.randomPool(PhotoTransitionId.Phase.P2, sdkInt = 22)
-        assertTrue("P2 池应与完整枚举一致（70），实际 ${p2.size}", p2.size == 70)
+        // 新平台（sdk 33）不触发任何降级 ⇒ 池大小 = 分期项数 − 音频反应类。
+        // 老平台（sdk 22）在此基础上再折叠 LIQUIFY 与 clip 类（C46 ⇒ CROSSFADE）。
+        val collapsed = collapsedOnOldPlatform()
+        for ((phase, expectedModern) in listOf(
+            PhotoTransitionId.Phase.P0 to 15,  // P0 里没有音频反应类
+            PhotoTransitionId.Phase.P1 to 41,  // 43 − 2 音频反应类
+            PhotoTransitionId.Phase.P2 to 71,  // 76 − 5 音频反应类
+        )) {
+            val modern = PhotoTransitionId.randomPool(phase, sdkInt = 33)
+            assertTrue(
+                "$phase 新平台池应为 $expectedModern 项，实际 ${modern.size}",
+                modern.size == expectedModern,
+            )
+            val expectedOld = expectedModern - collapsed.count { it in modern }
+            val old = PhotoTransitionId.randomPool(phase, sdkInt = 22)
+            assertTrue(
+                "$phase 老平台池应为 $expectedOld 项（降级去重），实际 ${old.size}",
+                old.size == expectedOld,
+            )
+        }
     }
+
+    /**
+     * 老平台（`sdkInt < 26`）会把被降级的项折叠掉，池里因此少了这些 ordinal：
+     * [PhotoTransitionId.LIQUIFY]（shader 降级）+ 全部 [PhotoTransitionId.CLIP_BASED]
+     * （clipPath 降级到 CROSSFADE）。⛔ 写死在断言里会在新增 clip 类时立刻失真。
+     */
+    private fun collapsedOnOldPlatform(): Set<Int> =
+        (setOf(PhotoTransitionId.LIQUIFY) + PhotoTransitionId.CLIP_BASED)
+            .map { it.ordinal }
+            .toSet()
 
     /** 分期越靠后池越大（单调）—— 防止「加了分期但池没扩」 */
     @Test

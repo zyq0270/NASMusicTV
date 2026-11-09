@@ -85,6 +85,8 @@ import com.nasmusic.tv.ui.theme.UiMode
 import com.nasmusic.tv.ui.components.branches.*
 import com.nasmusic.tv.ui.viewmodel.MainViewModel
 import com.nasmusic.tv.data.model.Screen
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.rememberCoroutineScope
 
@@ -115,8 +117,15 @@ fun AppRoot(
     val orientationScope = rememberCoroutineScope()
     // 竖屏设置二级页状态（归 navVM，BACK handler 需要读它，方案 §6.2 / K2）
     val settingsSection by viewModel.navVM.settingsSection.collectAsState(initial = null)
-    val playerState by viewModel.playerVM.playerState.collectAsState()
-    val currentSong = playerState.currentSong
+    // M38：顶层**只订 currentSong**。原先整体收集 playerState（queue / currentIndex /
+    // currentSong 三元组），而 AppRoot 只用得到 currentSong ⇒ 往队列里加一首歌、播完一首换
+    // currentIndex，都会驱动整棵 UI 树（导航栏 + 各 Screen 分支）重组。三元组本身仍保持
+    // 「同帧原子发布」（见 PlayerState 的 KDoc），这里只是在消费端做投影 + 去重。
+    val currentSong by remember(viewModel) {
+        viewModel.playerVM.playerState
+            .map { it.currentSong }
+            .distinctUntilChanged()
+    }.collectAsState(initial = viewModel.playerVM.playerState.value.currentSong)
     // v2.35.0 多码率：当前生效档位 = 单曲覆盖 ?: 全局默认（方案 §2.3 两级模型）
     val globalQualityTier by viewModel.prefs.player.qualityTier.collectAsState(initial = 0)
     val qualityTier = remember(currentSong, globalQualityTier) {
@@ -371,10 +380,13 @@ fun AppRoot(
         if (isPhonePortrait &&
             !isImmersiveMode.value && !showMv && !showKaraoke && !showVisualizer
         ) {
-            if (currentScreen != Screen.NowPlaying && currentSong != null) {
+            // M38：currentSong 是 `by` 委托属性（collectAsState 的 State 委托），
+            // 直接传参过不了智能转换（"Smart cast to 'Song' is impossible"）⇒ 先取本地 val。
+            val miniPlayerSong = currentSong
+            if (currentScreen != Screen.NowPlaying && miniPlayerSong != null) {
                 // 播放页自身即播放器，不重复显示 MiniPlayer
                 MiniPlayer(
-                    song = currentSong,
+                    song = miniPlayerSong,
                     coverCandidates = coverCandidates,
                     progressFlow = viewModel.playerVM.progress,
                     durationFlow = viewModel.playerVM.duration,
@@ -610,6 +622,10 @@ private fun VisualizerOverlay(
     val cover by vm.cover.collectAsState()
     val palette by vm.palette.collectAsState()
     val lyrics by viewModel.currentLyrics.collectAsState(initial = null)
+    // M38：这条 1 Hz 的 progress **必须**在组合期收集 —— 它唯一的用途是在组合期
+    // `computeLyricInfo(lyrics, progressMs, …)` 里定位「当前唱到第几行」/ 行内进度，
+    // 属于必须驱动重组的输入（不是可以挪进 draw 阶段的动画量，那类量走 `positionMs` provider）。
+    // 唯一的收敛点是把订阅范围收到本 overlay（已是如此），不再上游到 AppRoot 顶层。
     val progress by viewModel.playerVM.progress.collectAsState(initial = 0L)
 
     // 无自动导演档：用户选中的主题恒定显示，无需低频重估

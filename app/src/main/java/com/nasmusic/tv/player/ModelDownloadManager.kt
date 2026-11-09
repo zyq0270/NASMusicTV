@@ -265,41 +265,53 @@ class ModelDownloadManager(
         tempFile: File,
         onProgress: (downloaded: Long, total: Long) -> Unit
     ): String? {
+        // L03：HttpURLConnection 必须在 finally 里 disconnect —— 原实现只是在用完后让
+        // inputStream 关掉，连接仍留在 keep-alive 池里；连续换镜像重试时会累积到超时。
+        var connection: HttpURLConnection? = null
         return try {
             AppLog.d(TAG, "tryDownloadUrl: starting download from $urlStr")
 
             val url = URL(urlStr)
-            val connection = url.openConnection() as HttpURLConnection
-            connection.connectTimeout = CONNECT_TIMEOUT_MS
-            connection.readTimeout = READ_TIMEOUT_MS
-            connection.setRequestProperty("User-Agent", "NASMusicTV/2.22")
-            connection.connect()
+            val conn = url.openConnection() as HttpURLConnection
+            connection = conn
+            conn.connectTimeout = CONNECT_TIMEOUT_MS
+            conn.readTimeout = READ_TIMEOUT_MS
+            conn.setRequestProperty("User-Agent", "NASMusicTV/2.22")
+            conn.connect()
 
-            if (connection.responseCode != HttpURLConnection.HTTP_OK) {
-                AppLog.e(TAG, "tryDownloadUrl: HTTP ${connection.responseCode}")
-                return context.getString(R.string.model_download_http_error, connection.responseCode)
+            if (conn.responseCode != HttpURLConnection.HTTP_OK) {
+                AppLog.e(TAG, "tryDownloadUrl: HTTP ${conn.responseCode}")
+                return context.getString(R.string.model_download_http_error, conn.responseCode)
             }
 
-            val totalBytes = connection.contentLength.toLong()
+            val totalBytes = conn.contentLength.toLong()
             AppLog.d(TAG, "tryDownloadUrl: total size = ${totalBytes / (1024 * 1024)}MB")
 
-            connection.inputStream.use { input ->
+            var downloadedBytes = 0L
+            var lastReportedBytes = 0L
+            conn.inputStream.use { input ->
                 FileOutputStream(tempFile, true).use { output ->
                     val buffer = ByteArray(8192)
-                    var downloadedBytes = 0L
                     var bytesRead: Int
 
                     while (input.read(buffer).also { bytesRead = it } != -1) {
                         output.write(buffer, 0, bytesRead)
                         downloadedBytes += bytesRead
 
-                        // 回调进度（每 512KB 或完成时）
-                        if (downloadedBytes % (512 * 1024) < bytesRead || downloadedBytes == totalBytes) {
+                        // 回调进度（每 512KB 一次）
+                        // L03：原判据里还有 `|| downloadedBytes == totalBytes`，本意是「收尾补报」，
+                        // 但当服务端不给 Content-Length（chunked / 镜像站）时 totalBytes = -1，
+                        // 这个等式永远不成立 ⇒ 最后一段不足 512KB 的数据不会报，
+                        // 进度条停在半路直到 sha256 校验完才被强行拉满。
+                        if (downloadedBytes - lastReportedBytes >= 512 * 1024) {
+                            lastReportedBytes = downloadedBytes
                             onProgress(downloadedBytes, if (totalBytes > 0) totalBytes else EXPECTED_SIZE_BYTES)
                         }
                     }
                 }
             }
+            // 收尾补报：total 已知则等于 total（100%），未知则用已下载量（同样 100%）。
+            onProgress(downloadedBytes, if (totalBytes > 0) totalBytes else downloadedBytes)
             null
         } catch (e: Exception) {
             val msg = when (e) {
@@ -310,6 +322,8 @@ class ModelDownloadManager(
             }
             AppLog.e(TAG, "tryDownloadUrl: failed from $urlStr", e)
             msg
+        } finally {
+            runCatching { connection?.disconnect() }
         }
     }
 

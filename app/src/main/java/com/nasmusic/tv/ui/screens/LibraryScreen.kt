@@ -47,6 +47,9 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.tv.material3.ExperimentalTvMaterial3Api
 import androidx.tv.material3.Text
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import kotlin.math.ceil
 import kotlin.math.floor
@@ -96,6 +99,15 @@ enum class LibraryTab(val titleRes: Int) {
  * 曲库子 TAB 横推动画时长（v2.36.2）：与竖屏播放页的模式切换保持一致的手感。
  */
 private const val LIBRARY_TAB_SLIDE_ANIM_MS = 260
+
+/**
+ * 滚动位置**写回**的防抖窗口（C26）。
+ *
+ * `rememberLazyGridState` 只在**构造时**读初值，所以写回不需要逐帧进行 ——
+ * 等滚动停下 300ms 再写一次，既能保住"记忆位置"的语义，又不至于让滚动期间
+ * 每帧都去写 StateFlow 并反向触发页面重组。
+ */
+private const val SCROLL_SAVE_DEBOUNCE_MS = 300L
 
 /**
  * 曲库子 TAB：在**内容区**左右滑切换 TAB（v2.36.1，用户明确要求「手机端横竖屏都要支持」）。
@@ -316,14 +328,28 @@ fun LibraryScreen(
         initialFirstVisibleItemScrollOffset = artistScrollOffset
     )
 
-    // 滚动位置变化时保存到 ViewModel（节流：仅在滚动停止后保存）
+    // 滚动位置变化时保存到 ViewModel。
+    //
+    // ⚠️ C26：原实现只有一句注释「节流：仅在滚动停止后保存」，代码里**没有任何节流** ——
+    // `snapshotFlow` 每帧都会因为 firstVisibleItemIndex/Offset 变化而发射，于是
+    // 滚动期间每帧写一次 ViewModel 的 StateFlow，再反向触发页面重组。
+    // 现在用 `distinctUntilChanged()`（过滤「值没变」的重复发射）+ `collectLatest { delay }`
+    // （新值到达即取消上一次等待 ⇒ 只有滚动**停下** 300ms 后才真正写回）。
     LaunchedEffect(albumListState) {
         snapshotFlow { albumListState.firstVisibleItemIndex to albumListState.firstVisibleItemScrollOffset }
-            .collect { pair: Pair<Int, Int> -> onAlbumScrollPositionChange(pair.first, pair.second) }
+            .distinctUntilChanged()
+            .collectLatest { pair: Pair<Int, Int> ->
+                delay(SCROLL_SAVE_DEBOUNCE_MS)
+                onAlbumScrollPositionChange(pair.first, pair.second)
+            }
     }
     LaunchedEffect(artistListState) {
         snapshotFlow { artistListState.firstVisibleItemIndex to artistListState.firstVisibleItemScrollOffset }
-            .collect { pair: Pair<Int, Int> -> onArtistScrollPositionChange(pair.first, pair.second) }
+            .distinctUntilChanged()
+            .collectLatest { pair: Pair<Int, Int> ->
+                delay(SCROLL_SAVE_DEBOUNCE_MS)
+                onArtistScrollPositionChange(pair.first, pair.second)
+            }
     }
 
     // Tab 切换时触发按需加载

@@ -4,6 +4,7 @@ import android.os.Handler
 import android.os.HandlerThread
 import android.os.Looper
 import com.nasmusic.tv.util.AppLog
+import com.nasmusic.tv.util.NetAddressGuard
 import com.quickjs.JSArray
 import com.quickjs.JSContext
 import com.quickjs.JavaCallback
@@ -310,6 +311,14 @@ internal class LxScriptHost(
     }
 
     private fun startRequest(id: Int, url: String, optsJson: String) {
+        // C21：脚本拼出来的 URL 必须过地址守卫。
+        // 远端 JS 只要能发请求，就能把 127.0.0.1 / 192.168.x / 169.254.169.254 的响应
+        // 原样读回来再回传给脚本（SSRF + 内网/云元数据内容外带）。
+        NetAddressGuard.rejectReason(url)?.let { reason ->
+            AppLog.w(DIAG, "[$scriptId] 拒绝出站请求：$reason")
+            postResponse(id, false, 0, "{}", reason)
+            return
+        }
         val opts = runCatching { JSONObject(optsJson) }.getOrNull() ?: JSONObject()
         val builder = try {
             Request.Builder().url(url)
@@ -320,7 +329,15 @@ internal class LxScriptHost(
         }
         builder.header("User-Agent", USER_AGENT)
         opts.optJSONObject("headers")?.let { headers ->
-            for (key in headers.keys()) builder.header(key, headers.optString(key))
+            for (key in headers.keys()) {
+                // C21：Host / Connection / Content-Length 等由 OkHttp 自己算，
+                // 脚本手改只会制造畸形请求（Host 还能用来做虚拟主机绕过）。
+                if (key.lowercase() in NetAddressGuard.FORBIDDEN_REQUEST_HEADERS) {
+                    AppLog.w(DIAG, "[$scriptId] 已忽略脚本设置的请求头：$key")
+                    continue
+                }
+                builder.header(key, headers.optString(key))
+            }
         }
         val method = opts.optString("method", "GET").ifBlank { "GET" }.uppercase()
         val bodyText = opts.optString("body", "").ifEmpty {

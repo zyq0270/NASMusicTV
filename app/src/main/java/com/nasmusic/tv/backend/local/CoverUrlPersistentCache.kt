@@ -181,17 +181,31 @@ class CoverUrlPersistentCache(context: Context) {
 
     private fun save() {
         synchronized(saveLock) {
+            val tmpFile = File(file.path + ".tmp")
             try {
                 val json = gson.toJson(cache.toMap())
-                val tmpFile = File(file.path + ".tmp")
                 tmpFile.writeText(json)
                 // 原子 rename：避免写文件中途崩溃导致缓存损坏
                 if (!tmpFile.renameTo(file)) {
-                    // rename 失败时回退为直接写
-                    file.writeText(json)
+                    // L13：rename 只在「跨卷 / 目标被占用」时失败。原实现这里直接
+                    // `file.writeText(json)` —— 等于放弃原子性（写一半被杀就损坏整份缓存），
+                    // 而且 `.tmp` 上残留的旧内容从此再不会被清理，下次 save 又被覆盖但没人管。
+                    // 改成「写第二份临时文件再 rename」重试一次；仍然失败就放弃本次保存
+                    //（缓存可重建，宁可不写也不能写坏），并在 finally 里清掉两份临时文件。
+                    val retryTmp = File(file.path + ".tmp2")
+                    try {
+                        retryTmp.writeText(json)
+                        if (!retryTmp.renameTo(file)) {
+                            AppLog.w(TAG, "save: rename failed twice, keeping previous cache file")
+                        }
+                    } finally {
+                        if (retryTmp.exists()) retryTmp.delete()
+                    }
                 }
             } catch (e: Exception) {
                 AppLog.e(TAG, "save failed: ${e.message}", e)
+            } finally {
+                if (tmpFile.exists()) tmpFile.delete()
             }
         }
     }

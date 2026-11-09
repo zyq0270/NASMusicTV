@@ -48,6 +48,8 @@ import com.nasmusic.tv.ui.viewmodel.MainViewModel
 import com.nasmusic.tv.ui.viewmodel.NetworkMusicViewModel
 import com.nasmusic.tv.util.LinkUtils
 import com.nasmusic.tv.util.QrCodeGenerator
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * 百度网盘设备码授权对话框
@@ -81,7 +83,11 @@ fun BaiduAuthDialog(
     // 不使用 qrcode_url：其一次性 token 链接（如 .../device/qrcode/<token>）扫码后经常打不开。
     val qrContent = remember(deviceCode) { deviceCode?.verificationUrl }
     LaunchedEffect(qrContent) {
-        qrBitmap = qrContent?.let { QrCodeGenerator.generateQrBitmap(it, 360) }
+        // C27 / N09：ZXing 编码 + 360×360 位图分配不能在主线程做（会卡住首帧）
+        val content = qrContent
+        qrBitmap = if (content == null) null else withContext(Dispatchers.Default) {
+            QrCodeGenerator.generateQrBitmap(content, 360)
+        }
     }
 
     // 授权成功 → 短暂展示后自动关闭；目录缺失也视为认证成功，自动关闭

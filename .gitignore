@@ -131,6 +131,15 @@ app/src/eco-upstream/package-lock.json
 app/src/main/assets/eco-globe/node_modules/
 app/src/main/assets/eco-globe/package.json
 app/src/main/assets/eco-globe/package-lock.json
+# E54「魂斗罗」上游原件（MikeWuPing/UEFI_Contra —— UEFI 固件上的 NES《魂斗罗》复刻）。
+# ⛔ 与 app/src/lofi-upstream/ 同性质：上游**无 LICENSE 文件**（README 自称 MIT，法律口径仍是
+#    all-rights-reserved），且 6 个素材头是 ROM 提取的图形/关卡数据（277,085 B）⇒ 不可再分发，
+#    原文不进 git，只作本机「翻译对账」基线（docs/e54-contra-porting-plan.md §0.4 / §3.4）。
+#    在 main 源集之外 ⇒ Gradle 不打包；但 .gitignore 挡不住打包 ⇒ 真正的护栏是
+#    `UpstreamOriginalsHygieneTest`（⚠️ 现只扫 .js/.mjs，须扩到 .c/.h 才对该目录生效，
+#    见 docs/e54-contra-porting-plan.md §5.3 / W2）。
+# ⚠️ 这里只放**上游原文**；本项目的 Kotlin 移植件在 feat/e51-private + 覆盖层，不在此目录。
+app/src/e54-upstream/
 # E51「像素城市」上游原件（loficities.com 的 app-*.js 按模块切分出来的 165 份原文）。
 # ⛔ 与 app/src/globe-upstream/（那是 MIT/Apache 授权的库原件、已入仓）**不同**：上游无开源授权，
 #    原文不进 git，只作本机对账基线（docs/archive/e51-lofi-city-plan.md §2 第二条纪律、§9 P1）。

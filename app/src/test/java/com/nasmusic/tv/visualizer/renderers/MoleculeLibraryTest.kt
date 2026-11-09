@@ -82,9 +82,10 @@ class MoleculeLibraryTest {
         val bandCount = 64
         var covered = 0
         for (i in 0 until atomCount) {
-            val r = MoleculeRenderer.bandRange(i, atomCount, bandCount)
-            assertEquals(r[0], covered)
-            covered = r[1] + 1
+            val from = MoleculeRenderer.bandFrom(i, atomCount, bandCount)
+            val to = MoleculeRenderer.bandTo(i, atomCount, bandCount)
+            assertEquals(from, covered)
+            covered = to + 1
         }
         assertEquals(bandCount, covered)
     }

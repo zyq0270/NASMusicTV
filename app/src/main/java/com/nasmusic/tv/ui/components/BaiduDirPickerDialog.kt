@@ -188,7 +188,10 @@ fun BaiduDirPickerDialog(
                         }
                         else -> {
                             LazyColumn(modifier = Modifier.fillMaxSize()) {
-                                items(dirs) { dir ->
+                                // L24：补稳定 key（同目录内文件名唯一）。缺 key 时
+                                // 每次换目录/刷新都会把整列 item 当作新元素重建，
+                                // D-Pad 焦点在刷新后落回第一项。
+                                items(dirs, key = { it.serverFilename }) { dir ->
                                     DirRow(
                                         label = dir.serverFilename,
                                         icon = Icons.Default.Folder,

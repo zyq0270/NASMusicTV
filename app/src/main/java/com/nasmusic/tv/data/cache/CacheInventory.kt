@@ -159,12 +159,18 @@ object CacheInventory {
         }
         if (!target.exists()) return@withContext CacheSize(0L, false)
         if (target.isFile) return@withContext CacheSize(runCatching { target.length() }.getOrDefault(0L), false)
-        var count = 0
         var truncated = false
         val sizes = ArrayList<Long>()
-        target.walkTopDown().filter { it.isFile }.forEach { f ->
-            if (count >= MAX_FILES) truncated = true
-            else { count++; sizes += runCatching { f.length() }.getOrDefault(0L) }
+        // M02：⛔ 不能用 forEach + 计数标记 —— 那只置 truncated，`walkTopDown()` 照样把
+        // **整棵目录树**走完，而「遍历目录项」本身就是这里的主要开销
+        // （下载曲库数万文件时设置页仍会卡）。take(MAX_FILES + 1) 多取一个用于判定截断，
+        // 取满即终止序列。
+        for (f in target.walkTopDown().filter { it.isFile }.take(MAX_FILES + 1)) {
+            if (sizes.size >= MAX_FILES) {
+                truncated = true
+                break
+            }
+            sizes += runCatching { f.length() }.getOrDefault(0L)
         }
         sumSizes(sizes, truncated)
     }

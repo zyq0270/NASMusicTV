@@ -7,6 +7,7 @@ import com.nasmusic.tv.data.model.WeatherData
 import com.nasmusic.tv.data.model.WeatherMood
 import com.nasmusic.tv.data.model.WeatherRadioQueue
 import com.nasmusic.tv.util.AppLog
+import com.nasmusic.tv.util.rethrowIfCancellation
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 
@@ -98,6 +99,7 @@ class WeatherRadioManager(
                 try {
                     searchNasSongs(queries, nasLimit)
                 } catch (e: Exception) {
+                    e.rethrowIfCancellation()
                     AppLog.w(TAG, "NAS search failed: ${e.message}")
                     NasSearchResult()
                 }
@@ -106,6 +108,7 @@ class WeatherRadioManager(
                 try {
                     searchNetworkSongs(queries, limit - nasLimit)
                 } catch (e: Exception) {
+                    e.rethrowIfCancellation()
                     AppLog.w(TAG, "Network search failed: ${e.message}")
                     emptyList()
                 }
@@ -132,6 +135,7 @@ class WeatherRadioManager(
                 try {
                     searchNasSongs(queries, (limit * NAS_MAX_RATIO).toInt().coerceAtLeast(5))
                 } catch (e: Exception) {
+                    e.rethrowIfCancellation()
                     NasSearchResult()
                 }
             }
@@ -139,6 +143,7 @@ class WeatherRadioManager(
                 try {
                     searchNetworkSongs(queries, limit - (limit * NAS_MAX_RATIO).toInt().coerceAtLeast(5))
                 } catch (e: Exception) {
+                    e.rethrowIfCancellation()
                     emptyList()
                 }
             }

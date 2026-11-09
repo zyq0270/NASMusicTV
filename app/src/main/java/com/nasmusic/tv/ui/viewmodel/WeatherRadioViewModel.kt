@@ -15,6 +15,7 @@ import com.nasmusic.tv.data.model.WeatherMood
 import com.nasmusic.tv.data.model.WeatherRadioQueue
 import com.nasmusic.tv.player.PlayerManager
 import com.nasmusic.tv.util.AppLog
+import com.nasmusic.tv.util.rethrowIfCancellation
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -22,6 +23,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
  * 天气电台域 ViewModel（R-1 拆分自 MainViewModel）。
@@ -71,9 +74,34 @@ class WeatherRadioViewModel(
     /** 天气电台「换一批」已展示歌曲（歌手, 歌名）集合：跨构建去重，mood 变化时重置 */
     private val weatherSeenKeys = mutableSetOf<Pair<String, String>>()
 
+    /**
+     * [weatherSeenKeys] 的互斥锁（M33）。
+     *
+     * `fetchWeather` / `switchWeatherMood` / `loadRadioForDefaultMood` **三条协程**都会
+     * `clear()` 这个普通 `MutableSet` 并在构建电台时读取它，而构建过程本身会 `add`
+     * （`pickBestFreshBatch` 边挑边记）。裸 `MutableSet` 并发读写下
+     * ① 会抛 `ConcurrentModificationException`；② 一次仍在飞的旧构建会把刚 clear 的集合
+     * 重新写脏、并把旧 mood 的队列覆盖到 `_weatherRadioQueue` 上。
+     * ⇒ 集合访问串行化（本锁）+ 队列写入按 [moodGeneration] 校验世代。
+     */
+    private val weatherSeenMutex = Mutex()
+
+    /** mood 世代号（M33）：每次清空/重建 +1，旧世代的构建结果不得写回 */
+    private var moodGeneration = 0
+
     /** 换一批统一逻辑的参数（与 MainViewModel.pickBestFreshBatch 对齐） */
     private val maxShuffleAttemptsPerClick = 6
     private val minNewResultsForShuffle = 5
+
+    /**
+     * 开启一轮新的「mood 上下文」：清空已见集合并把世代号 +1。
+     *
+     * @return 本轮世代号；构建结束后用它校验「结果是否还值得写回」
+     */
+    private suspend fun startNewMoodGeneration(): Int = weatherSeenMutex.withLock {
+        weatherSeenKeys.clear()
+        ++moodGeneration
+    }
 
     /**
      * 获取当前天气并构建天气电台
@@ -105,10 +133,13 @@ class WeatherRadioViewModel(
                     }
                     weatherRadioManager?.let { mgr ->
                         // 天气变化 = 新上下文，重置电台已见集合（跨构建去重从头开始）
-                        weatherSeenKeys.clear()
+                        val generation = startNewMoodGeneration()
                         val queue = buildWeatherRadioDeduped(mgr, WeatherMood.fromWeather(weather), weather)
-                        _weatherRadioQueue.value = queue
-                        _currentWeatherMood.value = queue.mood
+                        // M33：期间 mood 又被切走 ⇒ 本次结果作废，不得覆盖新队列
+                        if (generation == moodGeneration) {
+                            _weatherRadioQueue.value = queue
+                            _currentWeatherMood.value = queue.mood
+                        }
                     }
                 } else {
                     _weatherError.value = if (apiKey.isBlank()) {
@@ -120,6 +151,7 @@ class WeatherRadioViewModel(
                     loadRadioForDefaultMood()
                 }
             } catch (e: Exception) {
+                e.rethrowIfCancellation()
                 AppLog.e("WeatherRadioViewModel", "fetchWeather failed", e)
                 _weatherError.value = getApplication<Application>().getString(R.string.weather_fetch_failed, e.message?.take(50) ?: "")
                 // 即使天气获取失败，仍按默认心情（阳光）加载歌曲
@@ -136,19 +168,21 @@ class WeatherRadioViewModel(
     fun switchWeatherMood(mood: WeatherMood) {
         if (_currentWeatherMood.value == mood) return
         _currentWeatherMood.value = mood
-        // mood 变化 = 新上下文，重置电台已见集合（跨构建去重从头开始）
-        weatherSeenKeys.clear()
         viewModelScope.launch {
             _weatherLoading.value = true
             try {
+                // mood 变化 = 新上下文，重置电台已见集合（跨构建去重从头开始）
+                val generation = startNewMoodGeneration()
                 // 延迟初始化（可能在无后端连接时通过 fetchWeather() 创建）
                 val mgr = weatherRadioManager ?: run {
                     val adapter = backendRegistry.getAdapter()
                     WeatherRadioManager(adapter, networkMusicManager).also { weatherRadioManager = it }
                 }
                 val queue = buildWeatherRadioDeduped(mgr, mood, _weatherData.value)
-                _weatherRadioQueue.value = queue
+                // M33：世代校验（连点两个 mood 时，先发的构建不得覆盖后发的结果）
+                if (generation == moodGeneration) _weatherRadioQueue.value = queue
             } catch (e: Exception) {
+                e.rethrowIfCancellation()
                 AppLog.e("WeatherRadioViewModel", "switchWeatherMood failed", e)
                 _weatherError.value = getApplication<Application>().getString(R.string.weather_switch_mood_error, e.message?.take(50))
             } finally {
@@ -179,11 +213,15 @@ class WeatherRadioViewModel(
         mood: WeatherMood,
         weather: WeatherData?
     ): WeatherRadioQueue {
-        val (chosen, shown) = pickBestFreshBatch(
-            seenKeys = weatherSeenKeys,
-            produce = { mgr.buildRadioWithMood(mood, weather) },
-            songsOf = { it.songs }
-        )
+        // M33：`pickBestFreshBatch` 会**边挑边写** seenKeys ⇒ 必须在锁内跑，
+        // 否则与并发的 clear() 交错会抛 ConcurrentModificationException。
+        val (chosen, shown) = weatherSeenMutex.withLock {
+            pickBestFreshBatch(
+                seenKeys = weatherSeenKeys,
+                produce = { mgr.buildRadioWithMood(mood, weather) },
+                songsOf = { it.songs }
+            )
+        }
         return chosen.copy(songs = shown)
     }
 
@@ -193,15 +231,19 @@ class WeatherRadioViewModel(
     private fun loadRadioForDefaultMood() {
         viewModelScope.launch {
             try {
+                val generation = startNewMoodGeneration()
                 val mgr = weatherRadioManager ?: run {
                     val adapter = backendRegistry.getAdapter()
                     WeatherRadioManager(adapter, networkMusicManager).also { weatherRadioManager = it }
                 }
                 // 天气获取失败也走同一套跨构建去重：反复「换一批」仍只出新歌
                 val queue = buildWeatherRadioDeduped(mgr, WeatherMood.SUNNY, null)
-                _weatherRadioQueue.value = queue
-                _currentWeatherMood.value = queue.mood
+                if (generation == moodGeneration) {
+                    _weatherRadioQueue.value = queue
+                    _currentWeatherMood.value = queue.mood
+                }
             } catch (e: Exception) {
+                e.rethrowIfCancellation()
                 AppLog.e("WeatherRadioViewModel", "loadRadioForDefaultMood failed", e)
             }
         }

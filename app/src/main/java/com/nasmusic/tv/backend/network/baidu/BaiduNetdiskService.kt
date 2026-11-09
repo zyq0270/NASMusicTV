@@ -4,6 +4,7 @@ import com.nasmusic.tv.backend.network.NetworkMusicService
 import com.nasmusic.tv.data.model.Song
 import com.nasmusic.tv.data.prefs.AppPreferences
 import com.nasmusic.tv.util.AppLog
+import com.nasmusic.tv.util.rethrowIfCancellation
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.withContext
@@ -74,6 +75,7 @@ class BaiduNetdiskService(
                 val rootDir = prefs.baidu.getBaiduMusicRootDir().ifBlank { BaiduNetdiskConfig.APP_DIR }
                 api.searchAudio(keyword, dir = rootDir).map { it.toSong() }
             } catch (e: Exception) {
+                e.rethrowIfCancellation()
                 AppLog.w(TAG, "search API failed, fallback to index only", e)
                 emptyList()
             }

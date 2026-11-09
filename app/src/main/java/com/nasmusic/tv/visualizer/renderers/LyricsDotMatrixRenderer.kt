@@ -584,6 +584,10 @@ class LyricsDotMatrixRenderer : RendererFx() {
 
     // ── 文字采样 ────────────────────────────────────────────
 
+    /** M49：上次采样时的画布宽度与行目标 Y（点阵坐标是绝对像素 ⇒ 变化必须重采样） */
+    private var sampleW = 0f
+    private var sampleTargetY = 0f
+
     /**
      * 对单行文字进行采样，将结果写入目标数组。
      * @return 采样到的粒子数
@@ -598,6 +602,11 @@ class LyricsDotMatrixRenderer : RendererFx() {
         fontSize: Float,
         targetY: Float   // 行的目标 Y 位置（文字垂直中心）
     ): Int {
+        // M49：记录本次采样用的几何。点阵坐标在本函数末尾就被烘成**绝对画布像素**
+        // 并跨帧保存，画布一变这些坐标就全错，且代码里没有任何失效判据
+        // ⇒ 由 `drawContent` 用这两个值决定要不要重采样（见那里的判据）。
+        sampleW = canvasW
+        sampleTargetY = targetY
         if (text.isBlank()) return 0
 
         val paint = AndroidPaint().apply {
@@ -836,6 +845,16 @@ class LyricsDotMatrixRenderer : RendererFx() {
         bottomY = h * 0.60f
         // 行间距：**固定** = 两行中心之差（与字号解耦 ⇒ 字号再小两行也不挤、再大也不叠）
         rowGapPx = bottomY - topY
+
+        // M49：画布尺寸/行位变化 ⇒ 上一轮烘进 target[] 的绝对像素坐标已经失效，必须重采样。
+        // 判据用「上次采样用的宽度」+「上次采样用的行中心是否仍是 topY/bottomY 之一」：
+        // 采样本就只可能发生在两行之一上，所以这个组合既能抓住宽度变化，
+        // 也能抓住 h 变化导致的 topY/bottomY 漂移，且不会因为 line0/line1 交替采样而抖动。
+        if (displayedLineIndex >= 0 &&
+            (sampleW != w || (sampleTargetY != topY && sampleTargetY != bottomY))
+        ) {
+            resync(ctx, displayedLineIndex, frame.timeMs, w, h)
+        }
 
         // ── 状态切换逻辑 ────────────────────────────────────
         // 切歌重置：renderer 实例由 swapper 跨歌曲复用（不会重新 onEnter），

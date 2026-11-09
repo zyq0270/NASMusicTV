@@ -200,6 +200,18 @@ class TiltPulseSubRenderer : LyricsSubRenderer {
         }
     }
 
+    /**
+     * ⛔ **空实现，不得转调 [onEnter]**（C49）。
+     *
+     * 本子模式的换行由 `draw()` 里的 `syncLine(...)` 自行检测：换行时把旧版面转入
+     * [exitingState]（并按 `OUTER_EXIT_DURATION` 播完离场），再构建新版面。
+     * 默认实现 `onLineChanged → onEnter` 会把 `activeState / exitingState / activeLineIndex`
+     * 全部清空 ⇒ 离场动画被直接掐断、换行变成硬切。
+     */
+    override fun onLineChanged(ctx: RenderContext, lyrics: LyricsStagePayload) {
+        // 刻意留空：换行由 draw() 内部的 syncLine 自行处理。
+    }
+
     override fun onExit() {
         activeState = null
         exitingState = null

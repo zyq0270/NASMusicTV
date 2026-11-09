@@ -526,7 +526,9 @@ object SentenceLayout {
             val seed = textHash + result.size + (timeSeed ?: 0.0)
             val randomIndex = (pseudoRandom(seed) * candidates.size).toInt()
             val selectedCandidate = candidates[randomIndex.coerceIn(0, candidates.lastIndex)]
-            val midPoint = selectedCandidate.value.length / 2
+            // C51：中点必须落在**码点**边界上。`length / 2` 是按 UTF-16 码元算的，
+            // 落在代理对中间时会切出未配对的高/低代理，两半各自渲染成「半个方块」。
+            val midPoint = codePointMidpoint(selectedCandidate.value)
             val firstHalf = selectedCandidate.value.substring(0, midPoint)
             val secondHalf = selectedCandidate.value.substring(midPoint)
             result[selectedCandidate.index] = firstHalf
@@ -534,6 +536,22 @@ object SentenceLayout {
         }
 
         return result
+    }
+
+    /**
+     * C51：字符串「码点中点」对应的 UTF-16 偏移。
+     *
+     * 按码点计数后映射回 UTF-16 下标，保证切点不会落在代理对内部；
+     * 极端情况下（`offsetByCodePoints` 抛异常）退回原码元中点，至少与改造前等价。
+     */
+    private fun codePointMidpoint(text: String): Int {
+        if (text.isEmpty()) return 0
+        return try {
+            val codePoints = text.codePointCount(0, text.length)
+            text.offsetByCodePoints(0, codePoints / 2)
+        } catch (_: Throwable) {
+            text.length / 2
+        }
     }
 
     /** 移植 sentenceLayout.ts:523-544 `mergeSentences` */

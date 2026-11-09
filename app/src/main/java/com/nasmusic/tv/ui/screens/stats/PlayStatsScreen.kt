@@ -286,11 +286,12 @@ private fun StatsContent(bundle: StatsBundle) {
             fontWeight = FontWeight.Bold
         )
         Spacer(modifier = Modifier.height(12.dp))
+        // M45：不再由调用方按「流派条数 × 44dp，封顶 320dp」算高度 —— 那个封顶正是
+        // 「流派一多，条形被裁掉且看不到」的来源（Column 不可滚动、TV 上也不可聚焦）。
+        // 现在图表内部折叠成 Top-N +「其他」，高度自然收敛，这里只给宽度。
         GenreBarChart(
             genres = bundle.genreDistribution,
-            modifier = Modifier
-                .fillMaxWidth()
-                .height((bundle.genreDistribution.size * 44).coerceAtMost(320).dp)
+            modifier = Modifier.fillMaxWidth()
         )
     }
 }
@@ -356,16 +357,37 @@ private fun ArtistCard(artist: ArtistStat) {
     }
 }
 
+/** 流派条形图最多展示的行数（M45：超出的长尾折叠成一行「其他」） */
+private const val GENRE_CHART_MAX_ROWS = 8
+
+/**
+ * 把 Top-N 之后的长尾折叠成一行「其他 (N 个流派)」。
+ *
+ * M45：原实现直接把全量 `genreDistribution` 铺进一个固定封顶 320dp 的 `Column`，
+ * 流派数一多，多出来的部分就**被裁掉且无从查看**（Column 不滚动、TV 上也不可聚焦）。
+ * 折叠成 Top-(N-1) + 其他既能保留全部计数（播放次数求和），又保证高度收敛。
+ */
+private fun foldGenres(genres: List<GenreStat>, maxRows: Int, othersLabel: String): List<GenreStat> {
+    if (genres.size <= maxRows) return genres
+    val head = genres.take(maxRows - 1)
+    val tail = genres.drop(maxRows - 1)
+    val othersPlays = tail.sumOf { it.playCount }
+    val othersSongs = tail.sumOf { it.songCount }
+    return head + GenreStat(genre = othersLabel, playCount = othersPlays, songCount = othersSongs)
+}
+
 /** 流派分布横向条形图（原生 Canvas，不引第三方图表库） */
 @Composable
 private fun GenreBarChart(genres: List<GenreStat>, modifier: Modifier = Modifier) {
-    val maxCount = genres.maxOf { it.playCount }.coerceAtLeast(1)
+    val othersLabel = stringResource(R.string.pstats_genre_others, genres.size - (GENRE_CHART_MAX_ROWS - 1))
+    val rows = remember(genres, othersLabel) { foldGenres(genres, GENRE_CHART_MAX_ROWS, othersLabel) }
+    val maxCount = rows.maxOf { it.playCount }.coerceAtLeast(1)
     val accent = NasMusicColors.Primary
     val trackColor = NasMusicColors.Surface
     val labelColor = NasMusicColors.TextPrimary
 
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        genres.forEach { g ->
+        rows.forEach { g ->
             Column(modifier = Modifier.fillMaxWidth()) {
                 Row(modifier = Modifier.fillMaxWidth()) {
                     Text(

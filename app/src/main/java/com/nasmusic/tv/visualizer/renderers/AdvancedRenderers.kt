@@ -532,6 +532,10 @@ class MatrixRainRenderer : RendererFx() {
     internal var keySlot = 0
     internal var keyCell = 0
     internal var keyN = 0
+    /** L31：数字翻转的本地节拍累加器（× 300ms 周期），不依赖绝对 timeMs */
+    private var tickAcc = 0f
+    /** 300ms 翻一次 ⇒ 每秒 1000/300 拍 */
+    private val MATRIX_FLIP_HZ = 1000f / 300f
     private var gW = 0
     private var gH = 0
 
@@ -604,7 +608,11 @@ class MatrixRainRenderer : RendererFx() {
 
         val nc = drawContext.canvas.nativeCanvas
         val st = columnStrips ?: return
-        val tick = (frame.timeMs / 300L).toInt()
+        // L31：数字翻转节拍不能用绝对 `frame.timeMs` —— 暂停恢复后它跟着播放位置一次跳一大段，
+        // 整屏数字会集体翻转（视觉跳变）。改成按 fx.dt 累加的本地节拍，与暂停/恢复解耦
+        //（同文件 LiquidGridRenderer 已是这个口径）。
+        tickAcc += fx.dt * MATRIX_FLIP_HZ
+        val tick = tickAcc.toInt()
         val span = h + cellH * perCol
         val pad = glowPad.toFloat()
         // 条带 (0,0) 相对「头部名义格位」的偏移 —— 与 [buildStrips] 的布局同源，⛔ 两处必须一致

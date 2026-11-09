@@ -24,6 +24,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -49,6 +50,9 @@ import com.nasmusic.tv.util.AppLog
 import com.nasmusic.tv.util.LinkUtils
 import com.nasmusic.tv.util.NetworkUtils
 import com.nasmusic.tv.util.QrCodeGenerator
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * 备份扫码传输弹窗
@@ -73,19 +77,29 @@ fun BackupTransferDialog(
     var status by remember { mutableStateOf(context.getString(R.string.backup_transfer_starting)) }
     val server = remember { BackupTransferServer(context, onRestore, onBackupChanged) }
     val closeFocusRequester = remember { FocusRequester() }
+    // C27 / N09：二维码位图必须在后台线程生成（ZXing 编码 + 360×360 位图分配，
+    // 放在组合期同步跑会直接卡住首帧）。写法对齐 TextInputDialog 的既有模板。
+    val qrScope = rememberCoroutineScope()
 
     // 启动/停止服务器
     DisposableEffect(Unit) {
         val ip = NetworkUtils.getLocalIpAddress()
         if (ip != null) {
             val url = server.buildUrl(ip)
-            serverUrl = url
-            qrBitmap = QrCodeGenerator.generateQrBitmap(url, 360)
             val started = server.start()
             // 落盘日志（AppLog.w）：release 下手机报 "Failed to fetch" 时，
             // 靠这行判断当时服务到底在不在听（日志不记 token，只记地址）
             AppLog.w("BackupTransferDialog", "扫码传输服务 ${if (started) "已启动" else "启动失败"}: ${url.substringBefore("?")}")
             status = if (started) context.getString(R.string.backup_transfer_waiting) else context.getString(R.string.backup_transfer_start_failed)
+            // C39 同款：只有**真的在监听**时才展示二维码与地址 —— 否则用户扫一个
+            // 连不上的 URL，而失败文案还被 QR 的 `?.let` 分支挡住看不见。
+            if (started) {
+                serverUrl = url
+                qrScope.launch(Dispatchers.Default) {
+                    val bmp = QrCodeGenerator.generateQrBitmap(url, 360)
+                    withContext(Dispatchers.Main) { qrBitmap = bmp }
+                }
+            }
         } else {
             AppLog.w("BackupTransferDialog", "DisposableEffect: no IP address")
             status = context.getString(R.string.backup_transfer_no_ip)

@@ -78,13 +78,16 @@ internal fun NowPlayingBranch(
                     } else {
                         // F-2：progress/duration 在本分支内收集，播放期间的每秒重组
                         // 只影响 NowPlayingScreen，不再驱动 AppRoot 全树
-                        val progress by viewModel.playerVM.progress.collectAsState(initial = 0L)
+                        // M26：progress 以 **State** 形式原样下传（⛔ 不要在这里解包 `by`）——
+                        // 一旦在本分支读值，1Hz 的进度 tick 会把整个分支（含 NowPlayingScreen
+                        // 全部参数）重新求值；由叶子自己读 .value，重组范围就只剩那条进度线。
+                        val progressState = viewModel.playerVM.progress.collectAsState(initial = 0L)
                         val duration by viewModel.playerVM.duration.collectAsState(initial = 0L)
                         NowPlayingScreen(
                             currentSong = currentSong,
                             isPlaying = isPlaying,
                             playMode = playMode,
-                            progressMs = progress,
+                            progressMs = progressState,
                             durationMs = duration,
                             lyrics = lyrics,
                             lyricsAvailability = lyricsAvailability,

@@ -22,6 +22,7 @@ import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathFillType
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.nativeCanvas
@@ -106,6 +107,9 @@ class VintageTvRenderer : VisualizerRenderer {
     private var noiseBuffer: FloatArray? = null
     private var noiseBufferSize = 0
     private var lastNoiseUpdateMs = 0L
+    /** L27：噪点缓冲对应的画布尺寸（尺寸一变当帧重建，见 [drawNoise]） */
+    private var noiseBufferW = -1f
+    private var noiseBufferH = -1f
 
     // ── 抖动/扫描线 ────────────────────────────────────────
     private var scanlinePhase = 0f
@@ -117,6 +121,9 @@ class VintageTvRenderer : VisualizerRenderer {
     private var rollBrush: Brush? = null
     private var rollBrushBandH = 0f
     private var rollBandH = 0f
+
+    /** M48：算 [rollBandH] 时依据的画布高度（h 一变就要重算带高，见 [drawRollBand]） */
+    private var rollBandBaseH = 0f
     private var nextRollMs = 0L
     private var rollStartMs = 0L
     private var rollDurationMs = 0L
@@ -124,6 +131,9 @@ class VintageTvRenderer : VisualizerRenderer {
     // ── C：暗角 + 圆角屏面 ─────────────────────────────────
     private var vignetteBrush: Brush? = null
     private var vignetteW = 0f
+
+    /** M47：暗角渐变缓存键必须含 h（center 与 radius 同时依赖 w 与 h） */
+    private var vignetteH = 0f
     private var cornerPath: Path? = null
     private var cornerW = 0f
     private var cornerH = 0f
@@ -380,8 +390,17 @@ class VintageTvRenderer : VisualizerRenderer {
      */
     private fun DrawScope.drawNoise(w: Float, h: Float, nowMs: Long) {
         // 定期更新噪点缓冲区
-        if (noiseBuffer == null || nowMs - lastNoiseUpdateMs >= NOISE_UPDATE_INTERVAL_MS) {
+        //
+        // L27：判据必须带上 w/h。原先只看「是否已有缓冲 + 距上次更新 ≥100ms」——
+        // 缓冲里的坐标是按**旧画布尺寸**随机生成的绝对像素，尺寸变化（旋屏、进出舞台、
+        // 分屏）后要等到下一个 100ms 才重算，中间那段噪点会全部挤在角落。
+        if (noiseBuffer == null ||
+            noiseBufferW != w || noiseBufferH != h ||
+            nowMs - lastNoiseUpdateMs >= NOISE_UPDATE_INTERVAL_MS
+        ) {
             updateNoiseBuffer(w, h)
+            noiseBufferW = w
+            noiseBufferH = h
             lastNoiseUpdateMs = nowMs
         }
 
@@ -439,7 +458,13 @@ class VintageTvRenderer : VisualizerRenderer {
      * 渐变 Brush 按带高局部坐标预建一次，绘制用 canvas.save/translate 平移（零分配）。
      */
     private fun DrawScope.drawRollBand(w: Float, h: Float, nowMs: Long) {
-        if (rollBandH <= 0f) rollBandH = h * ROLL_BAND_FRACTION
+        // M48：带高按**当前**画布高度算。原实现只在 rollBandH <= 0 时算一次（onEnter 才清 0）
+        // ⇒ 手机↔TV、分屏、旋转之后带高仍是旧屏幕的比例值，而渐变缓存键只认带高
+        // ⇒ 暗带高度与整屏不匹配且永不纠正。
+        if (rollBandH <= 0f || rollBandBaseH != h) {
+            rollBandBaseH = h
+            rollBandH = h * ROLL_BAND_FRACTION
+        }
         if (rollBrush == null || rollBrushBandH != rollBandH) {
             rollBrush = Brush.verticalGradient(
                 colors = listOf(   // Perf-exempt: rollBrush 按带高缓存（带高变化才重建），非每帧分配
@@ -607,7 +632,11 @@ class VintageTvRenderer : VisualizerRenderer {
             androidCanvas.drawText(lines[i], bmpW / 2f, firstBaselineY + i * lineHeight, paint)
         }
 
-        // 转换为 ImageBitmap (使用扩展函数 asImageBitmap)
+        // L28：覆盖前回收上一张。`asImageBitmap()` 只是包装，底层 android.graphics.Bitmap
+        // 的像素在 native 内存里，不跟着 Compose 的 ImageBitmap 引用一起被 GC 及时回收；
+        // 歌词每次改字都重建一张，长时间播放会稳定涨内存（口径与 SeasideRenderer:2765 /
+        // DesertSmokeRenderer:253 的显式回收一致）。
+        lyricBitmap?.let { old -> runCatching { old.asAndroidBitmap().recycle() } }
         lyricBitmap = androidBmp.asImageBitmap()
     }
 
@@ -622,7 +651,9 @@ class VintageTvRenderer : VisualizerRenderer {
      * 仅最外沿有色差。边缘 alpha 0.5，保证画面内黑字可读。
      */
     private fun DrawScope.drawVignette(w: Float, h: Float) {
-        if (vignetteBrush == null || vignetteW != w) {
+        // M47：⛔ 缓存键不能只记 w —— 下面 center 用 (w/2, h/2)、radius 用 h，
+        // 同一宽度换高度（或 h 单独变化）时必须重建，否则暗角中心/半径沿用旧屏幕。
+        if (vignetteBrush == null || vignetteW != w || vignetteH != h) {
             val pictureW = minOf(w, h * ASPECT)
             vignetteBrush = Brush.radialGradient(
                 0f to Color.Black.copy(alpha = 0.03f),
@@ -633,6 +664,7 @@ class VintageTvRenderer : VisualizerRenderer {
                 radius = sqrt(pictureW * pictureW / 4f + h * h / 4f)
             )
             vignetteW = w
+            vignetteH = h
         }
         drawRect(vignetteBrush!!)
     }
@@ -861,6 +893,8 @@ class VintageTvRenderer : VisualizerRenderer {
         paint.style = AndroidPaint.Style.FILL
         paint.color = TEXT_COLOR
         c.drawText(channel, padX, baseline, paint)
+        // L28：同 rebuildLyricBitmap —— 换台标位图前回收旧的一张
+        osdBitmap?.let { old -> runCatching { old.asAndroidBitmap().recycle() } }
         osdBitmap = bmp.asImageBitmap()
         osdValidW = w
         osdValidH = h

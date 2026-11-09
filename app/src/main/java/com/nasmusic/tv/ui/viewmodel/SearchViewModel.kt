@@ -16,6 +16,8 @@ import com.nasmusic.tv.data.model.Song
 import com.nasmusic.tv.data.model.SongsPagingState
 import com.nasmusic.tv.data.model.UiState
 import com.nasmusic.tv.util.AppLog
+import com.nasmusic.tv.util.rethrowIfCancellation
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -114,6 +116,18 @@ class SearchViewModel(
     // 网络搜索关键词（跨页面导航时保留，避免回来后丢失搜索状态）
     private val _networkSearchKeyword = MutableStateFlow("")
     val networkSearchKeyword: StateFlow<String> = _networkSearchKeyword.asStateFlow()
+
+    /**
+     * 网络搜索代数闸门（C33）：换词 / 换一批 / 清空都递增，在途协程回写前必须比对。
+     *
+     * 与 [searchGeneration] 的区别：那个只管**服务端（NAS）**搜索，网络音乐这条链
+     * （Meting 聚合多端点、可能跑十几秒）此前**完全没有守卫** ⇒ 用户快手改词时，
+     * 旧词的慢请求返回后会覆盖新词结果，并把 `_networkSearchKeyword` 一起回滚。
+     */
+    private var networkSearchGeneration = 0
+
+    /** 在途网络搜索协程：新搜索直接取消旧的，避免继续占用端点与连接 */
+    private var networkSearchJob: Job? = null
 
     /** 搜索变异词后缀表：换一批时在原词后追加，用于突破单次搜索 30 首上限 */
     private val searchVariantSuffixes = listOf(
@@ -303,6 +317,7 @@ class SearchViewModel(
                     "searchSongsOnServer: ${merged.size} results for '$query' breakdown=${result.sourceBreakdown}"
                 )
             } catch (e: Exception) {
+                e.rethrowIfCancellation()
                 AppLog.e("SearchViewModel", "searchSongsOnServer failed", e)
                 if (gen != searchGeneration) return@launch
                 _searchResults.value = UiState.Error(
@@ -379,7 +394,9 @@ class SearchViewModel(
     fun shuffleNetworkSearch() {
         val base = networkSearchBaseKeyword
         if (base.isBlank()) return
-        viewModelScope.launch {
+        val generation = ++networkSearchGeneration
+        networkSearchJob?.cancel()
+        networkSearchJob = viewModelScope.launch {
             var failed = false
             val (chosen, shown) = pickBestFreshBatch(
                 seenKeys = seenNetworkSearchKeys,
@@ -400,6 +417,11 @@ class SearchViewModel(
             )
             // 全部候选都搜索失败时保留错误态（searchNetworkSongsBlocking 已设置）
             if (failed && shown.isEmpty()) return@launch
+            // C33：换一批期间用户可能已经换了词 / 又点了换一批 ⇒ 结果作废
+            if (generation != networkSearchGeneration) {
+                AppLog.d("MetingDiag", "shuffleNetworkSearch: 丢弃过期结果（代数 $generation）")
+                return@launch
+            }
             _networkSearchKeyword.value = chosen.first
             _networkSearchResults.value = UiState.Success(shown)
         }
@@ -407,7 +429,9 @@ class SearchViewModel(
 
     /** 实际执行网络搜索（换一批与手动搜索共用），失败返回 null 并设置错误态 */
     private suspend fun searchNetworkSongsBlocking(keyword: String): List<Song>? {
-        _networkSearchKeyword.value = keyword
+        // ⚠️ 这里**不再写 `_networkSearchKeyword`**（N08）：换一批会连试 6 个变异词，
+        // 每试一个就把关键词改一次，最后还会用旧词覆盖用户刚输入的新词。
+        // 关键词只由发起方在确认结果有效后统一写入。
         _networkSearchResults.value = UiState.Loading
         return try {
             nasMusicApp.networkMusicManager.search(keyword)
@@ -422,14 +446,22 @@ class SearchViewModel(
 
     /** 实际执行网络搜索（换一批与手动搜索共用） */
     private fun doNetworkSearch(keyword: String) {
-        viewModelScope.launch {
+        val generation = ++networkSearchGeneration
+        networkSearchJob?.cancel()
+        // 立即回显用户输入，避免「点了没反应」；结果回来再按代数决定是否落盘
+        _networkSearchKeyword.value = keyword
+        _networkSearchResults.value = UiState.Loading
+        networkSearchJob = viewModelScope.launch {
             val results = searchNetworkSongsBlocking(keyword)
-            if (results != null) {
-                AppLog.d("MetingDiag", "doNetworkSearch: got ${results.size} results for '$keyword'")
-                _networkSearchResults.value = UiState.Success(results)
-                // 搜索成功后才记录历史（空结果也算成功；shuffleNetworkSearch 不走此路径，不会重复记录）
-                prefs.history.recordSearch(keyword)
+            if (results == null) return@launch
+            if (generation != networkSearchGeneration) {
+                AppLog.d("MetingDiag", "doNetworkSearch: 丢弃过期结果 '$keyword'")
+                return@launch
             }
+            AppLog.d("MetingDiag", "doNetworkSearch: got ${results.size} results for '$keyword'")
+            _networkSearchResults.value = UiState.Success(results)
+            // 搜索成功后才记录历史（空结果也算成功；shuffleNetworkSearch 不走此路径，不会重复记录）
+            prefs.history.recordSearch(keyword)
         }
     }
 
@@ -437,6 +469,10 @@ class SearchViewModel(
      * 清除网络搜索结果
      */
     fun clearNetworkSearch() {
+        // C33：清空同样要作废在途请求，否则慢请求回来会把刚清掉的结果又写回去
+        networkSearchGeneration++
+        networkSearchJob?.cancel()
+        networkSearchJob = null
         _networkSearchResults.value = UiState.Success(emptyList())
         _networkSearchKeyword.value = ""
         networkSearchBaseKeyword = ""

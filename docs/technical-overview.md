@@ -26065,3 +26065,32 @@ Kotlin 里「换行后以 `+` 开头的行」是**一条独立语句**（一元�
 （+ 顶点侧 `uTime` / `uCamPos`）。
 
 - 未改：版本号 —— 仍是 **v2.39.15 / versionCode 200**；已交付 APK 不重编
+
+### 10.374 v2.39.16 —— 全库代码审查落地（154 项：Critical 1 / High 13 / Medium 94 / Low 46）（2026-11-09）
+
+**范围**：`app/src/main` 全量（91k 行 / 397 文件）+ CI 工作流 + 资源文件。
+
+**方法**：三阶段——① 按子系统并行深审（切互不重叠的文件清单，避免重复读）；② 对全部
+Critical/High + 关键 Medium 派**独立怀疑式复核**（砍掉约 1/3 的误报，34 → 13）；
+③ 逐条落成代码改动，最后统一编译 + 单测 + lint 验证。逐条对照见
+`docs/archive/NASMusicTV-代码审查报告-2026-11-09.html`。
+
+**三条"审查建议被否决"的记录**（避免下次重犯）：
+
+| 建议 | 结论 | 原因 |
+|---|---|---|
+| M50：`drawLinPoly` 复用 shader + `setLocalMatrix` 摆轴 | ⛔ **不采纳，保持逐帧新建** | 与 `TripodFillMechanismGateTest` G2 的红线同路：创维 E46（API 22）真机逐像素实测「多顶点凹/自交路径 + 矩阵变换」80 帧 0 像素。宁可每帧 6 个短命对象 |
+| M55：行时长兜底改成 `max(实际, 0.15s)` | ⛔ 改为**仅在时长非正时**兜底 | 一刀切会抬高高频短行的 `timingClass`，`micro` 档永远取不到（`LyricsStageBridgeTest` 钉住 50ms 短行） |
+| M16：B 站直链白名单按"白名单外一律拒绝"实现 | ✅ 采纳，但**测试同步换真实 CDN 主机** | 原测试用 `example.com` 造数，白名单一上线即红；负样本另加两条（外部域 / 内网地址） |
+
+**新增/更新的门禁**：
+
+- `PhotoTransitionClipGateTest`（新）：全仓 `clipPath` 白名单扫描 + `CLIP_BASED` 与实现同步校验 + 降级行为校验（7 个用例）。`DesertSmokeBakes` 的 `cv.clipPath` 因作用在 **Bitmap 的软件 Canvas** 上（不经 hwui）被显式豁免并写明理由
+- `LyricsLineChangeExitTest`（新）：切歌/歌词重载时的换行状态机（整曲代数）
+- `PhotoTransitionPoolTest`（改）：池大小断言改为**由 `CLIP_BASED` 推导**，新增 clip 类时不再失真
+- `TripodFillMechanismGateTest`（既有，本轮成为 M50 的否决依据）
+
+**验证**：`assembleDebug` ✅ / `testDebugUnitTest` 2906 用例全绿 ✅（新增 9 个用例）/ `lintDebug` ✅。
+
+- 版本：**v2.39.16 / versionCode 201**
+

@@ -103,7 +103,22 @@ class BaiduLyricsProvider(
                     AppLog.w(TAG, "downloadText failed code=${resp.code}")
                     return null
                 }
-                resp.body?.string()?.takeIf { it.isNotBlank() }
+                // M15：⛔ 不能直接 `body.string()` —— dlink 指向的是网盘上的任意文件，
+                // 体积由服务端决定（同文件 downloadRange 已按 206 + 分段保护，这里原先没有）。
+                // 先看 Content-Length 快速拒绝，再按上限**有界**读取（chunked 无长度也拦得住）。
+                val body = resp.body ?: return null
+                val declared = body.contentLength()
+                if (declared > MAX_SIDECAR_LRC_BYTES) {
+                    AppLog.w(TAG, "downloadText too large: $declared bytes")
+                    return null
+                }
+                val buf = okio.Buffer()
+                val read = body.source().read(buf, MAX_SIDECAR_LRC_BYTES + 1)
+                if (read > MAX_SIDECAR_LRC_BYTES) {
+                    AppLog.w(TAG, "downloadText exceeded cap (>$MAX_SIDECAR_LRC_BYTES bytes)")
+                    return null
+                }
+                buf.readUtf8().takeIf { it.isNotBlank() }
             }
         } catch (e: Exception) {
             AppLog.e(TAG, "downloadText error", e)
@@ -140,5 +155,8 @@ class BaiduLyricsProvider(
 
     /** M5 两段式补读的标签总长上限（16MB，与 BaiduCoverProvider 同口径） */
     private const val MAX_ID3_TAG_BYTES = 16L * 1024 * 1024
+
+        /** M15：侧车 LRC 文本下载的体积上限（1MB ≈ 5 万行，远超任何真实歌词） */
+        private const val MAX_SIDECAR_LRC_BYTES = 1L * 1024 * 1024
     }
 }

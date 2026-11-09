@@ -161,11 +161,22 @@ class BaiduOAuthClient(
                         AppLog.e(TAG, "pollDeviceToken: scope 缺少 netdisk! granted='$grantedScope', 阻断保存 token")
                         return@use PollResult.Failed(context.getString(R.string.baidu_oauth_scope_missing))
                     }
+                    // L16：`expires_in` 是服务端下发的秒数，未钳制直接 ×1000 会 Long 溢出
+                    //（脏数据 / 被中间人篡改的响应给出极大值）⇒ `expiresAt` 变负数 ⇒
+                    // `needsRefresh` 恒 true，表现为「刚授权完又要求重新授权」。
+                    // 下限 60s：防止服务端给 0 导致每分钟刷新一次。
+                    val expiresInSec = (json.get("expires_in")?.asLong ?: 2592000L)
+                        .coerceIn(60L, 365L * 24 * 3600)
+                    // `refresh_token` 并非所有链路都下发（设备码授权在部分场景只给 access_token），
+                    // 原实现直接 `.asString` 会在缺字段时抛 NPE（JsonNull.asString）。
+                    val refreshToken = json.get("refresh_token")
+                        ?.takeIf { it.isJsonPrimitive }
+                        ?.asString
+                        .orEmpty()
                     val tokens = BaiduTokens(
                         accessToken = json.get("access_token").asString,
-                        refreshToken = json.get("refresh_token").asString,
-                        expiresAt = System.currentTimeMillis() +
-                            (json.get("expires_in")?.asLong ?: 2592000L) * 1000,
+                        refreshToken = refreshToken,
+                        expiresAt = System.currentTimeMillis() + expiresInSec * 1000,
                         scope = grantedScope
                     )
                     prefs.baidu.saveBaiduTokens(tokens)

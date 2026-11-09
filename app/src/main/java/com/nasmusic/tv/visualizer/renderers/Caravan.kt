@@ -106,6 +106,9 @@ internal class DesertCaravanTable {
     var span = 1.24
         private set
 
+    /** L30：单次 build 的最大迭代数（4200s / 最小正增量下也远达不到） */
+    private val MAX_CARAVAN_STEPS = 4096
+
     /** 原型 `buildCaravan()`。 */
     fun build(p: DesertCaravanP) {
         cross = 1.24 / maxOf(1e-4, p.pace)
@@ -114,10 +117,18 @@ internal class DesertCaravanTable {
         val d = ArrayList<Int>()
         var t = rnd.next() * 40
         var i = 0
-        while (t < 4200) {
+        // L30：两道守卫。
+        // ① 增量必须为正：`cross + idle0 + rnd*(idle1-idle0)` 在参数被改写（pace 极大 ⇒ cross≈0，
+        //    或 idle1 < idle0 且随机项为负）时可以 ≤ 0 ⇒ t 永不推进 ⇒ 死循环 + 两个 ArrayList
+        //    无界增长。而这是**首帧同步路径**，卡住就是整屏黑、ANR。
+        // ② 迭代上限：即便增量极小（如 1e-7）也会跑出上百万次，同样等价于卡死。
+        // ⚠️ 随机数的消耗顺序与原来完全一致（每轮仍只取一个），视觉结果逐帧等价。
+        while (t < 4200 && i < MAX_CARAVAN_STEPS) {
+            val step = cross + p.idle0 + rnd.next() * (p.idle1 - p.idle0)
+            if (!(step > 1e-6) || !step.isFinite()) break
             s.add(t)
             d.add(if (i % 2 == 0) 1 else -1)
-            t += cross + p.idle0 + rnd.next() * (p.idle1 - p.idle0)
+            t += step
             i++
         }
         starts = s.toDoubleArray()

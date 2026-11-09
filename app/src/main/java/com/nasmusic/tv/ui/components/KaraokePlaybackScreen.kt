@@ -6,6 +6,7 @@
 
 package com.nasmusic.tv.ui.components
 
+import android.graphics.Bitmap
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusGroup
@@ -28,6 +29,7 @@ import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.type
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -77,6 +79,7 @@ import com.nasmusic.tv.ui.RegisterDialogBackHandler
 import com.nasmusic.tv.ui.theme.FontSize
 import com.nasmusic.tv.ui.theme.NasMusicBrushes
 import com.nasmusic.tv.ui.theme.NasMusicColors
+import kotlinx.coroutines.withContext
 
 /**
  * KARAOKE 全屏播放页面
@@ -98,8 +101,13 @@ fun KaraokePlaybackScreen(
     coverCandidates: List<String>,
     coverFilterEnabled: Boolean = false,
     coverFilterBlurRadius: Float = 8f,
-    /** 当前播放进度（毫秒），驱动歌词定位 —— 必须与播放页传入的同一 progressMs 来源 */
-    progressMs: Long,
+    /**
+     * 当前播放进度（毫秒），驱动歌词定位 —— 必须与播放页传入的同一 progressMs 来源。
+     *
+     * M26：收 `State<Long>` 而不是裸 `Long` ⇒ 每秒的进度推送**不会**重组播放页整棵子树，
+     * 只有本屏里真正读 `.value` 的叶子（歌词区 / 进度细线）重组。
+     */
+    progressMs: androidx.compose.runtime.State<Long>,
     /** 歌曲总时长（毫秒），用于底部细进度线 —— 与播放页传入的同一 durationMs 来源 */
     durationMs: Long,
     vocalRemovalEnabled: Boolean,
@@ -182,12 +190,21 @@ fun KaraokePlaybackScreen(
             }
     ) {
         // ── 手机遥控二维码（右上角，5 秒无操作完全隐藏）──
-        val qrBitmap = remember(remoteControlUrl) {
-            remoteControlUrl?.let { QrCodeGenerator.generateQrBitmap(it, 256) }
+        // C27 / N09：原实现用 `remember(url) { generate(...) }` —— 生成发生在**组合期**，
+        // 每次 URL 变化都会把主线程卡在 ZXing 编码 + 位图分配上；改到 LaunchedEffect 里
+        // 用后台线程生成，组合期只读一个 State。
+        var qrBitmap by remember(remoteControlUrl) { mutableStateOf<Bitmap?>(null) }
+        LaunchedEffect(remoteControlUrl) {
+            val url = remoteControlUrl
+            qrBitmap = if (url == null) null else withContext(Dispatchers.Default) {
+                QrCodeGenerator.generateQrBitmap(url, 256)
+            }
         }
-        if (qrBitmap != null) {
+        // 委托属性不能智能转换 ⇒ 先取本地 val（同一帧内不会变）
+        val qr = qrBitmap
+        if (qr != null) {
             Image(
-                bitmap = qrBitmap.asImageBitmap(),
+                bitmap = qr.asImageBitmap(),
                 contentDescription = stringResource(R.string.karaoke_scan_remote),
                 modifier = Modifier
                     .align(Alignment.TopEnd)
@@ -355,7 +372,7 @@ fun KaraokePlaybackScreen(
             ) {
                 KaraokeLyricsView(
                     lyrics = lyrics,
-                    progressMs = progressMs,
+                    progressMs = progressMs.value,
                     isPlaying = isPlaying,
                     modifier = Modifier
                         .fillMaxWidth()
@@ -363,7 +380,7 @@ fun KaraokePlaybackScreen(
                 )
                 // 进度细线：背景轨道 + 渐变填充，贴半透明框下沿（下沿上方留 8dp 间距）
                 val karaokeProgress = if (durationMs > 0L) {
-                    (progressMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
+                    (progressMs.value.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
                 } else {
                     0f
                 }

@@ -12,8 +12,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
@@ -57,7 +55,8 @@ class LyricsManager(
         neteaseBaseUrl = (neteaseBaseUrlProvider?.invoke() ?: neteaseBaseUrl)
             .ifBlank { LyricsNetworkProvider.DEFAULT_NETEASE_BASE_URL }
     )
-    private val persistentCache = LyricsPersistentCache(context)
+    // C24：进程级单例 —— 两个 LyricsManager 共享同一份索引与写锁，避免互相全量覆盖
+    private val persistentCache = LyricsPersistentCache.get(context)
 
     /**
      * 网络歌词暂存区（songId → lrcText）。
@@ -80,8 +79,49 @@ class LyricsManager(
     /** 后台 IO 作用域：歌词缓存落盘等磁盘写操作不得阻塞主线程（否则掉帧/ANR） */
     private val backgroundScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    /** 候选拉取互斥锁：cachedCandidates 的 containsKey→put 非原子，并发调用会重复发起网络请求（缓存惊群） */
-    private val candidateFetchMutex = Mutex()
+    /**
+     * L17：候选拉取的**单飞登记表** —— key = `"songId|round"`。
+     *
+     * 原实现用一把实例级的全局 `Mutex` 把整段 NETWORK 分支都罩住，而分支里含
+     * 两次网络拉取（`fetchLyricsCandidates` 内部是 3 组关键词 × 2 个源 × 15s 超时）：
+     * 一首歌首次取歌词期间，**任何别的歌**请求歌词都要排队，最长可等近 45s
+     * —— 真机表现就是「切歌后歌词半天不出现，过一会儿又自己好了」。
+     *
+     * 现在锁不再跨网络：改成一个 `CompletableDeferred` 登记表，同一 key 的并发请求合并到
+     * 同一个 Deferred 上（仍然只打一次网络，与原来一致），不同 key 完全并行。
+     */
+    private val candidateFetchInFlight = java.util.concurrent.ConcurrentHashMap<String, kotlinx.coroutines.CompletableDeferred<List<String>>>()
+
+    /**
+     * L17：按 key 合并的候选拉取。
+     *
+     * - 已有同 key 的拉取在跑 ⇒ 直接 `await` 它的结果（不打网络）；
+     * - 没有 ⇒ 自己登记一个 Deferred 再执行 [fetch]，无论成功失败都会注销。
+     *
+     * `while (true)` 是给 `putIfAbsent` 的失败分支用的：输给别的协程就回头再查一次，
+     * 正常情况一次就命中。
+     */
+    private suspend fun fetchCandidatesSingleFlight(
+        key: String,
+        fetch: suspend () -> List<String>
+    ): List<String> {
+        while (true) {
+            candidateFetchInFlight[key]?.let { return it.await() }
+            val mine = kotlinx.coroutines.CompletableDeferred<List<String>>()
+            if (candidateFetchInFlight.putIfAbsent(key, mine) == null) {
+                return try {
+                    val result = fetch()
+                    mine.complete(result)
+                    result
+                } catch (t: Throwable) {
+                    mine.completeExceptionally(t)
+                    throw t
+                } finally {
+                    candidateFetchInFlight.remove(key, mine)
+                }
+            }
+        }
+    }
 
     companion object {
         /** 搜索变异后缀，候选耗尽时依次尝试获取新候选 */
@@ -283,12 +323,17 @@ class LyricsManager(
                         .copy(source = LyricsSource.CACHED)
                 } else null
             }
-            LyricsSource.NETWORK -> candidateFetchMutex.withLock {
-                // 互斥 + 双检：containsKey→put 非原子，并发调用（如用户连点）会重复发起 fetchLyricsCandidates
+            LyricsSource.NETWORK -> {
+                // L17：不再整段持 `candidateFetchMutex`。锁的**唯一职责**是「让同一首歌只发一次
+                // 首轮拉取」，这件事交给 [fetchCandidatesSingleFlight]；网络请求本身在锁外跑，
+                // 所以不同歌曲互不阻塞（原实现会让别首歌排到最长约 45s）。
                 if (!cachedCandidates.containsKey(song.id)) {
-                    val results = networkProvider.fetchLyricsCandidates(song.title, song.artist)
-                    cachedCandidates[song.id] = results
-                    candidateVariantRound[song.id] = 0
+                    val results = fetchCandidatesSingleFlight("${song.id}|r0") {
+                        networkProvider.fetchLyricsCandidates(song.title, song.artist)
+                    }
+                    // putIfAbsent：单飞合并后仍可能有另一个协程已先写入，别覆盖它的结果
+                    cachedCandidates.putIfAbsent(song.id, results)
+                    candidateVariantRound.putIfAbsent(song.id, 0)
                     AppLog.d("LyricsManager", "NETWORK: first fetch, ${results.size} candidates")
                 }
                 val candidates = cachedCandidates[song.id] ?: emptyList()
@@ -297,7 +342,7 @@ class LyricsManager(
                 if (candidateIndex in candidates.indices) {
                     val text = candidates[candidateIndex]
                     pendingNetworkLyrics[song.id] = text
-                    return@withLock LrcParser.parse(text, song.id).copy(source = LyricsSource.NETWORK)
+                    return@withContext LrcParser.parse(text, song.id).copy(source = LyricsSource.NETWORK)
                 }
 
                 // 3. 候选耗尽 → 换一批重新搜索
@@ -307,7 +352,9 @@ class LyricsManager(
                     val suffix = variantSuffixes[nextRound]
                     val keyword = if (suffix.isBlank()) song.title else "${song.title} $suffix"
                     AppLog.d("LyricsManager", "NETWORK: candidates exhausted, re-search round=$nextRound keyword='$keyword'")
-                    val newResults = networkProvider.fetchLyricsCandidates(keyword, song.artist)
+                    val newResults = fetchCandidatesSingleFlight("${song.id}|r$nextRound") {
+                        networkProvider.fetchLyricsCandidates(keyword, song.artist)
+                    }
                     if (newResults.isNotEmpty()) {
                         val all = candidates + newResults
                         cachedCandidates[song.id] = all
@@ -317,7 +364,7 @@ class LyricsManager(
                         val safeIndex = candidateIndex.coerceIn(0, all.lastIndex)
                         val text = all[safeIndex]
                         pendingNetworkLyrics[song.id] = text
-                        return@withLock LrcParser.parse(text, song.id).copy(source = LyricsSource.NETWORK)
+                        return@withContext LrcParser.parse(text, song.id).copy(source = LyricsSource.NETWORK)
                     }
                 }
                 // 所有变异轮次用尽 → 返回 null

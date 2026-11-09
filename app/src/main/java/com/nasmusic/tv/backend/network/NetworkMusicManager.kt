@@ -2,6 +2,7 @@ package com.nasmusic.tv.backend.network
 
 import com.nasmusic.tv.data.model.Song
 import com.nasmusic.tv.util.AppLog
+import com.nasmusic.tv.util.rethrowIfCancellation
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.util.concurrent.ConcurrentHashMap
@@ -164,6 +165,7 @@ class NetworkMusicManager(
                 }
                 AppLog.d("MetingDiag", "search '$keyword' empty on source=${svc.sourceId}, trying next")
             } catch (e: Exception) {
+                e.rethrowIfCancellation()
                 AppLog.d("MetingDiag", "search '$keyword' error on source=${svc.sourceId}: ${e.message}", e)
             }
         }
@@ -278,6 +280,7 @@ class NetworkMusicManager(
             }
             result
         } catch (e: Exception) {
+            e.rethrowIfCancellation()
             AppLog.w(TAG, "resolvePlayUrl error: ${e.message}", e)
             playUrlCache.remove(cacheKey)
             ResolveResult.failure(quality)
@@ -296,6 +299,7 @@ class NetworkMusicManager(
         return try {
             svc.resolveLyrics(song)
         } catch (e: Exception) {
+            e.rethrowIfCancellation()
             AppLog.w(TAG, "resolveLyrics error: ${e.message}", e)
             null
         }
@@ -314,6 +318,7 @@ class NetworkMusicManager(
         return try {
             svc.resolveCoverUrl(song)
         } catch (e: Exception) {
+            e.rethrowIfCancellation()
             AppLog.w(TAG, "resolveCoverUrl error: ${e.message}", e)
             null
         }
@@ -330,6 +335,7 @@ class NetworkMusicManager(
             val url = try {
                 svc.searchCoverUrl(title, artist)
             } catch (e: Exception) {
+                e.rethrowIfCancellation()
                 AppLog.w(TAG, "searchCoverUrl error: ${e.message}", e)
                 null
             }
@@ -351,6 +357,7 @@ class NetworkMusicManager(
         return try {
             svc.getPlaylist(playlistId)
         } catch (e: Exception) {
+            e.rethrowIfCancellation()
             AppLog.w(TAG, "getPlaylist error: ${e.message}", e)
             emptyList()
         }
@@ -368,6 +375,7 @@ class NetworkMusicManager(
         return try {
             svc.findArtist(name)
         } catch (e: Exception) {
+            e.rethrowIfCancellation()
             AppLog.e(TAG, "findArtist error: ${e.message}", e)
             null
         }
@@ -379,6 +387,7 @@ class NetworkMusicManager(
         return try {
             svc.getArtistSongs(artistId, offset, limit)
         } catch (e: Exception) {
+            e.rethrowIfCancellation()
             AppLog.e(TAG, "getArtistSongs error: ${e.message}", e)
             null
         }
@@ -422,7 +431,12 @@ class NetworkMusicManager(
         // playUrlKey() 生成为 "<networkSource>:<networkId>:<quality>"，原过滤串
         // "ntwk_<sourceId>_" 是歌曲 id 的格式，永远匹配不上（注销后旧直链残留至 TTL）。
         playUrlCache.entries.removeAll { it.key.startsWith("${sourceId}:") }
-        AppLog.d(TAG, "unregisterService: $sourceId (total=${services.size})")
+        // M21：deadProbeCache 的 key 同口径（playUrlKey），必须一起清 ——
+        // 否则重新注册同一个源之后，残留的 DEAD 判定（TTL 5 分钟）会把本可播的歌
+        // 静默判死，取消再打开开关也不恢复。
+        val deadCleared = deadProbeCache.keys.count { it.startsWith("${sourceId}:") }
+        deadProbeCache.keys.removeAll { it.startsWith("${sourceId}:") }
+        AppLog.d(TAG, "unregisterService: $sourceId (total=${services.size}, deadCleared=$deadCleared)")
     }
 
     /**
@@ -492,6 +506,7 @@ class NetworkMusicManager(
             val candidates = try {
                 svc.search(query)
             } catch (e: Exception) {
+                e.rethrowIfCancellation()
                 AppLog.d(TAG, "cross-source: ${svc.sourceId} 搜索失败: ${e.message}")
                 emptyList()
             }
@@ -507,6 +522,7 @@ class NetworkMusicManager(
                 val candidateUrl = try {
                     svc.resolvePlayUrl(candidate)
                 } catch (e: Exception) {
+                    e.rethrowIfCancellation()
                     AppLog.d(TAG, "cross-source: ${svc.sourceId} 候选 ${candidate.title} 解析异常: ${e.message}")
                     null
                 }

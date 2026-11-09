@@ -14,6 +14,7 @@ import com.nasmusic.tv.util.AppLog
 import com.nasmusic.tv.visualizer.AudioFrame
 import com.nasmusic.tv.visualizer.RenderContext
 import com.nasmusic.tv.visualizer.VisualizerRandom
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -127,7 +128,13 @@ class PhotoWallController(
     private val picker = PhotoTransitionPicker(random)
     private val pool = PhotoWallPool()
 
-    private val ownScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    // L33：本作用域里除了扫描还有预取/解码等 launch。没有 handler 时任何逃逸异常
+    // （权限被撤、DB 损坏、解码 OOM）都会交给线程默认处理器 ⇒ **主线程崩溃**。
+    // 加一个只记日志的 handler 兜住它们（扫描那条另有 try/catch，见 [startScan]）。
+    private val ownScope: CoroutineScope = CoroutineScope(
+        SupervisorJob() + Dispatchers.Main.immediate +
+            CoroutineExceptionHandler { _, t -> AppLog.e(TAG, "photo wall coroutine failed", t) }
+    )
     private val scope: CoroutineScope get() = externalScope ?: ownScope
 
     // ────────────────────────── 运行时状态 ──────────────────────────
@@ -382,41 +389,64 @@ class PhotoWallController(
     // ══════════════════════════════════════════════════════════════════════
 
     private fun startScan() {
-        if (scanJob?.isActive == true) return
+        if (scanJob?.isActive == true) {
+            // C48：扫描进行中又来了新设置 ⇒ 置 needScan，等本轮结束后自动补扫一轮。
+            // 旧实现直接 return 且不清 needScan 状态，新设置被静默吞掉
+            // （表现为「改了目录/来源开关，照片墙还是老内容」）。
+            needScan = true
+            return
+        }
         needScan = false
         scanJob = scope.launch {
-            val enabled = enabledKinds(settings)
-            if (enabled.isEmpty()) {
-                // 「完全无照片 I/O」：三来源全关 ⇒ 连 status() 都不调（§6.8）
-                pool.clear()
+            // L33：扫描链（聚合 → 人脸过滤 → 建池）任何一处抛出都会走协程的默认 handler；
+            // 在 `scope` 是外部 ViewModel 作用域时那是「未捕获异常 ⇒ 进程崩溃」。
+            // 这里收口为「记日志 + 置 needScan」——下次设置变化或重新进舞台会自动补扫。
+            try {
+                val enabled = enabledKinds(settings)
+                if (enabled.isEmpty()) {
+                    // 「完全无照片 I/O」：三来源全关 ⇒ 连 status() 都不调（§6.8）
+                    pool.clear()
+                    resetSlots()
+                    _photos.value = emptyList()
+                    _perSourceCount.value = emptyMap()
+                    _mergedCount.value = 0
+                    _displayCount.value = 0
+                    _statuses.value = emptyMap()
+                    return@launch
+                }
+                val result: AggregateResult = aggregator.collect(
+                    enabled = enabled,
+                    balance = settings.photoWallSourceBalance,
+                )
+                // ⛔ 过滤（阶段 11）必须在「建池」**之前**：池里放的必须是用户实际会看到的那批。
+                val filtered = filterByFaces(result.photos)
+                _perSourceCount.value = result.perSource
+                _photos.value = filtered
+                // ⛔ 两个计数**口径不同**，刻意分开（v2.37.0 上机复验后调整，见 §10.183）：
+                //   「合并后（去重）」= 去重后、**人脸过滤前** ⇒ 与分来源行同口径（三者相加 == 它）
+                //   「实际展示」     = 人脸过滤后        ⇒ 用户真正会看到的张数
+                //   合并成一个数会出现「分来源 6938 / 合并 2657」的错觉：看起来像去重丢了 4281 张。
+                _mergedCount.value = result.photos.size
+                _displayCount.value = filtered.size
+                _statuses.value = result.statuses
+                pool.reset(filtered)
+                picker.reset()
                 resetSlots()
-                _photos.value = emptyList()
-                _perSourceCount.value = emptyMap()
-                _mergedCount.value = 0
-                _displayCount.value = 0
-                _statuses.value = emptyMap()
-                return@launch
-            }
-            val result: AggregateResult = aggregator.collect(
-                enabled = enabled,
-                balance = settings.photoWallSourceBalance,
-            )
-            // ⛔ 过滤（阶段 11）必须在「建池」**之前**：池里放的必须是用户实际会看到的那批。
-            val filtered = filterByFaces(result.photos)
-            _perSourceCount.value = result.perSource
-            _photos.value = filtered
-            // ⛔ 两个计数**口径不同**，刻意分开（v2.37.0 上机复验后调整，见 §10.183）：
-            //   「合并后（去重）」= 去重后、**人脸过滤前** ⇒ 与分来源行同口径（三者相加 == 它）
-            //   「实际展示」     = 人脸过滤后        ⇒ 用户真正会看到的张数
-            //   合并成一个数会出现「分来源 6938 / 合并 2657」的错觉：看起来像去重丢了 4281 张。
-            _mergedCount.value = result.photos.size
-            _displayCount.value = filtered.size
-            _statuses.value = result.statuses
-            pool.reset(filtered)
-            picker.reset()
-            resetSlots()
-            if (result.photos.isEmpty()) {
-                AppLog.w(TAG, "scan produced an empty pool: ${result.statuses}")
+                if (result.photos.isEmpty()) {
+                    AppLog.w(TAG, "scan produced an empty pool: ${result.statuses}")
+                }
+                // C48：本轮扫描期间设置又变了 ⇒ 立刻补扫下一轮。
+                // 先摘掉自身引用，否则 startScan() 会被 `scanJob?.isActive` 挡住、
+                // 只是把 needScan 再置一次，新设置永远落不了地。
+                if (needScan) {
+                    scanJob = null
+                    startScan()
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (t: Throwable) {
+                AppLog.e(TAG, "scan failed, marked for retry", t)
+                needScan = true
             }
         }
     }
@@ -535,7 +565,22 @@ class PhotoWallController(
     private fun pickTransition(): PhotoTransitionId {
         val s = settings
         if (!s.photoWallRandomTransition) {
-            return PhotoTransitionId.effective(s.photoWallFixedTransition, sdkInt)
+            // C47：固定档也必须过 available()。
+            // 枚举有 76 项、注册表只实现 43 项；effective() 只做平台降级、不看是否有实现
+            // ⇒ 备份导入写进一个「合法但未实现」的枚举名后，PhotoRenderer 的
+            // `bound ?: return` 会让整面照片墙永远黑屏（且 lastTransitionId 已写入，不再重试）。
+            val wanted = PhotoTransitionId.effective(s.photoWallFixedTransition, sdkInt)
+            return if (wanted in PhotoTransitionRegistry.available()) {
+                wanted
+            } else {
+                AppLog.w(
+                    TAG,
+                    "固定转场 ${wanted.name} 尚无实现，回落默认（${PhotoTransitionId.Default.name}）"
+                )
+                PhotoTransitionId.effective(PhotoTransitionId.Default, sdkInt)
+                    .takeIf { it in PhotoTransitionRegistry.available() }
+                    ?: PhotoTransitionId.Default
+            }
         }
         val candidates = PhotoTransitionId.randomPool(PhotoTransitionRegistry.available(), sdkInt)
         val idx = picker.pick(candidates)

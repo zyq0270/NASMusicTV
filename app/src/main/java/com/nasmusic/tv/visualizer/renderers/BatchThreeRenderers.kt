@@ -57,6 +57,20 @@ class RadarGridRenderer : RendererFx() {
     private val gridColor = Color(RADAR_GREEN)
     private val gridBright = VisualizerMath.towardWhite(gridColor, 0.5f)
 
+    /**
+     * M46：复用 [Stroke] 实例 ⇒ `drawContent` 真正零分配（本类头注释的既有红线）。
+     *
+     * ⚠️ Compose 的 `Stroke.width` 是 **val**（只读）⇒ 不能「改 width 复用同一对象」。
+     * 同心圆只有两档线宽（内圈 1f / 最外圈 1.8f）⇒ 直接两个字段；
+     * 回波线宽随 `peak` 连续变化 ⇒ 预建 8 档量化表，每帧查表。
+     * ⛔ 不要退回内联 `Stroke(width = ...)`：合计每帧 34 个短命对象。
+     */
+    private val ringStroke = Stroke(width = 1f)
+    private val ringStrokeEdge = Stroke(width = 1.8f)
+    private val echoStrokes = Array(8) { i ->
+        Stroke(width = 2.5f + 3.5f * i / 7f, cap = StrokeCap.Round)
+    }
+
     /** 扫掠余辉扇渐变（预分配；停靠点固定 0.86–1.0，旋转由 `withTransform` 完成） */
     private var sweepBrush: Brush? = null
     /** §A9 第 1 条：荧光屏中心极淡绿光（预分配） */
@@ -160,7 +174,8 @@ class RadarGridRenderer : RendererFx() {
                 if (i == RINGS) frame.energy * 0.22f else 0f
             drawCircle(
                 gridDim, radius = rr, center = Offset(cx, cy),
-                style = Stroke(if (i == RINGS) 1.8f else 1f), alpha = ringAlpha
+                style = if (i == RINGS) ringStrokeEdge else ringStroke,
+                alpha = ringAlpha
             )
             i++
         }
@@ -219,7 +234,7 @@ class RadarGridRenderer : RendererFx() {
                     useCenter = false,
                     topLeft = Offset(cx - rr, cy - rr),
                     size = Size(rr * 2f, rr * 2f),
-                    style = Stroke(width = 2.5f + peak * 3.5f, cap = StrokeCap.Round),
+                    style = echoStrokes[(peak.coerceIn(0f, 1f) * 7f).toInt()],
                     alpha = b * (0.35f + peak * 0.5f) * (1f - 0.35f * range)
                 )
             }

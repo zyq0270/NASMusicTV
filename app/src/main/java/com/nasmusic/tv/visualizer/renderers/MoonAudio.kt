@@ -165,5 +165,9 @@ internal object MoonAudio {
     /** 桶中心（[sbBucket] 的量化是 floor ⇒ 误差对称地落在 ±半桶）。 */
     private fun bucketCenter(bucket: Int, buckets: Int): Double = (bucket + 0.5) / buckets
 
-    private fun clampUnit(v: Double): Double = if (v < 0.0) 0.0 else if (v > 1.0) 1.0 else v
+    // L32：NaN 必须显式拦掉 —— 原写法 `if (v < 0.0) … else if (v > 1.0) … else v`
+    // 对 NaN 两个比较都是 false，于是 NaN 原样穿透到七个幅度函数（再传进
+    // `sin/cos/pow` 与 canvas 的 alpha/尺寸计算，表现为整层效果消失而非报错）。
+    private fun clampUnit(v: Double): Double =
+        if (v.isNaN()) 0.0 else if (v < 0.0) 0.0 else if (v > 1.0) 1.0 else v
 }

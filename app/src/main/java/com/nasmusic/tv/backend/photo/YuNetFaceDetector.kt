@@ -87,7 +87,15 @@ class YuNetFaceDetector(
             }
             val env = OrtEnvironment.getEnvironment()
             // ⛔ 绝不 close env：它是进程级单例（与 DemucsSeparator 同一条约定）
-            session = env.createSession(bytes, opts)
+            //
+            // L15：但 `SessionOptions` 是**本方法私有**的 native 资源，createSession 之后
+            // 必须关闭 —— 原实现每次 warmUp 成功都漏掉一份（它不参与 GC 的 native 释放，
+            // 反复出入设置页触发的 warmUp 会累积）。
+            session = try {
+                env.createSession(bytes, opts)
+            } finally {
+                runCatching { opts.close() }
+            }
             AppLog.i(TAG, "YuNet session ready: ${bytes.size} bytes, input=$inputSize")
             true
         } catch (t: Throwable) {
@@ -274,10 +282,23 @@ class PhotoThumbnailProvider(
     private val size: Int = YuNetFaceDetector.DEFAULT_INPUT_SIZE,
 ) : PhotoThumbProvider {
 
+    companion object {
+        /**
+         * M13：单张源文件的读取上限（48MB）。
+         *
+         * 人脸检测只需要 320×320 的缩略图，但采样前的**原图字节**必须完整拿在手里才能解码 ——
+         * 真人照片/相机图很少超过这个量级；超过就说明不是可扫的图片（或读到异常流），直接跳过。
+         */
+        private const val MAX_SOURCE_BYTES = 48 * 1024 * 1024
+    }
+
     override suspend fun decode(ref: PhotoRef): FaceThumb? {
         val source = sources[ref.source] ?: return null
+        // M13：⛔ 不能 readBytes() —— inSampleSize 只缩小**解码后**的 Bitmap，
+        // 原图字节仍然整份进内存（几十 MB 的照片 × 扫上千张 ⇒ OOM）。
+        // 改为有界读取：超过 MAX_SOURCE_BYTES 直接当失败，扫描跳过这张。
         val bytes = try {
-            source.openStream(ref)?.use { it.readBytes() }
+            source.openStream(ref)?.use { readBounded(it, MAX_SOURCE_BYTES) }
         } catch (t: Throwable) {
             // 拔盘 / 坏文件 / 网络失败 —— 扫描要继续，不能因为一张图炸掉整个任务
             null
@@ -299,6 +320,21 @@ class PhotoThumbnailProvider(
      * 解码结果可能略大于 `size`（`inSampleSize` 是 2 的幂），由
      * `bitmapToFaceThumb` 缩到确切尺寸。
      */
+    /** M13：有界读取（超限返回 null，绝不把整份大图读进内存） */
+    private fun readBounded(input: java.io.InputStream, limit: Int): ByteArray? {
+        val out = java.io.ByteArrayOutputStream(minOf(limit, 1 shl 20))
+        val buf = ByteArray(64 * 1024)
+        var total = 0
+        while (true) {
+            val n = input.read(buf)
+            if (n < 0) break
+            total += n
+            if (total > limit) return null
+            out.write(buf, 0, n)
+        }
+        return out.toByteArray()
+    }
+
     private fun decodeBitmap(ref: PhotoRef, bytes: ByteArray): Bitmap? {
         return try {
             if (ref.width > 0 && ref.height > 0) {

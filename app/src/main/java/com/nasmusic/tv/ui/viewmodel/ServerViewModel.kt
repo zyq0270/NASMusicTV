@@ -9,6 +9,7 @@ import com.nasmusic.tv.backend.BackendRegistry
 import com.nasmusic.tv.data.model.ServerConfig
 import com.nasmusic.tv.data.model.VersionInfo
 import com.nasmusic.tv.util.AppLog
+import com.nasmusic.tv.util.rethrowIfCancellation
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -134,6 +135,7 @@ class ServerViewModel(
             try {
                 backendRegistry.disconnect()
             } catch (e: Exception) {
+                e.rethrowIfCancellation()
                 AppLog.e("ServerViewModel", "disconnect failed", e)
             }
             _isConnected.value = false
@@ -145,6 +147,7 @@ class ServerViewModel(
                 val current = prefs.serverConfig.first()
                 prefs.saveServerConfig(current.copy(isConnected = false))
             } catch (e: Exception) {
+                e.rethrowIfCancellation()
                 AppLog.e("ServerViewModel", "disconnect: save config failed", e)
             }
         }
@@ -240,6 +243,7 @@ class ServerViewModel(
                     }
                 }
             } catch (e: Exception) {
+                e.rethrowIfCancellation()
                 AppLog.e("ServerViewModel", "connectToSavedServer failed", e)
                 if (!silent) {
                     _connectMessage.value = getApplication<Application>().getString(R.string.connect_failed_with_msg, e.message)

@@ -161,7 +161,9 @@ class JamendoService(
         val req = Request.Builder().url(url).build()
         client.newCall(req).execute().use { resp ->
             if (!resp.isSuccessful) {
-                AppLog.w(TAG, "GET ${url.take(100)} -> ${resp.code}")
+                // M17：⛔ 不记完整 URL —— Jamendo 的 client_id 就在 query 里，
+                // 而 w 级日志会落盘。只记 path 与状态码，足够定位。
+                AppLog.w(TAG, "GET ${req.url.encodedPath} -> ${resp.code}")
                 return null
             }
             return resp.body?.string()

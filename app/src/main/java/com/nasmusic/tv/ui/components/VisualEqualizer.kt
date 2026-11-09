@@ -35,6 +35,31 @@ import kotlin.math.sin
 import kotlin.random.Random
 
 /**
+ * 绘制期复用缓冲（M37）：本组件以约 30fps 重绘，此前 `computeBarWidths` / `drawClassicalWave`
+ * / `drawNeonPulse` 每次 draw 都会新建 FloatArray、Path、List，长时间停在均衡器页时 GC 抖动明显。
+ * 这些对象的尺寸只与 `barCount` 有关，抽成 remember 的 scratch 后 draw 内只剩 rewind / 覆写。
+ */
+private class EqDrawScratch(barCount: Int) {
+    val barWidths = FloatArray(barCount)
+    val centers = FloatArray(barCount)
+    val amplitudes = FloatArray(barCount)
+    val fillPath = Path()
+    val linePath = Path()
+    val waveStroke = Stroke(width = 2.5f, cap = StrokeCap.Round, join = StrokeJoin.Round)
+    val waveHighlightStroke = Stroke(width = 1f, cap = StrokeCap.Round, join = StrokeJoin.Round)
+}
+
+/** 霓虹配色（M37：原实现每帧 `listOf(...)` 新建一个 List 并把 6 个 Color 装箱） */
+private val NEON_COLORS = arrayOf(
+    Color(0xFFFF1493),  // 深粉红
+    Color(0xFF00FFFF),  // 青色
+    Color(0xFFFFD700),  // 金色
+    Color(0xFF00FF7F),  // 春绿
+    Color(0xFF7B68EE),  // 中紫
+    Color(0xFFFF4500)   // 橙红
+)
+
+/**
  * 可视化均衡器柱状频谱图
  *
  * 均衡器页顶部的频谱预览小条（64dp）。
@@ -63,27 +88,34 @@ fun VisualEqualizer(
     maxBarHeight: Float = 0.85f,
     modifier: Modifier = Modifier
 ) {
-    val barHeights = remember { Array(barCount) { 0f } }
-    val targetHeights = remember { Array(barCount) { 0f } }
+    // M37：barCount 变化时必须重建缓冲（原实现 `remember { }` 无 key，改数量后会越界）
+    val barHeights = remember(barCount) { Array(barCount) { 0f } }
+    val targetHeights = remember(barCount) { Array(barCount) { 0f } }
+    val rawBuf = remember(barCount) { FloatArray(barCount) }
+    val smoothBuf = remember(barCount) { FloatArray(barCount) }
+    val gateBuf = remember(barCount) { FloatArray(barCount) }
+    val scratch = remember(barCount) { EqDrawScratch(barCount) }
     var tick by remember { mutableIntStateOf(0) }
     // 色相偏移量——ColorFlow 主题使用，随时间递增使色彩流动
     var hueOffset by remember { mutableFloatStateOf(0f) }
     val currentSpectrumData by rememberUpdatedState(spectrumData)
 
     // 动画更新：定时刷新柱子高度
-    LaunchedEffect(isPlaying) {
+    // key 加 barCount：上面的缓冲按 barCount 重建，循环必须跟着重启才能看到新尺寸
+    LaunchedEffect(isPlaying, barCount) {
         while (true) {
             kotlinx.coroutines.delay(if (isPlaying) 33 else 400)
             val data = currentSpectrumData
 
             if (isPlaying && data != null && data.isNotEmpty()) {
-                val rawTargets = FloatArray(barCount) { i ->
-                    if (i < data.size) data[i].coerceIn(0.02f, 1f) else 0.02f
-                }
-                val smoothedTargets = applyFrequencySmoothing(rawTargets)
-                val gatedTargets = applyNoiseGate(smoothedTargets)
+                // M37：三段处理全部就地写进 remember 的缓冲，tick 内零新建
                 for (i in 0 until barCount) {
-                    targetHeights[i] = gatedTargets[i]
+                    rawBuf[i] = if (i < data.size) data[i].coerceIn(0.02f, 1f) else 0.02f
+                }
+                applyFrequencySmoothingInto(rawBuf, barCount, smoothBuf)
+                applyNoiseGateInto(smoothBuf, barCount, gateBuf)
+                for (i in 0 until barCount) {
+                    targetHeights[i] = gateBuf[i]
                 }
             } else if (isPlaying) {
                 for (i in 0 until barCount) {
@@ -133,9 +165,9 @@ fun VisualEqualizer(
 
             // 新版主题共 21 个，按风格归入三种绘制样式（本组件仅用于均衡器页小条）
             when (theme.ordinal % 3) {
-                0 -> drawColorFlow(barHeights, barCount, maxBarHeight, hueOffset, size)
-                1 -> drawNeonPulse(barHeights, barCount, maxBarHeight, size)
-                else -> drawClassicalWave(barHeights, barCount, maxBarHeight, size)
+                0 -> drawColorFlow(barHeights, barCount, maxBarHeight, hueOffset, size, scratch)
+                1 -> drawNeonPulse(barHeights, barCount, maxBarHeight, size, scratch)
+                else -> drawClassicalWave(barHeights, barCount, maxBarHeight, size, scratch)
             }
         }
     }
@@ -148,7 +180,8 @@ private fun DrawScope.drawColorFlow(
     barCount: Int,
     maxBarHeight: Float,
     hueOffset: Float,
-    canvasSize: Size
+    canvasSize: Size,
+    scratch: EqDrawScratch
 ) {
     val paddingPx = 8f
     val usableWidth = canvasSize.width - paddingPx * 2
@@ -157,7 +190,8 @@ private fun DrawScope.drawColorFlow(
     val usableHeight = canvasSize.height * maxBarHeight
 
     val baseW = usableWidth / barCount
-    val barWidths = computeBarWidths(barCount, baseW, usableWidth)
+    computeBarWidthsInto(barCount, baseW, usableWidth, scratch.barWidths)
+    val barWidths = scratch.barWidths
 
     var currentX = startX
     for (i in 0 until barCount) {
@@ -193,7 +227,8 @@ private fun DrawScope.drawNeonPulse(
     barHeights: Array<Float>,
     barCount: Int,
     maxBarHeight: Float,
-    canvasSize: Size
+    canvasSize: Size,
+    scratch: EqDrawScratch
 ) {
     val paddingPx = 8f
     val usableWidth = canvasSize.width - paddingPx * 2
@@ -201,22 +236,16 @@ private fun DrawScope.drawNeonPulse(
     val bottomY = canvasSize.height - 2f
     val usableHeight = canvasSize.height * maxBarHeight
 
-    // 当前帧平均振幅——用于整体亮度脉动
-    val avgAmp = barHeights.take(barCount).average().toFloat().coerceIn(0.05f, 1f)
+    // 当前帧平均振幅——用于整体亮度脉动（M37：原 `take(barCount).average()` 每帧建一个 List）
+    var ampSum = 0f
+    for (i in 0 until barCount) ampSum += barHeights[i]
+    val avgAmp = (if (barCount > 0) ampSum / barCount else 0f).coerceIn(0.05f, 1f)
     val pulse = 0.7f + 0.3f * avgAmp  // 0.7~1.0 范围
 
     val baseW = usableWidth / barCount
-    val barWidths = computeBarWidths(barCount, baseW, usableWidth)
-
-    // 三组霓虹色
-    val neonColors = listOf(
-        Color(0xFFFF1493),  // 深粉红
-        Color(0xFF00FFFF),  // 青色
-        Color(0xFFFFD700),  // 金色
-        Color(0xFF00FF7F),  // 春绿
-        Color(0xFF7B68EE),  // 中紫
-        Color(0xFFFF4500)   // 橙红
-    )
+    computeBarWidthsInto(barCount, baseW, usableWidth, scratch.barWidths)
+    val barWidths = scratch.barWidths
+    val neonColors = NEON_COLORS
 
     var currentX = startX
     for (i in 0 until barCount) {
@@ -266,7 +295,8 @@ private fun DrawScope.drawClassicalWave(
     barHeights: Array<Float>,
     barCount: Int,
     maxBarHeight: Float,
-    canvasSize: Size
+    canvasSize: Size,
+    scratch: EqDrawScratch
 ) {
     val paddingPx = 8f
     val usableWidth = canvasSize.width - paddingPx * 2
@@ -275,19 +305,21 @@ private fun DrawScope.drawClassicalWave(
     val usableHeight = canvasSize.height * maxBarHeight
 
     val baseW = usableWidth / barCount
-    val barWidths = computeBarWidths(barCount, baseW, usableWidth)
+    computeBarWidthsInto(barCount, baseW, usableWidth, scratch.barWidths)
+    val barWidths = scratch.barWidths
 
-    // 确定每个柱子的中心 X 坐标
-    val centers = FloatArray(barCount)
+    // 确定每个柱子的中心 X 坐标（M37：复用 scratch.centers）
+    val centers = scratch.centers
     var cx = startX
     for (i in 0 until barCount) {
         centers[i] = cx + barWidths[i] / 2f
         cx += barWidths[i]
     }
 
-    // 计算各个点的幅值，并做平滑插值（用于波形线）
-    val amplitudes = FloatArray(barCount) { i ->
-        bottomY - barHeights[i].coerceIn(0.01f, 1f) * usableHeight
+    // 计算各个点的幅值，并做平滑插值（用于波形线）（M37：复用 scratch.amplitudes）
+    val amplitudes = scratch.amplitudes
+    for (i in 0 until barCount) {
+        amplitudes[i] = bottomY - barHeights[i].coerceIn(0.01f, 1f) * usableHeight
     }
 
     // 主色——青蓝色渐变
@@ -295,7 +327,9 @@ private fun DrawScope.drawClassicalWave(
     val waveColorDark = Color(0xFF0891b2)
 
     // ① 填充面积（半透明渐变）
-    val fillPath = Path().apply {
+    val fillPath = scratch.fillPath
+    fillPath.rewind()
+    fillPath.apply {
         moveTo(centers[0], bottomY)
         for (i in 0 until barCount) {
             lineTo(centers[i], amplitudes[i])
@@ -309,7 +343,9 @@ private fun DrawScope.drawClassicalWave(
     )
 
     // ② 波形主线
-    val linePath = Path().apply {
+    val linePath = scratch.linePath
+    linePath.rewind()
+    linePath.apply {
         moveTo(centers[0], amplitudes[0])
         // 使用二次贝塞尔曲线平滑连接
         for (i in 1 until barCount) {
@@ -323,14 +359,14 @@ private fun DrawScope.drawClassicalWave(
     drawPath(
         path = linePath,
         color = waveColor,
-        style = Stroke(width = 2.5f, cap = StrokeCap.Round, join = StrokeJoin.Round)
+        style = scratch.waveStroke
     )
 
     // ③ 波形高光（细的半透明线叠加）
     drawPath(
         path = linePath,
         color = waveColor.copy(alpha = 0.3f),
-        style = Stroke(width = 1f, cap = StrokeCap.Round, join = StrokeJoin.Round)
+        style = scratch.waveHighlightStroke
     )
 
     // ④ 峰值点
@@ -354,20 +390,28 @@ private fun DrawScope.drawClassicalWave(
 
 // ─── Shared utilities ─────────────────────────────────────────────────
 
-private fun computeBarWidths(barCount: Int, baseW: Float, usableWidth: Float): FloatArray {
-    val barWidths = FloatArray(barCount) { i ->
-        when (i) {
+/** M37：写进调用方缓冲，不再返回新数组（返回新数组正是每次 draw 的分配源） */
+private fun computeBarWidthsInto(
+    barCount: Int,
+    baseW: Float,
+    usableWidth: Float,
+    out: FloatArray
+) {
+    var totalRaw = 0f
+    for (i in 0 until barCount) {
+        val w = when (i) {
             in 5..19 -> baseW * 1.3f
             in 20..27 -> baseW * 1.0f
             else -> baseW * 0.7f
         }
+        out[i] = w
+        totalRaw += w
     }
-    val totalRaw = barWidths.sum()
+    if (totalRaw <= 0f) return
     val scale = usableWidth / totalRaw
     for (i in 0 until barCount) {
-        barWidths[i] *= scale
+        out[i] *= scale
     }
-    return barWidths
 }
 
 private fun lerpColor(from: Color, to: Color, fraction: Float): Color {
@@ -380,21 +424,27 @@ private fun lerpColor(from: Color, to: Color, fraction: Float): Color {
     )
 }
 
-private fun applyFrequencySmoothing(data: FloatArray): FloatArray {
-    val size = data.size
-    if (size < 3) return data.copyOf()
-    val smoothed = FloatArray(size)
-    for (i in 0 until size) {
-        val left = if (i > 0) data[i - 1] else data[i]
-        val right = if (i < size - 1) data[i + 1] else data[i]
-        smoothed[i] = left * 0.25f + data[i] * 0.5f + right * 0.25f
+/** M37：就地平滑（原实现每 tick 新建 FloatArray） */
+private fun applyFrequencySmoothingInto(src: FloatArray, count: Int, out: FloatArray) {
+    if (count < 3) {
+        for (i in 0 until count) out[i] = src[i]
+        return
     }
-    return smoothed
+    for (i in 0 until count) {
+        val left = if (i > 0) src[i - 1] else src[i]
+        val right = if (i < count - 1) src[i + 1] else src[i]
+        out[i] = left * 0.25f + src[i] * 0.5f + right * 0.25f
+    }
 }
 
-private fun applyNoiseGate(data: FloatArray): FloatArray {
-    val sum = data.sum()
-    val avg = sum / data.size
+/** M37：就地噪声门（原实现 `map { }.toFloatArray()` 每 tick 新建 ArrayList + FloatArray） */
+private fun applyNoiseGateInto(src: FloatArray, count: Int, out: FloatArray) {
+    var sum = 0f
+    for (i in 0 until count) sum += src[i]
+    val avg = if (count > 0) sum / count else 0f
     val threshold = avg * 0.15f
-    return data.map { if (it < threshold) 0f else it }.toFloatArray()
+    for (i in 0 until count) {
+        val v = src[i]
+        out[i] = if (v < threshold) 0f else v
+    }
 }

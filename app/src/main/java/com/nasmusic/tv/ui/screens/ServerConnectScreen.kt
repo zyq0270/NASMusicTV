@@ -64,7 +64,9 @@ import com.nasmusic.tv.ui.components.LocalFocusableContentColor
 import com.nasmusic.tv.ui.theme.NasMusicColors
 import com.nasmusic.tv.ui.theme.LocalUiMode
 import com.nasmusic.tv.ui.theme.UiMode
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 private enum class InputField {
     BASE_URL, USERNAME, PASSWORD, API_TOKEN, ACCESS_CODE
@@ -169,13 +171,24 @@ val context = LocalContext.current
             }
         })
     }
+    // C27 / N09：二维码生成的协程作用域（必须在 DisposableEffect 之前声明）
+    val qrScope = rememberCoroutineScope()
     DisposableEffect(Unit) {
         val ip = NetworkUtils.getLocalIpAddress()
         if (ip != null) {
             val url0 = configTransferServer.buildUrl(ip)
             qrUrl = url0
-            qrBitmap = QrCodeGenerator.generateQrBitmap(url0, 150)
-            configTransferServer.startServer()
+            // C27 / N09：二维码改后台线程生成（ZXing 编码 + 位图分配不能在组合期同步跑）
+            val started = configTransferServer.startServer()
+            if (started) {
+                qrScope.launch(Dispatchers.Default) {
+                    val bmp = QrCodeGenerator.generateQrBitmap(url0, 150)
+                    withContext(Dispatchers.Main) { qrBitmap = bmp }
+                }
+            } else {
+                // C39 同款：服务没起来就不要展示扫不通的二维码
+                statusMessage = context.getString(R.string.server_config_start_failed)
+            }
         } else {
             statusMessage = context.getString(R.string.server_config_no_ip)
         }

@@ -23,6 +23,7 @@ import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.outlined.MusicNote
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -142,7 +143,6 @@ private fun LyricsViewInner(
     //    虚线指示条，松手后跳到虚线处歌词的起始时间播放。isDragSeeking 期间
     //    暂停自动跟行；tap（未滚动）不触发，普通浏览不受影响。
     var isDragSeeking by remember { mutableStateOf(false) }
-    var seekTargetLine by remember { mutableStateOf(-1) }
     // 修复（17:51 真机反馈）：LazyColumn 的 scrollable 发出的是 DragInteraction
     // 而非 PressInteraction——collectIsPressedAsState 永远收不到事件，
     // isDragSeeking 不会激活，拖拽跳转整体无效。改 collectIsDraggedAsState。
@@ -173,17 +173,24 @@ private fun LyricsViewInner(
         }
     }
 
-    // 找到当前歌词行索引（逐字模式用高频时钟，逐行模式用原始 progress）
-    val effectiveTimeMs = if (highlightMode == LyricsHighlightMode.WORD_BY_WORD && isPlaying) {
-        lyricTickMs
-    } else {
-        currentTimeMs
-    }
+    // 逐字模式的判定只跟这两个入参有关，与 tick 无关 ⇒ 先算成普通 Boolean，
+    // 避免在下面的派生状态里重复求值。
+    val wordByWordActive = highlightMode == LyricsHighlightMode.WORD_BY_WORD && isPlaying
 
-    val currentIndex = lyrics.lines
-        .indexOfFirst { it.time > effectiveTimeMs }
-        .let { if (it == -1) lyrics.lines.size - 1 else it - 1 }
-        .coerceAtLeast(0)
+    // 当前歌词行索引。
+    //
+    // ⚠️ M36：原实现把「高频时钟」`lyricTickMs` **在本层解包读取**（先算 effectiveTimeMs，
+    // 再 indexOfFirst）⇒ 20fps 的 tick 每帧都会把整个 LyricsView（含 LazyColumn 里所有
+    // 可见 item 的参数）重新求值一遍。
+    // 现在改为 `derivedStateOf`：快照只在**派生结果变化**（换行）时才通知重组，
+    // tick 本身只与这个派生状态比较，不触发本层重组；逐字进度则下沉到 item 内部读（见下）。
+    // 顺带把 O(N) 的 `indexOfFirst` 换成二分（`findCurrentLineIndex`，与 K 歌页共用）。
+    val currentIndex by remember(lyrics, wordByWordActive) {
+        derivedStateOf {
+            val tick = if (wordByWordActive) lyricTickMs else currentTimeMs
+            findCurrentLineIndex(lyrics.lines, tick)
+        }
+    }
 
     LaunchedEffect(currentIndex, isDragSeeking) {
         // 拖拽跳转中暂停自动跟行；松手跳转后 currentIndex 变化会自然滚回当前行
@@ -197,27 +204,43 @@ private fun LyricsViewInner(
     LaunchedEffect(listDragged, listState.isScrollInProgress, longPressSeekEnabled) {
         if (!longPressSeekEnabled && listDragged && listState.isScrollInProgress && !isDragSeeking) {
             isDragSeeking = true
-            seekTargetLine = -1
         }
     }
 
     // 拖拽中：计算虚线指示处的目标行（LazyColumn item index = 行 index + 1，头部有 spacer）
-    if (isDragSeeking) {
-        val indicatorPx = with(androidx.compose.ui.platform.LocalDensity.current) { INDICATOR_OFFSET_Y.toPx() }.toInt()
-        val info = listState.layoutInfo
-        seekTargetLine = info.visibleItemsInfo.firstOrNull { item ->
-            item.index in 1..lyrics.lines.size &&
-                item.offset <= indicatorPx && item.offset + item.size > indicatorPx
-        }?.let { it.index - 1 } ?: -1
+    //
+    // L23：原先这是「组合期直接给 State 赋值 + 组合期读 listState.layoutInfo」——
+    // 组合期写状态是 Compose 明令禁止的副作用（每次重组都写一次，还可能 写→重组→再写 抖动），
+    // 而组合期读 layoutInfo 也会让**每次滚动帧**都触发本组件重组。
+    // 改成 derivedStateOf 派生值：只在 isDragSeeking / layoutInfo 变化时重算，
+    // 组合期只读不写；事件回调（松手跳转）通过 seekTargetLine 读当前派生值。
+    val indicatorDensity = androidx.compose.ui.platform.LocalDensity.current
+    val indicatorOffsetPx = remember(indicatorDensity) {
+        with(indicatorDensity) { INDICATOR_OFFSET_Y.toPx() }.toInt()
     }
+    // key 带上 indicatorOffsetPx：density 变了（分屏/字体缩放）偏移量会变，派生值必须跟着重建
+    val seekTargetLineState = remember(indicatorOffsetPx) {
+        derivedStateOf {
+            if (!isDragSeeking) {
+                -1
+            } else {
+                listState.layoutInfo.visibleItemsInfo.firstOrNull { item ->
+                    item.index in 1..lyrics.lines.size &&
+                        item.offset <= indicatorOffsetPx && item.offset + item.size > indicatorOffsetPx
+                }?.let { it.index - 1 } ?: -1
+            }
+        }
+    }
+    val seekTargetLine by seekTargetLineState
 
     // 松手（拖动即进入模式）：跳到目标行起始时间播放（DragInteraction.Stop = 手指抬起）。
     // 长按模式的松手由下方 detectDragGesturesAfterLongPress 的 onDragEnd 处理。
     LaunchedEffect(listDragged) {
         if (!longPressSeekEnabled && !listDragged && isDragSeeking) {
-            isDragSeeking = false
+            // ⚠️ 顺序不能反：派生值在 isDragSeeking=false 之后立即变成 -1，
+            //    必须先读目标行再关标志位。
             val target = seekTargetLine
-            seekTargetLine = -1
+            isDragSeeking = false
             if (target in lyrics.lines.indices) {
                 onSeekToLine?.invoke(lyrics.lines[target].time)
             }
@@ -254,7 +277,6 @@ private fun LyricsViewInner(
                         onDragStart = {
                             // 长按 → 进入跳转模式
                             isDragSeeking = true
-                            seekTargetLine = -1
                         },
                         onDrag = { change, dragAmount ->
                             // 跳转模式中拖动 = 滚动列表选行（手动驱动，禁用子列表滚动）
@@ -263,16 +285,15 @@ private fun LyricsViewInner(
                         },
                         onDragEnd = {
                             // 松手 → 跳到目标行起始时间播放并退出跳转模式
+                            // ⚠️ 同 L23：先读派生值，再关 isDragSeeking
                             val target = seekTargetLine
                             isDragSeeking = false
-                            seekTargetLine = -1
                             if (target in lyrics.lines.indices) {
                                 onSeekToLine?.invoke(lyrics.lines[target].time)
                             }
                         },
                         onDragCancel = {
                             isDragSeeking = false
-                            seekTargetLine = -1
                         }
                     )
                 }
@@ -293,7 +314,10 @@ private fun LyricsViewInner(
             item {
                 Box(modifier = Modifier.fillMaxWidth().padding(vertical = edgeSpacer))
             }
-            itemsIndexed(lyrics.lines) { index, line ->
+            // C31：补稳定 key。歌词是单曲静态列表、行内没有 per-item remember/LaunchedEffect，
+            // 所以缺 key 目前不会「串行状态」，但一旦将来在行内加动画/手势就会错位；
+            // key 里带 index 是为了防同一时间戳出现两行（重复 key 会直接崩）。
+            itemsIndexed(lyrics.lines, key = { index, line -> "$index:${line.time}" }) { index, line ->
                 val isCurrent = index == currentIndex
                 val played = index < currentIndex
                 val near = kotlin.math.abs(index - currentIndex) <= 1
@@ -320,7 +344,9 @@ private fun LyricsViewInner(
                     } else {
                         line.time + 3000L // 默认3秒
                     }
-                    val progress = lineProgress(line.time, nextLineTime, effectiveTimeMs)
+                    // M36：tick 在这里读 —— 于是 20fps 只让「当前这一行」的 item 重组。
+                    val tickMs = if (wordByWordActive) lyricTickMs else currentTimeMs
+                    val progress = lineProgress(line.time, nextLineTime, tickMs)
                     KaraokeLineText(
                         text = line.text,
                         progress = progress,

@@ -24,6 +24,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -235,6 +236,39 @@ class FeiniuAdapter(private val appContext: Context? = null) : BackendAdapter {
 
     // 安全修复（C-1）：不使用 trust-all，采用系统默认证书校验。
 
+    /**
+     * 认证头允许出现的主机（C05）。
+     *
+     * 飞牛的流地址 `track/stream` 会 302 到别的域（CDN / 反代），而
+     * **OkHttp 的 `RetryAndFollowUpInterceptor` 只剥离 `Authorization`**，
+     * 自定义头 `x-access-code` / `x-access-source` 会原样跟着重定向送到第三方。
+     * 访问码是服务端的一道口令，泄漏到不受控的域等于把口令交出去。
+     *
+     * ⇒ 由 [authHostInterceptor] 在每个**实际发出**的请求上按 host 精确比对（忽略大小写），
+     * 不一致就整组剥离。空串表示尚未 initialize ⇒ 一律剥离（宁可 401，也不外泄）。
+     */
+    @Volatile
+    private var authHost: String = ""
+
+    /** 见 [authHost]。只剥离头，不改 URL，也不阻断请求。 */
+    private val authHostInterceptor = okhttp3.Interceptor { chain ->
+        val request = chain.request()
+        val targetHost = request.url.host
+        if (authHost.isNotEmpty() && targetHost.equals(authHost, ignoreCase = true)) {
+            chain.proceed(request)
+        } else {
+            // 只记 host，不记任何凭据
+            AppLog.d(TAG, "stripAuthHeaders: 跨 host 请求（$targetHost ≠ $authHost）已剥离认证头")
+            chain.proceed(
+                request.newBuilder()
+                    .removeHeader(HEADER_ACCESS_CODE)
+                    .removeHeader(HEADER_ACCESS_SOURCE)
+                    .removeHeader("Authorization")
+                    .build()
+            )
+        }
+    }
+
     private val client: OkHttpClient by lazy {
         // R-6：注入共享连接池 / Dispatcher（BackendRegistry 持有，切后端不再累积线程池）
         OkHttpClient.Builder()
@@ -242,6 +276,9 @@ class FeiniuAdapter(private val appContext: Context? = null) : BackendAdapter {
             .connectionPool(com.nasmusic.tv.backend.BackendRegistry.sharedConnectionPool)
             .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
+            // C05：跨 host 剥离认证头。⛔ 必须是**网络**拦截器 —— 应用拦截器只看得到
+            // 最初的请求，重定向产生的中间请求只有网络拦截器能看到。
+            .addNetworkInterceptor(authHostInterceptor)
             .build()
     }
 
@@ -279,6 +316,8 @@ class FeiniuAdapter(private val appContext: Context? = null) : BackendAdapter {
             return@withContext false
         }
         apiBase = normalized
+        // C05：记住本后端的 host —— 认证头只对这一个 host 生效（见 authHostInterceptor）
+        authHost = normalized.toHttpUrlOrNull()?.host.orEmpty()
         AppLog.d(TAG, "initialize: apiBase=${UrlSanitizer.sanitize(apiBase)}")
 
         // 先探测访问码（飞牛开启「外网访问码」时，账号密码再对也登不上）
@@ -435,7 +474,10 @@ class FeiniuAdapter(private val appContext: Context? = null) : BackendAdapter {
             }
             userToken = token
             tokenGeneration++
-            AppLog.d(TAG, "login success, token=${token.take(8)}...")
+            // L10：令牌是可直接冒充用户的凭据（服务端只认 `Authorization: <userToken>`，
+            // 无过期时间、无二次校验）⇒ 连前 8 位都不该落盘。只记世代号，足以判断
+            // 「是否真的重新登录过」，排障时配合服务端日志即可定位。
+            AppLog.d(TAG, "login success, tokenGeneration=$tokenGeneration")
             true
         } catch (e: AuthExpiredException) {
             // 登录阶段收到令牌失效码：原因已在 dataOf 写入，直接失败
@@ -538,6 +580,8 @@ class FeiniuAdapter(private val appContext: Context? = null) : BackendAdapter {
         // 访问码是凭据：与令牌同生命周期，登出即失效
         encodedAccessCode = ""
         apiBase = ""
+        // C05：登出后不再承认任何 host（否则旧 base 的 host 仍会被放行注入头）
+        authHost = ""
         serverVersion = ""
         mediasrvVersion = ""
         synchronized(trackCoverIds) { trackCoverIds.clear() }

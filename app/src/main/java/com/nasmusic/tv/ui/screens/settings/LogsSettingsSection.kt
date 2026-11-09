@@ -11,6 +11,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -199,8 +201,24 @@ internal fun LogsSettingsSection(
                         modifier = Modifier.padding(start = 4.dp, top = 4.dp)
                     )
                 }
-                else -> visibleEntries.forEach { entry ->
-                    LogEntryRow(entry = entry, onOpen = { selectedEntry = entry })
+                // M44：最多 100 条日志原先是 forEach 一次性铺进非 lazy 的 Column ——
+                // 整个分区是外层 LazyColumn 里的**一个** item、行内也没有 key，
+                // 100 条多行 Text 全部实时布局，筛选/刷新一次就要全量重排。
+                // 改成有界高度的 LazyColumn：只组合可见项，key 用「时间戳 + 序号」。
+                // ⚠️ 高度必须有界：本分区外层是 verticalScroll 的 Column，
+                //    给 LazyColumn 无限高约束会直接崩（measured with infinity maximum height）。
+                else -> LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = LOG_LIST_MAX_HEIGHT),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    itemsIndexed(
+                        items = visibleEntries,
+                        key = { index, entry -> "${entry.timestamp}_$index" },
+                    ) { _, entry ->
+                        LogEntryRow(entry = entry, onOpen = { selectedEntry = entry })
+                    }
                 }
             }
         }
@@ -254,6 +272,15 @@ private data class LogsAction(
  * （设备侧读数，不参与阶梯），选中它时只显示 X 自身；放在 D 旁边会被读成
  * 「比全部更低一档」，而实际上「全部」里已经含 X。
  */
+/**
+ * M44：日志列表的最大可视高度。
+ *
+ * 取一个有界值而不是 `fillMaxHeight()`，是因为本分区最终嵌在**可垂直滚动**的设置页里，
+ * 无界高度约束会让 LazyColumn 直接抛 `measured with infinity maximum height constraints`。
+ * 360dp ≈ 6~7 条（单行条目）+ 滚动查看其余。
+ */
+private val LOG_LIST_MAX_HEIGHT = 360.dp
+
 private data class LogLevelFilter(val level: String, @StringRes val labelRes: Int)
 
 private val LOG_LEVEL_FILTERS = listOf(

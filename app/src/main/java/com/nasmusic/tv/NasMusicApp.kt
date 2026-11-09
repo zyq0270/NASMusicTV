@@ -718,7 +718,9 @@ autoDownloadController = com.nasmusic.tv.backend.download.AutoDownloadController
             downloadRepository = downloadRepository,
             downloadPathBuilder = pathBuilder,
             // F-4：注入应用级 scope，删除组件私有 scope（单例场景语义不变）
-            externalScope = applicationScope
+            externalScope = applicationScope,
+            // M11：导出完成后按目标设备路径重建曲库索引，否则新导出的歌要拔插一次才可见
+            usbIndexRefresh = { path -> localMusicRepository.scanUsbDevice(path) }
         )
 
         // 存储守护启动 + 崩溃恢复 + MediaTagWriter 全局配置

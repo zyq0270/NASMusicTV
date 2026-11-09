@@ -29,6 +29,7 @@ import androidx.tv.material3.ExperimentalTvMaterial3Api
 import androidx.tv.material3.Text
 import com.nasmusic.tv.R
 import com.nasmusic.tv.data.model.Lyrics
+import com.nasmusic.tv.data.model.LyricsLine
 import com.nasmusic.tv.ui.theme.FontSize
 import com.nasmusic.tv.ui.theme.NasMusicColors
 import kotlinx.coroutines.delay
@@ -117,10 +118,11 @@ private fun KaraokeLyricsViewInner(
     }
 
     // 找到当前歌词行索引
-    val currentIndex = lyrics.lines
-        .indexOfFirst { it.time > lyricTickMs }
-        .let { if (it == -1) lyrics.lines.size - 1 else it - 1 }
-        .coerceAtLeast(0)
+    //
+    // ⚠️ C30：原实现是 `indexOfFirst { it.time > tick }` —— 线性扫描，且**每 50ms 帧**都跑一遍
+    // （长歌词 200+ 行时就是每帧 200 次比较 + lambda 调用）。LRC 行按时间天然有序 ⇒ 改用二分。
+    // 语义与原来逐字节等价：找「第一个 time > tick」的行，再退一行；越界夹到合法范围。
+    val currentIndex = findCurrentLineIndex(lyrics.lines, lyricTickMs)
 
     // 滚动窗口：偶数索引行固定在顶部、奇数索引行固定在底部，另一槽位显示下一行。
     // 槽位不跳动：句2 开始播放时，顶部槽位内容换为句3（句2 已在底部），
@@ -195,6 +197,28 @@ internal fun karaokePacingFraction(progress: Float): Float {
     if (progress <= 0f) return 0f
     if (progress >= 1f) return 1f
     return progress.pow(KARAOKE_PACING_EXPONENT)
+}
+
+/**
+ * 当前应高亮的歌词行下标（C30）。
+ *
+ * 语义与 `lines.indexOfFirst { it.time > tickMs }` 完全一致：
+ * 取「第一个开始时间晚于当前时刻」的行，**前一行**就是正在唱的那行；
+ * 全部行都已开始 ⇒ 最后一行；空列表 ⇒ 0。
+ *
+ * `LyricsLine.time` 单调不减（LRC 解析保证），因此用二分而不是线性扫描 ——
+ * 本函数每 50ms 调一次，线性版在长歌词上是每帧 O(N)。
+ */
+internal fun findCurrentLineIndex(lines: List<LyricsLine>, tickMs: Long): Int {
+    if (lines.isEmpty()) return 0
+    var lo = 0
+    var hi = lines.size
+    while (lo < hi) {
+        val mid = (lo + hi) ushr 1
+        if (lines[mid].time > tickMs) hi = mid else lo = mid + 1
+    }
+    // lo = 第一个 time > tick 的下标（可能 == size）
+    return if (lo == 0) 0 else (lo - 1).coerceAtMost(lines.size - 1)
 }
 
 /**
@@ -303,6 +327,11 @@ internal fun KaraokeLineText(
 
         // 顶层层：黄色，按平滑进度裁剪揭示
         val lr = layout
+        // C30：各可视行的字符数**按布局缓存** —— 原先每帧 `(0 until rowCount).map{...}`
+        // 都要新分配一个 List（20fps × 每次 1~3 个 Integer → 持续的 GC 压力）。
+        val rowLengths = remember(lr) {
+            lr?.let { l -> (0 until l.lineCount).map { l.getLineEnd(it) - l.getLineStart(it) } } ?: emptyList()
+        }
         if (lr != null && progress > 0f) {
             Text(
                 text = text,
@@ -320,7 +349,6 @@ internal fun KaraokeLineText(
 
                         // 逐可视行处理：先覆盖本行全部区域，再进入下一行
                         val rowCount = lr.lineCount
-                        val rowLengths = (0 until rowCount).map { lr.getLineEnd(it) - lr.getLineStart(it) }
                         val rowCoverage = karaokeRowCoverage(rowLengths, coveredChars)
                         for (line in 0 until rowCount) {
                             val rowLen = rowLengths[line]

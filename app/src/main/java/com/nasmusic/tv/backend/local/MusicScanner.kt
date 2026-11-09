@@ -11,6 +11,8 @@ import com.nasmusic.tv.data.model.StorageType
 import com.nasmusic.tv.util.AppLog
 import com.nasmusic.tv.util.HashUtils
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import java.io.File
 
@@ -26,6 +28,14 @@ import java.io.File
 class MusicScanner(private val context: Context) {
 
     companion object {
+        /**
+         * M10：单次扫描的结果硬上限（30 万首 ≈ 一个 2TB 库的极限）。
+         *
+         * ⛔ 不能只靠「用户不会那么多」：`songs` 是 ArrayList，异常目录（软链环、
+         * 递归挂载）下可以无限增长，最后 OOM 在扫描线程上。
+         */
+        private const val MAX_SCAN_RESULTS = 300_000
+
         private const val TAG = "MusicScanner"
 
         /** 支持的音乐文件扩展名（文件系统扫描用） */
@@ -147,19 +157,34 @@ class MusicScanner(private val context: Context) {
         val root = File(rootPath)
         if (!root.exists() || !root.isDirectory) return@withContext songs
 
-        root.walkTopDown()
+        var visited = 0
+        var truncated = false
+        // M10：原实现是 `walkTopDown().forEach {}` —— 序列里**没有任何协作取消点**，
+        // 取消扫描（切盘/退出应用）之后仍会把整棵树走完、还继续往 songs 里塞结果。
+        // 现在每 64 个命中文件检查一次 ensureActive()，并按硬上限截断结果集。
+        for (file in root.walkTopDown()
             // 跳过 .tmp / 含 .nomedia 的目录（避免 .part 临时文件与下载目录被媒体扫描器读到）
             .onEnter { dir ->
                 dir.name !in excludeDirs && !File(dir, ".nomedia").exists()
             }
             .maxDepth(MAX_SCAN_DEPTH)
             .filter { it.isFile && it.extension.lowercase() in SUPPORTED_EXTENSIONS }
-            .forEach { file ->
-                val song = metadataResolver?.invoke(file) ?: scanFile(file, storageType)
-                if (song != null) songs.add(song)
+        ) {
+            // 每 64 个命中文件一个协作取消点（CancellationException 直接向上抛，不吞）
+            if ((++visited and 0x3F) == 0) currentCoroutineContext().ensureActive()
+            if (songs.size >= MAX_SCAN_RESULTS) {
+                truncated = true
+                break
             }
+            val song = metadataResolver?.invoke(file) ?: scanFile(file, storageType)
+            if (song != null) songs.add(song)
+        }
 
-        AppLog.d(TAG, "Scanned ${songs.size} songs from $rootPath")
+        AppLog.d(
+            TAG,
+            "Scanned ${songs.size} songs from $rootPath" +
+                if (truncated) " (truncated at MAX_SCAN_RESULTS=$MAX_SCAN_RESULTS)" else ""
+        )
         songs
     }
 

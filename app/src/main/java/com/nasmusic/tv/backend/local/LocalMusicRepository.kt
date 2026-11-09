@@ -214,6 +214,21 @@ class LocalMusicRepository(
     /** USB 设备变更时的定向扫描 */
     suspend fun scanUsbDevice(devicePath: String): ScanResult = withContext(Dispatchers.IO) {
         val scanned = scanner.scanPath(devicePath, StorageType.USB)
+        // C06：空扫描保护，与 fullScan / incrementalScan 同口径。
+        // 设备刚挂载（MediaStore 还没索引完）或查询异常时 `scanPath` 会返回空列表，
+        // 而下面的删除集按「该设备下所有 USB 条目」计算 ⇒ 会把整台设备的索引全删掉
+        // （Room 索引可重建，下次扫描自愈，但当下曲库会凭空少一整块，且 UI 立刻刷新）。
+        if (scanned.isEmpty()) {
+            AppLog.w(
+                TAG,
+                "scanUsbDevice: scanned list is empty for $devicePath, keep existing index (destructive-rebuild guard)"
+            )
+            return@withContext ScanResult(
+                newSongs = emptyList(),
+                deletedPaths = emptyList(),
+                updatedSongs = emptyList()
+            )
+        }
         // P2-2 修复（2026-09-16）：LocalSongEntity.path 存的是「file://<绝对路径>」URI，
         // 而传入的 devicePath 是挂载点裸路径 → 原前缀匹配永不命中，删除集恒为空，
         // 已移除文件的陈旧索引条目永远残留（上次审查 P0-7 修复因前缀不匹配实际是 no-op）。

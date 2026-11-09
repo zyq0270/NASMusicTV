@@ -10,6 +10,7 @@ import com.nasmusic.tv.data.model.Song
 import com.nasmusic.tv.util.AppLog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.net.URLEncoder
@@ -239,7 +240,23 @@ class BilibiliMvService(
         }
     }
 
-    /** 从 playurl 响应提取直链：优先 durl[].url，其次 dash.video[].baseUrl */
+    /**
+     * M16：该直链是否可信 —— 只接受 http/https 且 host 命中 B 站自有 CDN 后缀。
+     *
+     * ⛔ 直链最终交给 ExoPlayer 直接联网，而 `playurl` 的响应来自第三方代理端点：
+     * 没有白名单时，一个被劫持/投毒的响应可以把播放器指向任意地址
+     * （包括 `file://`、内网地址、纯 tracker）。CDN 域名集合按 2026-11 实测的
+     * `upos-sz-mirror*.bilivideo.com` / `*.hdslb.com` / `upos-*.akamaized.net` 取，
+     * 用**后缀**匹配以覆盖 regional/镜像子域。
+     */
+    private fun isTrustedMediaUrl(url: String): Boolean {
+        val u = url.toHttpUrlOrNull() ?: return false
+        if (u.scheme != "https" && u.scheme != "http") return false
+        val host = u.host.lowercase()
+        return TRUSTED_MEDIA_HOST_SUFFIXES.any { host == it || host.endsWith(it) }
+    }
+
+    /** 从 playurl 响应提取直链：优先 durl[].url，其次 dash.video[].baseUrl（M16 白名单过滤） */
     internal fun extractPlayUrl(body: String): String? {
         try {
             val json = gson.fromJson(body, JsonObject::class.java) ?: return null
@@ -250,7 +267,9 @@ class BilibiliMvService(
             if (durl != null) {
                 for (item in durl) {
                     val url = item?.asJsonObject?.get("url")?.asString
-                    if (!url.isNullOrBlank()) return url
+                    if (url.isNullOrBlank()) continue
+                    if (isTrustedMediaUrl(url)) return url
+                    AppLog.w(TAG, "extractPlayUrl: reject untrusted durl host=${url.toHttpUrlOrNull()?.host}")
                 }
             }
             val dash = data.getAsJsonObject("dash")
@@ -258,7 +277,9 @@ class BilibiliMvService(
             if (dashVideo != null) {
                 for (item in dashVideo) {
                     val url = item?.asJsonObject?.get("baseUrl")?.asString
-                    if (!url.isNullOrBlank()) return url
+                    if (url.isNullOrBlank()) continue
+                    if (isTrustedMediaUrl(url)) return url
+                    AppLog.w(TAG, "extractPlayUrl: reject untrusted dash host=${url.toHttpUrlOrNull()?.host}")
                 }
             }
             return null
@@ -398,6 +419,21 @@ class BilibiliMvService(
     )
 
     companion object {
+        /**
+         * M16：B 站自有 CDN 的可信 host 后缀（用于 [isTrustedMediaUrl]）。
+         *
+         * 用**后缀**匹配以覆盖 regional / 镜像子域：`upos-sz-mirrorcos.bilivideo.com`、
+         * `upos-hz-mirrorakam.akamaized.net`、`i0.hdslb.com` 等。⛔ 不要放通用 CDN
+         * 根域（如裸 `akamaized.net`）之外的宽泛项 —— 白名单越短越好维护。
+         */
+        private val TRUSTED_MEDIA_HOST_SUFFIXES = arrayOf(
+            ".bilivideo.com",
+            ".bilivideo.cn",
+            ".hdslb.com",
+            ".biliapi.net",
+            ".akamaized.net",
+        )
+
         private const val TAG = "BilibiliMvService"
 
         /** 预编译的 HTML 标签正则，避免每次解析 MV 标题时重复编译 */

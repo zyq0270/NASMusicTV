@@ -176,7 +176,11 @@ internal class WorldGlobeRenderer(context: Context) : VisualizerRenderer {
         val wv = WebView(context).apply {
             setBackgroundColor(android.graphics.Color.BLACK)
             settings.javaScriptEnabled = true
-            settings.allowFileAccess = true
+            // ⛔ L29：页面与脚本全部经虚拟资产域（https://appassets…）由
+            //    shouldInterceptRequest 流式提供，**不需要** file:// 能力。
+            //    开着它等于给页面留一条读本地文件的通道（一旦后续引入任何
+            //    外部输入到 JS 就变成真实面），直接关掉。
+            settings.allowFileAccess = false
             settings.domStorageEnabled = false
             settings.cacheMode = WebSettings.LOAD_NO_CACHE
             // ⛔ 禁焦三件套（MvPlaybackScreen 同款）：WebView 子树必须完全让出
@@ -233,6 +237,21 @@ internal class WorldGlobeRenderer(context: Context) : VisualizerRenderer {
                         AppLog.e("WorldGlobe", "asset not found, serving empty: $assetName", e)
                         emptyBody("text/plain")
                     }
+                }
+
+                /**
+                 * L29：本页是完全离线的单页应用，**任何**离开资产域的主框架导航都是
+                 * 异常（贴图/脚本里混进外链、后续改动引入跳转）。默认实现会照单全收
+                 * 并真联网，这里一律拦截，只记一条 w 便于定位是谁发的。
+                 */
+                override fun shouldOverrideUrlLoading(
+                    view: WebView?,
+                    request: WebResourceRequest?
+                ): Boolean {
+                    val url = request?.url ?: return true
+                    if (url.host == ASSET_HOST) return false
+                    AppLog.w("WorldGlobe", "blocked outbound navigation: ${url.scheme}://${url.host}${url.path}")
+                    return true
                 }
 
                 override fun onPageFinished(view: WebView?, url: String?) {
@@ -330,23 +349,37 @@ internal class WorldGlobeRenderer(context: Context) : VisualizerRenderer {
         attached = false
         handler.removeCallbacks(tickRunnable)
         // ⛔ 不能同步 destroy：onDispose 触发时 AndroidView 的 view 可能仍挂在
-        // 组合销毁流程中，直接 destroy 会崩。post 到主线程队列（此时组合销毁
-        // 已完成、view 已 detach），并先摘除父容器再销毁。
+        // 组合销毁流程中，直接 destroy 会崩。先后置空引用、再由主线程队列延后销毁。
+        //
+        // C41：⛔ 此处**不能**用 `wv.post { }`。View.post 在 view 已 detach（无 attachInfo）
+        // 时只是把 Runnable 塞进自身的 HandlerActionQueue，等**下一次 attach** 才执行；
+        // 而这里正是「已 detach 且不会再 attach」的场景 ⇒ Runnable 永不执行 ⇒
+        // WebView（含 WebViewChromium 的 native 侧）永久泄漏。改由本类主线程 Handler 代发。
         val wv = webView
         webView = null
-        wv?.post {
-            try {
-                (wv.parent as? ViewGroup)?.removeView(wv)
-                wv.destroy()
-            } catch (_: Exception) {
-            }
-        }
+        if (wv != null) handler.post { destroyWebView(wv) }
     }
 
     override fun onExit() {
         attached = false
         handler.removeCallbacks(tickRunnable)
-        // WebView 销毁统一交给 onViewDetached（AndroidView 组销毁路径）
+        // C42 同族兜底：onExit 之后 AndroidView 的 onDispose 不一定发生（切换渲染器时
+        // 组合可能被缓存/复用），这里直接补一次销毁，destroyWebView 幂等。
+        val wv = webView
+        webView = null
+        if (wv != null) handler.post { destroyWebView(wv) }
+    }
+
+    /** 幂等的 WebView 销毁：摘父容器 + destroy（重复调用安全） */
+    private fun destroyWebView(wv: WebView) {
+        try {
+            (wv.parent as? ViewGroup)?.removeView(wv)
+        } catch (_: Exception) {
+        }
+        try {
+            wv.destroy()
+        } catch (_: Exception) {
+        }
     }
 
     // ── 音频桥接（100ms 事件粒度）────────────────────────────────────────
@@ -354,8 +387,16 @@ internal class WorldGlobeRenderer(context: Context) : VisualizerRenderer {
     private val tickRunnable = object : Runnable {
         override fun run() {
             if (!attached || webView == null) return
-            tick()
-            handler.postDelayed(this, TICK_MS)
+            // N10：tick() 里任何意外异常（含 Gson 对 NaN 抛 IllegalArgumentException）
+            // 都会打断重排程 ⇒ 100ms 链路永久停摆且无任何日志。用 try/finally 保证
+            // 「只要还 attached 就继续排下一次」，异常本身记一条 e 后吞掉。
+            try {
+                tick()
+            } catch (e: Exception) {
+                AppLog.e("WorldGlobe", "tick failed", e)
+            } finally {
+                if (attached) handler.postDelayed(this, TICK_MS)
+            }
         }
     }
 
@@ -383,7 +424,23 @@ internal class WorldGlobeRenderer(context: Context) : VisualizerRenderer {
         null
     }
 
-    private fun ema(old: Float, v: Float): Float = old + (v - old) * EMA_ALPHA
+    /**
+     * C44：EMA 平滑（NaN/Inf 免疫）。
+     *
+     * ⛔ 不能用一行 `old + (v - old) * ALPHA`：上游音量一旦出现 NaN（解码异常、
+     * 除零、残留脏帧），NaN 会永久粘在这个状态里（NaN 与任何数运算仍是 NaN），
+     * 之后每帧 `sendAudio` 都会把 NaN 交给 `gson.toJson` —— Gson 默认**拒绝** NaN
+     * （抛 IllegalArgumentException）⇒ 100ms tick 链路整条被打死，画面冻结。
+     * 所以入口把非有限值当 0 处理，状态里永远只有有限值。
+     */
+    private fun ema(old: Float, v: Float): Float {
+        val input = if (v.isFinite()) v else 0f
+        val cur = if (old.isFinite()) old else 0f
+        return cur + (input - cur) * EMA_ALPHA
+    }
+
+    /** C44：交 JS 前把量规整到 0..1 并对 NaN/Inf 兜底（`coerceIn` 对 NaN 无效） */
+    private fun safeUnit(v: Float): Float = if (v.isFinite()) v.coerceIn(0f, 1f) else 0f
 
     // ── 航线维护 ──────────────────────────────────────────────────────────
 
@@ -538,11 +595,11 @@ internal class WorldGlobeRenderer(context: Context) : VisualizerRenderer {
 
     private fun sendAudio() {
         val params = mapOf(
-            "energy" to emaEnergy.coerceIn(0f, 1f),
-            "bass" to emaBass.coerceIn(0f, 1f),
-            "mid" to emaMid.coerceIn(0f, 1f),
-            "treble" to emaTreble.coerceIn(0f, 1f),
-            "beat" to emaBeat.coerceIn(0f, 1f)
+            "energy" to safeUnit(emaEnergy),
+            "bass" to safeUnit(emaBass),
+            "mid" to safeUnit(emaMid),
+            "treble" to safeUnit(emaTreble),
+            "beat" to safeUnit(emaBeat)
         )
         evalJs("WorldGlobe.setAudio(${gson.toJson(params)})")
     }

@@ -4,6 +4,7 @@ import com.google.gson.Gson
 import com.google.gson.JsonObject
 import com.nasmusic.tv.data.model.RadioStation
 import com.nasmusic.tv.util.AppLog
+import com.nasmusic.tv.util.NetAddressGuard
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.util.concurrent.TimeUnit
@@ -150,8 +151,20 @@ class RadioBrowserClient(
         try {
             val uuid = obj.get("stationuuid")?.takeIf { !it.isJsonNull }?.asString ?: return null
             val name = obj.get("name")?.takeIf { !it.isJsonNull }?.asString ?: return null
-            val urlResolved = obj.get("url_resolved")?.takeIf { !it.isJsonNull }?.asString
-                ?: obj.get("url")?.takeIf { !it.isJsonNull }?.asString ?: return null
+            // C23：`radio-browser.info` 是**公共可写**数据库，`url_resolved` 由任何注册者填写，
+            // 完全不可信。原实现原样塞进 `Song.streamUrl` ⇒ 播放器会去连
+            // `http://127.0.0.1:...` / `192.168.x.x` / `169.254.169.254` 之类的地址
+            // （内网探测、云元数据端点）。这里只接受**公网 http(s)**。
+            // ⚠️ 校验在「取更可信的 url_resolved」之前做：`url` 也同样不可信，不能当退路。
+            val candidates = listOfNotNull(
+                obj.get("url_resolved")?.takeIf { !it.isJsonNull }?.asString,
+                obj.get("url")?.takeIf { !it.isJsonNull }?.asString,
+            )
+            val urlResolved = candidates.firstOrNull { NetAddressGuard.rejectReason(it) == null }
+                ?: run {
+                    AppLog.d(TAG, "parseStation: reject untrusted stream url (uuid ignored)")
+                    return null
+                }
             val favicon = obj.get("favicon")?.takeIf { !it.isJsonNull }?.asString
             val countryCode = obj.get("countrycode")?.takeIf { !it.isJsonNull }?.asString ?: ""
             val country = obj.get("country")?.takeIf { !it.isJsonNull }?.asString ?: ""
@@ -164,7 +177,9 @@ class RadioBrowserClient(
                 uuid = uuid,
                 name = name,
                 urlResolved = urlResolved,
-                faviconUrl = favicon?.takeIf { it.startsWith("http") },
+                // C23：封面同样由 Coil 直接请求 ⇒ 也要过地址白名单（原先只判 "http" 前缀，
+                // 连 `http://127.0.0.1:8080/x.png` 都放行）
+                faviconUrl = favicon?.takeIf { NetAddressGuard.rejectReason(it) == null },
                 countryCode = countryCode,
                 country = country,
                 tags = tags,

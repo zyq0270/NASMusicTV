@@ -97,21 +97,21 @@ class BilibiliMvServiceTest {
     fun `extractPlayUrl durl 数组返回第一个 url`() {
         val body = """
             {"code":0,"data":{"durl":[
-                {"url":"https://example.com/video_part1.mp4","size":1000},
-                {"url":"https://example.com/video_part2.mp4","size":500}
+                {"url":"https://upos-sz-mirrorcos.bilivideo.com/video_part1.mp4","size":1000},
+                {"url":"https://upos-sz-mirrorcos.bilivideo.com/video_part2.mp4","size":500}
             ]}}
         """.trimIndent()
-        assertEquals("https://example.com/video_part1.mp4", service.extractPlayUrl(body))
+        assertEquals("https://upos-sz-mirrorcos.bilivideo.com/video_part1.mp4", service.extractPlayUrl(body))
     }
 
     @Test
     fun `extractPlayUrl durl 空时回退 dash baseUrl`() {
         val body = """
             {"code":0,"data":{"durl":[],"dash":{"video":[
-                {"baseUrl":"https://example.com/dash_video.m4s","codecs":"avc1"}
+                {"baseUrl":"https://upos-hz-mirrorakam.akamaized.net/dash_video.m4s","codecs":"avc1"}
             ]}}}
         """.trimIndent()
-        assertEquals("https://example.com/dash_video.m4s", service.extractPlayUrl(body))
+        assertEquals("https://upos-hz-mirrorakam.akamaized.net/dash_video.m4s", service.extractPlayUrl(body))
     }
 
     @Test
@@ -135,10 +135,34 @@ class BilibiliMvServiceTest {
         val body = """
             {"code":0,"data":{"durl":[
                 {"url":"","size":0},
-                {"url":"https://example.com/valid.mp4","size":100}
+                {"url":"https://i0.hdslb.com/valid.mp4","size":100}
             ]}}
         """.trimIndent()
-        assertEquals("https://example.com/valid.mp4", service.extractPlayUrl(body))
+        assertEquals("https://i0.hdslb.com/valid.mp4", service.extractPlayUrl(body))
+    }
+
+    @Test
+    fun `extractPlayUrl 拒绝非 B 站 CDN 的直链`() {
+        // M16：直链最终交给 ExoPlayer 直接联网，而 playurl 响应来自第三方代理端点 ——
+        // 没有白名单时，一个被投毒/劫持的响应可以把播放器指向任意地址（含内网与 file://）。
+        val body = """
+            {"code":0,"data":{"durl":[
+                {"url":"https://example.com/evil.mp4","size":1},
+                {"url":"http://169.254.169.254/latest/meta-data","size":1}
+            ]}}
+        """.trimIndent()
+        assertNull(service.extractPlayUrl(body))
+    }
+
+    @Test
+    fun `extractPlayUrl 跳过不可信直链取下一个可信的`() {
+        val body = """
+            {"code":0,"data":{"durl":[
+                {"url":"https://evil.example.net/a.mp4","size":1},
+                {"url":"https://upos-sz-mirrorcos.bilivideo.com/good.mp4","size":2}
+            ]}}
+        """.trimIndent()
+        assertEquals("https://upos-sz-mirrorcos.bilivideo.com/good.mp4", service.extractPlayUrl(body))
     }
 
     @Test

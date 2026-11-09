@@ -1151,7 +1151,9 @@ class JellyfinAdapter : BackendAdapter {
         if (gbk != null && '\uFFFD' !in gbk) {
             // 标记哪些响应触发了 GBK 回退，便于排查编码问题
             // 注意：AGENTS.md 已说明部分双重编码情况不可恢复
-            AppLog.d("JellyfinAdapter", "utf8Body: GBK fallback applied for ${request.url} (U+FFFD detected in UTF-8)")
+            // L08：同一函数下一行已经改用 `UrlSanitizer.sanitize` —— Jellyfin 的 api_key
+            // 是明文 query 参数，直接把 `request.url` 打进日志会把它落盘。
+            AppLog.d("JellyfinAdapter", "utf8Body: GBK fallback applied for ${UrlSanitizer.sanitize(request.url.toString())} (U+FFFD detected in UTF-8)")
             return gbk
         }
         AppLog.w("JellyfinAdapter", "utf8Body: U+FFFD present but GBK fallback failed for ${UrlSanitizer.sanitize(request.url.toString())}, using UTF-8 as-is")

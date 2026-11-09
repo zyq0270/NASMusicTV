@@ -14,6 +14,7 @@ import com.nasmusic.tv.data.model.BackupMessage
 import com.nasmusic.tv.data.model.PlaylistImportHistoryItem
 import com.nasmusic.tv.data.prefs.AppPreferences
 import com.nasmusic.tv.util.AppLog
+import com.nasmusic.tv.util.rethrowIfCancellation
 import java.util.Collections
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.Dispatchers
@@ -137,6 +138,7 @@ class PlaylistImportViewModel(
                     }
                 )
             } catch (e: Exception) {
+                e.rethrowIfCancellation()
                 AppLog.e("PlaylistImportViewModel", "import failed", e)
                 _importMessage.value = BackupMessage(
                     appCtx.getString(R.string.playlist_import_failed, e.message?.take(60) ?: ""),
@@ -301,6 +303,7 @@ class PlaylistImportViewModel(
                                     }
                                 }
                                 .onFailure { e ->
+                                    e.rethrowIfCancellation()
                                     AppLog.w("PlaylistImportViewModel", "enrich '${stub.title}' failed: ${e.message}")
                                 }
                         }

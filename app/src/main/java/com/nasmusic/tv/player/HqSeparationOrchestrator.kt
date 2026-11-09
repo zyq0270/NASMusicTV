@@ -7,6 +7,7 @@ import com.nasmusic.tv.R
 import com.nasmusic.tv.data.model.Song
 import com.nasmusic.tv.util.AppLog
 import com.nasmusic.tv.util.DeviceDiagnostics
+import com.nasmusic.tv.util.rethrowIfCancellation
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -311,41 +312,51 @@ class HqSeparationOrchestrator(
                 val outFile = File(tempDir, "${song.id}_input.tmp")
 
                 val request = Request.Builder().url(streamUrl).build()
-                val response = httpClient.newCall(request).execute()
-                if (!response.isSuccessful) {
-                    AppLog.w(TAG, "resolveInputPath: download failed, HTTP ${response.code}")
-                    lastDownloadError = appContext.getString(R.string.player_download_http_error, response.code)
-                    return@withContext null
-                }
+                // C12：整个下载分支都用 `use{}` 包住 —— 「HTTP 非 2xx」与「body == null」
+                // 这两条早退路径原先直接 `return@withContext`，Response **从未关闭**
+                // ⇒ 连接滞留在连接池里（成功路径原本靠 `body.byteStream().use` 顺带释放，
+                // 早退路径没有任何兜底）。
+                httpClient.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) {
+                        AppLog.w(TAG, "resolveInputPath: download failed, HTTP ${response.code}")
+                        lastDownloadError =
+                            appContext.getString(R.string.player_download_http_error, response.code)
+                        return@use null
+                    }
 
-                val body = response.body ?: return@withContext null
-                val contentLength = body.contentLength()
-                var downloaded = 0L
-                // 节流：只在百分比整数变化 ≥1% 时才更新 StateFlow，避免淹没 Main 线程
-                var lastReportedPercent = -1
+                    val body = response.body ?: return@use null
+                    val contentLength = body.contentLength()
+                    var downloaded = 0L
+                    // 节流：只在百分比整数变化 ≥1% 时才更新 StateFlow，避免淹没 Main 线程
+                    var lastReportedPercent = -1
 
-                body.byteStream().use { input ->
-                    outFile.outputStream().use { output ->
-                        val buffer = ByteArray(8192)
-                        var bytesRead: Int
-                        while (input.read(buffer).also { bytesRead = it } != -1) {
-                            output.write(buffer, 0, bytesRead)
-                            downloaded += bytesRead
-                            if (contentLength > 0) {
-                                val pct = downloaded.toFloat() / contentLength.toFloat()
-                                val intPercent = (pct * 100).toInt()
-                                // 只在整百分比变化 ≥1 时才更新，大幅减少 StateFlow 发射次数
-                                if (intPercent != lastReportedPercent) {
-                                    lastReportedPercent = intPercent
-                                    _separationProgress.value = (0.05f + pct * 0.15f) to progressStage
+                    body.byteStream().use { input ->
+                        outFile.outputStream().use { output ->
+                            val buffer = ByteArray(8192)
+                            var bytesRead: Int
+                            while (input.read(buffer).also { bytesRead = it } != -1) {
+                                output.write(buffer, 0, bytesRead)
+                                downloaded += bytesRead
+                                if (contentLength > 0) {
+                                    val pct = downloaded.toFloat() / contentLength.toFloat()
+                                    val intPercent = (pct * 100).toInt()
+                                    // 只在整百分比变化 ≥1% 时才更新，大幅减少 StateFlow 发射次数
+                                    if (intPercent != lastReportedPercent) {
+                                        lastReportedPercent = intPercent
+                                        _separationProgress.value =
+                                            (0.05f + pct * 0.15f) to progressStage
+                                    }
                                 }
                             }
                         }
                     }
-                }
 
-                AppLog.d(TAG, "resolveInputPath: downloaded ${outFile.length()} bytes for '${song.title}'")
-                outFile.absolutePath
+                    AppLog.d(
+                        TAG,
+                        "resolveInputPath: downloaded ${outFile.length()} bytes for '${song.title}'",
+                    )
+                    outFile.absolutePath
+                }
             }
             if (tempFile == null) {
                 // lastDownloadError 已在内部设置
@@ -362,6 +373,12 @@ class HqSeparationOrchestrator(
             AppLog.e(TAG, "resolveInputPath: network error", e)
             lastDownloadError = appContext.getString(R.string.player_download_network_error, e.message ?: e.javaClass.name)
             null
+        } catch (e: CancellationException) {
+            // C13：⛔ 必须原样重抛 —— `CancellationException` 是 `IllegalStateException` 的子类，
+            // 会被下面的 `catch (Exception)` 吞成「下载失败 ⇒ null」：
+            // 外层 `separationJob` 收不到取消信号，于是回退 FAST 模式并在**已 release**
+            // 的播放器上 `host.play()`（真正的故障源是那条静默的回退路径）。
+            throw e
         } catch (e: Exception) {
             AppLog.e(TAG, "resolveInputPath: download exception", e)
             lastDownloadError = appContext.getString(R.string.player_download_exception, e.message ?: e.javaClass.name)
@@ -475,6 +492,10 @@ class HqSeparationOrchestrator(
             _separating.value = true
             separationStartTimeMs = System.currentTimeMillis()
             var tempInputPath: String? = null
+            // M03：分离是否**真的产出了**伴奏。finally 里的 saveOriginalFile 必须以此为前提，
+            // 否则取消/下载中断/分离失败时都会把半截音频缓存成「永久原声」
+            // （而 saveOriginalFile 内部有 if (!dest.exists()) 保护 ⇒ 之后成功也不会覆盖）。
+            var separationSucceeded = false
             separationJob = scope.launch {
                 try {
                     // 解析输入路径（本地文件 或 下载 streamUrl）
@@ -568,6 +589,7 @@ class HqSeparationOrchestrator(
                         _hqSuccess.value = appContext.getString(R.string.hq_success_separation_done, totalSec)
                         // 本轮成功：上一轮留存的失败详情失效，一并清除
                         _hqErrorDetail.value = null
+                        separationSucceeded = true
                         host.setFastVocalRemoval(false)
                         switchToAccompaniment(result.accompanimentFile.absolutePath)
                         if (wasPlayingBeforeSeparation) host.play()
@@ -594,6 +616,7 @@ class HqSeparationOrchestrator(
                     host.setFastVocalRemoval(true)
                     if (wasPlayingBeforeSeparation) host.play()
                 } catch (e: Exception) {
+                    e.rethrowIfCancellation()
                     AppLog.e(TAG, "enableHighQualityRemoval: exception", e)
                     val msg = appContext.getString(R.string.hq_error_exception_with_suffix, e.message ?: e.javaClass.name)
                     _hqError.value = msg
@@ -613,7 +636,9 @@ class HqSeparationOrchestrator(
                     // 文件会被这一步一并删掉，之后切回原唱时文件已不存在。
                     // 两行顺序不可调换，cleanupTempFile 也不可省略（否则临时文件残留）。
                     val inputPath = tempInputPath
-                    if (inputPath != null && songId != null) {
+                    // M03：⛔ 只有本轮真正分离成功才缓存原声 —— 失败/取消时的输入可能是
+                    // 下载了一半的临时文件，缓存下来会被当成永久原声（且后续成功也不覆盖）。
+                    if (separationSucceeded && inputPath != null && songId != null) {
                         accompanimentCache?.saveOriginalFile(songId, inputPath)
                     }
                     // 清理临时下载文件

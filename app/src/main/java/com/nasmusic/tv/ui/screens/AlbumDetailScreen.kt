@@ -244,7 +244,9 @@ fun AlbumDetailScreen(
                     state = listState,
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    itemsIndexed(songs, key = { _, song -> song.id }) { index, song ->
+                    // M29：歌单/专辑/电台里同一首歌完全可能重复出现，只用 song.id 做 key 会撞
+                    // 「Key was already used」直接崩溃 ⇒ 索引前缀保证唯一。
+                    itemsIndexed(songs, key = { index, song -> "${index}_${song.id}" }) { index, song ->
                         UnifiedSongRow(
                             song = song,
                             onClick = { onPlaySong(song) },

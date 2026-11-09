@@ -348,7 +348,9 @@ class BaiduPanApi(
             client.newCall(req).execute().use { resp ->
                 val body = resp.body?.string() ?: return BaiduListResult(emptyList(), false, errno = -1)
                 if (!resp.isSuccessful) {
-                    AppLog.w(TAG, "request failed url=${sanitizeUrl(url)} code=${resp.code} body=$body")
+                    // N05：与 executeOnce 同口径 —— 只截 200 字。
+                    // 百度网盘的错误响应体可能很长（含整页 HTML），原样写进日志会灌满 LogStore。
+                    AppLog.w(TAG, "request failed url=${sanitizeUrl(url)} code=${resp.code} body=${body.take(200)}")
                     return BaiduListResult(emptyList(), false, errno = -1)
                 }
                 val json = gson.fromJson(body, JsonObject::class.java) ?: return BaiduListResult(emptyList(), false, errno = -1)
@@ -356,7 +358,10 @@ class BaiduPanApi(
                 if (errno != 0) {
                     val desc = BaiduNetdiskConfig.describeErrno(context, errno)
                     AppLog.w(TAG, "errno=$errno $desc url=${sanitizeUrl(url)}")
-                    AppLog.w(TAG, "full response body: $body")
+                    // C20：⛔ 不得记录完整响应体 —— w 级日志在 release 仍会落 LogStore
+                    // （仅 logcat 受 DEBUG 限制），完整 body 会随「导出日志」一起带出去。
+                    // 同文件 executeOnce 早已用 take(200) 形成惯例，这里对齐。
+                    AppLog.w(TAG, "response body(200): ${body.take(200)}")
                     onApiError?.invoke(errno, desc)
                 }
                 parser(json).copy(errno = errno)

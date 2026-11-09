@@ -23,6 +23,7 @@ import com.nasmusic.tv.player.PlayerManager
 import com.nasmusic.tv.util.AppLog
 import com.nasmusic.tv.util.LocalFilePicker
 import com.nasmusic.tv.util.StorageUtils
+import com.nasmusic.tv.util.rethrowIfCancellation
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -362,19 +363,33 @@ class DownloadViewModel(
         _modelDownloadedMB.value = 0L
         _modelTotalMB.value = mgr.getExpectedSizeMB().toLong()
         viewModelScope.launch {
-            val error = mgr.downloadModel { downloaded, total ->
-                _modelDownloadedMB.value = downloaded / (1024 * 1024)
-                _modelTotalMB.value = total / (1024 * 1024)
-                _modelDownloadProgress.value = if (total > 0) downloaded.toFloat() / total else 0f
-            }
-            _modelDownloading.value = false
-            if (error == null) {
-                _modelDownloaded.value = true
-                _modelSizeMB.value = mgr.getModelSizeMB()
-                _modelDownloadProgress.value = 1f
-            } else {
-                _modelDownloadError.value = error
+            // C36：`_modelDownloading` 必须由 finally 复位。
+            // `ModelDownloadManager` 把常规失败都转成 String? 返回值，所以这里真正的风险
+            // 只剩「取消 / 意外异常」—— 一旦漏掉，两个入口（下载、导入）都会因为
+            // `if (_modelDownloading.value) return` 永久失灵，直到进程重启。
+            try {
+                val error = mgr.downloadModel { downloaded, total ->
+                    _modelDownloadedMB.value = downloaded / (1024 * 1024)
+                    _modelTotalMB.value = total / (1024 * 1024)
+                    _modelDownloadProgress.value = if (total > 0) downloaded.toFloat() / total else 0f
+                }
+                if (error == null) {
+                    _modelDownloaded.value = true
+                    _modelSizeMB.value = mgr.getModelSizeMB()
+                    _modelDownloadProgress.value = 1f
+                } else {
+                    _modelDownloadError.value = error
+                    _modelDownloaded.value = false
+                }
+            } catch (e: Exception) {
+                e.rethrowIfCancellation()
+                AppLog.e("DownloadViewModel", "downloadModel failed", e)
+                _modelDownloadError.value = getApplication<Application>().getString(
+                    R.string.model_msg_import_failed, e.message ?: e.javaClass.simpleName
+                )
                 _modelDownloaded.value = false
+            } finally {
+                _modelDownloading.value = false
             }
         }
     }
@@ -426,6 +441,7 @@ class DownloadViewModel(
                 _modelPath.value = target.absolutePath
                 _modelDownloadProgress.value = 1f
             } catch (e: Exception) {
+                e.rethrowIfCancellation()
                 AppLog.e("DownloadViewModel", "importModelFromUri failed", e)
                 _modelDownloadError.value = appCtx.getString(
                     R.string.model_msg_import_failed, e.message ?: e.javaClass.simpleName

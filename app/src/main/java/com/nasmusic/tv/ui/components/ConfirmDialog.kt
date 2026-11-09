@@ -48,6 +48,13 @@ fun ConfirmDialog(
 ) {
     // Level 1: 注册 BACK 键回调 —— 打开对话框时，BACK 键关闭对话框
     RegisterDialogBackHandler(onDismiss)
+    // M23：上面这层是**应用级**的五级 BACK 状态机，只在同一个 window 内有效。
+    // 调用方普遍把本组件塞进真 `Dialog` 且写 `dismissOnBackPress = false`（防误触关闭），
+    // 那种情况下 BACK 被 Dialog 窗口自己吃掉、根本不会派发到 Activity 的 dispatcher
+    // ⇒ 用户按返回键既关不掉弹窗、也退不出页面（"卡死"感）。
+    // 这里再挂一个 workflow 级的 BackHandler：Dialog 场景下它绑在 dialog 自己的
+    // dispatcher 上，遮罩场景下与上面那层等价（都只是 onDismiss，幂等）。
+    androidx.activity.compose.BackHandler { onDismiss() }
 
     // 焦点管理：破坏性操作默认聚焦「取消」，非破坏性默认聚焦「确定」
     val confirmFocusRequester = remember { FocusRequester() }

@@ -112,7 +112,22 @@ class SongDownloadManager(
      * executeDownload 的重试判定看到 cancelRequested=true 后不再重试、直接落 FAILED。
      */
     @Volatile
-    private var cancelRequested = false
+    private var cancelGeneration: Long = 0L
+
+    /**
+     * 当前任务的世代号（C08）。
+     *
+     * 原先是一个全局布尔 `cancelRequested`：`executeDownload` 开头把它复位成 false，
+     * 而 `cancelAll()` 随时可能置 true ⇒ 存在两个方向的竞态：
+     * ① 复位动作落在一个**已被取消、还没退出**的上一个任务的判定之前（它于是继续重试）；
+     * ② 取消落在「复位之后、任务真正开始」之间（新任务一出生就带着取消状态）。
+     *
+     * 改成单调递增的世代号后，任务只在启动瞬间领号，判定退化为「我的号还是不是最新的」：
+     * 复位动作彻底消失，两个方向的窗口都不存在。
+     * ⚠️ 只有 loop() 这一个消费者，同一时刻只有一个 executeDownload ⇒ 单字段足够。
+     */
+    @Volatile
+    private var activeTaskGeneration: Long = 0L
 
     /**
      * M4 修复（2026-10-06）：下载后置段（封面/歌词/rename/embed/落库）的取消检查点。
@@ -120,8 +135,11 @@ class SongDownloadManager(
      * 若不主动检查，cancelAll 标记的 FAILED 会被随后的 upsert(COMPLETED) 无条件覆盖。
      */
     private fun checkCancelled() {
-        if (cancelRequested) throw DownloadCancelledException()
+        if (isCancelRequested()) throw DownloadCancelledException()
     }
+
+    /** C08：本任务是否已被取消 —— 只比较世代号，不看任何复位过的布尔。 */
+    private fun isCancelRequested(): Boolean = activeTaskGeneration != cancelGeneration
 
     /** M4 修复：取消专用异常——executeDownload 的重试判定看到后不重试、直接落 FAILED */
     private class DownloadCancelledException : java.io.IOException("download cancelled by user")
@@ -182,8 +200,8 @@ class SongDownloadManager(
         val auto = req.auto
         // 占位 key：解析完成前用"请求档位"标记状态，解析后若降级会迁移到实际档位 key
         var key = song.downloadKeyOf(req.quality)
-        // P1-5：新任务开始执行 → 上一次 cancelAll 的取消窗口结束
-        cancelRequested = false
+        // C08：领号（取代原先「复位 cancelRequested」的动作 —— 复位本身就是竞态来源）
+        activeTaskGeneration = cancelGeneration
 
         // 幂等检查：已在下载队列中或已完成 → 不重复下载
         val current = repo.get(key)
@@ -227,12 +245,35 @@ class SongDownloadManager(
                 DownloadResult.Failure(e.message)
             }
 
-            if (result is DownloadResult.Success || result is DownloadResult.Already) return result
+            if (result is DownloadResult.Success || result is DownloadResult.Already) {
+                if (result is DownloadResult.Already) {
+                    // C07：入口幂等的 Already 分支已经写过 Completed，但 `singleAttempt` 里
+                    // 「降级后二次去重」返回的 Already 没有 —— 那时 `_downloadStates[key]`
+                    // 还停在 `Downloading(0)`（条目已被 onQualityResolved 迁到实际档位 key）
+                    // ⇒ UI 永久卡在 0%，任务其实早就完成了。
+                    // 按 DB 实际记录回填 Completed；库中若查不到就移除条目（不要留幽灵行）。
+                    val record = repo.get(key)
+                    _downloadStates.update { states ->
+                        if (record != null && record.status == DownloadStatus.COMPLETED.name) {
+                            states + (key to DownloadState.Completed(
+                                record.audioPath ?: "",
+                                coverPath = record.coverPath,
+                                lyricPath = record.lyricPath,
+                                embedded = record.embedded,
+                                quality = record.quality
+                            ))
+                        } else {
+                            states - key
+                        }
+                    }
+                }
+                return result
+            }
             if (result is DownloadResult.QuotaExceeded || result is DownloadResult.Disabled) return result
             if (result is DownloadResult.StorageFull || result is DownloadResult.NotDownloadable) return result
 
             // P1-5：cancelAll 已置位 → 不再重试，直接落 FAILED
-            if (cancelRequested) {
+            if (isCancelRequested()) {
                 repo.updateStatus(key, DownloadStatus.FAILED, 0, "已取消")
                 _downloadStates.update { it - key }
                 return result
@@ -242,7 +283,7 @@ class SongDownloadManager(
             val reason = (result as? DownloadResult.Failure)?.reason
             val httpCode = reason?.removePrefix("HTTP ")?.toIntOrNull()
             val shouldNotRetry = httpCode != null && httpCode in NO_RETRY_CODES
-            if (attempt <= MAX_RETRY && !shouldNotRetry && !cancelRequested) {
+            if (attempt <= MAX_RETRY && !shouldNotRetry && !isCancelRequested()) {
                 val delayMs = RETRY_DELAYS.getOrElse(attempt - 1) { RETRY_DELAYS.last() }
                 AppLog.d(TAG, "retry $attempt/$MAX_RETRY for ${song.title} in ${delayMs}ms")
                 _downloadStates.update { it + (key to DownloadState.Queued) }
@@ -429,7 +470,9 @@ class SongDownloadManager(
      *
      * 完整性校验：服务器声明的 Content-Length 是权威长度。若读到的字节数与声明不符
      * （服务器中途断流、代理截断），抛出 [IOException] 触发上层重试，避免半截文件
-     * 被 rename + 内嵌 + 标记 COMPLETED。任何失败都会清理半成品，防止磁盘残留。
+     * 被 rename + 内嵌 + 标记 COMPLETED。**0 字节同样算失败**（C16：`Content-Length: 0`
+     * 的空响应 + `repo.isDownloaded` 的幂等检查会让用户永久留着一首空文件）。
+     * 任何失败都会清理半成品，防止磁盘残留。
      */
     private suspend fun downloadFile(
         url: String,
@@ -462,7 +505,16 @@ class SongDownloadManager(
                         }
                     }
                 }
-                // 完整性校验：声明长度已知但实际写入不足/不符 → 视为失败以触发重试
+                // 完整性校验：
+                // ① 0 字节一律算失败（C16）—— `Content-Length: 0` 的空响应原先能一路走到
+                //    rename + 内嵌 + 标 COMPLETED，而 `repo.isDownloaded` 的幂等检查
+                //    又拦住后续自动重下 ⇒ 用户永久得到一首 0 字节的"已完成"歌曲。
+                // ② 声明长度已知时要求严格相等（截断/代理断流 ⇒ 抛错触发重试）。
+                // ③ 声明长度为 -1（chunked）时无法核对总量：截断通常由 IOException 暴露
+                //    （见 catch），这里只兜住「一个字节都没读到」的退化情况。
+                if (written <= 0L) {
+                    throw IOException("empty download: written=$written, declared=$declaredLength")
+                }
                 if (declaredLength > 0 && written != declaredLength) {
                     throw IOException("incomplete download: $written/$declaredLength bytes")
                 }
@@ -518,8 +570,8 @@ class SongDownloadManager(
     /** 取消所有进行中任务 + 删除 .part 临时文件 */
     suspend fun cancelAll() {
         // P1-5 修复（2026-09-16）：不再 cancel/restart loop（消除双 loop 并发窗口）。
-        // ① 置位取消标志 → 进行中任务在异常/重试判定处直接落 FAILED，不再重试
-        cancelRequested = true
+        // ① 递增世代号 → 进行中任务（世代号已过期）在异常/重试判定处直接落 FAILED，不再重试
+        cancelGeneration++
         // ② drain 排队未开始的任务（含手动与自动两条队列）
         while (manualQueue.tryReceive().getOrNull() != null) { /* drain */ }
         while (autoQueue.tryReceive().getOrNull() != null) { /* drain */ }
@@ -634,6 +686,11 @@ class SongDownloadManager(
                     RegexOption.IGNORE_CASE
                 )
                 val hit = albumDir.listFiles { f -> f.isFile && pattern.matches(f.name) }
+                    // M08：⛔ 只按文件名正则匹配不够 —— 崩溃/断电可能在最终路径上留下**半截文件**，
+                    // 被误标 COMPLETED 后 playableLocalUri 指向坏文件且永不重下。
+                    // 追加两道校验：非空；DB 有 fileSize 记录时必须一致。
+                    ?.filter { it.length() > 0L }
+                    ?.filter { entity.fileSize <= 0L || it.length() == entity.fileSize }
                     ?.maxByOrNull { it.lastModified() }
                 if (hit != null) return hit.absolutePath
             }

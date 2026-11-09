@@ -63,6 +63,28 @@ object GraphemeSplitter {
         return cachedIcu
     }
 
+    /**
+     * C52：逐**码点**切分的兜底（原实现 `text.map { it.toString() }` 是逐 UTF-16 码元，
+     * 会把代理对劈成两个孤立代理 ⇒ 渲染成两个方块）。
+     *
+     * 走到这里的路径已经很窄（`resolveIcu()` 失败会先走 `java.text.BreakIterator`，
+     * 只有「ICU 实例已建但反射中途抛异常」才会落到本函数），但不该在这里留下已知会产坏字形的实现。
+     * ⚠️ 码点切分仍不等于字素簇切分（组合字符/ZWJ emoji 会被拆开），
+     * 这是刻意接受的降级上限：能走到这里的设备本就连 BreakIterator 都不可用。
+     */
+    private fun splitByCodePoint(text: String): List<String> {
+        if (text.isEmpty()) return emptyList()
+        val out = ArrayList<String>(text.length)
+        var i = 0
+        while (i < text.length) {
+            val cp = text.codePointAt(i)
+            val n = Character.charCount(cp)
+            out.add(text.substring(i, i + n))
+            i += n
+        }
+        return out
+    }
+
     private fun splitWithIcu(icu: Any, text: String): List<String> {
         return try {
             // ⚠️ `setText` 的形参类型是 **CharSequence**（不是 String）⇒ 查方法时
@@ -82,12 +104,12 @@ object GraphemeSplitter {
             }
             // 防御：反射调用若与预期不符，退回逐字符
             if (result.isEmpty() && text.isNotEmpty()) {
-                text.map { it.toString() }
+                splitByCodePoint(text)
             } else {
                 result
             }
         } catch (_: Throwable) {
-            text.map { it.toString() }
+            splitByCodePoint(text)
         }
     }
 }

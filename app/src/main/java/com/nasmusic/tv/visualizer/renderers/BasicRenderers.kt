@@ -32,6 +32,19 @@ class CircularRingRenderer : RendererFx() {
     // §A2-6：收尾后处理（§13.5-D9：暗角 ≥ 0.42 下限，取 0.44）
     override val postFx = PostFx(vignette = 0.44f, grain = 0.028f)
 
+    /**
+     * M52：复用 [Stroke] 实例 ⇒ `drawContent` 真正零分配。
+     *
+     * ⚠️ Compose 的 `Stroke.width` 是 **val**（只读，不像 `Paint.strokeWidth`），
+     * 所以「改 width 复用同一个对象」这条捷径不存在（`also { it.width = … }` 编译不过）。
+     * 随 `pulse` 变化的外圈线宽改用**量化分桶**：预建 8 档 Stroke，每帧只查一次表。
+     * ⛔ 不要退回内联 `Stroke(width = …)`：本渲染器每帧画 3 个描边圆，内联就是每帧
+     * 3 个短命对象，与本文件反复强调的逐帧零分配红线冲突（GC 会落在渲染线程上）。
+     */
+    private val ringPulseStrokes = Array(8) { i -> Stroke(width = 1.5f + 1.5f * i / 7f) }
+    private val beatStroke = Stroke(width = 4.5f)
+    private val edgeStroke = Stroke(width = 0.5f)
+
     private var rotation = 0f
     private var peaks = FloatArray(64)
     // 峰帽按 hue 分 8 桶合并为 Path，替代 ~64 次 drawCircle。
@@ -170,14 +183,15 @@ class CircularRingRenderer : RendererFx() {
             radius = ringR,
             center = Offset(cx, cy),
             alpha = 0.30f + frame.pulse * 0.45f,
-            style = Stroke(width = 1.5f + frame.pulse * 1.5f)
+            // pulse∈[0,1] → 8 档线宽（1.5f..3.0f），查表零分配
+            style = ringPulseStrokes[(frame.pulse.coerceIn(0f, 1f) * 7f).toInt()]
         )
 
         // ③ 节拍爆环 —— 亮白冲击感
         if (frame.beat) {
             drawCircle(VisualizerMath.hsl(60f, 1.0f, 0.98f),
                 ringR * (1f + frame.pulse * 0.4f), Offset(cx, cy),
-                alpha = 0.65f, style = Stroke(width = 4.5f))
+                alpha = 0.65f, style = beatStroke)
         }
 
         // ④ 中央圆盘 —— §A2-4：3 层同心圆（同心台阶）→ 1 次径向渐变 + 0.5px 亮边
@@ -202,7 +216,7 @@ class CircularRingRenderer : RendererFx() {
             color = VisualizerMath.towardWhite(VisualizerMath.hsl(glowHue, sat, lit), 0.45f),
             radius = coverR, center = Offset(cx, cy),
             alpha = 0.65f + frame.energy * 0.35f,
-            style = Stroke(width = 0.5f))
+            style = edgeStroke)
 
         // 后处理已由基类按 `postFx` 在 drawContent 之后统一施加（§A2-6）
     }

@@ -96,6 +96,7 @@ import com.nasmusic.tv.net.RemoteControlServer
 import com.nasmusic.tv.net.RemoteSearchResult
 import android.os.Handler
 import android.os.Looper
+import com.nasmusic.tv.util.rethrowIfCancellation
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -394,6 +395,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
                     favoriteSongs = favoriteSongs.take(20)
                 )
             } catch (e: Exception) {
+                e.rethrowIfCancellation()
                 com.nasmusic.tv.util.AppLog.e("MainViewModel", "loadHomeDashboard failed", e)
             }
         }
@@ -1385,6 +1387,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
                 val info = adapter?.getSongTechnicalInfo(song.id)
                 _songTechnicalInfo.value = info
             } catch (e: Exception) {
+                e.rethrowIfCancellation()
                 AppLog.e("MainViewModel", "loadSongTechnicalInfo failed", e)
                 _songTechnicalInfo.value = null
             }
@@ -1687,6 +1690,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
                 updateMergedData()
                 AppLog.d("MainViewModel", "local music cache loaded: ${_localSongs.value.size} songs")
             } catch (e: Exception) {
+                e.rethrowIfCancellation()
                 AppLog.e("MainViewModel", "load local music cache failed: ${e.message}", e)
             }
         }
@@ -1788,6 +1792,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
             _favoriteIds.value = favorites.map { it.id }.toSet()
             AppLog.d("NASMusic", "loadFavorites: ${favorites.size} favorites")
         } catch (e: Exception) {
+            e.rethrowIfCancellation()
             AppLog.e("NASMusic", "loadFavorites failed", e)
             _favoriteSongs.value = UiState.Error(
                 message = getApplication<Application>().getString(R.string.load_favorites_error, e.message?.take(50))
@@ -1809,6 +1814,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
             val data = _genres.value.dataOrNull()
             AppLog.d("NASMusic", "loadGenres: ${data?.size} genres")
         } catch (e: Exception) {
+            e.rethrowIfCancellation()
             AppLog.e("NASMusic", "loadGenres failed", e)
             _genres.value = UiState.Error(
                 message = getApplication<Application>().getString(R.string.load_genres_error, e.message?.take(50))
@@ -1851,6 +1857,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
                     AppLog.d("NASMusic", "loadLibrary: ${loadedAlbums.size} albums loaded")
                     loadHomeDashboard()
                 } catch (e: Exception) {
+                    e.rethrowIfCancellation()
                     AppLog.e("NASMusic", "loadLibrary albums failed", e)
                     _albums.value = UiState.Error(
                         message = getApplication<Application>().getString(R.string.load_albums_error, e.message?.take(50)),
@@ -1948,6 +1955,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
                 }
                 AppLog.d("NASMusic", "loadSongsNextPage: loaded ${batch.size}, total ${newState.songs.size}/$totalCount")
             } catch (e: Exception) {
+                e.rethrowIfCancellation()
                 AppLog.e("NASMusic", "loadSongsNextPage failed", e)
                 _songsPaging.value = state.copy(isLoading = false, error = e.message?.take(120))
                 showError(getApplication<Application>().getString(R.string.load_songs_error, e.message?.take(50)))
@@ -2011,6 +2019,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
                 }
                 AppLog.d("NASMusic", "loadAllSongsBackground: done, ${_songsPaging.value.songs.size} songs")
             } catch (e: Exception) {
+                e.rethrowIfCancellation()
                 AppLog.e("NASMusic", "loadAllSongsBackground failed", e)
             } finally {
                 _isBackgroundLoadingAll.set(false)
@@ -2043,6 +2052,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
                 AppLog.d("NASMusic", "loadRandomSongs: got ${nasSongs.size} NAS songs")
                 allSongs.addAll(nasSongs)
             } catch (e: Exception) {
+                e.rethrowIfCancellation()
                 AppLog.e("NASMusic", "loadRandomSongs NAS failed", e)
             }
         }
@@ -2059,6 +2069,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
                     allSongs.addAll(tagged)
                 }
             } catch (e: Exception) {
+                e.rethrowIfCancellation()
                 AppLog.e("NASMusic", "loadRandomSongs network failed for '$playlistName'", e)
             }
         }
@@ -2123,6 +2134,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
                             playerManager.addToQueue(newSongs)
                         }
                     } catch (e: Exception) {
+                        e.rethrowIfCancellation()
                         AppLog.e("NASMusic", "shuffleRefill failed", e)
                         delay(30000) // 失败后等 30 秒再试
                         continue
@@ -2189,6 +2201,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
                 // 触发合并（updateMergedData 末尾会解析 NAS + 百度 + 本地缺失的艺术家封面）
                 updateMergedData()
             } catch (e: Exception) {
+                e.rethrowIfCancellation()
                 AppLog.e("NASMusic", "loadArtists failed", e)
                 _artists.value = UiState.Error(
                     message = getApplication<Application>().getString(R.string.load_favorites_error, e.message?.take(50)),
@@ -2220,6 +2233,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
                 _years.value = UiState.Success(yearsList)
                 AppLog.d("NASMusic", "loadYears: ${yearsList.size} years loaded")
             } catch (e: Exception) {
+                e.rethrowIfCancellation()
                 AppLog.e("NASMusic", "loadYears failed", e)
                 _years.value = UiState.Error(
                     message = getApplication<Application>().getString(R.string.load_year_songs_error, e.message?.take(50)),
@@ -2245,6 +2259,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
                 _recentSongs.value = UiState.Success(recent)
                 AppLog.d("NASMusic", "loadRecentSongs: ${recent.size} recent songs loaded")
             } catch (e: Exception) {
+                e.rethrowIfCancellation()
                 AppLog.e("NASMusic", "loadRecentSongs failed", e)
                 _recentSongs.value = UiState.Error(
                     message = getApplication<Application>().getString(R.string.load_favorites_error, e.message?.take(50)),
@@ -2390,6 +2405,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
                 )
                 _browseResults.value = UiState.Success(shown)
             } catch (e: Exception) {
+                e.rethrowIfCancellation()
                 AppLog.e("NASMusic", "refreshBrowseSongs failed: ${e.message}", e)
                 _browseResults.value = UiState.Error(
                     message = getApplication<Application>().getString(R.string.browse_search_failed, e.message?.take(50))
@@ -2454,6 +2470,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
                         val url = nasMusicApp.networkMusicManager.resolvePlayUrl(first)
                         if (!url.isNullOrBlank()) first.copy(streamUrl = url) else first
                     } catch (e: Exception) {
+                        e.rethrowIfCancellation()
                         AppLog.e("NASMusic", "playNetworkBatch: resolve first failed for ${first.title}", e)
                         first
                     }
@@ -2511,6 +2528,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
                     _favoriteIds.value = newIds
                 }
             } catch (e: Exception) {
+                e.rethrowIfCancellation()
                 AppLog.e("NASMusic", "toggleFavorite failed", e)
 showError(getApplication<Application>().getString(R.string.toggle_favorite_error, e.message?.take(50)))
             }
@@ -2580,7 +2598,13 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
       * NAS 数据（albums/artists） + 本地歌曲（localSongs）+ 百度网盘索引 按 name 去重合并
       */
     private fun updateMergedData() {
-        viewModelScope.launch(Dispatchers.Default) {
+        // C35：20+ 个入口都会调到这里（库存变化、设置开关、网盘索引刷新、扫描完成…）。
+        // 旧实现每次新起一个 Default 协程，既取消不了旧的、也没有代数闸门 ⇒
+        // 多个协程并发扫库存 + 回写 _mergedAlbums/_mergedArtists，最后写入的可能反而是
+        // 用**旧快照**算出来的结果。这里保存 Job 并取消上一轮（本轮总是以最新库存为准，
+        // 取消旧轮不会丢数据：新一轮会重新读 StateFlow 的当前值）。
+        mergeJob?.cancel()
+        mergeJob = viewModelScope.launch(Dispatchers.Default) {
             // ⛔ 构造期竞态防护：构造未完成（by lazy 委托未初始化）前一律挂起等待，
             // 详见 constructorReady 的 KDoc（v2.37.0 启动 NPE 修复）
             constructorReady.await()
@@ -2675,19 +2699,24 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
             }
         }
         // 更新 mergedArtists 列表中的 songCount
-        val artists = _mergedArtists.value
+        // C35：读-改-写改为 update{}，避免与 :2635 的整表写入交错时丢掉对方的更新
         if (artistSongCounts.isNotEmpty()) {
-            _mergedArtists.value = artists.map { artist ->
-                val key = ArtistSplitter.normalizeKey(artist.name)
-                val countedSongs = artistSongCounts[key]
-                if (countedSongs != null && countedSongs > 0) {
-                    artist.copy(songCount = countedSongs)
-                } else {
-                    artist
+            _mergedArtists.update { artists ->
+                artists.map { artist ->
+                    val key = ArtistSplitter.normalizeKey(artist.name)
+                    val countedSongs = artistSongCounts[key]
+                    if (countedSongs != null && countedSongs > 0) {
+                        artist.copy(songCount = countedSongs)
+                    } else {
+                        artist
+                    }
                 }
             }
         }
     }
+
+    /** C35：合并协程句柄，新的一轮会取消上一轮 */
+    private var mergeJob: Job? = null
 
     private var coverResolveJob: kotlinx.coroutines.Job? = null
     private var artistCoverResolveJob: kotlinx.coroutines.Job? = null
@@ -2886,6 +2915,7 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
                         AppLog.i("MainViewModel", "local scan: +${result.newSongs.size} new, -${result.deletedPaths.size} deleted")
                     }
                 } catch (e: Exception) {
+                    e.rethrowIfCancellation()
                     AppLog.e("MainViewModel", "local incremental scan failed: ${e.message}", e)
                 }
             }
@@ -2901,6 +2931,7 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
                             AppLog.i("MainViewModel", "USB mounted scan: ${result.newSongs.size} songs")
                         }
                     } catch (e: Exception) {
+                        e.rethrowIfCancellation()
                         AppLog.e("MainViewModel", "USB mount scan failed: ${e.message}", e)
                     }
                 }
@@ -3004,6 +3035,7 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
                 updateMergedData()
                 showError(getApplication<Application>().getString(R.string.local_music_refreshed, scanned.size))
             } catch (e: Exception) {
+                e.rethrowIfCancellation()
                 AppLog.e("MainViewModel", "full local scan failed: ${e.message}", e)
                 showError(getApplication<Application>().getString(R.string.refresh_local_music_error, e.message?.take(50)))
             }
@@ -3083,6 +3115,7 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
                         try {
                             collected += adapter.getAlbumSongs(src)
                         } catch (e: Exception) {
+                            e.rethrowIfCancellation()
                             nasError = e
                         }
                     } else {
@@ -3211,6 +3244,7 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
                                 try {
                                     adapter.getArtistSongs(id, artistName)
                                 } catch (e: Exception) {
+                                    e.rethrowIfCancellation()
                                     AppLog.w("NASMusic", "loadArtistSongs: NAS ID=$id query failed: ${e.message?.take(50)}")
                                     emptyList()
                                 }
@@ -3225,6 +3259,7 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
                         try {
                             nasMusicApp.networkMusicManager.search(artistName)
                         } catch (e: Exception) {
+                            e.rethrowIfCancellation()
                             AppLog.w("NASMusic", "loadArtistSongs: network search failed: ${e.message?.take(50)}")
                             emptyList()
                         }
@@ -3264,6 +3299,7 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
                 // 同时按拆分后的艺术家名更新 artistSongsMap 缓存
                 buildArtistMapsIncremental(finalSongs)
             } catch (e: Exception) {
+                e.rethrowIfCancellation()
                 AppLog.e("NASMusic", "loadArtistSongs failed", e)
                 showError(getApplication<Application>().getString(R.string.load_favorites_error, e.message?.take(50)))
             }
@@ -3351,6 +3387,7 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
                 val nasSongs = adapter.getSongsByGenre(genre)
                 onResult((nasSongs + localMatches).distinctBy { it.id })
             } catch (e: Exception) {
+                e.rethrowIfCancellation()
                 AppLog.e("NASMusic", "getSongsByGenre failed", e)
                 showError(getApplication<Application>().getString(R.string.load_genre_songs_error, e.message?.take(50)))
                 onResult(localMatches)
@@ -3378,6 +3415,7 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
                 val nasSongs = adapter.getSongsByYearRange(fromYear, toYear)
                 onResult((nasSongs + localMatches).distinctBy { it.id })
             } catch (e: Exception) {
+                e.rethrowIfCancellation()
                 AppLog.e("NASMusic", "getSongsByYearRange failed", e)
                 showError(getApplication<Application>().getString(R.string.load_year_songs_error, e.message?.take(50)))
                 onResult(localMatches)
@@ -3472,6 +3510,7 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
                         enrichSemaphore.release()
                     }
                 } catch (e: Exception) {
+                    e.rethrowIfCancellation()
                     AppLog.w("MainViewModel", "triggerEnrichForStubs failed '${song.title}': ${e.message}")
                 } finally {
                     enrichInFlight.remove(song.id)
@@ -3497,6 +3536,7 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
                     enrichSemaphore.release()
                 }
             } catch (e: Exception) {
+                e.rethrowIfCancellation()
                 AppLog.w("MainViewModel", "playbackFailure failed '${song.title}': ${e.message}")
             }
         }
@@ -3652,6 +3692,12 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
         // 的照片墙/人脸扫描 ORT session 释放与 launcher 闭包清理因此从未执行。统一在此驱动。
         runCatching { visualizerVM.dispose() }
             .onFailure { AppLog.e("MainViewModel", "visualizerVM.dispose failed", it) }
+        // C34：dispose() 只覆盖了 visualizerVM，其余 14 个子 VM 的 viewModelScope 仍然永存，
+        // 它们在 init / stateIn 里起的无限 collect 会一直跑。这里统一取消。
+        disposeChildViewModels(
+            weatherRadioVM, serverVM, searchVM, netVM, navVM, playHistoryVM, playerVM,
+            downloadVM, vocalVM, mvVM, playlistVM, backupVM, playlistImportVM,
+        )
         super.onCleared()
     }
 
@@ -3678,12 +3724,22 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
             // ⚠️ NAS 关 ⇒ 不查 NAS（方案 §3.2.1 #13）。
             // 网络侧走 services map（关源即失效），这里只挡 NAS 这一支。
             if (!sourceVisibility.isVisible(MusicSourceType.NAS)) return@async emptyList()
-            try { backendRegistry.getAdapter()?.searchSongs(keyword) ?: emptyList() }
-            catch (e: Exception) { AppLog.w("NASMusic", "remote search NAS failed: ${e.message}"); emptyList() }
+            try {
+                backendRegistry.getAdapter()?.searchSongs(keyword) ?: emptyList()
+            } catch (e: Exception) {
+                e.rethrowIfCancellation()
+                AppLog.w("NASMusic", "remote search NAS failed: ${e.message}")
+                emptyList()
+            }
         }
         val netDeferred = async(Dispatchers.IO) {
-            try { nasMusicApp.networkMusicManager.search(keyword) }
-            catch (e: Exception) { AppLog.w("NASMusic", "remote search network failed: ${e.message}"); emptyList() }
+            try {
+                nasMusicApp.networkMusicManager.search(keyword)
+            } catch (e: Exception) {
+                e.rethrowIfCancellation()
+                AppLog.w("NASMusic", "remote search network failed: ${e.message}")
+                emptyList()
+            }
         }
         RemoteSearchResult(nasDeferred.await(), netDeferred.await())
     }
@@ -3843,6 +3899,7 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Exception) {
+                e.rethrowIfCancellation()
                 AppLog.e("NASMusic", "loadLyrics failed", e)
                 showError(getApplication<Application>().getString(R.string.load_lyrics_error, e.message?.take(50)))
             }
@@ -3955,6 +4012,7 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
                     _networkCoverUrl.value = null
                 }
             } catch (e: Exception) {
+                e.rethrowIfCancellation()
                 AppLog.e("NASMusic", "switchLyricsSource failed", e)
                 showError(getApplication<Application>().getString(R.string.switch_lyrics_source_error, e.message?.take(50)))
             }
@@ -4221,6 +4279,7 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
                 } catch (e: java.net.ConnectException) {
                     "error:${app.getString(R.string.settings_network_test_connection_refused)}"
                 } catch (e: Exception) {
+                    e.rethrowIfCancellation()
                     "error:${app.getString(R.string.settings_network_test_error, e.message ?: e.javaClass.simpleName)}"
                 }
             }
@@ -4472,6 +4531,7 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
             try {
                 _playlists.value = UiState.Success(adapter.getPlaylists())
             } catch (e: Exception) {
+                e.rethrowIfCancellation()
                 AppLog.e("NASMusic", "loadPlaylists failed", e)
                 _playlists.value = UiState.Error(
                     message = getApplication<Application>().getString(R.string.load_playlists_error, e.message?.take(50)),
@@ -4498,6 +4558,7 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
                 val songs = adapter.getPlaylistSongs(playlist.id)
                 _selectedPlaylistSongs.value = UiState.Success(songs)
             } catch (e: Exception) {
+                e.rethrowIfCancellation()
                 AppLog.e("NASMusic", "selectPlaylist songs failed", e)
                 _selectedPlaylistSongs.value = UiState.Error(
                     message = getApplication<Application>().getString(R.string.load_playlist_songs_error, e.message?.take(50)),
@@ -4520,6 +4581,7 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
                     postLocalConnectMessage(getApplication<Application>().getString(R.string.create_failed))
                 }
             } catch (e: Exception) {
+                e.rethrowIfCancellation()
                 postLocalConnectMessage(getApplication<Application>().getString(R.string.create_failed_with_msg, e.message))
             }
         }
@@ -4542,6 +4604,7 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
                     postLocalConnectMessage(getApplication<Application>().getString(R.string.delete_failed))
                 }
             } catch (e: Exception) {
+                e.rethrowIfCancellation()
                 postLocalConnectMessage(getApplication<Application>().getString(R.string.delete_failed_with_msg, e.message))
             }
         }
@@ -4562,6 +4625,7 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
                     navVM.navigateTo(Screen.NowPlaying)
                 }
             } catch (e: Exception) {
+                e.rethrowIfCancellation()
                 AppLog.e("NASMusic", "playPlaylist failed", e)
                 showError(getApplication<Application>().getString(R.string.play_playlist_error, e.message?.take(50)))
             }
@@ -4579,6 +4643,7 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
                     _selectedPlaylistSongs.value = UiState.Success(currentSongs.filter { it.id != songId })
                 }
             } catch (e: Exception) {
+                e.rethrowIfCancellation()
                 AppLog.e("NASMusic", "removeFromPlaylist failed", e)
                 showError(getApplication<Application>().getString(R.string.remove_from_playlist_error, e.message?.take(50)))
             }
@@ -4630,6 +4695,7 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
                 )
                 _radioStations.value = UiState.Success(stations)
             } catch (e: Exception) {
+                e.rethrowIfCancellation()
                 AppLog.e("Radio", "loadRadioStations failed: ${e.message}", e)
                 _radioStations.value = UiState.Error(message = getApplication<Application>().getString(R.string.radio_load_failed))
             }
@@ -4642,6 +4708,7 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
             try {
                 nasMusicApp.radioBrowserClient.reportClick(station)
             } catch (e: Exception) {
+                e.rethrowIfCancellation()
                 // 上报失败不影响播放
             }
             playQueue(listOf(station.toSong()))
@@ -4676,6 +4743,7 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
                 val songs = nasMusicApp.jamendoService.hotTracks(limit = 30)
                 _jamendoState.value = UiState.Success(songs)
             } catch (e: Exception) {
+                e.rethrowIfCancellation()
                 AppLog.e("Jamendo", "loadJamendoHot failed: ${e.message}", e)
                 _jamendoState.value = UiState.Error(message = getApplication<Application>().getString(R.string.jamendo_load_failed))
             }
@@ -4698,6 +4766,7 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
                 val songs = nasMusicApp.jamendoService.tracksByTag(tag, limit = 30)
                 _jamendoState.value = UiState.Success(songs)
             } catch (e: Exception) {
+                e.rethrowIfCancellation()
                 AppLog.e("Jamendo", "loadJamendoTag failed: ${e.message}", e)
                 _jamendoState.value = UiState.Error(message = getApplication<Application>().getString(R.string.jamendo_load_failed))
             }
@@ -4719,6 +4788,7 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
                 val songs = nasMusicApp.jamendoService.search(keyword, limit = 30)
                 _jamendoState.value = UiState.Success(songs)
             } catch (e: Exception) {
+                e.rethrowIfCancellation()
                 AppLog.e("Jamendo", "searchJamendo failed: ${e.message}", e)
                 _jamendoState.value = UiState.Error(message = getApplication<Application>().getString(R.string.jamendo_load_failed))
             }
@@ -4790,6 +4860,9 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
                 getApplication<Application>().getString(R.string.added_to_queue_with_skipped, added, skipped)
             )
         }
+
+        // M30：PlaylistViewModel 的歌单 CRUD 失败也要能到达用户（此前只写无人订阅的 StateFlow）
+        playlistVM.showMessage = { showError(it) }
 
         // ---- NetworkMusicViewModel 接线 ----
         netVM.onPlayQueue = { songs, startIndex -> playQueue(songs, startIndex) }

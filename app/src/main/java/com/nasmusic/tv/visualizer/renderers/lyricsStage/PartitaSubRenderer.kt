@@ -228,6 +228,18 @@ class PartitaSubRenderer : LyricsSubRenderer {
         activeLineStart = Double.NaN
     }
 
+    /**
+     * ⛔ **空实现，不得转调 [onEnter]**（C49）。
+     *
+     * 本子模式的换行由 `draw()` 里的 `syncLine(...)` 自行检测：换行时把旧版面转入
+     * [exitingState]（并按 `GlowWordCore.lineContainerMotion` 的 `exitDurationSec` 播完离场），
+     * 再构建新版面。默认实现 `onLineChanged → onEnter` 会把
+     * `activeState / exitingState / activeLineIndex` 全部清空 ⇒ 离场动画被直接掐断。
+     */
+    override fun onLineChanged(ctx: RenderContext, lyrics: LyricsStagePayload) {
+        // 刻意留空：换行由 draw() 内部的 syncLine 自行处理。
+    }
+
     override fun DrawScope.draw(frame: AudioFrame, ctx: RenderContext, lyrics: LyricsStagePayload) {
         val timeSec = lyrics.timeSec
         syncLine(lyrics, ctx, timeSec)
@@ -428,6 +440,10 @@ class PartitaSubRenderer : LyricsSubRenderer {
         state.line = line
         val profile = GlowWordCore.resolveProfile(line)
         state.profile = profile
+        // L34：行容器动效（进出场时长/缩放/透明度）只取决于 profile ⇒ 整行算一次。
+        // 原实现在 drawPartitaGroup 里每帧调 GlowWordCore.lineContainerMotion(profile)，
+        // 每次新建一个 GlowWordLineContainerMotion 对象，违反本文件的 draw 零分配红线。
+        state.motion = GlowWordCore.lineContainerMotion(profile)
         // 辉光半径只取决于揭示模式 ⇒ 整行算一次（逐帧取会每次分配一个 Pair）
         val glowRadii = GlowWordGlow.radiiFor(profile?.wordRevealMode ?: "normal")
         state.glowInnerRadius = glowRadii.first * GlowWordGlow.DROP_SHADOW_RADIUS_SCALE
@@ -477,7 +493,8 @@ class PartitaSubRenderer : LyricsSubRenderer {
         if (chunks.isEmpty()) return
 
         val profile = state.profile ?: return
-        val motion = GlowWordCore.lineContainerMotion(profile)
+        // L34：走 buildState 预计算的那一份（缺失时才现算，正常路径不会走到）
+        val motion = state.motion ?: GlowWordCore.lineContainerMotion(profile)
 
         // ── 行容器的进出（glowWordTiming.ts:58-91 `getGlowWordLineContainerMotion`）──
         var groupAlpha = 1f
@@ -1008,6 +1025,8 @@ class PartitaSubRenderer : LyricsSubRenderer {
         var floatDuration = FLOAT_DURATION_NORMAL
         var groupStart = 0.0
         var exitStart = -1.0
+        /** L34：行容器动效（buildState 里按 profile 算一次，逐帧零分配） */
+        var motion: GlowWordLineContainerMotion? = null
     }
 
     private class PartitaChunkState {

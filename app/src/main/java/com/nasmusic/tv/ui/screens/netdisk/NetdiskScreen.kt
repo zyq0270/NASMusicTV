@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Folder
@@ -26,6 +27,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -58,6 +60,10 @@ import com.nasmusic.tv.ui.theme.UiMode
 import com.nasmusic.tv.ui.viewmodel.MainViewModel
 import com.nasmusic.tv.ui.viewmodel.NetworkMusicViewModel
 import com.nasmusic.tv.backend.download.model.stateOfSong
+import kotlinx.coroutines.flow.distinctUntilChanged
+
+/** C37：距列表底部还剩多少项时预取下一页（含 footer 项，留一屏余量） */
+private const val NETDISK_PREFETCH_ITEMS = 8
 
 /**
  * 网盘 Tab：目录浏览 + 关键词搜索 + 文件操作（播放/加队列/加歌单/查看 MV）
@@ -94,6 +100,12 @@ val downloadStates by viewModel.songDownloadStates.collectAsState(initial = empt
 
     // v2.36.0 竖屏（方案 §4.5 / P0-19）：页 padding 32→16；搜索框 420dp → 整行（原头部三件套一行必溢出）
     val isPhonePortrait = LocalUiMode.current == UiMode.PhonePortrait
+    // L25：两个网格的状态都必须**跨 when 分支存活**。原先搜索网格根本没传 state、
+    // 目录网格在分支内部 remember ⇒ 清空搜索词 / 进出目录时状态机被销毁，
+    // 滚动位置与 D-Pad 焦点一起回到顶部（长目录里等于每次都要重新翻）。
+    // 两个网格分开保存，各自记住自己的位置。
+    val searchGridState = rememberLazyGridState()
+    val dirGridState = rememberLazyGridState()
     Column(
         modifier = Modifier.fillMaxSize().padding(if (isPhonePortrait) 16.dp else 32.dp)
     ) {
@@ -179,6 +191,7 @@ val downloadStates by viewModel.songDownloadStates.collectAsState(initial = empt
                 } else {
                     LazyVerticalGrid(
                         columns = songGridColumns(),
+                        state = searchGridState,
                         modifier = Modifier.fillMaxSize(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalArrangement = Arrangement.spacedBy(6.dp)
@@ -188,7 +201,11 @@ val downloadStates by viewModel.songDownloadStates.collectAsState(initial = empt
                             ActionBar(
                                 songCount = searchResults.size,
                                 onPlayAll = { onPlayAllSongs(searchResults) },
-                                onAddAllToQueue = { searchResults.forEach { song -> viewModel.playerVM.toggleQueueSong(song) } }
+                                // C38：必须用「只增不删」的批量入口。
+                                // 旧实现逐首 toggleQueueSong，而 toggle 的语义是「在队列则移除」
+                                // ⇒ 已经入队的歌会被反向踢出队列（PlayerViewModel 的 KDoc 点名过此坑，
+                                // LibraryBranch 早已改掉，唯独网盘搜索页漏改）。
+                                onAddAllToQueue = { viewModel.playerVM.addSongsToQueue(searchResults) }
                             )
                         }
                         itemsIndexed(searchResults, key = { _, s -> "${s.networkId}_${s.title}" }) { index, song ->
@@ -251,8 +268,23 @@ val downloadStates by viewModel.songDownloadStates.collectAsState(initial = empt
                         Text(stringResource(R.string.netdisk_empty_dir), color = NasMusicColors.TextSecondary, fontSize = FontSize.body())
                     }
                 } else {
+                    // C37：首页只取 PAGE_SIZE(=1000) 条，超出部分靠触底预取追加
+                    val hasMore by viewModel.netVM.netdiskHasMore.collectAsState()
+                    val loadingMore by viewModel.netVM.netdiskLoadingMore.collectAsState()
+                    val gridState = dirGridState
+                    LaunchedEffect(gridState, hasMore, dirFiles.size) {
+                        if (!hasMore) return@LaunchedEffect
+                        snapshotFlow {
+                            val info = gridState.layoutInfo
+                            val lastVisible = info.visibleItemsInfo.lastOrNull()?.index ?: -1
+                            lastVisible >= info.totalItemsCount - NETDISK_PREFETCH_ITEMS
+                        }.distinctUntilChanged().collect { nearEnd ->
+                            if (nearEnd) viewModel.netVM.loadMoreBaiduDir()
+                        }
+                    }
                     LazyVerticalGrid(
                         columns = songGridColumns(),
+                        state = gridState,
                         modifier = Modifier.fillMaxSize(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalArrangement = Arrangement.spacedBy(6.dp)
@@ -283,6 +315,20 @@ val downloadStates by viewModel.songDownloadStates.collectAsState(initial = empt
                                     downloadState = downloadStates.stateOfSong(song),
                                     onDownload = { viewModel.downloadVM.downloadSong(song) }
                                 )
+                            }
+                        }
+                        if (hasMore || loadingMore) {
+                            item(span = { GridItemSpan(maxLineSpan) }) {
+                                Box(
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        stringResource(R.string.netdisk_loading_files),
+                                        color = NasMusicColors.TextSecondary,
+                                        fontSize = FontSize.small()
+                                    )
+                                }
                             }
                         }
                     }

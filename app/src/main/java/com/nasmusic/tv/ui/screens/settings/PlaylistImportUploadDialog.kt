@@ -24,6 +24,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -48,6 +49,9 @@ import com.nasmusic.tv.util.AppLog
 import com.nasmusic.tv.util.LinkUtils
 import com.nasmusic.tv.util.NetworkUtils
 import com.nasmusic.tv.util.QrCodeGenerator
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * 歌单扫码上传弹窗（阶段5.5，替代 SAF 文件选择器）
@@ -72,20 +76,30 @@ fun PlaylistImportUploadDialog(
     var status by remember { mutableStateOf(context.getString(R.string.playlist_upload_starting)) }
     val server = remember { PlaylistUploadServer(context, onFileReceived) }
     val closeFocusRequester = remember { FocusRequester() }
+    // C27 / N09：二维码生成协程作用域
+    val qrScope = rememberCoroutineScope()
 
     // 启动/停止服务器
     DisposableEffect(Unit) {
         val ip = NetworkUtils.getLocalIpAddress()
         if (ip != null) {
             val url = server.buildUrl(ip)
-            serverUrl = url
-            qrBitmap = QrCodeGenerator.generateQrBitmap(url, 360)
             AppLog.i("PlaylistImportUploadDialog", "starting server at $url")
             val started = server.start()
             status = if (started) {
                 context.getString(R.string.playlist_upload_waiting)
             } else {
                 context.getString(R.string.playlist_upload_start_failed)
+            }
+            // C39：原实现在 `server.start()` **之前**就无条件写 qrBitmap / serverUrl
+            // ⇒ 启动失败时界面照样渲染二维码和可点 URL（用户扫一个连不上的地址），
+            // 而 `qrBitmap?.let` 包着的那块又把失败文案挡住看不见。现在只有 started 才赋值。
+            if (started) {
+                serverUrl = url
+                qrScope.launch(Dispatchers.Default) {
+                    val bmp = QrCodeGenerator.generateQrBitmap(url, 360)
+                    withContext(Dispatchers.Main) { qrBitmap = bmp }
+                }
             }
         } else {
             AppLog.w("PlaylistImportUploadDialog", "no IP address")

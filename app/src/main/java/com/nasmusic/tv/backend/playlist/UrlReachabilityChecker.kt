@@ -1,5 +1,7 @@
 package com.nasmusic.tv.backend.playlist
 
+import com.nasmusic.tv.util.AppLog
+import com.nasmusic.tv.util.NetAddressGuard
 import java.net.ConnectException
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
@@ -123,6 +125,16 @@ class UrlReachabilityChecker(
         val parsed = runCatching { url.toHttpUrl() }.getOrNull()
             ?: return Result.INVALID_URL to null
 
+        // C18：歌单里的 URL 来自**不可信内容**（用户下载的 .m3u / .json 由第三方编写）。
+        // 原实现直接 HEAD —— 等于给恶意歌单一个「按需探测任意内网地址」的接口
+        // （响应码/耗时差异足够推断内网拓扑，`169.254.169.254` 还能读到云元数据）。
+        // ⚠️ 只拦「回环 / 链路本地 / 云元数据 / 组播」：**私网放行**，
+        //    因为指向用户自己 NAS 的 `192.168.x` / `nas.local` 是正当用法。
+        NetAddressGuard.rejectReasonForPlayback(parsed.toString())?.let { reason ->
+            AppLog.d("UrlReachabilityChecker", "check rejected: $reason")
+            return Result.INVALID_URL to null
+        }
+
         // 3. OkHttp HEAD(自动 followRedirects=true)
         val req = Request.Builder().url(parsed).method("HEAD", null).build()
         return withContext(Dispatchers.IO) {
@@ -179,6 +191,15 @@ class UrlReachabilityChecker(
             .followRedirects(true)
             .followSslRedirects(true)
             .retryOnConnectionFailure(true)
+            // C18：**逐跳**复核重定向目标。只校验首跳是不够的 ——
+            // `https://evil.example/x` 可以 302 到 `http://127.0.0.1:8080/`，
+            // 而 OkHttp 会自动跟随。网络拦截器能看到每一个实际发出的请求。
+            .addNetworkInterceptor { chain ->
+                val target = chain.request().url
+                val reason = NetAddressGuard.rejectReasonForPlayback(target.toString())
+                if (reason != null) throw java.io.IOException("blocked redirect hop: $reason")
+                chain.proceed(chain.request())
+            }
             .build()
     }
 }

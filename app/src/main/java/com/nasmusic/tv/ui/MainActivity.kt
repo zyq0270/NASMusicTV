@@ -578,7 +578,13 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
-        networkMonitor.unregister()
+        // L19：`networkMonitor` 是 lateinit，赋值发生在 onCreate 尾部的网络监听装配段。
+        // onCreate 若在它之前就抛过异常（ViewModel 构造失败 / 权限拦截 / 主题解析崩溃），
+        // 系统仍会走 onDestroy ⇒ 这里直接读 lateinit 会抛 UninitializedPropertyAccessException，
+        // 把「一次启动崩溃」变成「崩溃 + 二次崩溃」，原始堆栈被盖掉。加初始化守卫。
+        if (::networkMonitor.isInitialized) {
+            networkMonitor.unregister()
+        }
         // 兜底清理：确保播放服务和后端连接被释放
         // 正常退出流程（退出对话框）已在 onConfirm 中处理，这里处理异常退出场景
         // 修复（M-2）：仅在本页真正结束（isFinishing，如退出确认/finishAffinity）时才清理；

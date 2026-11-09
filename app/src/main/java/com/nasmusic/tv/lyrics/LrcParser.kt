@@ -105,7 +105,13 @@ object LrcParser {
                     val wMin = wt.startMs / 60000
                     val wSec = (wt.startMs % 60000) / 1000
                     val wMs = wt.startMs % 1000
-                    "<${wMin.toInt()}:${wSec.toInt()}.${(wMs / 10).toInt()}>${wt.word}"
+                    // M20：⛔ 逐字时间戳也必须补零 —— `WORD_TIMESTAMP_REGEX` 要求
+                    // 分/秒/百分秒都是两位，不补零写出的 `<0:5.3>` 连自己都回读不了，
+                    // 卡拉 OK 逐字时间轴会在「写盘 → 重新加载」后静默丢失。
+                    val wmm = wMin.toString().padStart(2, '0')
+                    val wss = wSec.toString().padStart(2, '0')
+                    val wxx = (wMs / 10).toString().padStart(2, '0')
+                    "<$wmm:$wss.$wxx>${wt.word}"
                 }
             } else {
                 line.text

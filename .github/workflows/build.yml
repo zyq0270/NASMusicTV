@@ -62,6 +62,13 @@ jobs:
               echo "::error::D5 fail-fast: CRYPTO_PASSPHRASE is empty on $GITHUB_EVENT_NAME ($GITHUB_REF_NAME) — APK would fail to decrypt stored credentials (plan §14.2)."
               exit 1
             fi
+            # M01：五个 secret 一个都不能少。此前只断言了 keystore 与 passphrase，
+            # 漏配 storePassword/keyAlias/keyPassword 时会写出**空值** keystore.properties，
+            # 一路瞎跑到打包阶段才失败（违背 fail-fast 初衷，且报错位置离根因很远）。
+            if [ -z "$SIGNING_STORE_PASSWORD" ] || [ -z "$SIGNING_KEY_ALIAS" ] || [ -z "$SIGNING_KEY_PASSWORD" ]; then
+              echo "::error::D5 fail-fast: one of SIGNING_STORE_PASSWORD / SIGNING_KEY_ALIAS / SIGNING_KEY_PASSWORD is empty on $GITHUB_EVENT_NAME ($GITHUB_REF_NAME) — keystore.properties would get empty values and only fail at the signing step."
+              exit 1
+            fi
           fi
           if [ -n "$SIGNING_KEYSTORE_BASE64" ]; then
             echo "Using release keystore from GitHub Secrets"
@@ -89,8 +96,10 @@ jobs:
               echo "cryptoPassphrase=${CRYPTO_PASSPHRASE:-ci-build-only-placeholder}"
             } > keystore.properties
           fi
-          echo "=== keystore.properties (passwords redacted) ==="
-          sed 's/\(storePassword\|keyPassword\)=.*/\1=<redacted>/' keystore.properties
+          echo "=== keystore.properties (secrets redacted) ==="
+          # L01：cryptoPassphrase 也是密钥（备份加解密的口令），原实现只打码两个 password，
+          # 注释却写 "passwords redacted" ⇒ CI 日志里会明文出现 passphrase。
+          sed -E 's/(storePassword|keyPassword|cryptoPassphrase)=.*/\1=<redacted>/' keystore.properties
 
       - name: Build release APK
         run: ./gradlew assembleRelease --stacktrace

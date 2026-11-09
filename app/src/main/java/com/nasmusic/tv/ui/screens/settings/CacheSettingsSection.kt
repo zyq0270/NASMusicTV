@@ -66,6 +66,11 @@ internal fun CacheSettingsSection(
     // 2026-09-26 审查补修（#11 Low）：分区内清理缓存后数字不刷新。加 refreshKey 触发
     // 重算——每个清理按钮点击后 ++，LaunchedEffect(refreshKey) 重新执行。
     var refreshKey by remember { mutableStateOf(0) }
+    // L26：19 条登记项的分组是**编译期常量关系**，与运行时无关。
+    // 原实现在组合期对 5 个 group 各跑一次 `CacheInventory.entries.filter { ... }`
+    //（5 × 19 = 95 次比较，每次重组都重来，且每次 filter 还新建一个 List）。
+    // remember 一次分组结果即可。
+    val entriesByGroup = remember { CacheInventory.entries.groupBy { it.group } }
     LaunchedEffect(refreshKey) {
         // 清理动作是 fire-and-forget 异步（MainViewModel 里 viewModelScope.launch），
         // 重算前留 300ms 让其落盘，否则可能量到删除中途的尺寸。
@@ -94,7 +99,7 @@ internal fun CacheSettingsSection(
                     label = stringResource(cacheGroupLabel(group)),
                     value = CacheInventory.groupTotal(snapshot, group).toString()
                 )
-                CacheInventory.entries.filter { it.group == group }.forEach { entry ->
+                entriesByGroup[group].orEmpty().forEach { entry ->
                     SettingsInfoRow(
                         label = stringResource(entry.labelRes),
                         // 「≥」前缀由 CacheSize.toString() 给（扫描上限的唯一可见证据，⛔ 不要在 UI 侧剥掉）

@@ -7,6 +7,38 @@
 >
 > 类型：`Added`（新增） | `Changed`（变更） | `Fixed`（修复） | `Removed`（移除）
 
+## \[v2.39.16] - 2026-11-09
+
+> 全库代码审查（154 项发现：Critical 1 / High 13 / Medium 94 / Low 46）一次性落地。
+> 逐条对照见 `docs/archive/NASMusicTV-代码审查报告-2026-11-09.html`。
+
+### Fixed
+
+- **Critical**：相册转场在 API < 26 上走 `clipPath` 会把硬件渲染进程打崩 —— 枚举层统一降级到 `CROSSFADE`，并新增门禁 `PhotoTransitionClipGateTest` 守住红线（改回 `clipPath` 立即变红）
+- 固定转场档位绕过注册表导致黑屏：`effective()` 统一为两级降级（shader → clipPath）
+- 相册墙扫描协程的异常被静默吞掉、失败后无法重试（`needScan` 永久丢失）
+- 歌词换行把「上一首最后一行 → 下一首第一行」误判成同一行（整曲身份改用单调代数）
+- 逐字歌词按 `String.length` 切分会把中文标点 / emoji / 组合字符从中间劈开（改按 code point 切分）
+- 行时间戳相同或倒序时行时长为 0，逐字高亮第一帧就跳过整行（兜底最短行时长）
+- B 站 MV 直链未做主机白名单：`playurl` 响应被投毒时可把播放器指向任意地址（含 `file://` 与内网）
+- 百度网盘目录索引并发构建时重复整树遍历；MV 缓存导入不再无限量入表
+- 模型下载的连接不关闭、进度回调每 64KB 抖一次 UI、取消后不复用
+- 播放服务换封面时旧 `Bitmap` 不回收（native 内存泄漏）
+- 备份恢复路径的数值字段（封面模糊半径 / 暗化 / 字号 / EQ 频段）遇 NaN / Inf 会让整份导入失败
+- 百度 OAuth 的 `expires_in` 异常值与非字符串 `refresh_token` 会让刷新永久失败
+- 飞牛登录日志打印 token 前缀、Jellyfin GBK 回退日志打印完整 URL（改为代数 / 脱敏）
+- CI 打包工作流的密钥脱敏只覆盖 `storePassword`，`cryptoPassphrase` 会被明文打印
+- 自定义弹窗未注册 BACK 处理器，遥控器返回键穿透到上一级导航
+- `verticalScroll` 内嵌无界 `LazyColumn` 直接崩（日志设置页）；列表项补齐稳定 `key`
+- 封面轮播在组合期调用外部回调（收敛到 `LaunchedEffect`）
+- 均衡器 / 圆环 / 雷达网格等渲染器每帧新建 `Path` / `Stroke` / 数组；环形与回波线宽改为量化分桶预建
+
+### Changed
+
+- 播放页进度改为 `State` 下沉：每秒 tick 只重组进度条小节，不再重组整张播放页
+- 设置页的模型下载进度四条流改为按分区条件订阅（不在「歌词 / K 歌」分区时不建流）
+- 流派统计超过 8 类时合并为「其他（N 个流派）」，不再把整页撑长
+
 ## \[v2.39.15] - 2026-11-09
 
 ### Fixed

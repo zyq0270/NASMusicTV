@@ -47,7 +47,7 @@ fun CoverCarousel(
 
     if (coverCandidates.isEmpty()) {
         PlaceholderCover(modifier)
-        if (!permanentlyFailed) { permanentlyFailed = true; onAllFailed() }
+        ReportAllFailedOnce(permanentlyFailed) { permanentlyFailed = true; onAllFailed() }
         return
     }
     if (coverCandidates.size == 1) {
@@ -63,7 +63,7 @@ fun CoverCarousel(
             )
         } else {
             PlaceholderCover(modifier)
-            if (!permanentlyFailed) { permanentlyFailed = true; onAllFailed() }
+            ReportAllFailedOnce(permanentlyFailed) { permanentlyFailed = true; onAllFailed() }
         }
         return
     }
@@ -106,12 +106,27 @@ fun CoverCarousel(
                 )
             } else {
                 PlaceholderCover(modifier)
-                if (!permanentlyFailed) { permanentlyFailed = true; onAllFailed() }
+                ReportAllFailedOnce(permanentlyFailed) { permanentlyFailed = true; onAllFailed() }
             }
         }
     } else {
         PlaceholderCover(modifier)
-        if (!permanentlyFailed) { permanentlyFailed = true; onAllFailed() }
+        ReportAllFailedOnce(permanentlyFailed) { permanentlyFailed = true; onAllFailed() }
+    }
+}
+
+/**
+ * L22：`onAllFailed` 的统一出口。
+ *
+ * 原实现在**组合期**直接 `permanentlyFailed = true; onAllFailed()` —— 组合期写 State 并调
+ * 外部回调是 Compose 明令禁止的副作用（每次重组都重复执行，而 `onAllFailed` 在调用方
+ * 往往又是「写自己的 State」⇒ 重组 → 再触发 的抖动）。
+ * 这里统一收进 `LaunchedEffect`，只在进入该分支时执行一次。
+ */
+@Composable
+private fun ReportAllFailedOnce(alreadyReported: Boolean, onReport: () -> Unit) {
+    LaunchedEffect(Unit) {
+        if (!alreadyReported) onReport()
     }
 }
 

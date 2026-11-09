@@ -2382,6 +2382,10 @@ class TripodFogRenderer : RendererFx() {
      *
      * ⚠️ 代价：色标缓存只能复用到数组，`LinearGradient` 必须按指令的轴逐条新建（每帧腿 3 +
      * 机身 1 + 光柱 ≤2 ≈ 6 个 native 对象）。
+     *
+     * ⛔ **M50（审查建议"复用 shader + setLocalMatrix 摆轴"）已判定不可采纳**：
+     * 那正是上面这条真机红线的同一条路（画布/着色器矩阵承载变换），
+     * 护栏 `TripodFillMechanismGateTest` G2 会直接变红。宁可每帧 6 个短命对象。
      */
     private fun DrawScope.drawLinPoly(c: Canvas, i: Int) {
         val ci = gradSlot(i)

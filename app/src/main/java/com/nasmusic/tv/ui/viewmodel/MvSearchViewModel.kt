@@ -10,6 +10,7 @@ import com.nasmusic.tv.data.model.PlayMode
 import com.nasmusic.tv.data.model.Song
 import com.nasmusic.tv.player.PlayerManager
 import com.nasmusic.tv.util.AppLog
+import com.nasmusic.tv.util.rethrowIfCancellation
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -37,6 +38,17 @@ class MvSearchViewModel(
     val showMv: StateFlow<Boolean> = _showMv.asStateFlow()
 
     private var mvSearchJob: Job? = null
+
+    /**
+     * 预搜下一首 MV 的 Job 与目标代数（M32）。
+     *
+     * 原实现 `preSearchNextMv()` 直接 `viewModelScope.launch` 且**不保存 Job**：
+     * `onMvPlaybackEnded` 与 `onMvNext` 都会调用它，连续切两首时两个预搜并行，
+     * 先发的后完成 ⇒ `pendingNextResult` 被**旧歌**的结果覆盖
+     * （随后无缝切歌就切到错的那支 MV）。现在取消旧 Job 并按 songId 校验世代。
+     */
+    private var preSearchJob: Job? = null
+    private var preSearchSongId: String? = null
 
     /** 当前歌曲的 MV 播放失败是否已重搜过一次（防止死循环；切歌时在 triggerMvSearch 内重置） */
     private var mvRetryDone = false
@@ -89,6 +101,7 @@ class MvSearchViewModel(
             val result = try {
                 mvSearchManager.searchMvFor(song)
             } catch (e: Exception) {
+                e.rethrowIfCancellation()
                 AppLog.e("MvSearchViewModel", "triggerMvSearch failed", e)
                 null
             }
@@ -190,6 +203,7 @@ class MvSearchViewModel(
             val result = try {
                 mvSearchManager.searchMvFor(prevSong)
             } catch (e: Exception) {
+                e.rethrowIfCancellation()
                 null
             }
             _mvState.value = if (result != null) MvAvailability.Ready(result.mv, result.alternatives) else MvAvailability.NotFound
@@ -219,7 +233,12 @@ class MvSearchViewModel(
             _mvState.value = MvAvailability.Searching
             mvSearchJob?.cancel()
             mvSearchJob = viewModelScope.launch {
-                val result = try { mvSearchManager.searchMvFor(nextSong) } catch (e: Exception) { null }
+                val result = try {
+                    mvSearchManager.searchMvFor(nextSong)
+                } catch (e: Exception) {
+                    e.rethrowIfCancellation()
+                    null
+                }
                 _mvState.value = if (result != null) MvAvailability.Ready(result.mv, result.alternatives) else MvAvailability.NotFound
                 AppLog.d("MvSearchViewModel", "onMvNext: '${nextSong.title}' -> ${if (result != null) "found" else "not found"}")
                 if (result != null) preSearchNextMv()
@@ -234,15 +253,23 @@ class MvSearchViewModel(
     private fun preSearchNextMv() {
         val nextSong = playerManager.peekNextSong(currentPlayMode) ?: run {
             pendingNextResult = null
+            preSearchJob?.cancel()
+            preSearchSongId = null
             return
         }
-        viewModelScope.launch {
+        // M32：取消上一次预搜 —— 否则两个预搜并行，旧歌结果可能后到并覆盖新歌结果
+        preSearchJob?.cancel()
+        preSearchSongId = nextSong.id
+        preSearchJob = viewModelScope.launch {
             val result = try {
                 mvSearchManager.searchMvFor(nextSong)
             } catch (e: Exception) {
+                e.rethrowIfCancellation()
                 AppLog.d("MvSearchViewModel", "preSearchNextMv failed: ${e.message}", e)
                 null
             }
+            // 世代校验：期间又预搜了别的歌 ⇒ 本次结果作废（不得写回 pending）
+            if (preSearchSongId != nextSong.id) return@launch
             pendingNextResult = result
             AppLog.d("MvSearchViewModel", "preSearchNextMv: '${nextSong.title}' -> ${if (result != null) "found ${result.mv.title}" else "not found"}")
         }
@@ -286,6 +313,7 @@ class MvSearchViewModel(
             val result = try {
                 mvSearchManager.searchBilibiliFallback(song)
             } catch (e: Exception) {
+                e.rethrowIfCancellation()
                 AppLog.e("MvSearchViewModel", "onSearchBilibili failed", e)
                 null
             }
@@ -334,6 +362,7 @@ class MvSearchViewModel(
             val result = try {
                 mvSearchManager.searchMvFor(song, forceRefresh = true, excludeBvids = mvExcludedBvids.toSet(), minSimilarity = minSim)
             } catch (e: Exception) {
+                e.rethrowIfCancellation()
                 AppLog.e("MvSearchViewModel", "researchMv failed", e)
                 null
             }

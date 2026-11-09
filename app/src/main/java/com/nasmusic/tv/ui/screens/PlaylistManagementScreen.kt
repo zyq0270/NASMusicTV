@@ -20,6 +20,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import com.nasmusic.tv.ui.LocalListBackHandler
@@ -80,11 +81,17 @@ fun PlaylistManagementScreen(
     val isPhonePortrait = LocalUiMode.current == UiMode.PhonePortrait
     var portraitPlaylistName by remember { mutableStateOf<String?>(null) }
 
+    // M27：`DisposableEffect(Unit)` 只在首次组合执行一次，闭包会把首帧的 isPhonePortrait
+    // 固化下来 —— 旋屏后 handler 仍按旧形态判断（该先回一级时不回、不该回时乱回）。
+    // 用 rememberUpdatedState 把当前值喂给已注册的闭包，避免每次旋屏都重建 handler
+    // （重建会先 onDispose 置 null、再注册，中间存在 BACK 穿透窗口，见 DialogBackHandler 注释）。
+    val portraitModeNow by rememberUpdatedState(isPhonePortrait)
+
     // Level 1.5: 任意列表已滚动时按 BACK 先回顶并聚焦第一个
     DisposableEffect(Unit) {
         val handler: () -> Boolean = {
             // 竖屏二级页（歌曲明细）先回一级（播放列表）
-            if (isPhonePortrait && portraitPlaylistName != null) {
+            if (portraitModeNow && portraitPlaylistName != null) {
                 portraitPlaylistName = null
                 true
             } else {

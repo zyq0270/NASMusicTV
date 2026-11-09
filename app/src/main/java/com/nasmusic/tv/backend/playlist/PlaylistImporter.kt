@@ -11,6 +11,8 @@ import java.util.Date
 import java.util.Locale
 import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * 歌单导入编排器（docs/archive/playlist-import-feature-plan.md §4.2）。
@@ -54,29 +56,42 @@ class PlaylistImporter(
         userConfirmedName: String? = null,
         onProgress: (Int) -> Unit = {},
     ): ImportSummary {
-        val fileName = queryDisplayName(uri) ?: uri.lastPathSegment.orEmpty()
-        val bytes = runCatching {
-            app.contentResolver.openInputStream(uri)?.use { readLimited(it) }
-        }.getOrNull() ?: return ImportSummary("", "", 0, 0, unrecognizedFormat = true)
+        // C17：读流是**阻塞 IO**（contentResolver.openInputStream + 最多 5MB 的 read）
+        // ⇒ 必须离开调用方所在线程（历史上这里直接躺在 Main 上）。
+        val fileName = withContext(Dispatchers.IO) {
+            queryDisplayName(uri) ?: uri.lastPathSegment.orEmpty()
+        }
+        val bytes = withContext(Dispatchers.IO) {
+            runCatching {
+                app.contentResolver.openInputStream(uri)?.use { readLimited(it) }
+            }.getOrNull()
+        } ?: return ImportSummary("", "", 0, 0, unrecognizedFormat = true)
         return importBytes(bytes, fileName, userConfirmedName, onProgress)
     }
 
-    /** 核心：字节 → 解析 → 入库。独立暴露便于单测（绕过 Uri）。 */
+    /**
+     * 核心：字节 → 解析 → 入库。独立暴露便于单测（绕过 Uri）。
+     *
+     * ⚠️ C17：整段必须跑在 [Dispatchers.IO] 上 —— 里面是「解码 → 嗅探 → 逐条入库」，
+     * 其中 `prefs.addSongToPlaylist` 是**每首一次 DataStore edit（整份 JSON 重序列化）**，
+     * 大歌单（几百首）累计是 O(n²) 的写放大；留在 Main 上会持续卡在挂起/恢复之间。
+     * 进度回调因此在 IO 线程触发，调用方只应写 StateFlow（线程安全）。
+     */
     suspend fun importBytes(
         bytes: ByteArray,
         fileName: String,
         userConfirmedName: String? = null,
         onProgress: (Int) -> Unit = {},
-    ): ImportSummary {
+    ): ImportSummary = withContext(Dispatchers.IO) {
         onProgress(0)
-        if (bytes.isEmpty()) return ImportSummary("", "", 0, 0, unrecognizedFormat = true)
+        if (bytes.isEmpty()) return@withContext ImportSummary("", "", 0, 0, unrecognizedFormat = true)
 
         val text = PlaylistParsers.decode(bytes)
         val head = bytes.copyOfRange(0, minOf(bytes.size, PlaylistParsers.SNIFF_BYTES))
 
         // 嗅探选解析器（顺序即优先级；canParse 各自基于首 4KB/扩展名）
         val parser = parsers.firstOrNull { it.canParse(head, fileName) }
-            ?: return ImportSummary("", "", 0, 0, unrecognizedFormat = true)
+            ?: return@withContext ImportSummary("", "", 0, 0, unrecognizedFormat = true)
 
         val entries = parser.parse(text, fileName)
         val innerName = (parser as? PlaylistNameProvider)?.innerName
@@ -122,7 +137,7 @@ class PlaylistImporter(
                 importedCount = imported,
             )
         )
-        return ImportSummary(
+        return@withContext ImportSummary(
             playlistId = playlist.id,
             playlistName = playlist.name,
             imported = imported,

@@ -20,6 +20,15 @@ internal data class LxSourceEntry(
     val version: String?,
     val installedAt: Long,
     val lastStatus: String? = null,
+    /**
+     * 安装时正文的 SHA-256（hex，小写）。
+     *
+     * 用于**落盘后完整性校验**：脚本正文是会被 QuickJS 直接执行的代码，一旦磁盘上的文件被
+     * 其它途径改写（备份恢复、外部工具、越权写入），加载前必须能发现。
+     *
+     * `null` = 老版本安装的记录，未做 pin（下次刷新/重装后自动补上）。
+     */
+    val sha256: String? = null,
 ) {
     val installed: Boolean get() = installedAt > 0
 
@@ -31,6 +40,7 @@ internal data class LxSourceEntry(
         put("version", version ?: "")
         put("installedAt", installedAt)
         if (lastStatus != null) put("lastStatus", JSONObject(lastStatus))
+        if (!sha256.isNullOrBlank()) put("sha256", sha256)
     }
 
     companion object {
@@ -42,6 +52,7 @@ internal data class LxSourceEntry(
             version = obj.optString("version").takeIf { it.isNotBlank() },
             installedAt = obj.optLong("installedAt", 0L),
             lastStatus = obj.optJSONObject("lastStatus")?.toString(),
+            sha256 = obj.optString("sha256").takeIf { it.isNotBlank() },
         )
 
         fun parseList(json: String?): List<LxSourceEntry> {

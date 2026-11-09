@@ -135,7 +135,14 @@ class SpectrumAnalyzer {
 
     /**
      * 释放资源：停用 PCM 通道并清空缓冲。
+     *
+     * L04：本方法与 [analyze] 会并发执行（FFT 线程在 [PcmSpectrumTap] 上跑，release 走主线程），
+     * 而 [analyze] 是 `@Synchronized`、本方法原先**没有加锁** ⇒ 清空 barBuf/displayBuf 的同时
+     * analyze 正在写同一批数组，会读到半清零数据（柱子偶尔全 0 闪一下），
+     * 更糟的是 `repository?.reset()` 与 analyze 的 `repository?.push(...)` 竞态。
+     * 两处都用实例监视器即可（`emitSilence` 与 `onPlaybackChanged` 已在同一把锁上）。
      */
+    @Synchronized
     fun release() {
         pcmFallback?.deactivate()
         barBuf.fill(0f)

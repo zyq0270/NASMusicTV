@@ -264,14 +264,43 @@ enum class PhotoTransitionId(
         /**
          * 当前平台上的**实际标识**。
          *
-         * 只有 [degradeTo] 非空的项（目前仅 [LIQUIFY]）会换成另一个效果；
-         * 其余 M5 项返回自身（降级发生在实现内部）。
+         * 两级降级，先平台后红线：
+         * 1. **shader 降级**（`sdkInt < 33`）：只有 [degradeTo] 非空的项（目前仅 [LIQUIFY]）
+         *    会换成另一个效果；其余 M5 项返回自身（降级发生在实现内部）。
+         * 2. **clipPath 降级**（`sdkInt < 26`，C46）：[CLIP_BASED] 里的效果一律退化成
+         *    [CROSSFADE]。这些实现走 `DrawScope.clipPath`，而 minSdk 22/23/24 的硬件加速
+         *    路径（hwui Region）在本项目有过段错误取证 —— 详见 `docs/blackhole-visualizer-plan.md`。
+         *    ⚠️ 注意 `sdkInt < 26` 与 shader 的 33 是两个独立阈值，必须**分别**判断。
          */
-        fun effective(id: PhotoTransitionId, sdkInt: Int): PhotoTransitionId =
-            if (sdkInt < SHADER_MIN_SDK) id.degradeTo ?: id else id
+        fun effective(id: PhotoTransitionId, sdkInt: Int): PhotoTransitionId {
+            val platform = if (sdkInt < SHADER_MIN_SDK) id.degradeTo ?: id else id
+            return if (sdkInt < CLIP_MIN_SDK && platform in CLIP_BASED) CROSSFADE else platform
+        }
 
         /** AGSL shader 的最低 API（§4.4） */
         const val SHADER_MIN_SDK = 33
+
+        /**
+         * 走 `DrawScope.clipPath` 的实现（C46）。
+         *
+         * `clipPath` 在 API < 26 的硬件加速下会触发 hwui Region 段错误（项目既有红线），
+         * 而 `try/catch(Throwable)` 拦不住 native 崩溃 ⇒ 只能在枚举层先降级。
+         *
+         * ⚠️ 新增 clip 类实现时必须同步加进这里（`PhotoTransitionClipGateTest` 守这条）。
+         */
+        val CLIP_BASED: Set<PhotoTransitionId> = setOf(
+            IRIS_CIRCLE,      // IrisTransitions.kt  IrisCircleTransition
+            WIPE_LINEAR,      // IrisTransitions.kt  WipeLinearTransition
+            IRIS_DIAMOND,     // IrisP1Transitions.kt PolygonIrisTransition
+            IRIS_HEXAGON,
+            IRIS_STAR,
+            SHAPE_RANDOM,     // 复用 PolygonIrisTransition（四个形状全是 clipPath）
+            WIPE_CLOCK,       // IrisP1Transitions.kt 扇形折线 clipPath
+            WIPE_CROSS,
+        )
+
+        /** clipPath 安全的最低 API */
+        const val CLIP_MIN_SDK = 26
 
         /**
          * 随机池 —— §5.9 的三条规则集中在此，便于单测（门禁 G5）。

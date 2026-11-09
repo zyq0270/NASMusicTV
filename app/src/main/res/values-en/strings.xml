@@ -1204,6 +1204,7 @@
     <string name="pstats_distinct_songs">Songs</string>
     <string name="pstats_top_artists">Top Artists</string>
     <string name="pstats_genre_distribution">Genre Distribution</string>
+    <string name="pstats_genre_others">Others (%1$d genres)</string>
     <string name="pstats_empty">No play records yet. Play some songs first!</string>
     <string name="pstats_plays_format">%1$d plays</string>
     <string name="pstats_songs_format">%1$d songs</string>
@@ -1686,4 +1687,5 @@
     <string name="feiniu_err_token_expired">Login token has expired. Please reconnect.</string>
     <string name="feiniu_err_network">Cannot reach the server (%1$s). Check the network and address.</string>
     <string name="feiniu_err_no_token">Login succeeded but the response contained no userToken</string>
+    <string name="server_config_start_failed">Local server failed to start (port may be in use)</string>
 </resources>

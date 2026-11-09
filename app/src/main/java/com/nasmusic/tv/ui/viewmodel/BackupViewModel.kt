@@ -14,6 +14,8 @@ import com.nasmusic.tv.data.prefs.backupGson
 import com.nasmusic.tv.util.AppLog
 import com.nasmusic.tv.util.BackupFileUtils
 import com.nasmusic.tv.util.LocalFilePicker
+import com.nasmusic.tv.util.rethrowIfCancellation
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -41,7 +43,10 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
 
     /** 刷新备份文件列表（进入设置页时调用） */
     fun refreshBackupFiles() {
-        viewModelScope.launch {
+        // M35：整个函数体都是**阻塞**的（MediaStore 查询 / 文件读写 / Gson 序列化大对象），
+        // 原先跑在 viewModelScope 默认的 Main 上 ⇒ 大备份时会直接卡 UI。
+        // StateFlow 写入线程安全，回写不需要切回 Main。
+        viewModelScope.launch(Dispatchers.IO) {
             _backupFiles.value = currentBackupFiles()
         }
     }
@@ -58,7 +63,10 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
 
     /** 导出完整备份到 Downloads/NASMusic/（含服务器地址，不含密码/Token） */
     fun exportBackup() {
-        viewModelScope.launch {
+        // M35：整个函数体都是**阻塞**的（MediaStore 查询 / 文件读写 / Gson 序列化大对象），
+        // 原先跑在 viewModelScope 默认的 Main 上 ⇒ 大备份时会直接卡 UI。
+        // StateFlow 写入线程安全，回写不需要切回 Main。
+        viewModelScope.launch(Dispatchers.IO) {
             try {
                 val data = prefs.backup.exportBackupData().copy(
                     mvCacheEntries = mvSearchManager.exportMvCache()
@@ -73,6 +81,7 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
                     _backupMessage.value = BackupMessage(getApplication<Application>().getString(R.string.backup_export_failed, e.message?.take(60) ?: ""), isError = true)
                 }
             } catch (e: Exception) {
+                e.rethrowIfCancellation()
                 AppLog.e("BackupViewModel", "exportBackup failed", e)
                 _backupMessage.value = BackupMessage(getApplication<Application>().getString(R.string.backup_export_failed, e.message?.take(60) ?: ""), isError = true)
             }
@@ -87,7 +96,10 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
      *   还必须把这份文件**登记**进列表（见 [currentBackupFiles]），否则用户导入完在列表里找不到它。
      */
     fun importBackup(uri: Uri, fromLocalFile: Boolean = false) {
-        viewModelScope.launch {
+        // M35：整个函数体都是**阻塞**的（MediaStore 查询 / 文件读写 / Gson 序列化大对象），
+        // 原先跑在 viewModelScope 默认的 Main 上 ⇒ 大备份时会直接卡 UI。
+        // StateFlow 写入线程安全，回写不需要切回 Main。
+        viewModelScope.launch(Dispatchers.IO) {
             try {
                 val json = BackupFileUtils.read(getApplication(), uri).getOrThrow()
                 // ⚠️ 必须用 backupGson（容错枚举）：老备份里可能存着已删除的枚举名
@@ -108,6 +120,7 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
                     }
                 )
             } catch (e: Exception) {
+                e.rethrowIfCancellation()
                 AppLog.e("BackupViewModel", "importBackup failed", e)
                 _backupMessage.value = BackupMessage(getApplication<Application>().getString(R.string.backup_restore_failed, e.message?.take(60) ?: ""), isError = true)
             }
@@ -169,7 +182,10 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
 
     /** 删除指定备份文件 */
     fun deleteBackup(uri: Uri) {
-        viewModelScope.launch {
+        // M35：整个函数体都是**阻塞**的（MediaStore 查询 / 文件读写 / Gson 序列化大对象），
+        // 原先跑在 viewModelScope 默认的 Main 上 ⇒ 大备份时会直接卡 UI。
+        // StateFlow 写入线程安全，回写不需要切回 Main。
+        viewModelScope.launch(Dispatchers.IO) {
             try {
                 val result = BackupFileUtils.delete(getApplication(), uri)
                 if (result.isSuccess) prefs.removeImportedBackup(uri.toString())
@@ -181,6 +197,7 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
                     _backupMessage.value = BackupMessage(getApplication<Application>().getString(R.string.backup_delete_failed, e.message?.take(60) ?: ""), isError = true)
                 }
             } catch (e: Exception) {
+                e.rethrowIfCancellation()
                 AppLog.e("BackupViewModel", "deleteBackup failed", e)
                 _backupMessage.value = BackupMessage(getApplication<Application>().getString(R.string.backup_delete_failed, e.message?.take(60) ?: ""), isError = true)
             }

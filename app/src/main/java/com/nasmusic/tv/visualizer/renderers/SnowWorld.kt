@@ -101,12 +101,23 @@ internal class SnowAudio(p: SnowCedarP) {
     val energy: Double get() = smEnergy.value.toDouble()
     val treble: Double get() = smTreble.value.toDouble()
 
-    /** 一帧一次；`dtSec` 直接来自帧循环（⛔ 隐含 60fps —— [AudioSmoother.update] 那条老路）。 */
+    /**
+     * 一帧一次；`dtSec` 直接来自帧循环（⛔ 隐含 60fps —— [AudioSmoother.update] 那条老路）。
+     *
+     * M53：入口对 NaN/Inf 兜底。⛔ [AudioSmoother] 是纯 EMA —— NaN 进来就**永久粘连**
+     * （NaN 与任何数运算仍是 NaN），随后经 `SnowWorld.state()` 污染风场参数与雪粒坐标，
+     * 整幅画永久静止，而且换画幅也不会自愈（`reset()` 只在重建时调用）。
+     * 这里把非有限值一律当 0，`dtSec` 同样兜底（NaN 的 dt 会把所有积分器打死）。
+     */
     fun update(rawBass: Double, rawEnergy: Double, rawTreble: Double, dtSec: Double) {
-        smBass.updateDt(rawBass.toFloat(), dtSec.toFloat())
-        smEnergy.updateDt(rawEnergy.toFloat(), dtSec.toFloat())
-        smTreble.updateDt(rawTreble.toFloat(), dtSec.toFloat())
+        val dt = if (dtSec.isFinite()) dtSec.toFloat() else 0f
+        smBass.updateDt(safe(rawBass), dt)
+        smEnergy.updateDt(safe(rawEnergy), dt)
+        smTreble.updateDt(safe(rawTreble), dt)
     }
+
+    /** 非有限值 → 0（见 [update]） */
+    private fun safe(v: Double): Float = if (v.isFinite()) v.toFloat() else 0f
 
     fun reset() {
         smBass.reset()

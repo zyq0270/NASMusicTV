@@ -4,6 +4,7 @@
 
 package com.nasmusic.tv.ui.components
 
+import android.graphics.Bitmap
 import androidx.compose.ui.res.stringResource
 import com.nasmusic.tv.R
 
@@ -78,7 +79,9 @@ import com.nasmusic.tv.ui.theme.FontSize
 import com.nasmusic.tv.ui.theme.NasMusicColors
 import com.nasmusic.tv.ui.theme.NasOverlayColors
 import com.nasmusic.tv.util.AppLog
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 
 /**
  * MTV（音乐视频）全屏播放页
@@ -115,8 +118,10 @@ fun MvPlaybackScreen(
     val context = LocalContext.current
     var showMvLyrics by rememberSaveable { mutableStateOf(false) }
     var isPlaying by remember { mutableStateOf(false) }
-    var positionMs by remember { mutableLongStateOf(0L) }
-    var mvDurationMs by remember { mutableLongStateOf(0L) }
+    // C29：进度/时长改成 **State 持有者**，读取点下沉到叶子（进度线 / 歌词浮层）。
+    // 原先 `var positionMs by ...` 在本层解包读取 ⇒ 4Hz 轮询把整棵 MV 子树都重组一遍。
+    val positionMs = remember { mutableLongStateOf(0L) }
+    val mvDurationMs = remember { mutableLongStateOf(0L) }
     var playbackError by remember { mutableStateOf(false) }
     // 播放状态标志（切歌时重置）
     var errorReported by remember { mutableStateOf(false) }
@@ -138,8 +143,13 @@ fun MvPlaybackScreen(
     val controlsAlpha = if (controlsVisible) 1f else 0.15f
 
     // 手机遥控二维码（URL 不变只生成一次）
-    val qrBitmap = remember(remoteControlUrl) {
-        remoteControlUrl?.let { QrCodeGenerator.generateQrBitmap(it, 256) }
+    // C27 / N09：挪出组合期（原 `remember { generate(...) }` 会在主线程同步编码 + 分配位图）
+    var qrBitmap by remember(remoteControlUrl) { mutableStateOf<Bitmap?>(null) }
+    LaunchedEffect(remoteControlUrl) {
+        val url = remoteControlUrl
+        qrBitmap = if (url == null) null else withContext(Dispatchers.Default) {
+            QrCodeGenerator.generateQrBitmap(url, 256)
+        }
     }
 
     // ── 独立视频 ExoPlayer（页面级复用，不再因 URL 变化重建）──
@@ -189,8 +199,8 @@ fun MvPlaybackScreen(
     LaunchedEffect(exoPlayer) {
         while (true) {
             isPlaying = exoPlayer.isPlaying
-            positionMs = exoPlayer.currentPosition.coerceAtLeast(0L)
-            mvDurationMs = exoPlayer.duration.coerceAtLeast(0L)
+            positionMs.longValue = exoPlayer.currentPosition.coerceAtLeast(0L)
+            mvDurationMs.longValue = exoPlayer.duration.coerceAtLeast(0L)
             delay(250)
         }
     }
@@ -316,9 +326,11 @@ fun MvPlaybackScreen(
         )
 
         // ── 手机遥控二维码（右上角，跟随控制条虚化）──
-        if (qrBitmap != null) {
+        // 委托属性不能智能转换 ⇒ 先取本地 val（同一帧内不会变）
+        val qr = qrBitmap
+        if (qr != null) {
             Image(
-                bitmap = qrBitmap.asImageBitmap(),
+                bitmap = qr.asImageBitmap(),
                 contentDescription = stringResource(R.string.mv_scan_remote),
                 modifier = Modifier
                     .align(Alignment.TopEnd)
@@ -332,22 +344,15 @@ fun MvPlaybackScreen(
 
         // ── 歌词浮层（默认隐藏；「歌词」按钮切换）──
         if (showMvLyrics && lyrics != null && lyrics.lines.isNotEmpty()) {
-            Box(
+            MvLyricsOverlay(
+                lyrics = lyrics,
+                positionMs = positionMs,
+                isPlaying = isPlaying,
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .fillMaxWidth()
                     .padding(start = 48.dp, end = 48.dp, bottom = 96.dp)
-                    .background(Color(0x66000000), RoundedCornerShape(12.dp))
-            ) {
-                KaraokeLyricsView(
-                    lyrics = lyrics,
-                    progressMs = positionMs,
-                    isPlaying = isPlaying,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 24.dp)
-                )
-            }
+            )
         }
 
         // ── 播放失败提示 ──
@@ -451,28 +456,66 @@ fun MvPlaybackScreen(
 
             Spacer(Modifier.height(12.dp))
 
-            // 进度细线（样式与 K 歌页一致：轨道 + 渐变填充）
-            val mvProgress = if (mvDurationMs > 0L) {
-                (positionMs.toFloat() / mvDurationMs.toFloat()).coerceIn(0f, 1f)
-            } else 0f
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(2.dp)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(NasMusicColors.SurfaceVariant.copy(alpha = 0.6f))
-                )
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth(mvProgress)
-                        .fillMaxHeight()
-                        .background(NasMusicBrushes.progressBar)
-                )
-            }
+            // 进度细线（样式与 K 歌页一致：轨道 + 渐变填充）——
+            // C29：进度比例在 MvProgressLine 内部读取，本层不读 ⇒ 4Hz 更新只重组这一条线
+            MvProgressLine(positionMs = positionMs, durationMs = mvDurationMs)
         }
+    }
+}
+
+/**
+ * MV 页进度细线（C29）。
+ *
+ * 只有这里读 `positionMs` / `durationMs` 的**值** ⇒ 4Hz 轮询不会连带重组整页。
+ */
+@Composable
+private fun MvProgressLine(
+    positionMs: androidx.compose.runtime.State<Long>,
+    durationMs: androidx.compose.runtime.State<Long>,
+) {
+    val pos = positionMs.value
+    val dur = durationMs.value
+    val progress = if (dur > 0L) (pos.toFloat() / dur.toFloat()).coerceIn(0f, 1f) else 0f
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(2.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(NasMusicColors.SurfaceVariant.copy(alpha = 0.6f))
+        )
+        Box(
+            modifier = Modifier
+                .fillMaxWidth(progress)
+                .fillMaxHeight()
+                .background(NasMusicBrushes.progressBar)
+        )
+    }
+}
+
+/**
+ * MV 页歌词浮层（C29）：进度读取点下沉，避免整页随轮询重组。
+ */
+@Composable
+private fun MvLyricsOverlay(
+    lyrics: com.nasmusic.tv.data.model.Lyrics?,
+    positionMs: androidx.compose.runtime.State<Long>,
+    isPlaying: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier = modifier.background(Color(0x66000000), RoundedCornerShape(12.dp))
+    ) {
+        KaraokeLyricsView(
+            lyrics = lyrics,
+            progressMs = positionMs.value,
+            isPlaying = isPlaying,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 24.dp)
+        )
     }
 }
 

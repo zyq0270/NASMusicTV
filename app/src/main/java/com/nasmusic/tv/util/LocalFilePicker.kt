@@ -35,6 +35,9 @@ object LocalFilePicker {
     /** 内置存储的文档提供者（系统文件选择器列目录用的 authority） */
     private const val EXTERNAL_STORAGE_DOC_AUTHORITY = "com.android.externalstorage.documents"
 
+    /** C02：有界读取的分块大小（也是 ByteArrayOutputStream 的初始容量上限） */
+    private const val READ_CHUNK_BYTES = 64 * 1024
+
     /** 导出类文件统一落在公共下载目录的这个子目录下（与 `BackupFileUtils` 同一约定） */
     private val initialDocumentId: String
         get() = "primary:${Environment.DIRECTORY_DOWNLOADS}/${BackupFileUtils.BACKUP_SUBDIR}"
@@ -162,9 +165,26 @@ object LocalFilePicker {
     fun readText(context: Context, uri: Uri, maxBytes: Long): String {
         val size = sizeOf(context, uri)
         if (size > maxBytes) throw TooLargeException(size)
-        return context.contentResolver.openInputStream(uri)?.use {
-            it.reader(Charsets.UTF_8).use { r -> r.readText() }
-        } ?: throw IOException("openInputStream returned null")
+        val stream = context.contentResolver.openInputStream(uri)
+            ?: throw IOException("openInputStream returned null")
+        // C02：⛔ `sizeOf == -1`（SAF provider 不报 SIZE）时不能退化成无上限的 readText()。
+        // 改成边读边计数：一旦累计超过 maxBytes 立刻抛 TooLargeException，
+        // 既保证上限生效，也不会先把整份文件读进内存再判断。
+        stream.use { input ->
+            val buf = ByteArray(READ_CHUNK_BYTES)
+            val out = java.io.ByteArrayOutputStream(
+                size.coerceIn(0L, READ_CHUNK_BYTES.toLong()).toInt()
+            )
+            var total = 0L
+            while (true) {
+                val n = input.read(buf)
+                if (n < 0) break
+                total += n
+                if (total > maxBytes) throw TooLargeException(total)
+                out.write(buf, 0, n)
+            }
+            return out.toString("UTF-8")
+        }
     }
 
     /**

@@ -138,8 +138,13 @@ fun TextInputDialog(
     val context = LocalContext.current
     // 手机端：强制使用系统 IME（不显示自定义键盘、不启动 QR）；TV 端保持原样
     // 与 MainActivity 一致，同时检查 leanback 和 television 特性
-    val isTVDevice = context.packageManager.hasSystemFeature("android.software.leanback") ||
+    // L20：`hasSystemFeature` 是**跨进程 binder 调用**，原先每次重组都要打两次；
+    // 输入框在打字时每敲一个字符就重组一次 ⇒ 每个按键多两次 IPC。
+    // 机型不会在运行期变化，remember 一次即可（context 变才重算）。
+    val isTVDevice = remember(context) {
+        context.packageManager.hasSystemFeature("android.software.leanback") ||
             context.packageManager.hasSystemFeature("android.hardware.type.television")
+    }
     // 是否切换到系统 IME 输入模式
     var showSystemIme by remember {
         mutableStateOf(!isTVDevice)  // 手机端默认系统 IME，TV 端默认自定义键盘
@@ -157,7 +162,9 @@ fun TextInputDialog(
     val server = remember { LocalInputServer(context) }
     val qrScope = rememberCoroutineScope()
     // L11：NanoHTTPD 回调统一投递到主线程（见 server.start 内注释）
-    val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    // L20：Handler 原先每次重组都 new 一个（同样随打字高频发生），remember 一次即可 ——
+    // 它只持有 Looper 引用，没有需要随重组重建的状态。
+    val mainHandler = remember { android.os.Handler(android.os.Looper.getMainLooper()) }
 
     val keyboardController = LocalSoftwareKeyboardController.current
     val textFieldFocusRequester = remember { FocusRequester() }

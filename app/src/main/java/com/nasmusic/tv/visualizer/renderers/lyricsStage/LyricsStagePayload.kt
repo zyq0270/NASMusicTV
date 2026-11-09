@@ -13,13 +13,40 @@ import com.nasmusic.tv.data.model.WordTimestamp
  * ⚠️ **可变类而非 data class**：舞台每帧只改三个字段、不新建对象 ⇒ 逐帧零分配。
  */
 class LyricsStagePayload(
-    /** 整曲歌词行（Folia 的 `lines`），FULL_VIEW 子模式要把它排成整版版面 */
-    var lines: List<LyricLine> = emptyList(),
+    /**
+     * 整曲歌词行（Folia 的 `lines`），FULL_VIEW 子模式要把它排成整版版面。
+     *
+     * ⚠️ 这里是**普通构造参数**、不是属性：同名属性 [lines] 在类体内声明
+     * （要自定义 setter 维护 [linesGeneration]），初始值取自本参数。这样
+     * `LyricsStagePayload(lines = …)` 这类命名参数调用点全部不受影响。
+     */
+    lines: List<LyricLine> = emptyList(),
     /** 当前行索引（-1 = 无） */
     var currentIndex: Int = -1,
     /** 播放进度（秒） */
     var timeSec: Double = 0.0,
 ) {
+    /**
+     * 整曲歌词行。
+     *
+     * ⚠️ **整曲身份**（C50/M54）：切歌、歌词异步到达、重新加载都会换一个
+     * `List` 实例。子渲染器普遍按「当前行 `startTime`」判换行 —— 而两首歌的首行
+     * `startTime` 常常都是 0.0 ⇒ 只比 `startTime` 会把「上一首最后一行 →
+     * 下一首第一行」误判成「同一行」，版面与词表全部沿用旧曲。所以这里在赋值处
+     * 集中维护 [linesGeneration]，子渲染器只比代数即可。
+     */
+    var lines: List<LyricLine> = lines
+        set(value) {
+            if (value !== field) {
+                field = value
+                linesGeneration++
+            }
+        }
+
+    /** 整曲歌词的「身份代数」：每次 [lines] 换成新实例 +1（单调递增，永不复用） */
+    var linesGeneration: Int = 0
+        private set
+
     val current: LyricLine? get() = lines.getOrNull(currentIndex)
     val next: LyricLine? get() = lines.getOrNull(currentIndex + 1)
     val hasLyrics: Boolean get() = lines.isNotEmpty()
@@ -60,7 +87,13 @@ object LyricsStageBridge {
     fun buildLine(line: LyricsLine, nextLineTimeMs: Long?): LyricLine {
         val startTime = line.time / 1000.0
         val endTimeMs = nextLineTimeMs ?: (line.time + DEFAULT_LINE_DURATION_MS)
-        val endTime = endTimeMs / 1000.0
+        // M55：相邻行时间戳相同或倒序（解析器兜底、坏 LRC）会让 endTime <= startTime
+        // ⇒ 行时长为 0/负 ⇒ 逐字揭示的进度分母为 0，第一帧就判「整行唱完」，
+        // 高亮直接跳过这一行。这里兜到最短行时长，保证严格单调。
+        // ⚠️ 只在**非正时长**时兜底：50ms 的真实短行必须保持 50ms，否则
+        // `renderHints.timingClass` 会被抬出 micro 档（`LyricsStageBridgeTest` 钉着这条）。
+        val endTime =
+            if (endTimeMs > line.time) endTimeMs / 1000.0 else startTime + MIN_LINE_DURATION_SEC
 
         val words = buildWords(line.text, line.wordTimestamps, startTime, endTime)
 
@@ -178,4 +211,7 @@ object LyricsStageBridge {
     private val TOKEN_REGEX = Regex("[\\u4e00-\\u9fff\\u3040-\\u30ff\\uac00-\\ud7af]|[A-Za-z0-9']+")
 
     private const val DEFAULT_LINE_DURATION_MS = 3000L
+
+    /** M55：行时长下限（秒）—— 时间戳相同/倒序时的兜底，见 [buildLine] */
+    private const val MIN_LINE_DURATION_SEC = 0.15
 }

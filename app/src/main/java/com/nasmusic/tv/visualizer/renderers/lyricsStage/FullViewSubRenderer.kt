@@ -291,6 +291,11 @@ class FullViewSubRenderer : LyricsSubRenderer {
     /** 构建当前版面所用的歌词行（换歌时换掉 ⇒ 重建） */
     private var builtLines: List<LyricLine>? = null
 
+    /** 上次建版面时的画布尺寸（像素）与 density（M54：任一变化都必须重排） */
+    private var builtViewportW: Float = -1f
+    private var builtViewportH: Float = -1f
+    private var builtDensity: Float = -1f
+
     /** 构建当前版面所用的原始歌词行（`sourceLineIndex` 的下标来源） */
     private var builtSourceLines: List<LyricLine> = emptyList()
 
@@ -388,8 +393,16 @@ class FullViewSubRenderer : LyricsSubRenderer {
 
         val time = lyrics.timeSec
 
-        // 换歌 ⇒ 重建版面
-        if (lyrics.lines !== builtLines) {
+        // 换歌 ⇒ 重建版面。
+        // M54：画布尺寸 / density 变化**同样**必须重排 —— 版面里的字形度量、行高、
+        // 纸张宽度、相机世界范围全部是按 `canvasSize × density` 烘死的，只认
+        // `lines` 引用的话，TV↔手机切换、画中画、分屏、系统字号改 density 之后
+        // 整篇版面永久错位（而且再也不会纠正，因为 lines 引用没变）。
+        if (lyrics.lines !== builtLines ||
+            builtViewportW != ctx.canvasSize.width ||
+            builtViewportH != ctx.canvasSize.height ||
+            builtDensity != density
+        ) {
             rebuildArticle(lyrics.lines, density, ctx)
         }
 
@@ -613,6 +626,9 @@ class FullViewSubRenderer : LyricsSubRenderer {
     ) {
         builtLines = lines
         builtSourceLines = lines
+        builtViewportW = ctx.canvasSize.width
+        builtViewportH = ctx.canvasSize.height
+        builtDensity = density
         builtSnapshotScale = FumeMath.clamp(density, 1f, 2f)
         releaseSnapshots()
 

@@ -72,6 +72,22 @@ class BackendRegistry(private val appContext: Context? = null) {
     private var serverDisplayName: String = ""
 
     /**
+     * 初始化世代号（C04）。
+     *
+     * `ServerViewModel` 有两条可并发触发的连接协程（首次连接 / 手动重连），而
+     * `initialize()` 全程跑在 IO 上 ⇒ 先发起的那次可能**后**完成。只靠 `synchronized`
+     * 保护「替换 currentAdapter」是不够的：
+     *
+     * - 后完成的旧世代会把 `currentAdapter` 换回自己的 adapter，同时把
+     *   `BackendAuthHeaders` 的 provider 指过去 —— 而**另一个** adapter 可能已经被
+     *   `releaseAdapter` 关闭 ⇒ 播放/封面立刻 401；
+     * - 旧世代的 adapter 本身也已 `close()`，却被当成活跃对象用。
+     *
+     * ⇒ 每次初始化在锁内领一个号；提交前比对，不是最新世代就**放弃提交并释放自己**。
+     */
+    private var initGeneration: Long = 0L
+
+    /**
      * 最近一次连接失败的简短原因（见 [BackendAdapter.lastErrorDetail]）。
      *
      * ⚠️ 必须在 `releaseAdapter(adapter)` **之前**从 adapter 取出——`releaseAdapter`
@@ -103,6 +119,9 @@ class BackendRegistry(private val appContext: Context? = null) {
         // F-1：username 不落日志（debug 亦脱敏），只记布尔存在性
         AppLog.d("BackendRegistry", "initialize: type=${config.backendType}, baseUrl=${UrlSanitizer.sanitize(config.baseUrl)}, hasUser=${config.username.isNotEmpty()}, hasPw=${config.password.isNotEmpty()}, hasToken=${config.apiToken.isNotEmpty()}, hasAccessCode=${config.accessCode.isNotEmpty()}")
 
+        // C04：先领世代号再动任何共享状态 —— 领号之后的所有提交都要比对它。
+        val generation = synchronized(lock) { ++initGeneration }
+
         // 每次连接前清空，避免上一次失败的原因被误当成本次的
         lastErrorDetail = ""
 
@@ -123,8 +142,12 @@ class BackendRegistry(private val appContext: Context? = null) {
             // L1 修复（2026-10-06）：失败分支对称走 releaseAdapter（logout + close）——
             // 旧实现只 close 不 logout，与成功替换路径（releaseAdapter）不对称。
             // ⚠️ 诊断文案必须在 releaseAdapter 之前取（close() 会清空 FeiniuAdapter 的会话态）
-            lastErrorDetail = adapter.lastErrorDetail
+            val detail = adapter.lastErrorDetail
             releaseAdapter(adapter)
+            // C04：过期世代的失败不得覆盖最新世代的诊断（与下方 else 分支同口径）
+            synchronized(lock) {
+                if (generation == initGeneration) lastErrorDetail = detail
+            }
             false
         }
 
@@ -133,25 +156,49 @@ class BackendRegistry(private val appContext: Context? = null) {
             // 关键：必须释放旧 adapter 的 OkHttp 资源（连接池 + dispatcher 线程池），
             // 否则网络重连风暴会累积多套 OkHttpClient，导致电视 WiFi 栈过载。
             // JellyfinAdapter.close() / NavidromeAdapter.close() 负责实际的 shutdown + evictAll。
+            var stale = false
             val oldAdapter = synchronized(lock) {
-                val old = currentAdapter
-                currentAdapter = adapter
-                currentConfig = config
-                serverDisplayName = adapter.serverName
-                old
+                if (generation != initGeneration) {
+                    // C04：已有更晚的 initialize 在跑/已提交 ⇒ 本世代作废。
+                    // ⛔ 不得改写 currentAdapter，也**不得**改 BackendAuthHeaders 的 provider
+                    //    （那会让播放/封面指向一个马上要被 close 的 adapter ⇒ 401）。
+                    stale = true
+                    null
+                } else {
+                    val old = currentAdapter
+                    currentAdapter = adapter
+                    currentConfig = config
+                    serverDisplayName = adapter.serverName
+                    // C04：认证头必须与 adapter 的提交**在同一临界区**完成 ——
+                    // 原先这次 update 在锁外，恰好是最容易回写覆盖新 provider 的位置。
+                    // 同步播放 / 封面链路的认证头（飞牛音乐等需要 Authorization 的后端）。
+                    // 其他后端 streamHeaders 为空 Map，注入后行为不变。
+                    BackendAuthHeaders.update({ adapter.streamHeaders }, hostOf(config.baseUrl))
+                    old
+                }
+            }
+            if (stale) {
+                AppLog.d("BackendRegistry", "initialize: 本世代($generation)已被更新的连接取代，丢弃本次结果")
+                // 只释放**自己**的 adapter（不动 currentAdapter / 认证头 provider），
+                // 并把结果当作「已连接」返回：服务端确实连上了，只是由更晚的世代代表。
+                // ⛔ 返回 false 会让调用方弹「连接失败」并把 lastErrorDetail 显示给用户，
+                //    而此刻系统里其实有一个健康的 adapter —— 那是纯误报。
+                releaseAdapter(adapter)
+                return@withContext true
             }
             if (oldAdapter != null) {
                 AppLog.d("BackendRegistry", "initialize: replacing existing adapter, releasing old one")
                 releaseAdapter(oldAdapter)
             }
-            // 同步播放 / 封面链路的认证头（飞牛音乐等需要 Authorization 的后端）。
-            // 其他后端 streamHeaders 为空 Map，注入后行为不变。
-            BackendAuthHeaders.update({ adapter.streamHeaders }, hostOf(config.baseUrl))
         } else {
             // ⚠️ 同上：先取诊断文案再释放，否则 close() 之后就只剩空串
-            lastErrorDetail = adapter.lastErrorDetail
+            val detail = adapter.lastErrorDetail
             // L1 修复：同上——对称 releaseAdapter，防服务端 session 残留
             releaseAdapter(adapter)
+            // C04：过期的失败不得覆盖最新世代的诊断文案（否则用户看到的是上一次连接的错因）
+            synchronized(lock) {
+                if (generation == initGeneration) lastErrorDetail = detail
+            }
         }
 
         success
@@ -211,6 +258,10 @@ class BackendRegistry(private val appContext: Context? = null) {
      */
     suspend fun disconnect() {
         val adapter = synchronized(lock) {
+            // C04：作废所有在飞的 initialize —— 否则「断开」之后那条仍在 IO 上的
+            // initialize 完成时会把自己提交上去，表现为「刚断开就自己连回来了」
+            // （连认证头都被重新注入）。
+            initGeneration++
             val a = currentAdapter
             currentAdapter = null
             currentConfig = null

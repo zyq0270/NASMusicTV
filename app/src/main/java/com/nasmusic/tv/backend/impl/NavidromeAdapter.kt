@@ -914,6 +914,14 @@ class NavidromeAdapter : BackendAdapter {
             password = ""
             apiToken = ""
             salt = ""
+            // L11：认证态是**两处**存的 —— initialize 时同步给 restClient 一份
+            // （见 R-10 注释），close 只清了本类字段 ⇒ restClient 里那串明文 password / salt
+            // 会跨「断开连接」一直驻留到下一次 initialize，任何延迟引用 restClient 的请求
+            // （分页拉取、封面批量取）仍会带着旧口令打旧服务器。
+            restClient.baseUrl = ""
+            restClient.username = ""
+            restClient.password = ""
+            restClient.salt = ""
             AppLog.d("NavidromeAdapter", "close: auth state cleared (shared OkHttp pool retained)")
         } catch (e: Exception) {
             AppLog.w("NavidromeAdapter", "close failed", e)

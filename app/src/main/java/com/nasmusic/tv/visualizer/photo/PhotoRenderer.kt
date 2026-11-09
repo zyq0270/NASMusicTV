@@ -112,7 +112,15 @@ class PhotoRenderer : VisualizerRenderer {
             lastCanvasH = ctx.canvasSize.height
         }
 
-        val t = bound ?: return
+        // C47 兜底：id 对应的实现不存在时（枚举 76 项、注册表 43 项），
+        // 旧实现直接 return ⇒ 整面墙一帧都不画（纯黑）。这里回落默认转场，
+        // 宁可效果不对，也不能整面黑屏。
+        val t = bound
+            ?: PhotoTransitionRegistry.get(PhotoTransitionId.Default)?.also { fallback ->
+                bound = fallback
+                fallback.prepare(geom, ctx.quality, MaskCache)
+            }
+            ?: return
 
         // ── 停留期运动（§5.6）：作用在几何上，转场自身无感知 ──
         // 检测新周期：progress 回落（HOLD 的 1 → 新 ENTER 的 0）

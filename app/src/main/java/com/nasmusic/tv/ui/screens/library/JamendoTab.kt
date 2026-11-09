@@ -1,5 +1,6 @@
 package com.nasmusic.tv.ui.screens.library
 
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -12,6 +13,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -39,6 +41,8 @@ import com.nasmusic.tv.ui.components.song.SongRowMode
 import com.nasmusic.tv.ui.components.song.UnifiedSongRow
 import com.nasmusic.tv.ui.screens.TextInputDialog
 import com.nasmusic.tv.ui.theme.FontSize
+import com.nasmusic.tv.ui.theme.LocalUiMode
+import com.nasmusic.tv.ui.theme.UiMode
 import com.nasmusic.tv.ui.theme.NasMusicColors
 import com.nasmusic.tv.backend.download.model.stateOfSong
 
@@ -72,6 +76,11 @@ fun JamendoTab(
     // 2026-09-25 审查修复（#15）：裸 LazyListState() 每次重组新建，滚动位置被重置回顶
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
 
+    // M42：340dp 搜索框与「热门 + N 个预设 tag」挤在同一行 —— 360dp 竖屏上 tag 全部溢出屏幕，
+    // 且 Row 不可滚动、D-Pad 也移不过去，等于这些筛选器在手机上不存在。
+    // 与 RadioTab（方案 §2.4 / P0-23）同一套处理：竖屏改「搜索框整行 + tag 行横滑」。
+    val isPhonePortrait = LocalUiMode.current == UiMode.PhonePortrait
+
     LaunchedEffect(Unit) {
         onLoadHot()
     }
@@ -101,61 +110,76 @@ fun JamendoTab(
 
     Column(modifier = Modifier.fillMaxSize()) {
         // ── 顶部筛选行 ──
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
+        val jamendoSearchField: @Composable (Modifier) -> Unit = { m ->
             SearchField(
                 query = jamendoActiveTag,
                 placeholder = stringResource(R.string.network_search_hint),
                 onOpenSearch = { showSearchDialog = true },
                 onClear = { onLoadHot() },
-                modifier = Modifier.width(340.dp)
+                modifier = m
             )
-            Spacer(modifier = Modifier.width(8.dp))
-
-            val hotSelected = jamendoActiveTag.isBlank()
-            FocusableSurface(
-                onClick = onLoadHot,
-                shape = RoundedCornerShape(8.dp),
-                focusedScale = 1.05f,
-                animationDurationMs = 150,
-                containerColor = if (hotSelected) NasMusicColors.Primary
-                                else NasMusicColors.Surface.copy(alpha = 0.6f),
-                focusedContainerColor = NasMusicColors.Primary,
-                contentColor = if (hotSelected) NasMusicColors.OnPrimary else NasMusicColors.TextPrimary,
-                focusedContentColor = NasMusicColors.OnPrimary
-            ) {
-                Text(
-                    text = stringResource(R.string.network_jamendo_hot),
-                    color = LocalFocusableContentColor.current,
-                    fontSize = FontSize.small(),
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
-                )
-            }
-            Spacer(modifier = Modifier.width(4.dp))
-
-            JAMENDO_PRESET_TAGS.forEach { tag ->
-                val isSelected = jamendoActiveTag == tag
+        }
+        val jamendoTagRow: @Composable (Modifier) -> Unit = { m ->
+            Row(modifier = m, verticalAlignment = Alignment.CenterVertically) {
+                val hotSelected = jamendoActiveTag.isBlank()
                 FocusableSurface(
-                    onClick = { onLoadTag(tag) },
+                    onClick = onLoadHot,
                     shape = RoundedCornerShape(8.dp),
                     focusedScale = 1.05f,
                     animationDurationMs = 150,
-                    containerColor = if (isSelected) NasMusicColors.Primary
+                    containerColor = if (hotSelected) NasMusicColors.Primary
                                     else NasMusicColors.Surface.copy(alpha = 0.6f),
                     focusedContainerColor = NasMusicColors.Primary,
-                    contentColor = if (isSelected) NasMusicColors.OnPrimary else NasMusicColors.TextPrimary,
+                    contentColor = if (hotSelected) NasMusicColors.OnPrimary else NasMusicColors.TextPrimary,
                     focusedContentColor = NasMusicColors.OnPrimary
                 ) {
                     Text(
-                        text = tag,
+                        text = stringResource(R.string.network_jamendo_hot),
                         color = LocalFocusableContentColor.current,
                         fontSize = FontSize.small(),
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
                     )
                 }
                 Spacer(modifier = Modifier.width(4.dp))
+
+                JAMENDO_PRESET_TAGS.forEach { tag ->
+                    val isSelected = jamendoActiveTag == tag
+                    FocusableSurface(
+                        onClick = { onLoadTag(tag) },
+                        shape = RoundedCornerShape(8.dp),
+                        focusedScale = 1.05f,
+                        animationDurationMs = 150,
+                        containerColor = if (isSelected) NasMusicColors.Primary
+                                        else NasMusicColors.Surface.copy(alpha = 0.6f),
+                        focusedContainerColor = NasMusicColors.Primary,
+                        contentColor = if (isSelected) NasMusicColors.OnPrimary else NasMusicColors.TextPrimary,
+                        focusedContentColor = NasMusicColors.OnPrimary
+                    ) {
+                        Text(
+                            text = tag,
+                            color = LocalFocusableContentColor.current,
+                            fontSize = FontSize.small(),
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
+                        )
+                    }
+                Spacer(modifier = Modifier.width(4.dp))
+            }
+            }
+        }
+
+        if (isPhonePortrait) {
+            // 竖屏：搜索框整行 + tag 行可横滑（同 RadioTab）
+            jamendoSearchField(Modifier.fillMaxWidth())
+            Spacer(modifier = Modifier.height(8.dp))
+            jamendoTagRow(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()))
+        } else {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                jamendoSearchField(Modifier.width(340.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                jamendoTagRow(Modifier)
             }
         }
         Spacer(modifier = Modifier.height(12.dp))

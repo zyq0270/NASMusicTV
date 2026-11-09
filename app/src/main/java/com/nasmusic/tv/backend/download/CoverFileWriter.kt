@@ -61,7 +61,12 @@ class CoverFileWriter(
                 return@withContext if (isNormalizedJpeg(existing)) {
                     existing
                 } else {
-                    MediaTagWriter.compressCover(existing) ?: existing
+                    // L12：压缩失败时原先回退 `existing`（原始字节，可能是 PNG / 超大图），
+                    // 而调用方 `MediaTagWriter.embed` 一律按 `image/jpeg` 写入 ID3 ——
+                    // 产出「声明 jpeg、内容 PNG」的 APIC 帧，部分播放器直接不显示封面、
+                    // 且体积失控（专辑目录里的 cover.jpg 也可能就是几百 KB 的原图）。
+                    // 归一化失败就返回 null：cover.jpg 仍在，只是这一首不做内嵌。
+                    MediaTagWriter.compressCover(existing)
                 }
             }
             albumDir.mkdirs()

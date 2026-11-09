@@ -4,6 +4,7 @@ import com.nasmusic.tv.backend.BackendRegistry
 import com.nasmusic.tv.backend.network.NetworkSongId
 import com.nasmusic.tv.data.model.Song
 import com.nasmusic.tv.util.AppLog
+import com.nasmusic.tv.util.rethrowIfCancellation
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -117,6 +118,7 @@ class SmartRadioManager(
                     emitBatch(batch, seed, onBatchReady)
                 }
             } catch (e: Exception) {
+                e.rethrowIfCancellation()
                 AppLog.e(TAG, "startFromScratch failed", e)
                 _state.value = State.Exhausted
             }
@@ -165,6 +167,7 @@ class SmartRadioManager(
                     emitBatch(batch, seed, onBatchReady)
                 }
             } catch (e: Exception) {
+                e.rethrowIfCancellation()
                 AppLog.e(TAG, "startFromCurrentSong failed", e)
                 _state.value = State.Exhausted
             }
@@ -214,6 +217,7 @@ class SmartRadioManager(
                     emitBatch(batch, seed, onBatchReady)
                 }
             } catch (e: Exception) {
+                e.rethrowIfCancellation()
                 AppLog.e(TAG, "skip failed", e)
                 _state.value = State.Exhausted
             }

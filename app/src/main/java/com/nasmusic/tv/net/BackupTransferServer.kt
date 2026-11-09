@@ -39,12 +39,17 @@ class BackupTransferServer(
         private const val TAG = "BackupTransferServer"
 
         /**
-         * 上传体量上限（32MB）。
+         * 上传体量上限（= [BackupFileUtils.MAX_BACKUP_BYTES]，默认 10MB）。
+         *
          * 原实现按客户端 Content-Length 直接 `ByteArray(contentLength.toInt())`，
          * 同 LAN 攻击者谎报 1.5GB 即触发 OutOfMemoryError——该 Error 不被 catch(Exception) 捕获，
          * 直接崩进程（DoS）。
+         *
+         * ⚠️ N02：这里原先写死 32MB，而恢复/下载链路统一按 10MB 读
+         * （`LocalFilePicker.readText(MAX_BACKUP_BYTES)`）⇒ 11~32MB 的上传会「落盘成功、
+         * 恢复时被拒」。现直接引用同一个常量，三个口子同一个数。
          */
-        const val MAX_UPLOAD_BYTES = 32L * 1024 * 1024
+        const val MAX_UPLOAD_BYTES = BackupFileUtils.MAX_BACKUP_BYTES
     }
 
     private var server: Impl? = null

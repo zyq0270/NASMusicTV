@@ -14,6 +14,7 @@ import com.nasmusic.tv.backend.download.NetworkPlaybackResolver
 import com.nasmusic.tv.backend.network.ReplaceChain
 import com.nasmusic.tv.backend.network.ReplaceLayer
 import com.nasmusic.tv.util.AppLog
+import com.nasmusic.tv.util.rethrowIfCancellation
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -169,6 +170,7 @@ class PlayerViewModel(
                                 enriched
                             }
                         } catch (e: Exception) {
+                            e.rethrowIfCancellation()
                             AppLog.e("PlayerViewModel", "playQueue: enrich failed for stub '${firstSong.title}'", e)
                             firstSong
                         }
@@ -178,6 +180,7 @@ class PlayerViewModel(
                             val url = nasMusicApp.networkMusicManager.resolvePlayUrl(firstSong)
                             if (!url.isNullOrBlank()) firstSong.copy(streamUrl = url) else firstSong
                         } catch (e: Exception) {
+                            e.rethrowIfCancellation()
                             AppLog.e("PlayerViewModel", "playQueue: resolveUrl failed for ${firstSong.title}", e)
                             firstSong
                         }
@@ -201,6 +204,7 @@ class PlayerViewModel(
                                 firstSong
                             }
                         } catch (e: Exception) {
+                            e.rethrowIfCancellation()
                             AppLog.w("PlayerViewModel", "playQueue: NAS resolve failed for ${firstSong.title}", e)
                             firstSong
                         }
@@ -309,6 +313,7 @@ class PlayerViewModel(
                 // 重新加载队列到 ExoPlayer 并播放
                 playerManager.playQueue(updatedQueue, currentIndexValue)
             } catch (e: Exception) {
+                e.rethrowIfCancellation()
                 AppLog.e("PlayerViewModel", "resolveAndPlayCurrentSong failed", e)
                 showMessage?.invoke(getApplication<Application>().getString(R.string.play_failed_with_msg, e.message?.take(50)))
             }
@@ -447,11 +452,23 @@ class PlayerViewModel(
                 AppLog.d("PlayerViewModel", "resolveAndPlayByIndex: resolved ${song.title} → $playUrl")
                 // 基于「当前最新队列」更新目标歌曲的 streamUrl（而非入口旧快照），然后播放
                 val latestQueue = playerState.value.queue
+                // C32：队列在解析期间可能被增删/移动（那些入口不递增代数），
+                // 只比代数挡不住 ⇒ 必须校验 targetIndex 上还是不是同一首歌，
+                // 否则解析结果会写到已换成别的歌的同一下标上。
+                val currentAtTarget = latestQueue.getOrNull(targetIndex)
+                if (currentAtTarget == null || currentAtTarget.id != song.id) {
+                    AppLog.d(
+                        "PlayerViewModel",
+                        "resolveAndPlayByIndex: 队列已变（index $targetIndex 现为 ${currentAtTarget?.title ?: "越界"}），丢弃 ${song.title} 的解析结果"
+                    )
+                    return@launch
+                }
                 val updatedQueue = latestQueue.mapIndexed { index, s ->
                     if (index == targetIndex) s.copy(streamUrl = playUrl) else s
                 }
                 playerManager.playQueue(updatedQueue, targetIndex)
             } catch (e: Exception) {
+                e.rethrowIfCancellation()
                 AppLog.e("PlayerViewModel", "resolveAndPlayByIndex failed", e)
                 showMessage?.invoke(getApplication<Application>().getString(R.string.play_failed_with_msg, e.message?.take(50)))
             }
@@ -492,6 +509,12 @@ class PlayerViewModel(
         val (usedLayer, replacement) = hit
         if (generation != resolveGeneration) return false
         val latestQueue = playerState.value.queue
+        // N01：与 C32 同族 —— 回写前确认 targetIndex 上仍是触发替换的那首歌，
+        // 否则队列已增删/移动，替换产物会落到别的歌上（队列变短时还会越界）。
+        if (latestQueue.getOrNull(targetIndex)?.id != song.id) {
+            AppLog.d("PlayerViewModel", "tryReplaceByReSearch: 队列已变，丢弃 ${song.title} 的替换结果")
+            return false
+        }
         val updatedQueue = latestQueue.mapIndexed { index, s ->
             if (index == targetIndex) replacement else s
         }
@@ -593,6 +616,7 @@ class PlayerViewModel(
                     AppLog.d("PlayerViewModel", "updateRestoredQueueStreamUrls: updated ${updatedSongs.size} NAS songs")
                 }
             } catch (e: Exception) {
+                e.rethrowIfCancellation()
                 AppLog.w("PlayerViewModel", "updateRestoredQueueStreamUrls failed: ${e.message}", e)
             }
         }
@@ -611,6 +635,10 @@ class PlayerViewModel(
     /**
      * 切换歌曲在队列中的状态：不在队列则加入，在队列则移除。
      * 当前正在播放的歌曲不会被移除（避免误中断播放）。
+     *
+     * ⚠️ 这里**刻意不递增** `resolveGeneration`（C32 的另一种解法）：
+     * 增删任意一首歌都会让所有在途解析作废，包括正在播放那首的解析 ⇒ 反而更糟。
+     * 正确性由 `resolveAndPlayByIndex` / `tryReplaceByReSearch` 回写前的 **id 校验**保证。
      */
     fun toggleQueueSong(song: Song) {
         val currentQueue = playerState.value.queue

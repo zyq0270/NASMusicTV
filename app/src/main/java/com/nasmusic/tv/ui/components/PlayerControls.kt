@@ -82,7 +82,11 @@ import kotlinx.coroutines.launch
 @OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
 fun ProgressSection(
-    progressMs: Long,
+    /**
+     * M26：进度收 `State<Long>` —— 每秒 tick 只重组本小节（时长文本 / 进度填充），
+     * ⛔ 不要改回裸 `Long`：那会让整张播放页跟着每秒重组。
+     */
+    progressMs: androidx.compose.runtime.State<Long>,
     durationMs: Long,
     onSeek: (Long) -> Unit,
     onProgressFocusChanged: (Boolean) -> Unit = {},
@@ -98,7 +102,8 @@ fun ProgressSection(
     val progressFocusRequester = remember { FocusRequester() }
 
     // 手势处理器读取最新值（progressMs 每秒更新，不能作为 pointerInput key 否则手势每秒重启）
-    val latestProgressMs by rememberUpdatedState(progressMs)
+    // progressMs 本身就是 State（稳定引用）⇒ 闭包里直接读 `.value` 即可取最新进度，
+    // 不需要再套 rememberUpdatedState。
     val latestDurationMs by rememberUpdatedState(durationMs)
     val latestIsLive by rememberUpdatedState(isLive)
     val latestOnSeek by rememberUpdatedState(onSeek)
@@ -110,7 +115,7 @@ fun ProgressSection(
     ) {
         Text(
             text = if (isLive) "\u25CF " + stringResource(R.string.network_radio_live)
-                   else TimeUtils.formatDuration(progressMs),
+                   else TimeUtils.formatDuration(progressMs.value),
             color = if (isLive) NasMusicColors.Primary
                     else if (isProgressFocused) NasMusicColors.TextPrimary else NasMusicColors.TextSecondary,
             fontSize = if (isProgressFocused) timeFontFocused else timeFont
@@ -142,7 +147,7 @@ fun ProgressSection(
                                 if (durationMs > 0 && !isLive) {
                                     isProgressFocused = true
                                     val delta = if (event.key == Key.DirectionLeft) -15000L else 15000L
-                                    val newPosition = (progressMs + delta).coerceIn(0, durationMs)
+                                    val newPosition = (progressMs.value + delta).coerceIn(0, durationMs)
                                     onSeek(newPosition)
                                 }
                                 true
@@ -200,7 +205,7 @@ fun ProgressSection(
             Box(modifier = Modifier.fillMaxSize()) {
                 // 直播态：进度填充置 0、隐藏滑块圆点
                 val progress = if (isLive) 0f
-                               else if (durationMs > 0) progressMs.toFloat() / durationMs else 0f
+                               else if (durationMs > 0) progressMs.value.toFloat() / durationMs else 0f
                 val thumbDiameter = if (isProgressFocused && !isLive) 24.dp else 16.dp
 
                 // 背景轨道

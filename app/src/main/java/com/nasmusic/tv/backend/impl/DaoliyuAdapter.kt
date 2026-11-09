@@ -542,7 +542,12 @@ class DaoliyuAdapter : BackendAdapter {
         val title = EncodingUtils.fixEncoding(obj.get("title")?.asString ?: obj.get("name")?.asString) ?: "Unknown"
         val artist = EncodingUtils.fixEncoding(obj.get("artist")?.asString ?: obj.get("artistName")?.asString) ?: ""
         val album = EncodingUtils.fixEncoding(obj.get("album")?.asString ?: obj.get("albumName")?.asString) ?: ""
-        val rawAlbumId = obj.get("albumId")?.asString ?: albumId
+        // L06：两个来源的「前缀状态」不同 —— `obj.albumId` 是服务端裸值，
+        // 而 `albumId` 入参来自 `getAlbumSongs(albumId)`，调用方传的是**已带前缀**的 id。
+        // 原实现对回退值再拼一次前缀，得到 `daoliyu_daoliyu_XXX`：
+        // 按专辑取歌 / 取封面时 id 对不上，详情页封面与「同专辑其它歌」全部落空。
+        // 这里先统一剥掉前缀，后面只加一次。
+        val rawAlbumId = (obj.get("albumId")?.asString ?: albumId)?.removePrefix(SONG_ID_PREFIX)
         val coverUrl = obj.get("coverUrl")?.asString ?: obj.get("image")?.asString
         val durationMs = parseDurationMs(obj.get("duration")?.asLong)
         val trackNumber = obj.get("trackNumber")?.asInt ?: obj.get("track")?.asInt ?: 0

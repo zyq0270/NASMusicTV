@@ -51,6 +51,16 @@ internal class SubsonicRestClient(
     internal var password: String = ""
     internal var salt: String = ""
 
+    /**
+     * 最近一次 REST 请求的 HTTP 状态码（M06；0 = 还没有失败记录）。
+     *
+     * ⛔ [executeRequest] 对非 2xx 一律返回 null，调用方把它当「空结果」处理
+     * ⇒ 密码错（401）、无权限（403）、服务端 500 与「曲库为空」在 UI 上完全无法区分，
+     * 用户只看到「暂无歌曲」。这里把状态码留下来（已脱敏：只有数字），
+     * 由适配器在 null 分支读取并拼进 lastErrorDetail。
+     */
+    @Volatile internal var lastHttpStatus: Int = 0
+
     /** 歌曲总数缓存（-1 表示未统计） */
     @Volatile private var cachedTotal: Int = -1
     @Volatile private var cachedTotalAt: Long = 0L
@@ -132,8 +142,13 @@ internal class SubsonicRestClient(
                     val rawBytes = response.body?.bytes() ?: return@use null
                     val utf8Body = String(rawBytes, Charsets.UTF_8)
                     if (response.isSuccessful) {
+                        lastHttpStatus = response.code
                         gson.fromJson(utf8Body, JsonObject::class.java)
                     } else {
+                        // M06：⛔ 不能静默吞成 null —— 401/403/5xx 与空曲库无法区分。
+                        // 只记状态码与脱敏后的 URL（不含 u/t/s 参数）。
+                        lastHttpStatus = response.code
+                        AppLog.w(tag, "executeRequest HTTP ${response.code} for ${UrlSanitizer.sanitize(url)}")
                         null
                     }
                 }

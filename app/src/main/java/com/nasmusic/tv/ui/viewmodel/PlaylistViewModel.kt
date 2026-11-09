@@ -8,6 +8,7 @@ import com.nasmusic.tv.R
 import com.nasmusic.tv.data.model.LocalPlaylist
 import com.nasmusic.tv.data.model.Song
 import com.nasmusic.tv.util.AppLog
+import com.nasmusic.tv.util.rethrowIfCancellation
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -45,6 +46,7 @@ class PlaylistViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 prefs.playlist.createLocalPlaylist(name)
             } catch (e: Exception) {
+                e.rethrowIfCancellation()
                 AppLog.e("PlaylistViewModel", "createLocalPlaylist failed", e)
                 showError(getApplication<Application>().getString(R.string.create_playlist_error, e.message?.take(50)))
             }
@@ -60,6 +62,7 @@ class PlaylistViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 prefs.playlist.renameLocalPlaylist(id, newName)
             } catch (e: Exception) {
+                e.rethrowIfCancellation()
                 AppLog.e("PlaylistViewModel", "renameLocalPlaylist failed", e)
                 showError(getApplication<Application>().getString(R.string.rename_playlist_error, e.message?.take(50)))
             }
@@ -74,6 +77,7 @@ class PlaylistViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 prefs.playlist.deleteLocalPlaylist(id)
             } catch (e: Exception) {
+                e.rethrowIfCancellation()
                 AppLog.e("PlaylistViewModel", "deleteLocalPlaylist failed", e)
                 showError(getApplication<Application>().getString(R.string.delete_playlist_error, e.message?.take(50)))
             }
@@ -91,6 +95,7 @@ class PlaylistViewModel(app: Application) : AndroidViewModel(app) {
                     showError(getApplication<Application>().getString(R.string.song_already_in_playlist, ""))
                 }
             } catch (e: Exception) {
+                e.rethrowIfCancellation()
                 AppLog.e("PlaylistViewModel", "addSongToPlaylist failed", e)
                 showError(getApplication<Application>().getString(R.string.add_to_playlist_error, e.message?.take(50)))
             }
@@ -105,21 +110,32 @@ class PlaylistViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 prefs.playlist.removeSongFromPlaylist(playlistId, songId)
             } catch (e: Exception) {
+                e.rethrowIfCancellation()
                 AppLog.e("PlaylistViewModel", "removeSongFromPlaylist failed", e)
                 showError(getApplication<Application>().getString(R.string.remove_from_local_playlist_error, e.message?.take(50)))
             }
         }
     }
 
-    // ---- 常规错误消息（沿用 MainViewModel 的 errorMessage 通道）----
+    /**
+     * 操作反馈出口（M30）：由 `MainViewModel` 的接线 init 注入 `showError`。
+     *
+     * ⚠️ 此前这里只往一个**无人订阅**的 `_errorMessage` 里写，歌单创建/重命名/删除/加歌失败
+     * 对用户完全静默（点了没反应，只有 logcat 有记录）。同一工程里
+     * `SearchViewModel` / `NetworkMusicViewModel` / `PlayerViewModel` 都已是这套注入约定。
+     */
+    var showMessage: ((String) -> Unit)? = null
+
+    /** UI 展示用的错误文案（无注入方时的兜底通道，例如单测里直接 new 本类） */
     private val _errorMessage = MutableStateFlow<String?>(null)
     val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
 
     private fun showError(msg: String) {
-        _errorMessage.value = msg
+        val sink = showMessage
+        if (sink != null) sink(msg) else _errorMessage.value = msg
     }
 
-    /** 消费错误消息（UI 显示后调用，由 MainViewModel 的 errorMessage 消费方统一接管时可移除） */
+    /** 消费兜底通道里的错误消息（仅在 [showMessage] 未注入时才有内容） */
     fun consumeErrorMessage() {
         _errorMessage.value = null
     }

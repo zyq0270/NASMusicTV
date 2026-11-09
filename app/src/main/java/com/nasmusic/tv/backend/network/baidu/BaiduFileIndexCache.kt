@@ -10,6 +10,7 @@ import com.nasmusic.tv.data.model.BaiduIndexEntry
 import com.nasmusic.tv.data.model.Song
 import com.nasmusic.tv.util.BaiduFilenameParser
 import com.nasmusic.tv.util.AppLog
+import com.nasmusic.tv.util.rethrowIfCancellation
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -348,6 +349,10 @@ class BaiduFileIndexCache(
      * 索引 [save]/[load] 时自动失效重建。
      */
     private fun getOrBuildDirIndex(): Map<String, List<BaiduIndexEntry>> {
+        // C19：`dirIndex` 是 @Volatile，且 [save]/[load] 会把它置 null。
+        // 原实现「判空 → 同步块内再判空赋值 → 出了同步块再读 dirIndex!!」——
+        // 最后一次读与别人的置 null 之间没有任何保护 ⇒ 偶发 NPE。
+        // 整个「读 → 建 → 写 → 读」都收进同一临界区，直接从锁内的局部变量返回值。
         dirIndex?.let { return it }
         val index = cachedIndex ?: return emptyMap()
         val map = index.entries.groupBy { entry ->
@@ -355,9 +360,11 @@ class BaiduFileIndexCache(
             entry.path.substringBeforeLast('/')
         }
         synchronized(cacheLock) {
-            if (dirIndex == null) dirIndex = map
+            val existing = dirIndex
+            if (existing != null) return existing
+            dirIndex = map
+            return map
         }
-        return dirIndex!!
     }
 
     /** 按 fs_id 反查 path（MV 同目录同名匹配用） */
@@ -648,6 +655,7 @@ class BaiduFileIndexCache(
                             }
                             coverUrl != null
                         } catch (e: Exception) {
+                            e.rethrowIfCancellation()
                             AppLog.d(TAG, "APIC extract failed for ${entry.filename}: ${e.message}")
                             false
                         }

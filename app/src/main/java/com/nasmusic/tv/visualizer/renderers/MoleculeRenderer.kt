@@ -104,12 +104,24 @@ class MoleculeRenderer(
             Phase.GAP -> if (elapsedMs >= GAP_MS.toLong()) Phase.DRAW else null
         }
 
-        /** 原子 → 频段区间映射（纯函数）：原子按定义序均分频段，重原子 → 低频 */
-        internal fun bandRange(atomIdx: Int, atomCount: Int, bandCount: Int): IntArray {
+        /**
+         * 原子 → 频段区间映射（纯函数）：原子按定义序均分频段，重原子 → 低频。
+         *
+         * ⛔ 原实现返回 `intArrayOf(from, to)`，被 [atomEnergy] 每帧按「原子数 + 键数×2」次调用
+         * （约 81~96 次/帧）⇒ 每帧几十个短命 IntArray，直接把 GC 拖进渲染线程。
+         * 现拆成两个纯标量函数（零分配），`to` 的 `coerceAtLeast(from)` 语义与原实现逐字一致。
+         */
+        internal fun bandFrom(atomIdx: Int, atomCount: Int, bandCount: Int): Int {
+            val per = bandCount.toFloat() / atomCount
+            return (atomIdx * per).toInt().coerceIn(0, bandCount - 1)
+        }
+
+        /** [bandFrom] 的配对函数：该原子的频段上界（含） */
+        internal fun bandTo(atomIdx: Int, atomCount: Int, bandCount: Int): Int {
             val per = bandCount.toFloat() / atomCount
             val from = (atomIdx * per).toInt()
             val to = (((atomIdx + 1) * per).toInt() - 1).coerceAtLeast(from)
-            return intArrayOf(from.coerceIn(0, bandCount - 1), to.coerceIn(0, bandCount - 1))
+            return to.coerceIn(0, bandCount - 1)
         }
     }
 
@@ -379,10 +391,10 @@ class MoleculeRenderer(
         }
     }
 
-    /** 原子 i 的归一化频段能量 0..1（频段均分，重原子 → 低频段） */
+    /** 原子 i 的归一化频段能量 0..1（频段均分，重原子 → 低频段）——零分配（C40） */
     private fun atomEnergy(frame: AudioFrame, i: Int): Float {
-        val r = bandRange(i, atomCount, frame.spectrum.size)
-        return frame.bandMean(r[0], r[1])
+        val bands = frame.spectrum.size
+        return frame.bandMean(bandFrom(i, atomCount, bands), bandTo(i, atomCount, bands))
     }
 
     /** DRAW：描线刻画（对齐催眠 §8.4）——原子按 DFS 次序点亮、键沿次序生长 */

@@ -25,13 +25,21 @@ import java.io.OutputStream
  * - 字节复制，不重新编码（源文件下载时已内嵌封面/歌词）
  * - 增量过滤：export_records 中 relPath 已存在 且 srcSize 未变 → skipped
  * - 可取消 / 可续跑：每首歌结束后保存已完成记录，取消后重插 U 盘可继续
- * - SAF 下直接写目标（无 rename 语义）；File 下先写 .part 再 rename
+ * - SAF 与 File 两种根都**先写 `<name>.part`、整份成功后**才动目标文件（C15 修复）；
+ *   SAF 无 rename 语义，故再复制一遍到目标，失败时保留 .part 完整副本。
  */
 class SongExporter(
     private val context: Context,
     private val repo: DownloadRepository,
     private val exportRecordDao: com.nasmusic.tv.backend.download.db.ExportRecordDao,
-    private val prefs: com.nasmusic.tv.data.prefs.AppPreferences
+    private val prefs: com.nasmusic.tv.data.prefs.AppPreferences,
+    /**
+     * M11：导出完成后重建该设备的曲库索引（可选注入，默认 null = 不重建）。
+     *
+     * 由 `ExportCoordinator` 注入 `LocalMusicRepository::scanUsbDevice` ——
+     * 导出器自己不该知道本地曲库的存在，否则「导出」这个纯文件职责就被污染了。
+     */
+    private val usbIndexRefresh: (suspend (String) -> Unit)? = null
 ) {
     companion object {
         private const val TAG = "SongExporter"
@@ -235,14 +243,26 @@ class SongExporter(
      * 现在 SAF 分支用 resolveChildDoc 反查目标 DocumentFile 的长度对比。
      */
     private fun shouldOverwrite(task: FileTask): Boolean {
+        val srcLen = task.src.length()
+        val srcMtime = task.src.lastModified()
         return when (val root = currentRoot) {
             is ExportRoot.File -> {
                 val target = File(root.dir, task.relPath)
-                !target.exists() || target.length() != task.src.length()
+                if (!target.exists()) return true
+                // N06：长度相同但源文件比目标更新时间 ⇒ 重新下载过（同名同长、内容不同），
+                // 需要重导。mtime 不可用（0）时退回纯长度判定。
+                val targetMtime = target.lastModified()
+                target.length() != srcLen ||
+                    (srcMtime > 0L && targetMtime > 0L && srcMtime > targetMtime)
             }
             is ExportRoot.Saf -> {
-                val doc = resolveChildDoc(root.dir, task.relPath) ?: return true
-                doc.length() != task.src.length()
+                // M07：⛔ 这里只是「问一下要不要覆盖」，不能用 resolveChildDoc ——
+                // 它在判断过程中就会 createDirectory/createFile，用户取消导出后
+                // U 盘上会残留一堆空目录和 0 字节文件。改用纯查询版。
+                val doc = findChildDoc(root.dir, task.relPath) ?: return true
+                val docMtime = runCatching { doc.lastModified() }.getOrDefault(0L)
+                doc.length() != srcLen ||
+                    (srcMtime > 0L && docMtime > 0L && srcMtime > docMtime)
             }
             ExportRoot.Unavailable -> true
         }
@@ -253,15 +273,49 @@ class SongExporter(
             is ExportRoot.Saf -> {
                 val parent = root.dir
                 val doc = resolveChildDoc(parent, task.relPath) ?: return@withContext false
+                // ── C15 修复（2026-11-09）──────────────────────────────────────
+                // 旧实现直接 openOutputStream(doc.uri)（SAF 下 "w" 先截断），catch 里再
+                // doc.delete() ⇒ 中途失败会把**用户上一次导出的完好文件**连半截一起删掉，
+                // 而 SAF 没有回收站、无法恢复。
+                // 现在与 File 分支对齐：先写同目录的 `<name>.part`，整份写成功后才动目标。
+                // 任何失败只删 .part，目标文件保持原样。
+                val partName = (doc.name ?: task.relPath.substringAfterLast('/')) + ".part"
+                val part = parent.findFile(partName) ?: parent.createFile(mimeTypeFor(partName), partName)
+                if (part == null) {
+                    AppLog.w(TAG, "export(SAF): 无法创建临时文件 $partName")
+                    return@withContext false
+                }
+                // 目标是否已被截断开始写：失败时据此决定「清掉 .part」还是「保留 .part 副本」
+                var targetCopyStarted = false
                 try {
-                    val output = context.contentResolver.openOutputStream(doc.uri) ?: return@withContext false
-                    output.use { out ->
+                    val partOut = context.contentResolver.openOutputStream(part.uri)
+                        ?: return@withContext false
+                    partOut.use { out ->
                         task.src.inputStream().use { input -> copyStream(input, out) }
                     }
+                    // 整份已落盘，才覆盖目标
+                    val targetOut = context.contentResolver.openOutputStream(doc.uri, "wt")
+                        ?: run {
+                            runCatching { part.delete() }
+                            return@withContext false
+                        }
+                    targetCopyStarted = true
+                    targetOut.use { out ->
+                        context.contentResolver.openInputStream(part.uri)?.use { input ->
+                            copyStream(input, out)
+                        }
+                    }
+                    runCatching { part.delete() }
                     true
                 } catch (e: Exception) {
-                    // SAF 无 rename 语义，写失败即删除半截文件
-                    runCatching { doc.delete() }
+                    if (!targetCopyStarted) {
+                        // 目标还没被碰过 ⇒ 只清掉半截临时文件，用户的旧文件完好无损
+                        AppLog.w(TAG, "export(SAF): 写入临时文件失败，目标文件未改动", e)
+                        runCatching { part.delete() }
+                    } else {
+                        // 目标已被截断，但 .part 里有一份完整副本 ⇒ 保留它，便于下次覆盖或人工恢复
+                        AppLog.w(TAG, "export(SAF): 覆盖目标时失败，已保留 ${part.name} 完整副本", e)
+                    }
                     false
                 }
             }
@@ -298,6 +352,22 @@ class SongExporter(
     }
 
 /** SAF 嵌套目录解析：逐级 findFile/createDirectory 定位到叶子目录，再 createFile 文件名 */
+    /**
+     * M07：**纯查询**版子文档解析（⛔ 绝不 create）。
+     *
+     * 与 [resolveChildDoc] 的区别只在「找不到就返回 null」而不顺手建出来 ——
+     * 供 [shouldOverwrite] 这类只做判断的路径使用。
+     */
+    private fun findChildDoc(root: DocumentFile, relPath: String): DocumentFile? {
+        val segments = relPath.split("/").toMutableList()
+        val fileName = segments.removeAt(segments.lastIndex)
+        var current = root
+        for (dir in segments) {
+            current = current.findFile(dir) ?: return null
+        }
+        return current.findFile(fileName)
+    }
+
     private fun resolveChildDoc(root: DocumentFile, relPath: String): DocumentFile? {
         val segments = relPath.split("/").toMutableList()
         // NewApi 修复（2026-09-14）：removeLast() 在 API 35 会被 java.util.SequencedCollection
@@ -355,10 +425,24 @@ class SongExporter(
     }
 
     /** 媒体扫描（best-effort；应用专属目录在 Android/data 下多数 ROM 不扫，调用方改用 scanUsbDevice 重建索引） */
+    /**
+     * 导出完成后的可见性收尾（M11）。
+     *
+     * ① MediaStore：让系统媒体库看到**已下载源文件**（历史行为，保持不动）；
+     * ② 本地曲库索引：⛔ 原实现把 [devicePath] 收下却完全没用（扫的是源文件路径），
+     *    导出到 U 盘后不重建索引 ⇒ 新歌要拔插一次才在曲库里出现。
+     *    现在通过注入回调真正用上 [devicePath]。
+     */
     private suspend fun mediaScan(devicePath: String) {
         runCatching {
             val paths = repo.getCompleted().mapNotNull { it.audioPath }
             MediaScannerConnection.scanFile(context, paths.toTypedArray(), null, null)
+        }
+        // 构造器 val 上的可空函数类型不做智能转换 ⇒ 先取本地 val（同一帧内引用稳定）
+        val refresh = usbIndexRefresh
+        if (devicePath.isNotBlank() && refresh != null) {
+            runCatching { refresh.invoke(devicePath) }
+                .onFailure { AppLog.w(TAG, "mediaScan: usb index refresh failed: ${it.message}") }
         }
     }
 

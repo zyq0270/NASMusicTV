@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -70,6 +71,7 @@ import com.nasmusic.tv.ui.theme.NasMusicColors
 import com.nasmusic.tv.ui.theme.UiMode
 import com.nasmusic.tv.util.TimeUtils
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * 歌曲行布局模式
@@ -77,8 +79,6 @@ import kotlinx.coroutines.launch
 enum class SongRowMode {
     /** 水平行：封面 + 文字 + 操作，用于列表 */
     MODE_ROW,
-    /** 卡片：封面在上，文字在下，用于网格 */
-    MODE_CARD,
     /** 紧凑行：无封面，仅文字，用于队列 */
     MODE_COMPACT
 }
@@ -106,7 +106,7 @@ enum class UrlStatus {
  * 统一歌曲行组件
  *
  * 替代 HomeScreen.HomeSongCard 等重复实现。
- * 支持三种布局模式，通过参数控制显示内容。
+ * 支持两种布局模式（行 / 紧凑），通过参数控制显示内容。
  *
  * @param song 歌曲数据
  * @param onClick 点击回调（播放歌曲）
@@ -170,12 +170,6 @@ fun UnifiedSongRow(
             urlStatus = urlStatus,
             possiblyUnplayable = possiblyUnplayable,
             modifier = modifier
-        )
-        SongRowMode.MODE_CARD -> SongRowModeCard(
-            song = song,
-            onClick = onClick,
-            downloadState = downloadState,
-            focusRequester = focusRequester
         )
         SongRowMode.MODE_COMPACT -> SongRowModeCompact(
             song = song,
@@ -363,26 +357,34 @@ private fun SongRowModeRow(
                 // 并每行每次重组打 3 条 debug 日志。改为 remember 按 (song.id, downloadState,
                 // coverUrl) 缓存，重组零 IO；负结果由 extractor 侧 missCache 兜底。
                 val rowContext = androidx.compose.ui.platform.LocalContext.current
-                val effectiveCoverUrl = remember(song.id, downloadState, song.coverUrl) {
-                    when {
-                        downloadState is DownloadState.Completed -> {
-                            val embedded = com.nasmusic.tv.backend.local.EmbeddedCoverExtractor.extractCoverUri(
-                                downloadState.path, rowContext.cacheDir, rowContext
-                            )
-                            when {
-                                embedded != null -> embedded
-                                !downloadState.coverPath.isNullOrBlank() &&
-                                    java.io.File(downloadState.coverPath).exists() ->
-                                    "file://${downloadState.coverPath}"
-                                else -> song.coverUrl
+                // M09：⛔ 提取内嵌封面是**同步读盘 + 写缓存文件**，不能留在组合期主线程 ——
+                // 列表首次渲染时每行都会走一遍，TV 上快速滚动会成片掉帧。
+                // 组合期只给不碰盘的兜底值，真正的提取下放到 LaunchedEffect + IO。
+                var effectiveCoverUrl by remember(song.id, downloadState, song.coverUrl) {
+                    mutableStateOf(song.coverUrl)
+                }
+                LaunchedEffect(song.id, downloadState, song.coverUrl) {
+                    effectiveCoverUrl = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        when {
+                            downloadState is DownloadState.Completed -> {
+                                val embedded = com.nasmusic.tv.backend.local.EmbeddedCoverExtractor.extractCoverUri(
+                                    downloadState.path, rowContext.cacheDir, rowContext
+                                )
+                                when {
+                                    embedded != null -> embedded
+                                    !downloadState.coverPath.isNullOrBlank() &&
+                                        java.io.File(downloadState.coverPath).exists() ->
+                                        "file://${downloadState.coverPath}"
+                                    else -> song.coverUrl
+                                }
                             }
+                            song.isLocalSong && !song.path.isNullOrBlank() -> {
+                                com.nasmusic.tv.backend.local.EmbeddedCoverExtractor.extractCoverUri(
+                                    song.path, rowContext.cacheDir, rowContext
+                                ) ?: song.coverUrl
+                            }
+                            else -> song.coverUrl
                         }
-                        song.isLocalSong && !song.path.isNullOrBlank() -> {
-                            com.nasmusic.tv.backend.local.EmbeddedCoverExtractor.extractCoverUri(
-                                song.path!!, rowContext.cacheDir, rowContext
-                            ) ?: song.coverUrl
-                        }
-                        else -> song.coverUrl
                     }
                 }
                 CoverImage(
@@ -687,100 +689,6 @@ private fun RowActionButton(
 }
 
 /**
- * MODE_CARD：卡片布局（封面在上，文字在下）
- * 与现有 HomeScreen.HomeSongCard 样式一致
- */
-@OptIn(ExperimentalTvMaterial3Api::class)
-@Composable
-private fun SongRowModeCard(
-    song: Song,
-    onClick: () -> Unit,
-    downloadState: DownloadState = DownloadState.None,
-    focusRequester: FocusRequester?
-) {
-    var isFocused by remember { mutableStateOf(false) }
-    val animScale = remember { Animatable(1f) }
-    val scope = rememberCoroutineScope()
-
-    Box(
-        modifier = Modifier
-            .width(160.dp)
-            .scale(animScale.value)
-            .clip(RoundedCornerShape(12.dp))
-            .background(
-                color = if (isFocused) NasMusicColors.Primary.copy(alpha = 0.15f)
-                else NasMusicColors.Surface.copy(alpha = 0.6f)
-            )
-            .onFocusChanged { state ->
-                isFocused = state.hasFocus
-                scope.launch {
-                    animScale.animateTo(
-                        if (isFocused) 1.06f else 1f,
-                        tween(200)
-                    )
-                }
-            }
-            .focusRing(
-                shape = RoundedCornerShape(12.dp),
-                color = NasMusicColors.FocusRing,
-                visible = isFocused,
-            )
-            .then(
-                if (focusRequester != null) Modifier.focusRequester(focusRequester)
-                else Modifier
-            ),
-        contentAlignment = Alignment.Center
-    ) {
-        Column(
-            modifier = Modifier.fillMaxWidth().padding(6.dp)
-        ) {
-            // 封面：已下载 → 内嵌封面（提取到缓存）→ 旁路 .jpg → 后端 URL
-            // 2026-09-25 审查修复（#14 同款）：组合期提取改 remember 缓存，重组零 IO
-            // LocalContext.current 是 @Composable 调用，必须在 remember lambda 外读取
-            val cardCtx = androidx.compose.ui.platform.LocalContext.current
-            val cardCoverUrl = remember(song.id, downloadState, song.coverUrl) {
-                when (downloadState) {
-                    is DownloadState.Completed -> {
-                        val embedded = com.nasmusic.tv.backend.local.EmbeddedCoverExtractor.extractCoverUri(
-                            downloadState.path, cardCtx.cacheDir, cardCtx
-                        )
-                        when {
-                            embedded != null -> embedded
-                            !downloadState.coverPath.isNullOrBlank() &&
-                                java.io.File(downloadState.coverPath).exists() ->
-                                "file://${downloadState.coverPath}"
-                            else -> song.coverUrl
-                        }
-                    }
-                    else -> song.coverUrl
-                }
-            }
-            CoverImage(
-                coverUrl = cardCoverUrl,
-                contentDescription = song.title,
-                size = 148.dp,
-                cornerRadius = 8.dp
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = song.title,
-                    color = NasMusicColors.TextPrimary,
-                    fontSize = FontSize.body(),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Text(
-                    text = song.artist.ifBlank { "-" },
-                    color = NasMusicColors.TextSecondary,
-                    fontSize = FontSize.small(),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
-    }
-}
-
-/**
  * MODE_COMPACT：紧凑行（无封面，仅文字 + 序号）
  * 用于播放队列等空间紧张的场景
  */
@@ -822,7 +730,13 @@ private fun SongRowModeCompact(
             .then(
                 if (focusRequester != null) Modifier.focusRequester(focusRequester)
                 else Modifier
-            ),
+            )
+            // C28：本行是 MODE_COMPACT 的**唯一根节点**，必须自己可聚焦、可点击。
+            // 旧实现只有 focusRing + onFocusChanged —— 这两者在不可聚焦的节点上都是死代码
+            // （onFocusChanged 永远不会收到焦点事件），于是 PlaylistManagementScreen 的
+            // 「移除」按钮在 TV 遥控器与手机触摸下都点不动，onClick 形参完全没接线。
+            .focusable()
+            .clickable { onClick() },
         contentAlignment = Alignment.CenterStart
     ) {
         Row(

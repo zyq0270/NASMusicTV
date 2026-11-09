@@ -591,7 +591,11 @@ val LocalPhoneCompact = androidx.compose.runtime.staticCompositionLocalOf { fals
  * 提供 CompositionLocal 供组件使用。
  * 高对比度模式下：分割线加粗、焦点边框加宽、文字对比增强。
  */
-val LocalHighContrast = androidx.compose.runtime.staticCompositionLocalOf { false }
+// L18：用 `compositionLocalOf` 而不是 `staticCompositionLocalOf` ——
+// 后者不跟踪读取者，值一变就要**整棵子树**重组（这里是整个主题 content）；
+// 高对比度开关会随设置页切换，代价直接体现为「打开开关整屏闪一下」。
+// 本值变化频率极低、读取者也不多，动态版本的下沉失效范围更划算。
+val LocalHighContrast = androidx.compose.runtime.compositionLocalOf { false }
 
 /**
  * 高对比度模式下的颜色增强（composable getter，随当前调色板）。

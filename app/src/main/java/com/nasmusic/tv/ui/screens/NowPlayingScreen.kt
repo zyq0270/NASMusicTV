@@ -103,7 +103,9 @@ fun NowPlayingScreen(
     currentSong: Song?,
     isPlaying: Boolean,
     playMode: PlayMode,
-    progressMs: Long,
+    // M26：进度以 **State** 形式传入，本函数自身**不读值** ⇒ 1Hz 进度 tick 不会让
+    // 这个 2300 行的播放页整体重组；只有真正读 `.value` 的叶子（时间标签 / 进度细线）会。
+    progressMs: androidx.compose.runtime.State<Long>,
     durationMs: Long,
     lyrics: Lyrics?,
     lyricsAvailability: com.nasmusic.tv.data.model.LyricsAvailability,
@@ -581,7 +583,7 @@ fun NowPlayingScreen(
                         } else {
                             LyricsView(
                                 lyrics = lyrics,
-                                currentTimeMs = progressMs,
+                                currentTimeMs = progressMs.value,
                                 highlightMode = highlightMode,
                                 isPlaying = isPlaying,
                                 fontSizeMultiplier = lyricsFontScale,
@@ -1142,29 +1144,45 @@ private fun SourceTag(
     // L11 修复：onClick 允许 null —— 纯展示标签（如 LOCAL_FILE 来源标记）不应可聚焦
     onClick: (() -> Unit)?
 ) {
+    val tagContainer = if (!available) NasMusicColors.Surface.copy(alpha = 0.3f)
+                       else if (selected) NasMusicColors.Primary
+                       else NasMusicColors.Surface.copy(alpha = 0.8f)
+    val tagContent = if (!available) NasMusicColors.TextSecondary.copy(alpha = 0.4f)
+                     else if (selected) NasMusicColors.OnPrimary
+                     else NasMusicColors.TextPrimary
+
+    // M25：onClick == null 的纯展示标签此前仍走 FocusableSurface，只是把回调兜底成空 lambda
+    // 并把焦点框关掉 —— 按钮照样参与 D-Pad 焦点遍历，遥控器会在一个「按了没反应」的格子上
+    // 停住（用户以为焦点丢了）。现在直接分叉成不可聚焦的 Box，焦点链路里彻底不出现它。
+    if (onClick == null) {
+        Box(
+            modifier = Modifier
+                .clip(RoundedCornerShape(6.dp))
+                .background(tagContainer)
+                .padding(horizontal = 8.dp, vertical = 4.dp)
+        ) {
+            Text(text = label, color = tagContent, fontSize = FontSize.small())
+        }
+        return
+    }
+
     FocusableSurface(
-        onClick = onClick?.let { cb -> { if (available) cb() } } ?: {},
+        onClick = { if (available) onClick() },
         modifier = Modifier,
         shape = RoundedCornerShape(6.dp),
         focusedScale = 1.1f,
         animationDurationMs = 150,
-        containerColor = if (!available) NasMusicColors.Surface.copy(alpha = 0.3f)
-                         else if (selected) NasMusicColors.Primary
-                         else NasMusicColors.Surface.copy(alpha = 0.8f),
+        containerColor = tagContainer,
         focusedContainerColor = if (selected) NasMusicColors.Primary
                                 else NasMusicColors.Primary.copy(alpha = 0.3f),
-        contentColor = if (!available) NasMusicColors.TextSecondary.copy(alpha = 0.4f)
-                       else if (selected) NasMusicColors.OnPrimary
-                       else NasMusicColors.TextPrimary,
+        contentColor = tagContent,
         focusedContentColor = if (selected) NasMusicColors.OnPrimary else NasMusicColors.Primary,
         pressedScale = 0.95f,
-        showFocusBorder = available && onClick != null  // L11：无行为标签不画焦点框
+        showFocusBorder = available  // L11：不可用的来源不画焦点框
     ) {
         Text(
             text = label,
-            color = if (!available) NasMusicColors.TextSecondary.copy(alpha = 0.4f)
-                    else if (selected) NasMusicColors.OnPrimary
-                    else NasMusicColors.TextPrimary,
+            color = tagContent,
             fontSize = FontSize.small(),
             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
         )
@@ -1361,7 +1379,7 @@ private fun NowPlayingPortrait(
     currentSong: Song?,
     isPlaying: Boolean,
     playMode: PlayMode,
-    progressMs: Long,
+    progressMs: androidx.compose.runtime.State<Long>,
     durationMs: Long,
     lyrics: Lyrics?,
     lyricsAvailability: com.nasmusic.tv.data.model.LyricsAvailability,
@@ -1590,7 +1608,16 @@ private fun NowPlayingPortrait(
                                 modifier = Modifier.fillMaxSize(),
                             )
                         }
+                        // 点击封面 → 沉浸模式
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .clickable(onClick = onToggleImmersive)
+                        )
                         // D8：封面右上角 ⓘ 图标按钮 → 歌曲信息（不用长按）
+                        // M28：本层必须声明在上面的全屏 clickable **之后**。Compose 的命中测试按
+                        // 声明顺序倒序进行，后声明者先拿到事件；此前 ⓘ 声明在前，被全屏 clickable
+                        // 完全盖住 —— 点 ⓘ 只会进沉浸模式，歌曲信息面板永远打不开。
                         Box(modifier = Modifier.align(Alignment.TopEnd).padding(6.dp)) {
                             PortraitTopBarButton(
                                 label = "\u24D8",
@@ -1598,12 +1625,6 @@ private fun NowPlayingPortrait(
                                 onClick = { showInfoPanel = !showInfoPanel },
                             )
                         }
-                        // 点击封面 → 沉浸模式
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .clickable(onClick = onToggleImmersive)
-                        )
                     }
 
                     Spacer(modifier = Modifier.height(12.dp))
@@ -1829,7 +1850,7 @@ private fun NowPlayingPortrait(
                         } else {
                             LyricsView(
                                 lyrics = lyrics,
-                                currentTimeMs = progressMs,
+                                currentTimeMs = progressMs.value,
                                 highlightMode = highlightMode,
                                 isPlaying = isPlaying,
                                 fontSizeMultiplier = lyricsFontScale,
@@ -1984,7 +2005,7 @@ private fun PortraitImmersiveLyrics(
     currentSong: Song?,
     isPlaying: Boolean,
     isRadio: Boolean,
-    progressMs: Long,
+    progressMs: androidx.compose.runtime.State<Long>,
     durationMs: Long,
     lyrics: Lyrics?,
     highlightMode: LyricsHighlightMode,
@@ -2141,7 +2162,7 @@ private fun PortraitImmersiveLyrics(
             } else {
                 LyricsView(
                     lyrics = lyrics,
-                    currentTimeMs = progressMs,
+                    currentTimeMs = progressMs.value,
                     highlightMode = highlightMode,
                     isPlaying = isPlaying,
                     fontSizeMultiplier = lyricsFontScale,
@@ -2270,8 +2291,9 @@ private fun PortraitSecondaryChips(
 
 /** 歌词模式的 2dp 细进度条（不可 seek；seek 在封面模式的完整进度条上做） */
 @Composable
-private fun PortraitThinProgress(progressMs: Long, durationMs: Long) {
-    val fraction = if (durationMs > 0L) (progressMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f) else 0f
+private fun PortraitThinProgress(progressMs: androidx.compose.runtime.State<Long>, durationMs: Long) {
+    // M26：进度读点在这个叶子里 —— 1Hz 的 tick 只让这条细线重组，不再驱动整页
+    val fraction = if (durationMs > 0L) (progressMs.value.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f) else 0f
     Box(
         modifier = Modifier
             .fillMaxWidth()

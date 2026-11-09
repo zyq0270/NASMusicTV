@@ -2336,8 +2336,17 @@ class AppPreferences internal constructor(private val context: Context) {
             }
         }
         dataStore.edit { prefs ->
-            prefs[keyNetworkFavorites] = gson.toJson(data.networkFavorites)
-            prefs[keyLocalPlaylists] = gson.toJson(data.localPlaylists)
+            // L02：口径统一为「备份里没有的就别动本机」。
+            // 同一个函数里 playlistImportHistory / songReachability / playRecords / searchHistory
+            // 都带 isNotEmpty() 保护，而收藏 / 歌单 / 最近播放 / 播放次数是无条件回写 ⇒
+            // 一份没带这些字段（或用户清空后导出）的备份会把本机数据整片抹掉，
+            // 且 UI 全程没有任何「将替换全部数据」的提示。
+            if (data.networkFavorites.isNotEmpty()) {
+                prefs[keyNetworkFavorites] = gson.toJson(data.networkFavorites)
+            }
+            if (data.localPlaylists.isNotEmpty()) {
+                prefs[keyLocalPlaylists] = gson.toJson(data.localPlaylists)
+            }
             if (data.playlistImportHistory.isNotEmpty()) {
                 prefs[keyPlaylistImportHistory] = gson.toJson(data.playlistImportHistory)
             }
@@ -2350,19 +2359,34 @@ class AppPreferences internal constructor(private val context: Context) {
                     prefs[keySongReachability] = gson.toJson(clean)
                 }
             }
-            prefs[keyRecentSongs] = gson.toJson(data.recentSongIds)
-            prefs[keyRecentSongObjects] = gson.toJson(
-                RecentSongObjectsData(data.recentSongObjects.map { it.stripVolatileStreamUrl() })
-            )
-            prefs[keyPlayCounts] = gson.toJson(data.playCounts)
+            if (data.recentSongIds.isNotEmpty()) {
+                prefs[keyRecentSongs] = gson.toJson(data.recentSongIds)
+            }
+            if (data.recentSongObjects.isNotEmpty()) {
+                prefs[keyRecentSongObjects] = gson.toJson(
+                    RecentSongObjectsData(data.recentSongObjects.map { it.stripVolatileStreamUrl() })
+                )
+            }
+            if (data.playCounts.isNotEmpty()) {
+                prefs[keyPlayCounts] = gson.toJson(data.playCounts)
+            }
             if (data.lastQueue != null) {
                 prefs[keyLastQueue] = gson.toJson(
                     data.lastQueue.copy(songs = data.lastQueue.songs.map { it.stripVolatileStreamUrl() })
                 )
             }
             data.equalizerPreset?.let { prefs[keyEqualizerPreset] = it.ordinal }
-            if (data.equalizerBands.isNotEmpty()) {
-                prefs[keyEqualizerBands] = gson.toJson(data.equalizerBands)
+            // C01：均衡器频段必须逐元素校验 —— 备份 JSON 可以手改，长度/取值都不受控；
+            // 而 `setEqualizerBands` 本身不做校验就直写 DataStore。
+            // NaN 会直接让 gson.toJson 抛异常，越界值会让 PlayerEqualizer 的 EQ 打到失真。
+            // 约定：丢弃非有限值、钳到 [-10, 10] dB（与 EqualizerScreen 的滑杆范围一致）、
+            // 最多保留 10 个频段。
+            val cleanBands = data.equalizerBands
+                .filter { it.isFinite() }
+                .map { it.coerceIn(-10f, 10f) }
+                .take(MAX_EQUALIZER_BANDS)
+            if (cleanBands.isNotEmpty()) {
+                prefs[keyEqualizerBands] = gson.toJson(cleanBands)
             }
             if (data.playRecords.isNotEmpty()) {
                 prefs[keyPlayRecords] = gson.toJson(PlayRecordsData(data.playRecords))
@@ -2372,10 +2396,15 @@ class AppPreferences internal constructor(private val context: Context) {
             }
             // v2: 恢复之前遗漏的设置项
             prefs[keyCoverFilterEnabled] = data.coverFilterEnabled
-            prefs[keyCoverFilterBlurRadius] = data.coverFilterBlurRadius
-            prefs[keyCoverFilterDarkOverlay] = data.coverFilterDarkOverlay
+            // C01：这四个数值字段在正常路径上都由 UI 约束，但**恢复路径绕过了 UI**。
+            // NaN/Inf 一旦落进 DataStore，消费端（blur 半径、alpha、字号）会画出整屏空白；
+            // 越界值则会让「点两次 + 就恢复不了」的怪现象出现。统一 isFinite + coerceIn。
+            prefs[keyCoverFilterBlurRadius] =
+                finiteIn(data.coverFilterBlurRadius, 0.0, COVER_BLUR_MAX, 0.0)
+            prefs[keyCoverFilterDarkOverlay] =
+                finiteIn(data.coverFilterDarkOverlay, 0.0, 1.0, 0.3)
             if (data.musicSource.isNotBlank()) prefs[keyMusicSource] = data.musicSource
-            prefs[keyLyricsFontScale] = data.lyricsFontScale
+            prefs[keyLyricsFontScale] = finiteIn(data.lyricsFontScale, 0.7, 1.6, 1.0)
         }
     }
 }
@@ -2391,6 +2420,25 @@ class AppPreferences internal constructor(private val context: Context) {
 //
 // 主修复是让备份走 `backupGson`（容错枚举）。这里再兜一层：**单个字段为 null 也只回落默认值**，
 // 绝不因为一个字段让整份备份导入失败。扩展函数接收可空接收者，故对非空类型同样适用、无编译告警。
+
+/** 均衡器最多保留的频段数（C01：与 EqualizerScreen 的 10 段滑杆一致） */
+private const val MAX_EQUALIZER_BANDS = 10
+
+/** 封面滤镜模糊半径上限（C01：与设置页「+」按钮的 40px 封顶一致） */
+private const val COVER_BLUR_MAX = 40.0
+
+/**
+ * C01：恢复路径专用的数值兜底 —— 非有限值（NaN / ±Inf）落到 [fallback]，其余钳到区间。
+ *
+ * ⚠️ 参数与返回值都是 **Double**：这三个字段在备份数据类里就是 Double、落盘也用
+ * `doublePreferencesKey` ⇒ 用 Float 版本会让每个调用点套一层 `toDouble()`，
+ * 更糟的是「声明里的默认值 8.0」与「兜底值 0f」两套精度混用。
+ * ⚠️ 不能只写 `coerceIn`：`Double.NaN.coerceIn(a, b)` 返回 NaN（比较恒 false ⇒ 原样返回），
+ * 而 NaN 会让 `gson.toJson` 的 `doubleToLongBits` 路径直接抛 IllegalArgumentException，
+ * 从而让整份备份导入失败。
+ */
+private fun finiteIn(value: Double, min: Double, max: Double, fallback: Double): Double =
+    if (value.isFinite()) value.coerceIn(min, max) else fallback
 
 /** 可视化主题：null → [VisualizerTheme.Default]（`CIRCULAR_RING`） */
 private fun VisualizerTheme?.nameOrDefault(): String =

@@ -215,7 +215,8 @@ fun WeatherRadioScreen(
             ) {
                 itemsIndexed(
                     items = weatherRadioQueue.songs,
-                    key = { _, song -> song.id }
+                    // M29：同 AlbumDetailScreen —— 索引前缀防重复曲目 key 冲突
+                    key = { index, song -> "${index}_${song.id}" },
                 ) { index, song ->
                     UnifiedSongRow(
                         song = song,

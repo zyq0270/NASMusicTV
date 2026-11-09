@@ -14,6 +14,7 @@ import com.nasmusic.tv.util.AppLog
 import com.nasmusic.tv.util.EncodingUtils
 import com.nasmusic.tv.util.RetryConfig
 import com.nasmusic.tv.util.UrlSanitizer
+import com.nasmusic.tv.util.rethrowIfCancellation
 import com.nasmusic.tv.util.withRetry
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -92,6 +93,15 @@ class SubsonicAdapter : BackendAdapter {
         // 生成 token 认证参数
         salt = UUID.randomUUID().toString().replace("-", "").take(16)
         this@SubsonicAdapter.apiToken = md5(password + salt)
+
+        // C03：把认证态同步给公共层 —— `getSongsTotalCount()` 直接委托 `restClient.songsTotalCount()`，
+        // 而 `restClient` 是**另建的对象**，不写这里的话它永远是空 baseUrl/username/password
+        // ⇒ Subsonic 的分页总数恒为 0（列表显示 "X/0"，`SongsPagingState.resolveError`
+        // 的「total==0 不误报」保护把症状彻底藏起来）。口径与 NavidromeAdapter 一致。
+        restClient.baseUrl = this@SubsonicAdapter.baseUrl
+        restClient.username = username
+        restClient.password = password
+        restClient.salt = salt
 
         testConnection()
     }
@@ -745,6 +755,7 @@ class SubsonicAdapter : BackendAdapter {
                                 bitrate = song.get("bitRate")?.asInt ?: 0
                             )
                         } catch (e: Exception) {
+                            e.rethrowIfCancellation()
                             null
                         } finally {
                             semaphore.release()

@@ -26,13 +26,26 @@ import com.nasmusic.tv.util.AppLog
  * 1. **普通路径**：[Context.startService]（前台态 ⇒ 正常放行）；
  * 2. **被系统拒绝** ⇒ 降级为**前台服务** [Context.startForegroundService]
  *    （`PlaybackService` 已在 manifest 声明 `foregroundServiceType="mediaPlayback"`，
- *    且权限 `FOREGROUND_SERVICE` / `FOREGROUND_SERVICE_MEDIA_PLAYBACK` 齐备；
- *    服务 `onCreate` 里的 `ensureMediaSessionActive()` 会**立刻** `startForeground`
- *    ⇒ 满足 API 26+ 「5 秒内必须前台化」的要求）；
+ *    且权限 `FOREGROUND_SERVICE` / `FOREGROUND_SERVICE_MEDIA_PLAYBACK` 齐备。
+ *    ⚠️ API 26+ 要求 `startForegroundService` 之后 **5 秒内** 必须 `startForeground`，
+ *    所以降级时会带上 [EXTRA_FOREGROUND_START]，由 `PlaybackService.onStartCommand`
+ *    立刻起一个占位前台通知满足约束。**不能**依赖「首次播放才前台化」——
+ *    从车机/蓝牙冷启动唤醒时首曲往往还在解析 streamUrl，5 秒内起播没有保证，
+ *    超时会被判 `ForegroundServiceDidNotStartInTimeException` 直接崩溃）；
  * 3. **再失败** ⇒ 只记日志，**不崩溃**（播放服务晚点由前台交互再拉起）。
  *
  * ⛔ 注意：`stopService` **没有**这个限制 ⇒ 停止路径无需改动。
  */
+
+/**
+ * 降级路径专用标记：告诉 `PlaybackService` 本次启动来自 `startForegroundService`，
+ * 必须在 `onStartCommand` 里立刻前台化（API 26+ 的 5 秒约束）。
+ *
+ * 用 Intent extra 而不是静态变量：进程被回收后系统会用同一个 Intent 重建服务，
+ * extra 能一起送达，静态标记不能。
+ */
+internal const val EXTRA_FOREGROUND_START = "com.nasmusic.tv.extra.FOREGROUND_START"
+
 internal fun startPlaybackServiceSafely(context: Context, intent: Intent) {
     try {
         context.startService(intent)
@@ -48,6 +61,7 @@ internal fun startPlaybackServiceSafely(context: Context, intent: Intent) {
     // ② 降级：前台服务
     try {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            intent.putExtra(EXTRA_FOREGROUND_START, true)
             context.startForegroundService(intent)
         } else {
             context.startService(intent)

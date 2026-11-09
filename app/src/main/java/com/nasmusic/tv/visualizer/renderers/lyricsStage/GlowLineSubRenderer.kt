@@ -633,6 +633,14 @@ class GlowLineSubRenderer : LyricsSubRenderer {
     private var curLayout: LineLayout? = null
     private var prevLayout: LineLayout? = null
 
+    /**
+     * 上一次建版面时对应的整曲歌词代数（C50）。
+     *
+     * [Int.MIN_VALUE] = 还没比过；与 `lyrics.linesGeneration` 不等 ⇒ 整曲换了，
+     * 必须硬复位（见 `draw` 开头）。
+     */
+    private var lastLinesGeneration: Int = Int.MIN_VALUE
+
     private var lastFrameMs = -1L
     private var breathElapsed = 0.0
     private var frameDeltaSec = 0.0
@@ -659,6 +667,20 @@ class GlowLineSubRenderer : LyricsSubRenderer {
         curLayout = null
         prevLayout = null
         applyIntensity(ctx.quality)
+    }
+
+    /**
+     * ⛔ **空实现，不得转调 [onEnter]**（C49）。
+     *
+     * 本子模式的版面是**逐行自管**的：`draw()` 里用
+     * `needRebuild = layout == null || layout.key != line.startTime` 检测换行，
+     * 并把旧版面经 `startExit(layout, nowSec)` 转入离场态继续绘制。
+     * 而默认实现 `onLineChanged → onEnter` 会复位
+     * `curLayout / prevLayout / breathElapsed / lastFrameMs`
+     * ⇒ 离场动画永远拿不到上一版版面、逐帧时间步也被清零 ⇒ 换行时歌词**硬切**。
+     */
+    override fun onLineChanged(ctx: RenderContext, lyrics: LyricsStagePayload) {
+        // 刻意留空：换行由 draw() 内部的 needRebuild 分支自行处理。
     }
 
     override fun onExit() {
@@ -1312,6 +1334,17 @@ class GlowLineSubRenderer : LyricsSubRenderer {
 
         val nowSec = lyrics.timeSec
         val line = lyrics.current
+
+        // C50：整曲歌词整体更换（切歌 / 歌词异步到达 / 重新加载）⇒ **硬复位**。
+        // ⛔ 只靠下面 `layout.key != line.startTime` 不够：两首歌的首行 startTime
+        //    经常都是 0.0（或都从同一秒开始），换歌会被误判成「同一行」——
+        //    版面、词表、逐字状态机全部沿用上一首，画面上就是「换歌后歌词还停在旧曲」。
+        //    同时清掉 prevLayout：旧曲那一行的离场动画没有意义，留着会叠在新曲上。
+        if (lastLinesGeneration != lyrics.linesGeneration) {
+            lastLinesGeneration = lyrics.linesGeneration
+            curLayout = null
+            prevLayout = null
+        }
 
         if (line != null) {
             val layout = curLayout

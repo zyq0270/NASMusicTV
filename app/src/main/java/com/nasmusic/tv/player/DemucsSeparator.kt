@@ -199,11 +199,16 @@ class DemucsSeparator(private val context: Context) {
             true
         } catch (e: OutOfMemoryError) {
             AppLog.e(TAG, "initialize: OOM loading model", e)
+            // C14：失败必须回收已建的 session。原先只记错误、不清引用 ⇒ 同进程重试
+            // `initialize()` 时 `modelSession` 被新会话覆盖、旧会话连同 ~166MB 权重再无人能关。
+            releaseInternal()
             recordError(context.getString(R.string.demucs_error_oom_load_model, (modelFile.length() / (1024 * 1024)).toInt()), e, System.currentTimeMillis() - startMs)
             System.gc()
             false
         } catch (e: Exception) {
             AppLog.e(TAG, "initialize: failed", e)
+            // C14：同上 —— 异常路径同样要复位 session/环境引用，否则重试即泄漏。
+            releaseInternal()
             recordError(context.getString(R.string.demucs_error_init_failed, e.message ?: e.toString()), e, System.currentTimeMillis() - startMs)
             false
         }

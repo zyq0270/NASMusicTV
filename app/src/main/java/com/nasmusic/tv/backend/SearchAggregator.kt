@@ -12,6 +12,7 @@ import com.nasmusic.tv.data.model.SongWithPinyin
 import com.nasmusic.tv.util.AppLog
 import com.nasmusic.tv.util.PinyinMatcher
 import com.nasmusic.tv.util.PinyinUtils
+import com.nasmusic.tv.util.rethrowIfCancellation
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -98,6 +99,9 @@ enum class SearchType {
             private const val BAIDU_TIMEOUT = 8_000L
             private const val JAMENDO_TIMEOUT = 5_000L
             private const val LOCAL_TIMEOUT = 2_000L
+
+            /** L09：连续空白（含全角空格 U+3000 与不换行空格 U+00A0）折叠用 */
+            private val WHITESPACE_RUN = Regex("[\\s\\u00A0\\u3000]+")
     }
 
     /**
@@ -215,6 +219,7 @@ enum class SearchType {
                         }
                     }
                 } catch (e: Exception) {
+                    e.rethrowIfCancellation()
                     AppLog.e(TAG, "NAS search failed: ${e.message}", e)
                     emptyList()
                 }
@@ -241,6 +246,7 @@ enum class SearchType {
                         emptyList()
                     }
                 } catch (e: Exception) {
+                    e.rethrowIfCancellation()
                     AppLog.e(TAG, "Network search failed: ${e.message}", e)
                     emptyList()
                 }
@@ -284,6 +290,7 @@ enum class SearchType {
                         }
                     }
                 } catch (e: Exception) {
+                    e.rethrowIfCancellation()
                     AppLog.e(TAG, "Baidu search failed: ${e.message}", e)
                     emptyList()
                 }
@@ -309,6 +316,7 @@ enum class SearchType {
                         emptyList()
                     }
                 } catch (e: Exception) {
+                    e.rethrowIfCancellation()
                     AppLog.e(TAG, "Jamendo search failed: ${e.message}", e)
                     emptyList()
                 }
@@ -339,6 +347,7 @@ enum class SearchType {
                         }
                     }
                 } catch (e: Exception) {
+                    e.rethrowIfCancellation()
                     AppLog.e(TAG, "Local search failed: ${e.message}", e)
                     emptyList()
                 }
@@ -434,10 +443,18 @@ enum class SearchType {
 
     /**
      * 归一化歌曲标识：小写 + 去除首尾空白 + 合并连续空格
+     *
+     * L09：KDoc 一直承诺「合并连续空格」，实现却没做 —— 同一首歌在不同源里常常是
+     * `"Song  Title"` / `"Song Title"`（多个空格来自标签里的对齐填充），
+     * 归一化没折掉就判成两首，同源去重失效（列表里出现两条一模一样的歌）。
      */
     private fun normalizeKey(title: String, artist: String): String {
-        return "${title.trim().lowercase()}|${artist.trim().lowercase()}"
+        return "${squeezeSpaces(title)}|${squeezeSpaces(artist)}"
     }
+
+    /** 小写 + trim + 连续空白折叠成单个空格（L09） */
+    private fun squeezeSpaces(raw: String): String =
+        raw.trim().lowercase().replace(WHITESPACE_RUN, " ")
 
     /**
      * 按 searchType 维度匹配歌曲（客户端拼音过滤用，PinyinUtils 级别）

@@ -64,6 +64,28 @@ class MvPersistentCache(context: Context) {
     }
 
     /**
+     * M14：落盘串行执行器。
+     *
+     * [markCompleted] 在**主线程**被调用（MV 播完切歌路径），而 [save] 是
+     * 「最多 `MAX_ENTRIES` 条 Gson 序列化 + 写文件 + rename」的同步磁盘写
+     * ⇒ 直接调用会让切歌掉帧。单线程保证投递顺序 = 落盘顺序。
+     */
+    private val saveExecutor = java.util.concurrent.Executors.newSingleThreadExecutor { r ->
+        Thread(r, "mv-cache-save").apply { isDaemon = true }
+    }
+
+    /** 异步落盘（见 [saveExecutor]）：失败只留痕，不影响播放 */
+    private fun saveAsync() {
+        saveExecutor.execute {
+            try {
+                save()
+            } catch (t: Throwable) {
+                AppLog.e(TAG, "saveAsync failed: ${t.message}", t)
+            }
+        }
+    }
+
+    /**
      * 标记某首歌的某支 MV 播放完成（用户认可这个版本）。
      * 已有条目则 playCount++ + 更新 bvid/lastPlayedAt；无则新建。
      */
@@ -81,7 +103,8 @@ class MvPersistentCache(context: Context) {
         )
         cache[songId] = entry
         if (cache.size > MAX_ENTRIES) evictOldest()
-        save()
+        // M14：主线程调用点 ⇒ 必须异步落盘
+        saveAsync()
         AppLog.d(TAG, "markCompleted: '$songTitle' -> bvid=$bvid playCount=${entry.playCount}")
     }
 
@@ -122,8 +145,12 @@ class MvPersistentCache(context: Context) {
     fun importAll(entries: List<MvCacheEntry>) {
         ensureLoaded()
         cache.clear()
-        entries.forEach { cache[it.songId] = it }
-        if (cache.size > MAX_ENTRIES) evictOldest()
+        // L14：先按最近播放时间取最新 MAX_ENTRIES 条再入表 —— 原实现把**全部**条目先塞进
+        // map（一份几千条的备份会瞬时占用数十 MB，还要再做一次全量 sort 才 evict），
+        // 而最终留下的本来就只有最新的那些。
+        entries.sortedByDescending { it.lastPlayedAt }
+            .take(MAX_ENTRIES)
+            .forEach { cache[it.songId] = it }
         save()
         AppLog.d(TAG, "importAll: ${cache.size} entries")
     }
@@ -138,6 +165,13 @@ class MvPersistentCache(context: Context) {
     private fun load() {
         try {
             if (!file.exists()) return
+            // L14：读盘必须有体积上限 —— 原实现 `readText()` 不判大小，
+            // 一个被写坏的/超大的 mv_cache.json 会一次性把整个文件读进内存再 Gson 解析，
+            // 低内存电视盒上直接 OOM。超限就当作无缓存（缓存可重建，丢一次远比崩掉好）。
+            if (file.length() > MAX_CACHE_FILE_BYTES) {
+                AppLog.w(TAG, "load: cache file too large (${file.length()} bytes), ignored")
+                return
+            }
             val json = file.readText()
             if (json.isBlank()) return
             val type = object : TypeToken<Map<String, MvCacheEntry>>() {}.type
@@ -152,6 +186,9 @@ class MvPersistentCache(context: Context) {
     // 2026-09-25 审查修复（2-4）：put()（IO 线程）与 markCompleted()（主线程）可并发进入
     // save()，两个线程同时写同一 .tmp 互相踩踏 → rename 后 JSON 损坏、下次 load 全量丢失。
     // 写 tmp+rename 序列整体加锁（与 BaiduFileIndexCache 的 cacheLock 同语义）。
+    /** L14：mv_cache.json 的读取上限（8MB ≈ 上万条，真实规模远小于此） */
+    private val MAX_CACHE_FILE_BYTES = 8L * 1024 * 1024
+
     private val saveLock = Any()
 
     private fun save() = synchronized(saveLock) {

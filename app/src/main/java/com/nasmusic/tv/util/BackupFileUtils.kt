@@ -36,8 +36,16 @@ object BackupFileUtils {
     private const val FILE_PREFIX = "NASMusic_backup_"
     private const val FILE_SUFFIX = ".json"
 
-    /** 备份 json 的量级上限：正常备份只有几十 KB，超过这个数的一定不是备份文件 */
-    private const val MAX_BACKUP_BYTES = 10L * 1024 * 1024
+    /**
+     * 备份 json 的**统一**量级上限：正常备份只有几十 KB，超过这个数的一定不是备份文件。
+     *
+     * ⚠️ N02：这个上限必须同时管住**三个**口子，否则会出现「写得进、读不出」的自相矛盾：
+     * ① 导出（[export]）—— 生成超过上限的备份 ⇒ 用户当场就该知道，而不是等恢复时才发现；
+     * ② 读取（[readBackup] / `LocalFilePicker.readText`）；
+     * ③ 扫码上传（`BackupTransferServer.MAX_UPLOAD_BYTES`，直接引用本常量）。
+     * 历史上 ①③ 都是 32MB、② 是 10MB ⇒ app 自己导出的 11~32MB 备份永远恢复不了。
+     */
+    const val MAX_BACKUP_BYTES = 10L * 1024 * 1024
 
     /** API < 29：应用内部存储备份目录（/data 真闪存，断电不丢） */
     private fun internalBackupDir(context: Context): File =
@@ -77,6 +85,20 @@ object BackupFileUtils {
      */
     fun export(context: Context, json: String): Result<String> {
         return try {
+            // N02：先量再写 —— 超过统一上限的备份写出去也恢复不了（读取侧硬限同一常量），
+            // 不如在这里直接拒绝并说清原因，避免用户留着一个"看着成功、其实无法恢复"的文件。
+            val bytes = json.toByteArray(Charsets.UTF_8)
+            if (bytes.size > MAX_BACKUP_BYTES) {
+                AppLog.w(TAG, "export refused: ${bytes.size} bytes > $MAX_BACKUP_BYTES")
+                return Result.failure(
+                    Exception(
+                        context.getString(
+                            R.string.backup_util_too_large,
+                            (MAX_BACKUP_BYTES / (1024 * 1024)).toInt()
+                        )
+                    )
+                )
+            }
             val fileName = generateFileName()
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 val values = ContentValues().apply {
@@ -88,7 +110,7 @@ object BackupFileUtils {
                 val uri = context.contentResolver.insert(collection, values)
                     ?: return Result.failure(Exception(context.getString(R.string.backup_util_create_failed)))
                 context.contentResolver.openOutputStream(uri)?.use { out ->
-                    out.write(json.toByteArray(Charsets.UTF_8))
+                    out.write(bytes)
                 } ?: return Result.failure(Exception(context.getString(R.string.backup_util_write_failed)))
                 Result.success(fileName)
             } else {
@@ -97,12 +119,12 @@ object BackupFileUtils {
                 if (!internalDir.exists() && !internalDir.mkdirs()) {
                     return Result.failure(Exception(context.getString(R.string.backup_util_mkdir_failed)))
                 }
-                File(internalDir, fileName).writeText(json, Charsets.UTF_8)
+                File(internalDir, fileName).writeBytes(bytes)
                 // 辅助副本：公共 Downloads（普通 ROM 上文件管理器可访问；RAM 盘 ROM 上尽力而为）
                 try {
                     val publicDir = publicBackupDir()
                     if (publicDir.exists() || publicDir.mkdirs()) {
-                        File(publicDir, fileName).writeText(json, Charsets.UTF_8)
+                        File(publicDir, fileName).writeBytes(bytes)
                     }
                 } catch (e: Exception) {
                     AppLog.w(TAG, "public backup copy failed", e)

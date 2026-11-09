@@ -6,6 +6,7 @@ import com.nasmusic.tv.R
 import com.nasmusic.tv.data.model.Song
 import com.nasmusic.tv.util.AppLog
 import com.nasmusic.tv.util.EncodingUtils
+import com.nasmusic.tv.util.NetAddressGuard
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl
@@ -123,6 +124,19 @@ class MetingApiService(
             .trim('`', '\'', '"')
             .trim()
             .trimEnd('/')
+
+    /** M19：`server` 参数单点编码（值来自用户配置，含 & / = 会破坏 query） */
+    private fun enc(v: String): String = URLEncoder.encode(v, "UTF-8")
+
+    /**
+     * M22：安全取字符串字段。
+     *
+     * ⛔ `obj.get(k)?.asString` 对 **JsonNull** 会抛 UnsupportedOperationException
+     * （JsonNull 是 JsonElement 但不是 JsonPrimitive），异常被外层 try 吞掉后
+     * 整首单曲/整段响应作废。与 `JamendoModels.kt:17` 的既有范式保持一致。
+     */
+    private fun jsonStr(obj: JsonObject, key: String): String? =
+        obj.get(key)?.takeIf { it.isJsonPrimitive }?.asString
 
     companion object {
         private const val TAG = "MetingApiService"
@@ -292,7 +306,7 @@ class MetingApiService(
     private fun searchWithEndpoint(keyword: String, endpoint: String): List<Song> {
         val server = serverProvider()
         return try {
-            val url = "$endpoint?server=$server&type=search&id=${URLEncoder.encode(keyword, "UTF-8")}"
+            val url = "$endpoint?server=${enc(server)}&type=search&id=${URLEncoder.encode(keyword, "UTF-8")}"
             AppLog.d(DIAG, "searchWithEndpoint: url='$url'")
             val request = Request.Builder()
                 .url(url)
@@ -369,13 +383,34 @@ class MetingApiService(
                 val location = response.header("Location")
                 when {
                     code == 302 -> {
-                        found = location
-                        fromRedirect = !location.isNullOrBlank()
+                        // M19：Location 就是最终交给 ExoPlayer 的直链，⛔ 不能无条件相信
+                        // （端点被投毒即可把播放器指向内网/回环/非 http 协议）。
+                        val loc = location
+                        val reject = loc?.let { NetAddressGuard.rejectReasonForPlayback(it) }
+                        if (loc != null && reject == null) {
+                            found = loc
+                            fromRedirect = true
+                        } else if (loc != null) {
+                            AppLog.w(DIAG, "fetchPlayUrl: reject 302 location ($reject)")
+                        }
                     }
                     code == 200 -> found = response.body?.string()?.let { extractUrlFromJson(it) }
-                    code in 300..399 && !location.isNullOrBlank() ->
+                    code in 300..399 && !location.isNullOrBlank() -> {
                         // 相对 Location 按**实际请求的 URL**解析（端点链里已带 query）
-                        next = response.request.url.resolve(location)
+                        val candidate = response.request.url.resolve(location)
+                        // M19：跟跳目标同样要过 scheme/host 校验（拒 file:/内网/回环）
+                        if (candidate == null) {
+                            next = null
+                        } else {
+                            val reject = NetAddressGuard.rejectReason(candidate.toString())
+                            if (reject == null) {
+                                next = candidate
+                            } else {
+                                AppLog.w(DIAG, "fetchPlayUrl: reject $code hop ($reject)")
+                                next = null
+                            }
+                        }
+                    }
                     else -> Unit
                 }
             }
@@ -436,7 +471,7 @@ class MetingApiService(
                 for (br in brChain) {
                     try {
                         val brParam = if (br != null) "&br=$br" else ""
-                        val url = "$endpoint?server=$server&type=url&id=${URLEncoder.encode(netId, "UTF-8")}$brParam"
+                        val url = "$endpoint?server=${enc(server)}&type=url&id=${URLEncoder.encode(netId, "UTF-8")}$brParam"
                         val fetched = fetchPlayUrl(url)
                         when (fetched) {
                             is PlayUrlFetch.Found -> {
@@ -488,7 +523,7 @@ class MetingApiService(
         val endpoints = buildEndpointFallbackOrder(baseUrl)
         for (endpoint in endpoints) {
             try {
-                val url = "$endpoint?server=$server&type=lrc&id=${URLEncoder.encode(netId, "UTF-8")}"
+                val url = "$endpoint?server=${enc(server)}&type=lrc&id=${URLEncoder.encode(netId, "UTF-8")}"
                 val request = Request.Builder().url(url).build()
                 client.newCall(request).execute().use { response ->
                     val text = response.body?.string()
@@ -553,7 +588,7 @@ class MetingApiService(
         val endpoints = buildEndpointFallbackOrder(baseUrl)
         for (endpoint in endpoints) {
             try {
-                val url = "$endpoint?server=$server&type=playlist&id=${URLEncoder.encode(playlistId, "UTF-8")}"
+                val url = "$endpoint?server=${enc(server)}&type=playlist&id=${URLEncoder.encode(playlistId, "UTF-8")}"
                 AppLog.d(DIAG, "getPlaylist: trying endpoint='$endpoint' url='$url'")
                 val request = Request.Builder()
                     .url(url)
@@ -642,14 +677,17 @@ class MetingApiService(
                     // 兼容不同端点的字段名：
                     // - Mikus / Redcha 返回 title / author
                     // - Qijieya 返回 name / artist
-                    val title = item.get("title")?.asString
-                        ?: item.get("name")?.asString
-                    val author = item.get("author")?.asString
-                        ?: item.get("artist")?.asString
-                    val pic = item.get("pic")?.asString
-                    val urlField = item.get("url")?.asString
-                    val albumField = item.get("album")?.asString
-                        ?: item.get("al")?.asString
+                    // M22：⛔ 不能用 `get(k)?.asString` —— 字段存在但值是 **JsonNull**
+                    // 时 `asString` 会抛 UnsupportedOperationException，被外层 try 吞掉
+                    // 后整首歌被丢弃（甚至整段天气响应作废）。统一走 jsonStr()。
+                    val title = jsonStr(item, "title")
+                        ?: jsonStr(item, "name")
+                    val author = jsonStr(item, "author")
+                        ?: jsonStr(item, "artist")
+                    val pic = jsonStr(item, "pic")
+                    val urlField = jsonStr(item, "url")
+                    val albumField = jsonStr(item, "album")
+                        ?: jsonStr(item, "al")
                     // 编码修复：部分端点可能返回 GBK 被当作 Latin-1 解码的乱码
                     val fixedTitle = EncodingUtils.fixEncoding(title)
                     val fixedAuthor = EncodingUtils.fixEncoding(author)

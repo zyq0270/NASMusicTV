@@ -30,6 +30,8 @@ import com.nasmusic.tv.ui.screens.settings.*
 import com.nasmusic.tv.ui.screens.netdisk.*
 import com.nasmusic.tv.ui.screens.stats.*
 import com.nasmusic.tv.ui.viewmodel.*
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 
 /**
@@ -147,13 +149,36 @@ internal fun SettingsBranch(
                     // T10：歌词字号 / 高亮（与播放页 NowPlayingBranch 读的是同一份持久化 key）
                     val lyricsFontScale by viewModel.prefs.lyrics.lyricsFontScale.collectAsState(initial = 1.0f)
                     val lyricsHighlightMode by viewModel.lyricsHighlightMode.collectAsState()
+                    // v2.36.0 竖屏设置两级页：当前进入的分区（null = 一级列表）。
+                    // 状态归 NavigationViewModel —— AppRoot 的 BACK handler 需要读它（方案 §6.2 / K2）
+                    //
+                    // M39：这条从下面提前到这里，是因为紧接着的下载进度要按「当前分区」决定是否订阅。
+                    val settingsSection by viewModel.navVM.settingsSection.collectAsState(initial = null)
                     val modelDownloaded by viewModel.downloadVM.modelDownloaded.collectAsState()
                     // === F2-2b 睡眠定时器（常驻按钮状态，本页内收集） ===
                     val sleepTimerSt by viewModel.playerVM.sleepTimerState.collectAsState()
-                    val modelDownloading by viewModel.downloadVM.modelDownloading.collectAsState()
-                    val modelDownloadProgress by viewModel.downloadVM.modelDownloadProgress.collectAsState()
-                    val modelDownloadedMB by viewModel.downloadVM.modelDownloadedMB.collectAsState()
-                    val modelTotalMB by viewModel.downloadVM.modelTotalMB.collectAsState()
+                    // M39：下载进度是本分支**唯一的高频流**（下载器每写一个分块就发一次），
+                    // 而它只被「歌词 / K 歌」分区消费 —— 现在只在那一栏打开时才真正订阅。
+                    // 原先无条件收集 ⇒ 下载期间每秒数次驱动整棵设置页重组；本分支顶层一共 ~50 个
+                    // StateFlow，但其余全是低频（用户操作 / 一次性事实），逐个下沉到分区子 composable
+                    // 的改动量与回归面远大于收益，故只把高频这一组拆掉（下沉口径见 F-2 / M7）。
+                    val karaokeSectionOpen = settingsSection == SettingsSection.LYRICS_KARAOKE
+                    val modelDownloading: Flow<Boolean> = remember(karaokeSectionOpen) {
+                        if (karaokeSectionOpen) viewModel.downloadVM.modelDownloading else flowOf(false)
+                    }
+                    val modelDownloadProgressFlow: Flow<Float> = remember(karaokeSectionOpen) {
+                        if (karaokeSectionOpen) viewModel.downloadVM.modelDownloadProgress else flowOf(0f)
+                    }
+                    val modelDownloadedMBFlow: Flow<Long> = remember(karaokeSectionOpen) {
+                        if (karaokeSectionOpen) viewModel.downloadVM.modelDownloadedMB else flowOf(0L)
+                    }
+                    val modelTotalMBFlow: Flow<Long> = remember(karaokeSectionOpen) {
+                        if (karaokeSectionOpen) viewModel.downloadVM.modelTotalMB else flowOf(0L)
+                    }
+                    val modelDownloadingVal by modelDownloading.collectAsState(initial = false)
+                    val modelDownloadProgress by modelDownloadProgressFlow.collectAsState(initial = 0f)
+                    val modelDownloadedMB by modelDownloadedMBFlow.collectAsState(initial = 0L)
+                    val modelTotalMB by modelTotalMBFlow.collectAsState(initial = 0L)
                     val modelSizeMB by viewModel.downloadVM.modelSizeMB.collectAsState()
                     val modelDownloadError by viewModel.downloadVM.modelDownloadError.collectAsState()
                     val modelPath by viewModel.downloadVM.modelPath.collectAsState()
@@ -170,9 +195,6 @@ internal fun SettingsBranch(
                     val localMusicSongs by viewModel.localSongs.collectAsState(initial = emptyList())
                     // v2.39.0：当前均衡器预设（PLAYBACK 卡④只读呈现，改预要在 EqualizerScreen）
                     val equalizerPreset by viewModel.equalizerPreset.collectAsState(initial = com.nasmusic.tv.data.model.EqualizerPreset.NORMAL)
-                    // v2.36.0 竖屏设置两级页：当前进入的分区（null = 一级列表）。
-                    // 状态归 NavigationViewModel —— AppRoot 的 BACK handler 需要读它（方案 §6.2 / K2）
-                    val settingsSection by viewModel.navVM.settingsSection.collectAsState(initial = null)
                     // v2.36.0 屏幕方向（L1 全局策略）
                     val screenOrientation by viewModel.prefs.display.screenOrientation.collectAsState(initial = "auto")
                     // v2.39.7 焦点高亮开关（初值必须与偏好默认值一致：true，否则进页瞬间会闪一下）
@@ -360,7 +382,7 @@ internal fun SettingsBranch(
                     onChangeSeparationMode = { viewModel.vocalVM.setSeparationMode(it) },
                     // 高质量分离模型下载状态
                     modelDownloaded = modelDownloaded,
-                    modelDownloading = modelDownloading,
+                    modelDownloading = modelDownloadingVal,
                     modelDownloadProgress = modelDownloadProgress,
                     modelDownloadedMB = modelDownloadedMB,
                     modelTotalMB = modelTotalMB,

@@ -10,6 +10,7 @@ import com.nasmusic.tv.data.stats.PlayHeatmapBuilder
 import com.nasmusic.tv.data.stats.PlayStatsAggregator
 import com.nasmusic.tv.data.stats.StatsBundle
 import com.nasmusic.tv.util.AppLog
+import com.nasmusic.tv.util.rethrowIfCancellation
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -48,16 +49,31 @@ class PlayStatsViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             _loading.value = true
             try {
-                // 首次打开时把 play_records 回填进按天统计（幂等，标记置位后零开销）
-                runCatching { prefs.backfillDailyStatsOnce() }
-                    .onFailure { AppLog.w("PlayStatsViewModel", "backfill daily stats failed", it) }
+                // M41：下面整段都是持久化读取（DataStore 首读 + Gson/Room 反序列化），
+                // 原本跑在 viewModelScope 默认的 Main 上 ⇒ 打开统计页首帧掉帧。
+                // 逐项下放到 IO（类型由表达式推断，不做元组打包）。
+                withContext(Dispatchers.IO) {
+                    // 首次打开时把 play_records 回填进按天统计（幂等，标记置位后零开销）
+                    runCatching { prefs.backfillDailyStatsOnce() }
+                        .onFailure {
+                            it.rethrowIfCancellation()
+                            AppLog.w("PlayStatsViewModel", "backfill daily stats failed", it)
+                        }
+                }
 
-                val songMeta: List<Song> = prefs.getRecentSongObjects()
                 val month = com.nasmusic.tv.data.stats.PlayStatsRepository.currentMonth()
-
-                val monthlyCounts = prefs.playStatsRepo.getMonthCounts(month)
-                val allTimeCounts = prefs.history.playCounts.firstOrNull() ?: emptyMap()
-                val dailyCounts = prefs.playStatsRepo.getDailyCounts()
+                val songMeta: List<Song> = withContext(Dispatchers.IO) {
+                    prefs.getRecentSongObjects()
+                }
+                val monthlyCounts = withContext(Dispatchers.IO) {
+                    prefs.playStatsRepo.getMonthCounts(month)
+                }
+                val allTimeCounts = withContext(Dispatchers.IO) {
+                    prefs.history.playCounts.firstOrNull() ?: emptyMap()
+                }
+                val dailyCounts = withContext(Dispatchers.IO) {
+                    prefs.playStatsRepo.getDailyCounts()
+                }
 
                 _monthlyBundle.value = withContext(Dispatchers.Default) {
                     PlayStatsAggregator.aggregate(month, monthlyCounts, songMeta)
@@ -69,6 +85,7 @@ class PlayStatsViewModel(app: Application) : AndroidViewModel(app) {
                     PlayHeatmapBuilder.build(dailyCounts)
                 }
             } catch (e: Exception) {
+                e.rethrowIfCancellation()
                 AppLog.e("PlayStatsViewModel", "loadStats failed", e)
             } finally {
                 _loading.value = false

@@ -17,8 +17,17 @@ import java.util.concurrent.ConcurrentHashMap
  *
  * 写入时机：用户主动切换到网络歌词来源（[MainViewModel.switchLyricsSource]）
  * LRU 淘汰：超过 [MAX_ENTRIES] 条时删 lastPlayedAt 最旧的，同时删除对应的 .lrc 文件
+ *
+ * ## 进程级单例（C24）
+ *
+ * 索引是「**内存 Map + 整文件覆盖写**」的形态，因此**两个实例就是两个真源**：
+ * 各自 load 一份索引、各自 `saveIndex()` 全量覆盖同一个 `lyrics_cache.json`
+ * ⇒ 后写的把先写的条目整体抹掉（被抹掉条目的 `.lrc` 变成磁盘孤儿）。
+ * 而 `LyricsManager` 在仓里确实被构造了两次（播放链路 / 备份链路）。
+ *
+ * ⇒ 构造改为私有，统一走 [get] 取**同一份**实例：一份索引、一把写锁、一个真源。
  */
-class LyricsPersistentCache(context: Context) {
+class LyricsPersistentCache private constructor(context: Context) {
 
     /** 索引条目（不包含 LRC 文本，仅用于索引） */
     private data class IndexEntry(
@@ -38,6 +47,20 @@ class LyricsPersistentCache(context: Context) {
 
     companion object {
         private const val TAG = "LyricsPersistentCache"
+
+        /** C24：进程级单例（见类 KDoc） */
+        @Volatile
+        private var instance: LyricsPersistentCache? = null
+
+        /**
+         * 取进程内唯一的缓存实例。
+         *
+         * @param context 任意 Context（内部转 `applicationContext`，不会持有 Activity）
+         */
+        fun get(context: Context): LyricsPersistentCache =
+            instance ?: synchronized(this) {
+                instance ?: LyricsPersistentCache(context.applicationContext).also { instance = it }
+            }
         private const val MAX_ENTRIES = 2000
         /** get 命中后累积多少次再落盘一次索引（真 LRU 访问时间刷新） */
         private const val TOUCH_SAVE_INTERVAL = 16

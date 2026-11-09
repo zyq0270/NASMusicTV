@@ -13,6 +13,7 @@ import com.nasmusic.tv.data.model.BaiduFile
 import com.nasmusic.tv.data.model.NetworkFavoriteItem
 import com.nasmusic.tv.data.model.Song
 import com.nasmusic.tv.util.AppLog
+import com.nasmusic.tv.util.rethrowIfCancellation
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -152,13 +153,26 @@ class NetworkMusicViewModel(app: Application) : AndroidViewModel(app) {
                     return@launch
                 }
                 val playable = song.copy(streamUrl = playUrl)
-                AppLog.d("NetworkMusicViewModel", "playNetworkSong: ${song.title} → $playUrl")
+                // L21：`playUrl` 是**解析后的直链** —— 百度 dlink、各家临时签名全在 query 里。
+                // 全量打日志等于把凭据写进 LogStore（落盘、可在设置页回看/导出）。
+                AppLog.d("NetworkMusicViewModel", "playNetworkSong: ${song.title} → ${redactUrl(playUrl)}")
                 onPlaySong(playable)
             } catch (e: Exception) {
+                e.rethrowIfCancellation()
                 AppLog.e("NetworkMusicViewModel", "playNetworkSong failed", e)
                 showMessage?.invoke(getApplication<Application>().getString(R.string.play_failed_with_msg, e.message?.take(50)))
             }
         }
+    }
+
+    /**
+     * L21：日志脱敏 —— 去掉 URL 的 query 与 fragment（签名 / token / dlink 都在那里）。
+     *
+     * 保留 scheme+host+path，足以判断「打到了哪个源、哪条路径」。
+     */
+    private fun redactUrl(url: String): String {
+        val cut = url.indexOfFirst { it == '?' || it == '#' }
+        return if (cut > 0) url.substring(0, cut) + "?<redacted>" else url
     }
 
     // ---- 百度网盘连接状态 ----
@@ -201,6 +215,33 @@ class NetworkMusicViewModel(app: Application) : AndroidViewModel(app) {
     private val _netdiskIsLoading = MutableStateFlow(false)
     val netdiskIsLoading: StateFlow<Boolean> = _netdiskIsLoading.asStateFlow()
 
+    /**
+     * 目录浏览是否还有下一页（C37）。
+     *
+     * 百度 `list` 接口每页 `PAGE_SIZE`(=1000) 条，原实现只取首页就把 `hasMore` 丢掉了
+     * ⇒ 超过 1000 项的子目录在浏览页里看不到第 1001 项之后的内容，也没有任何"还有更多"的提示。
+     * 这里把 `hasMore` 暴露给 UI，由 [loadMoreBaiduDir] 按 `start` 继续翻页。
+     */
+    private val _netdiskHasMore = MutableStateFlow(false)
+    val netdiskHasMore: StateFlow<Boolean> = _netdiskHasMore.asStateFlow()
+
+    /**
+     * 触底追加用的独立 loading 位（C37）。
+     *
+     * ⛔ 不要复用 [_netdiskIsLoading]：那个位被 UI 用来"整页替换成加载中"，
+     * 追加下一页时整页闪空会丢掉用户当前滚动位置。
+     */
+    private val _netdiskLoadingMore = MutableStateFlow(false)
+    val netdiskLoadingMore: StateFlow<Boolean> = _netdiskLoadingMore.asStateFlow()
+
+    /**
+     * 目录浏览已经取到的服务端偏移量（C37），即下一页的 `start` 参数。
+     *
+     * 用「已收到的条数」而非「页号 × PAGE_SIZE」推进：服务端过滤后单页条数可能小于 `limit`，
+     * 用页号乘法会跳过条目。
+     */
+    private var netdiskDirOffset: Int = 0
+
     /** 网盘搜索 */
     private val _netdiskSearchResults = MutableStateFlow<List<Song>>(emptyList())
     val netdiskSearchResults: StateFlow<List<Song>> = _netdiskSearchResults.asStateFlow()
@@ -232,6 +273,19 @@ class NetworkMusicViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private var deviceCodePollJob: kotlinx.coroutines.Job? = null
+
+    /**
+     * 网盘浏览/搜索的**单飞**守卫（M31）。
+     *
+     * `listBaiduDir` 与 `searchBaidu` 共用 `_netdiskIsLoading` 这一个 loading 位，
+     * 而它们各自 `viewModelScope.launch` 且**不保存 Job**：
+     * ① 连点两个目录 ⇒ 两个请求并行，先发的后返回会把新目录的文件覆盖回旧目录；
+     * ② 先到的请求先执行 `finally { isLoading = false }` ⇒ 后到的请求还在飞，
+     *    转圈却已经停了。
+     * 现在：领号 + 取消上一个 + 只有「还是最新世代」才写状态/复位 loading。
+     */
+    private var netdiskJob: kotlinx.coroutines.Job? = null
+    private var netdiskGeneration: Int = 0
 
     /** 异步刷新连接状态（初始化与开关切换后调用；T2 第一批：getBaiduConfigSync → baiduConfigFlow.first()） */
     suspend fun refreshBaiduConnectionState() {
@@ -307,6 +361,7 @@ class NetworkMusicViewModel(app: Application) : AndroidViewModel(app) {
                         checkMusicRootDirAfterVerify()
                     }
                 } catch (e: Exception) {
+                    e.rethrowIfCancellation()
                     _baiduConnectionState.value = BaiduConnectionState.LoggedIn
                     AppLog.w("BaiduAuth", "verifyBaiduTokenAsync: network error, fallback to LoggedIn: ${e.message}")
                     triggerBaiduIndexScanIfNeeded()
@@ -335,6 +390,7 @@ class NetworkMusicViewModel(app: Application) : AndroidViewModel(app) {
                         onVerifyBaiduSuccess()
                     }
                 } catch (e: Exception) {
+                    e.rethrowIfCancellation()
                     // 网络错误不影响判定，按登录处理
                     AppLog.w("BaiduAuth", "checkMusicRootDirAfterVerify: network error, fallback to LoggedIn: ${e.message}")
                     onVerifyBaiduSuccess()
@@ -450,12 +506,19 @@ class NetworkMusicViewModel(app: Application) : AndroidViewModel(app) {
 
     fun listBaiduDir(dir: String) {
         AppLog.d("BaiduAuth", "listBaiduDir: dir=$dir, current state=${_baiduConnectionState.value}")
+        val generation = ++netdiskGeneration
+        netdiskJob?.cancel()
         _netdiskCurrentDir.value = dir
         _netdiskIsLoading.value = true
-        viewModelScope.launch {
+        // C37：换目录即重置分页游标与"还有更多"，否则新目录会带着旧目录的 offset 去翻页
+        netdiskDirOffset = 0
+        _netdiskHasMore.value = false
+        _netdiskLoadingMore.value = false
+        netdiskJob = viewModelScope.launch {
             try {
                 val result = baiduApi.listDir(dir)
                 AppLog.d("BaiduAuth", "listBaiduDir: got ${result.files.size} files, hasMore=${result.hasMore}, errno=${result.errno}")
+                if (generation != netdiskGeneration) return@launch
                 // API 返回错误时设置 Failed 状态（不再依赖回调）
                 if (result.errno != 0) {
                     val desc = BaiduNetdiskConfig.describeErrno(getApplication(), result.errno)
@@ -463,12 +526,65 @@ class NetworkMusicViewModel(app: Application) : AndroidViewModel(app) {
                     _baiduConnectionState.value = BaiduConnectionState.Failed(desc)
                 }
                 _netdiskDirFiles.value = result.files
+                netdiskDirOffset = result.files.size
+                _netdiskHasMore.value = result.hasMore
             } catch (e: Exception) {
+                e.rethrowIfCancellation()
                 AppLog.e("NetworkMusicViewModel", "listBaiduDir error", e)
+                if (generation != netdiskGeneration) return@launch
                 showMessage?.invoke(getApplication<Application>().getString(R.string.netdisk_load_dir_error, e.message?.take(40)))
                 _netdiskDirFiles.value = emptyList()
+                netdiskDirOffset = 0
+                _netdiskHasMore.value = false
             } finally {
-                _netdiskIsLoading.value = false
+                // M31：只有最新世代才能关掉转圈（旧请求的 finally 会把新请求的 loading 关掉）
+                if (generation == netdiskGeneration) _netdiskIsLoading.value = false
+            }
+        }
+    }
+
+    /**
+     * 触底追加目录下一页（C37）。
+     *
+     * 复用 [netdiskGeneration] 而不是另起世代：翻页途中若用户切了目录/发起搜索，
+     * 那个动作会 `++netdiskGeneration`，本次追加在写回前就会被判定过期并丢弃，
+     * 不会把旧目录的文件拼到新目录列表尾部。
+     *
+     * 停滞保护：`hasMore=true` 却返回 0 条时直接收敛为 `false`，否则触底会无限重试同一个 `start`。
+     */
+    fun loadMoreBaiduDir() {
+        if (!_netdiskHasMore.value || _netdiskLoadingMore.value || _netdiskIsLoading.value) return
+        val dir = _netdiskCurrentDir.value
+        val generation = netdiskGeneration
+        _netdiskLoadingMore.value = true
+        viewModelScope.launch {
+            try {
+                val result = baiduApi.listDir(dir, start = netdiskDirOffset)
+                if (generation != netdiskGeneration) return@launch
+                if (result.errno != 0) {
+                    val desc = BaiduNetdiskConfig.describeErrno(getApplication(), result.errno)
+                    AppLog.w("BaiduAuth", "loadMoreBaiduDir: errno=${result.errno} ($desc), stop paging")
+                    _baiduConnectionState.value = BaiduConnectionState.Failed(desc)
+                    _netdiskHasMore.value = false
+                    return@launch
+                }
+                if (result.files.isEmpty()) {
+                    AppLog.w("BaiduAuth", "loadMoreBaiduDir: empty page at start=$netdiskDirOffset, stop paging")
+                    _netdiskHasMore.value = false
+                    return@launch
+                }
+                netdiskDirOffset += result.files.size
+                // 去重：LazyVerticalGrid 以 fsId 为 key，重复 key 会直接抛异常
+                _netdiskDirFiles.value = (_netdiskDirFiles.value + result.files).distinctBy { it.fsId }
+                _netdiskHasMore.value = result.hasMore
+            } catch (e: Exception) {
+                e.rethrowIfCancellation()
+                AppLog.e("NetworkMusicViewModel", "loadMoreBaiduDir error", e)
+                if (generation != netdiskGeneration) return@launch
+                // 追加失败不动已有列表，只是停止继续翻页，避免每帧重试打爆接口
+                _netdiskHasMore.value = false
+            } finally {
+                if (generation == netdiskGeneration) _netdiskLoadingMore.value = false
             }
         }
     }
@@ -500,17 +616,23 @@ class NetworkMusicViewModel(app: Application) : AndroidViewModel(app) {
             _netdiskSearchResults.value = emptyList()
             return
         }
-        viewModelScope.launch {
+        val generation = ++netdiskGeneration
+        netdiskJob?.cancel()
+        netdiskJob = viewModelScope.launch {
             _netdiskIsLoading.value = true
             try {
                 val rootDir = prefs.baidu.getBaiduMusicRootDir().ifBlank { BaiduNetdiskConfig.APP_DIR }
                 val files = baiduApi.searchAudio(keyword, dir = rootDir)
+                // M31：旧搜索不得覆盖新搜索的结果
+                if (generation != netdiskGeneration) return@launch
                 _netdiskSearchResults.value = files.map { it.toSong() }
             } catch (e: Exception) {
+                e.rethrowIfCancellation()
                 AppLog.e("NetworkMusicViewModel", "searchBaidu error", e)
+                if (generation != netdiskGeneration) return@launch
                 _netdiskSearchResults.value = emptyList()
             } finally {
-                _netdiskIsLoading.value = false
+                if (generation == netdiskGeneration) _netdiskIsLoading.value = false
             }
         }
     }
@@ -642,6 +764,7 @@ class NetworkMusicViewModel(app: Application) : AndroidViewModel(app) {
                     startApicExtraction()
                 }
             } catch (e: Exception) {
+                e.rethrowIfCancellation()
                 AppLog.e("NetworkMusicViewModel", "rebuildBaiduIndex error", e)
             } finally {
                 _baiduIndexScanning.value = false
@@ -678,6 +801,7 @@ class NetworkMusicViewModel(app: Application) : AndroidViewModel(app) {
                     onProgress = callback
                 )
             } catch (e: Exception) {
+                e.rethrowIfCancellation()
                 AppLog.e("NetworkMusicViewModel", "startApicExtraction error", e)
             } finally {
                 _baiduApicExtracting.value = false
@@ -745,6 +869,7 @@ val verifyResult = baiduApi.listDir(BaiduNetdiskConfig.APP_DIR)
                                 AppLog.d("BaiduAuth", "init: verify OK, set state=LoggedIn, ${verifyResult.files.size} items in /")
                             }
                         } catch (e: Exception) {
+                            e.rethrowIfCancellation()
                             // 网络异常等，保守设 LoggedIn（可能是临时网络问题，不是 token 失效）
                             _baiduConnectionState.value = BaiduConnectionState.LoggedIn
                             AppLog.w("BaiduAuth", "init: verify network error, fallback to LoggedIn: ${e.message}")

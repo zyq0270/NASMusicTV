@@ -555,8 +555,15 @@ class PlayerManager(private val applicationContext: Context) {
 
     fun setPlayer(exoPlayer: ExoPlayer) {
         // 清理旧 player
-        player?.removeListener(playerListener)
+        val previous = player
+        previous?.removeListener(playerListener)
         progressHandler.removeCallbacks(progressUpdateRunnable)
+        // N04：覆盖旧实例时对称释放。服务重建会 new 一个新 ExoPlayer，
+        // 旧实现只摘 listener 不 release ⇒ 上一份 playback Looper / AudioTrack 泄漏。
+        if (previous != null && previous !== exoPlayer) {
+            runCatching { previous.release() }
+                .onFailure { AppLog.w("PlayerManager", "setPlayer: 旧 player 释放失败", it) }
+        }
 
         player = exoPlayer
         exoPlayer.addListener(playerListener)
@@ -1333,14 +1340,30 @@ class PlayerManager(private val applicationContext: Context) {
             val available2 = (0 until queueSize).toList()
             val randomIndex = available2.random()
             shuffleHistory.add(randomIndex)
-            _playerState.update { it.copy(currentIndex = randomIndex) }
+            // M05：⛔ 不能只写索引 —— PlayerState 的契约是「queue / currentIndex /
+            // currentSong 同帧发布」，只改索引会让 UI 读到「新索引 + 旧歌名」的错帧
+            // （随机播放的 next / onPlaybackEnded 都走这里）。
+            _playerState.update {
+                it.copy(
+                    currentIndex = randomIndex,
+                    currentSong = it.queue.getOrNull(randomIndex) ?: it.currentSong
+                )
+            }
             p.seekTo(randomIndex, 0)
             p.play()
             return
         }
         val randomIndex = available.random()
         shuffleHistory.add(randomIndex)
-        _playerState.update { it.copy(currentIndex = randomIndex) }
+        // M05：⛔ 不能只写索引 —— PlayerState 的契约是「queue / currentIndex /
+        // currentSong 同帧发布」，只改索引会让 UI 读到「新索引 + 旧歌名」的错帧
+        // （随机播放的 next / onPlaybackEnded 都走这里）。
+        _playerState.update {
+            it.copy(
+                currentIndex = randomIndex,
+                currentSong = it.queue.getOrNull(randomIndex) ?: it.currentSong
+            )
+        }
         p.seekTo(randomIndex, 0)
         p.play()
     }
@@ -1364,6 +1387,9 @@ class PlayerManager(private val applicationContext: Context) {
     fun release() {
         progressHandler.removeCallbacks(progressUpdateRunnable)
         progressHandler.removeCallbacks(seekTimeoutRunnable)
+        // N03：睡眠定时器内部持有 Handler/Runnable，服务销毁后若还在计时，
+        // 到点会回头调 onSleepTimerExpired 去更新一个已经没了的通知。
+        runCatching { sleepTimer.cancel() }
         // 中止进行中的 crossfade：释放子播放器与 50ms 淡化轮询，避免服务销毁后
         // fadeRunnable 继续向已释放的 player 写 volume（原实现漏调 abort）。
         crossfadeController.abort()

@@ -107,7 +107,9 @@ internal class EcoGlobeRenderer(context: Context) : VisualizerRenderer {
         val wv = WebView(context).apply {
             setBackgroundColor(android.graphics.Color.BLACK)
             settings.javaScriptEnabled = true
-            settings.allowFileAccess = true
+            // ⛔ L29（与 E41 同款）：页面与脚本全部经虚拟资产域由
+            //    shouldInterceptRequest 流式提供，不需要 file:// 能力。
+            settings.allowFileAccess = false
             settings.domStorageEnabled = false
             settings.cacheMode = WebSettings.LOAD_NO_CACHE
             // ⛔ 禁焦三件套（E41 同款）：WebView 子树必须完全让出 Android 视图焦点，
@@ -157,6 +159,21 @@ internal class EcoGlobeRenderer(context: Context) : VisualizerRenderer {
                         AppLog.e("EcoGlobe", "asset not found: $dir/$assetName", e)
                         emptyBody("text/plain")
                     }
+                }
+
+                /**
+                 * M51/L29：完全离线的单页应用，任何离开资产域的主框架导航都是异常。
+                 * 默认实现会照单全收并真联网（本页 `javaScriptEnabled=true`，一旦有外部
+                 * 输入流进 JS 就是真实面），这里一律拦截并留痕。
+                 */
+                override fun shouldOverrideUrlLoading(
+                    view: WebView?,
+                    request: WebResourceRequest?
+                ): Boolean {
+                    val url = request?.url ?: return true
+                    if (url.host == ASSET_HOST) return false
+                    AppLog.w("EcoGlobe", "blocked outbound navigation: ${url.scheme}://${url.host}${url.path}")
+                    return true
                 }
 
                 override fun onPageFinished(view: WebView?, url: String?) {
@@ -253,23 +270,37 @@ internal class EcoGlobeRenderer(context: Context) : VisualizerRenderer {
         attached = false
         handler.removeCallbacks(tickRunnable)
         // ⛔ 不能同步 destroy：onDispose 触发时 AndroidView 的 view 可能仍挂在组合
-        //    销毁流程中，直接 destroy 会崩。post 到主线程队列（此时 view 已 detach）
-        //    并先摘除父容器再销毁。
+        //    销毁流程中，直接 destroy 会崩。先后置空引用、再由主线程队列延后销毁。
+        //
+        // C42：⛔ 此处**不能**用 `wv.post { }`。view 已 detach（无 attachInfo）时
+        // View.post 只是把 Runnable 塞进自身的 HandlerActionQueue，等**下一次 attach**
+        // 才执行；本场景是「已 detach 且不会再 attach」⇒ Runnable 永不执行 ⇒ WebView
+        // 永久泄漏。改由本类主线程 Handler 代发。
         val wv = webView
         webView = null
-        wv?.post {
-            try {
-                (wv.parent as? ViewGroup)?.removeView(wv)
-                wv.destroy()
-            } catch (_: Exception) {
-            }
-        }
+        if (wv != null) handler.post { destroyWebView(wv) }
     }
 
     override fun onExit() {
         attached = false
         handler.removeCallbacks(tickRunnable)
-        // WebView 销毁统一交给 onViewDetached（AndroidView 组销毁路径）
+        // C42：onExit 之后 AndroidView 的 onDispose 不一定发生（切换渲染器时组合可能
+        // 被缓存/复用）⇒ 这里补一次销毁，destroyWebView 幂等，重复调用安全。
+        val wv = webView
+        webView = null
+        if (wv != null) handler.post { destroyWebView(wv) }
+    }
+
+    /** 幂等的 WebView 销毁：摘父容器 + destroy（重复调用安全） */
+    private fun destroyWebView(wv: WebView) {
+        try {
+            (wv.parent as? ViewGroup)?.removeView(wv)
+        } catch (_: Exception) {
+        }
+        try {
+            wv.destroy()
+        } catch (_: Exception) {
+        }
     }
 
     /**
@@ -285,8 +316,15 @@ internal class EcoGlobeRenderer(context: Context) : VisualizerRenderer {
     private val tickRunnable = object : Runnable {
         override fun run() {
             if (!attached || webView == null) return
-            tick()
-            handler.postDelayed(this, TICK_MS)
+            // N10：tick() 内任何意外异常都会打断重排程 ⇒ 100ms 链路永久停摆且无日志。
+            // try/finally 保证「只要还 attached 就继续排下一次」。
+            try {
+                tick()
+            } catch (e: Exception) {
+                AppLog.e("EcoGlobe", "tick failed", e)
+            } finally {
+                if (attached) handler.postDelayed(this, TICK_MS)
+            }
         }
     }
 
@@ -310,15 +348,27 @@ internal class EcoGlobeRenderer(context: Context) : VisualizerRenderer {
         null
     }
 
-    private fun ema(old: Float, v: Float): Float = old + (v - old) * EMA_ALPHA
+    /**
+     * C44：EMA 平滑（NaN/Inf 免疫）——NaN 一旦进状态就会永久粘连，
+     * 之后每帧 `gson.toJson` 都会因 Gson 拒 NaN 抛 IllegalArgumentException，
+     * 把 100ms tick 链路整条打死。入口把非有限值当 0。
+     */
+    private fun ema(old: Float, v: Float): Float {
+        val input = if (v.isFinite()) v else 0f
+        val cur = if (old.isFinite()) old else 0f
+        return cur + (input - cur) * EMA_ALPHA
+    }
+
+    /** C44：交 JS 前把量规整到 0..1 并对 NaN/Inf 兜底（`coerceIn` 对 NaN 无效） */
+    private fun safeUnit(v: Float): Float = if (v.isFinite()) v.coerceIn(0f, 1f) else 0f
 
     private fun sendAudio() {
         val params = mapOf(
-            "energy" to emaEnergy.coerceIn(0f, 1f),
-            "bass" to emaBass.coerceIn(0f, 1f),
-            "mid" to emaMid.coerceIn(0f, 1f),
-            "treble" to emaTreble.coerceIn(0f, 1f),
-            "beat" to emaBeat.coerceIn(0f, 1f)
+            "energy" to safeUnit(emaEnergy),
+            "bass" to safeUnit(emaBass),
+            "mid" to safeUnit(emaMid),
+            "treble" to safeUnit(emaTreble),
+            "beat" to safeUnit(emaBeat)
         )
         evalJs("EcoGlobe.setAudio(${gson.toJson(params)})")
     }

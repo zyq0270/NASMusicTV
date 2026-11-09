@@ -24,6 +24,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -47,6 +48,9 @@ import com.nasmusic.tv.ui.theme.NasMusicColors
 import com.nasmusic.tv.util.LinkUtils
 import com.nasmusic.tv.util.NetworkUtils
 import com.nasmusic.tv.util.QrCodeGenerator
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * 模型文件扫码传输弹窗
@@ -73,16 +77,24 @@ fun ModelTransferDialog(
     var status by remember { mutableStateOf(context.getString(R.string.model_transfer_starting)) }
     val server = remember { ModelTransferServer.create(context, onModelUploaded) }
     val closeFocusRequester = remember { FocusRequester() }
+    // C27 / N09：二维码改后台线程生成（见 BackupTransferDialog 同款说明）
+    val qrScope = rememberCoroutineScope()
 
     // 启动/停止服务器
     DisposableEffect(Unit) {
         val ip = NetworkUtils.getLocalIpAddress()
         if (ip != null) {
             val url = server.buildUrl(ip)
-            serverUrl = url
-            qrBitmap = QrCodeGenerator.generateQrBitmap(url, 360)
             val started = server.startServer()
             status = if (started) context.getString(R.string.model_transfer_waiting) else context.getString(R.string.model_transfer_start_failed)
+            // C39 同款：仅服务真的起来时才展示二维码/地址
+            if (started) {
+                serverUrl = url
+                qrScope.launch(Dispatchers.Default) {
+                    val bmp = QrCodeGenerator.generateQrBitmap(url, 360)
+                    withContext(Dispatchers.Main) { qrBitmap = bmp }
+                }
+            }
         } else {
             status = context.getString(R.string.model_transfer_no_ip)
         }
