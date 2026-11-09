@@ -25675,3 +25675,69 @@ Kotlin 里「换行后以 `+` 开头的行」是**一条独立语句**（一元�
 - 新增：`scripts/e52/sky_sim.py`（离线模拟器）
 - ⛔ 本节涉及的 E52 代码**只在私有分支** `feat/e51-private`（上游 Slow Roads 无授权 ⇒ 不外发）
 
+
+### 10.367 v2.39.15 —— E52「旷野公路」第二十五轮：**「这个白底色实际上不应该显示」**（根因 = 清屏色纯白 + 天空平面有限大）＋ 云边柔化此前完全无效（2026-11-09）
+
+#### 一、现象
+
+所有者给出 8 张真机截图（丘陵 / 行星 × 晴 / 雨 / 日落 / 金星 / 月球等），**所有天气**都在云带与地形剪影之间
+出现一条**位置固定、颜色恒为纯白**的横带；纯色天（金星金黄、月球灰白）也一样。
+三条诉求：① 去掉云层与天空的明显分界线；② 最好让云层与天空**逐步融合（虚化）**；
+③ 做不到就把云层拉到地平线，别让天空底色露出来。
+
+#### 二、根因（数值复算，与截图逐像素位置吻合）
+
+不是「云和天没融合」，是**几何缝**：
+
+| 环节 | 真值 |
+|---|---|
+| 清屏色 | `glClearColor(1,1,1,1)`（上游 `setClearColor(16777215)` 的照抄） |
+| 天空几何 | 水平面 `y = SKY_OFFSET = 200`、半宽 `ue ≈ 2838.218`，跟随相机 x/z 平移 |
+| 相机 | 俯仰 `0.3 rad` 向下、`fovy = 68°`、16:9 ⇒ 地平线在屏幕 y ≈ 146 px（540 高） |
+| 天空平面命中 | 只有 `y_px ∈ [0, 115]`（`vUv.y ∈ [0.615, 1.0]`）落在平面内 |
+| **未覆盖的缝** | `y_px ∈ [115, 146]`（视线与平面交点 `z` 达 7837 > 半宽 2838）⇒ **露出清屏纯白** |
+
+⇒ 截图那条白带 = 「天空平面结束 → 清屏白」，与天气无关，所以每个天气都一样白。
+上游之所以看不见，是因为「天空下沿 / 远景地形 / 清屏白」被**同一片雾**洗成白霾；
+我们 11-08 把天空改用**自己**的雾距后，天空下沿与远景地形是 `weather.col`（雾色），
+**唯独清屏色还是白** ⇒ 三者不再同色，缝就显形了。
+
+同一轮还查出一个**失效修复**：11-08 加的 `uCloudFadeTop / uCloudFadeBottom` 只写了
+`diffuseColor.a *= cloudFade`，而 `GLES20.glDisable(GL_BLEND)` 全程生效 ⇒ alpha 被丢弃，
+`gl_FragColor.rgb` 一点没变 ⇒ 「云边柔化」在真机上**一次都没生效**，所以云带下沿仍是硬切。
+（原门禁只扫源码字符串，没验证是否真的进了 rgb ⇒ 绿灯但无效。）
+
+#### 三、修法（所有者 11-09 追问后裁定：让白底没有机会露出来）
+
+| 改动 | 内容 |
+|---|---|
+| 清屏色 | 新增 `HighwayGlScene.clearColorForFrame(skipScene)`：正常帧取 `envLook.fogColor`，`onSurfaceCreated` / `onDrawFrame` / `HighwayGLSurfaceView` 三处统一调用 |
+| 白帧过场 | `skipScene == true` 时**仍为纯白**（D24 整帧不画场景 ⇒ 清屏色就是过场底色） |
+| 云边柔化 | `SKY_FS` 增加 `diffuseColor.rgb = mix( skyCol.rgb, diffuseColor.rgb, cloudFade );` ⇒ 云带下缘真的逐步溶进天空底色，再被雾洗进雾色 |
+
+⇒ 最终链条：**云 → 天色 → 雾色 → 地形**，全程连续；白色带不存在（不是「把白换成另一块板」）。
+天空下沿在可见边缘处 `fogFactor = 1`（[HighwaySkyFog] 的 `FAR_FRACTION = 1.0`）⇒ 颜色恰为雾色，
+与清屏色、远景地形的雾色严格一致。
+
+⛔ **没有采用**的两个方案（留档）：
+* **扩大天空平面 / 把云拉到地平线**：`dirs.y → 0+` 时交点趋于无穷，有限平面永远留一条缝，只能压窄不能根治；
+  且 `skyHalfSize` 一变会连带改 `HighwaySkyFog.range` 的跨度与云采样尺度，牵动一串 parity 门禁。
+* **全屏天空渐变背景 quad**：能根治，但要新着色器 / program / 门禁，收益不比「清屏色取雾色」大。
+
+#### 四、门禁
+
+`HighwaySkyBlendGateTest`：
+* ⑤ 改为断言 `diffuseColor.rgb = mix( skyCol.rgb, diffuseColor.rgb, cloudFade );` 必须存在，
+  且不许退回「简单乘法压暗云带」；
+* 新增 ⑥：源码扫描 `clearColorForFrame` —— 正常帧必须取 `envLook.fogColor`、
+  `skipScene` 必须仍是纯白、`onDrawFrame` 必须调用它、不许残留硬编码纯白分支。
+
+#### 五、文件清单
+
+- 改：`scripts/e52/e52_gen_glsl_kotlin.mjs`（`SKY_FS` 淡出进 rgb）⇒ 重跑生成器刷新 `HighwayGlsl.kt`
+- 改：`app/src/main/java/com/nasmusic/tv/visualizer/highway/HighwayGlScene.kt`（新增 `clearColorForFrame`，三处清屏色）
+- 改：`app/src/main/java/com/nasmusic/tv/visualizer/highway/HighwayGLSurfaceView.kt`（不再覆盖成纯白）
+- 改：`app/src/test/java/com/nasmusic/tv/visualizer/highway/HighwaySkyBlendGateTest.kt`（⑤ 重写 + ⑥ 新增）
+- 改：`scripts/e52/sky_sim.py`（平面未覆盖处填雾色，与新清屏色一致）
+- 改：`CHANGELOG.md` / `app/build.gradle.kts`（v2.39.15 / versionCode 200）
+- ⛔ 本节涉及的 E52 代码**只在私有分支** `feat/e51-private`（上游 Slow Roads 无授权 ⇒ 不外发）
