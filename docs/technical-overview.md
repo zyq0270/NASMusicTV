@@ -26092,5 +26092,9 @@ Critical/High + 关键 Medium 派**独立怀疑式复核**（砍掉约 1/3 的�
 
 **验证**：`assembleDebug` ✅ / `testDebugUnitTest` 2906 用例全绿 ✅（新增 9 个用例）/ `lintDebug` ✅。
 
+**归档**：证据与可复现材料（30 个落地补丁 + 5 个报告工具 + 6 张自审截图 + 154 条工单 JSON）
+已**复制**入 `docs/archive/verification/code-review-2026-11-09/`，索引见该目录 `README.md`；
+`logs_temp/` 里的原件原样保留。归档判定与三条否决记录见 `docs/archive/README.md` 第二十四轮。
+
 - 版本：**v2.39.16 / versionCode 201**
 

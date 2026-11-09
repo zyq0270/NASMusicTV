@@ -1,0 +1,622 @@
+# -*- coding: utf-8 -*-
+"""生成 NASMusicTV 全系统代码审查报告（2026-11-09）。一次性脚本，输出到 docs/archive/。"""
+import html, os, re
+
+SEP = "~|~"
+
+# 字段：子系统 ~|~ ID ~|~ 初稿严重度 ~|~ 复核后严重度 ~|~ 判定 ~|~ 位置 ~|~ 问题 ~|~ 复核说明 / 影响 / 建议
+RAW = r"""
+s1~|~C01~|~High~|~Low~|~PARTIALLY CORRECT~|~data/prefs/AppPreferences.kt:2375~|~importBackupData 把 4 个数值字段原样写入 DataStore，绕过钳制~|~【复核】四个字段中只有 setLyricsFontScale 的 setter 有 [0.7,1.6] 钳制，其余 setter 本就不钳制，「绕过 setter 的 coerceIn」机制说错；消费端 blur>0、Equalizer gainMb.coerceIn、设置页加减按钮等多处兜底，仅影响显示偏好、不丢数据。【建议】恢复路径统一 coerceIn + isFinite，equalizerBands 校验长度与每元素范围。
+s1~|~C02~|~High~|~Medium~|~CONFIRMED~|~util/LocalFilePicker.kt:163~|~sizeOf() 返回 -1 时 10MB 上限失效，readText() 全量入内存~|~【复核】仅 SAF provider 不报 SIZE（返回 -1）时失效，size 已知时仍拦截；-1 是文档化放行。BackupTransferServer 的恢复/下载同样走 BackupFileUtils.read，一样受影响。【建议】未知大小时改带累计上限的流式读取，或直接拒绝。
+s1~|~M01~|~Medium~|~Medium~|~初稿~|~.github/workflows/build.yml:56~|~D5 fail-fast 只校验 SIGNING_KEYSTORE_BASE64 与 CRYPTO_PASSPHRASE，其余 3 个签名 secret 缺失时不拦截~|~【影响】漏配时写出空值 keystore.properties，到打包阶段才失败，违背 fail-fast。【建议】5 个 secret 一并做非空断言。
+s1~|~M02~|~Medium~|~Medium~|~初稿~|~data/cache/CacheInventory.kt:165~|~MAX_FILES=4000 只置 truncated 标记，walkTopDown().forEach 不短路，仍遍历整棵目录树~|~【影响】目录项遍历这一主要开销未减少，下载曲库数万文件时设置页仍可能卡顿。【建议】用 take(MAX_FILES+1) 或计数达上限即终止序列。
+s1~|~L01~|~Low~|~Low~|~初稿~|~.github/workflows/build.yml:93~|~sed 只打码 storePassword/keyPassword，cryptoPassphrase 明文进 CI 日志，注释却写 passwords redacted~|~【建议】把 cryptoPassphrase 一并打码，或只打印键名并修正注释。
+s1~|~L02~|~Low~|~Low~|~初稿~|~data/prefs/AppPreferences.kt:2339~|~importBackupData 对收藏/歌单/最近播放/播放次数无条件回写，空列表会清空本机数据，与同函数 isNotEmpty() 保护口径不一~|~【建议】统一跳过空值口径，或在 UI 明确提示「恢复将替换全部数据」。
+
+s2~|~C09~|~High~|~Medium~|~CONFIRMED~|~player/PlaybackService.kt:217~|~onCreate 注册两个捕获本 Service 的 lambda，onDestroy 未注销~|~【复核】单例只持最新一个 Service，下次 onCreate 覆盖自愈、不累积；但销毁后仍持有已销毁 Context，且 sleepTimer 到期仍会回调。【建议】onDestroy 对称置空两个回调，PlayerManager.release() 也清理。
+s2~|~C10~|~High~|~High~|~CONFIRMED~|~player/PlaybackService.kt:876~|~主 ExoPlayer 只在 mediaLibrarySession 非空时才被 release~|~【复核】onCreate:269 无条件 new 并注入单例，ensureMediaSessionActive 唯一调用点是 onIsPlayingChanged(true):185，全仓仅此处 player.release()；PlayerManager.release():1371 只置 null。泄漏仅限「启动后从未起播」分支，但未 release 的 player 持有 playback Looper 与 AudioTrack。【建议】onDestroy 保存 onCreate 创建的引用并显式 release。
+s2~|~C11~|~High~|~High~|~PARTIALLY CORRECT~|~player/PlaybackService.kt:301~|~startForeground 被延迟到首次播放，与 startForegroundService 降级路径的假设矛盾~|~【复核】普通冷启动不受 5 秒约束；仅 startService 被拒走 PlaybackServiceStart.kt:51 降级时触发，该路径 2026-11-02 真机已证实可达且无框架兜底。文档（PlaybackServiceStart.kt:30、technical-overview.md:18160）仍写「onCreate 立刻前台化」，与代码矛盾。【建议】onCreate/onStartCommand 无条件起一个占位前台通知。
+s2~|~C12~|~Medium~|~Medium~|~CONFIRMED~|~player/HqSeparationOrchestrator.kt:314~|~OkHttp Response 在 !isSuccessful 与 body==null 两条提前 return 路径未关闭~|~【复核】成功路径靠 body.byteStream().use 释放，两条早退无兜底，连接滞留连接池。【建议】用 response.use{} 包裹全分支。
+s2~|~C13~|~Medium~|~Medium~|~CONFIRMED~|~player/HqSeparationOrchestrator.kt:365~|~resolveInputPath 的 catch(Exception) 吞掉 CancellationException~|~【复核】取消被转成「下载失败」返回 null，外层 separationJob:584 收不到，随后回退 FAST 模式并在已 release 的播放器上 host.play()。【建议】catch(Exception) 前显式重抛 CancellationException。
+s2~|~C14~|~Medium~|~Medium~|~PARTIALLY CORRECT~|~player/DemucsSeparator.kt:200~|~initialize() 通用 catch 分支未关闭已创建的 OrtSession~|~【复核】HqSeparationOrchestrator.release → releaseInternal 会在退出时关当前 session，不是必然永久泄漏；真正泄漏在同进程重试 initialize 时覆盖 modelSession 引用（约 166MB 权重）。【建议】两个 catch 分支 close 并复位 isInitialized。
+s2~|~M03~|~Medium~|~Medium~|~初稿~|~player/HqSeparationOrchestrator.kt:617~|~finally 无条件把临时输入缓存为 original.wav，半截音频被当成永久原声~|~【影响】分离被取消或下载中断时缓存损坏文件，因 if(!dest.exists()) 保护后续成功也不覆盖。【建议】仅 result != null 时才 saveOriginalFile。
+s2~|~M04~|~Medium~|~Medium~|~初稿~|~player/MediaLibraryTree.kt:257~|~loadChildren 的 catch(Exception) 吞掉取消，与同文件 search():346 显式重抛不一致~|~【影响】onGetChildren 的 withTimeoutOrNull 语义被破坏，车机可能一直转圈。【建议】与 search() 对齐。
+s2~|~M05~|~Medium~|~Medium~|~初稿~|~player/PlayerManager.kt:1343~|~playRandom() 只更新 currentIndex，破坏 PlayerState 的 queue/currentIndex/currentSong 同帧发布契约~|~【影响】next(SHUFFLE) 与 onPlaybackEnded(SHUFFLE) 都会走它，UI 读到「新索引 + 旧歌名」错帧。【建议】同步 copy(currentSong = queue.getOrNull(idx))。
+s2~|~L03~|~Low~|~Low~|~初稿~|~player/ModelDownloadManager.kt:272~|~HttpURLConnection 全程未 disconnect，且 contentLength=-1 时完成进度判断恒失效~|~【建议】try/finally disconnect；-1 时以输入流 EOF 作为完成事件。
+s2~|~L04~|~Low~|~Low~|~初稿~|~player/SpectrumAnalyzer.kt:139~|~release() 与 FFT 线程的 analyze() 未共用同一把锁~|~【建议】release() 加 @Synchronized 或先 stop 后 join 再清缓冲。
+s2~|~L05~|~Low~|~Low~|~初稿~|~player/PlaybackService.kt:952~|~切歌覆盖 cachedArtworkBitmap 时旧 Bitmap 未 recycle~|~【建议】覆盖前 recycle 或改用 LRU 缓存。
+
+s3~|~C03~|~Medium~|~Low~|~CONFIRMED~|~backend/impl/SubsonicAdapter.kt:765~|~getSongsTotalCount() 委托给从未注入认证态的 restClient，Subsonic 分页总数恒 0~|~【复核】initialize 只写本类字段，NavidromeAdapter.kt:92-95 才有四行同步；但 SongsPagingState.resolveError 有「total==0 不误报」保护、hasMore 不依赖 totalCount，分页实际正常，仅显示 X/0。【建议】initialize 补齐 restClient.baseUrl/username/password/salt。
+s3~|~C04~|~Medium~|~Medium~|~CONFIRMED~|~backend/BackendRegistry.kt:149~|~BackendAuthHeaders.update 在 synchronized(lock) 外执行，并发 initialize 时旧请求可回写覆盖新 provider~|~【复核】ServerViewModel.kt:102/:216 两条协程无防重入；host 精确匹配已挡住凭据泄漏，真正影响是 currentAdapter/provider 指向已被 releaseAdapter 关闭的旧 adapter → 播放/封面 401。【建议】update 移入同一 synchronized 块并加世代校验。
+s3~|~C05~|~Medium~|~Medium~|~PARTIALLY CORRECT~|~backend/impl/FeiniuAdapter.kt:963~|~自定义头 x-access-code 不随跨 host 302 剥离（OkHttp 只删 Authorization）~|~【复核】机制成立但属条件性：仅「跨 host 302 且访问码非空」分支会外泄，目标域由用户配置 NAS 决定；streamHeaders 的 host 精确匹配是另一条链路，不构成兜底。【建议】加网络拦截器在 host 变化时 removeHeader，或 API client 直接 followRedirects(false)。
+s3~|~M06~|~Medium~|~Medium~|~初稿~|~backend/impl/SubsonicRestClient.kt:137~|~非 2xx 响应被静默吞成 null，401/403/5xx 与空曲库无法区分~|~【影响】用户改错密码或 NAS 报 500 时只显示「暂无歌曲」。【建议】记录脱敏后的 response.code 并覆写 lastErrorDetail。
+s3~|~L06~|~Low~|~Low~|~初稿~|~backend/impl/DaoliyuAdapter.kt:555~|~parseSong 的 albumId 回退路径重复加前缀，得到 daoliyu_daoliyu_XXX~|~【建议】回退值先 stripPrefix 或不再加前缀。
+s3~|~L07~|~Low~|~Low~|~初稿~|~backend/BackendRegistry.kt:154~|~异常分支对同一 adapter 执行两次 releaseAdapter，且释放后才读诊断~|~【建议】catch 内去掉 release，诊断取值提前到异常现场。
+s3~|~L08~|~Low~|~Low~|~初稿~|~backend/impl/JellyfinAdapter.kt:1154~|~GBK 回退分支把未脱敏的 request.url（含 api_key）写进日志，同函数 :1157 已脱敏~|~【建议】统一改用 UrlSanitizer.sanitize。
+s3~|~L09~|~Low~|~Low~|~初稿~|~backend/SearchAggregator.kt:438~|~normalizeKey 的 KDoc 承诺合并连续空格，实现未做，去重漏判~|~【建议】补 replace(Regex("\\s+"), " ") 或修正注释。
+s3~|~L10~|~Low~|~Low~|~初稿~|~backend/impl/FeiniuAdapter.kt:438~|~登录成功日志写入 userToken.take(8)~|~【建议】只记 tokenGeneration。
+s3~|~L11~|~Low~|~Low~|~初稿~|~backend/impl/NavidromeAdapter.kt:909~|~close() 清空本类口令却未清 restClient 中同步过的明文 password/salt~|~【建议】close() 同步清空 restClient 四个字段。
+
+s4~|~C06~|~Medium~|~Medium~|~CONFIRMED~|~backend/local/LocalMusicRepository.kt:230~|~scanUsbDevice 缺空扫描保护，scanned 为空仍删除该 USB 设备全部索引~|~【复核】删的是可重建的 Room 索引而非音频文件，下次扫描自愈；scanPath 抛异常会整体抛出，仅「返回空列表」分支触发（设备刚挂载、MediaStore 未索引时概率不低）。【建议】与 incrementalScan:66、fullScan:190 同口径判空返回。
+s4~|~C07~|~Medium~|~Medium~|~PARTIALLY CORRECT~|~backend/download/SongDownloadManager.kt:230~|~DownloadResult.Already 直接 return 不更新 _downloadStates，UI 永久卡 Downloading(0)~|~【复核】入口幂等的 Already 分支已写回 Completed，问题只对 singleAttempt:289 返回的 Already 成立；clearAllStates/recoverAfterCrash 可清但不自动发生。【建议】按实际档位写回 Completed 或移除状态条目。
+s4~|~C08~|~Medium~|~Low~|~PARTIALLY CORRECT~|~backend/download/SongDownloadManager.kt:186~|~任务入口 cancelRequested=false 与 cancelAll:522 置位存在竞态窗口~|~【复核】M4 的三处 checkCancelled()（:338/:345/:365）+ currentCall.cancel + clearAll 二次删除已兜住绝大部分路径，残留窗口极窄。【建议】用单调 cancelGeneration 代替布尔标志。
+s4~|~C15~|~High~|~High~|~CONFIRMED~|~backend/export/SongExporter.kt:262~|~SAF 覆盖导出失败时 doc.delete() 会删掉目标上用户原有文件~|~【复核】doc 来自 resolveChildDoc:312 的 findFile（已存在目标），openOutputStream("w") 先截断；File 分支 :271-284 已有 .part + rename 正确实现，SAF 分支缺。注释「写失败即删除半截文件」与反查已有文件自相矛盾。原文件不可恢复。【建议】SAF 也用 .part 临时文件，成功后替换，catch 只删临时文件。
+s4~|~C16~|~High~|~Medium~|~CONFIRMED~|~backend/download/SongDownloadManager.kt:466~|~完整性校验仅 declaredLength > 0 时生效，chunked 与 0 字节响应不校验~|~【复核】chunked 流被截断通常抛 IOException 触发清理 + 3 次重试，确凿缺口是 Content-Length:0 的 0 字节文件被标 COMPLETED，且 repo.isDownloaded 幂等检查阻止自动重下。【建议】改为「written > 0 且（declared > 0 时 written == declared）」。
+s4~|~M07~|~Medium~|~Medium~|~初稿~|~backend/export/SongExporter.kt:244~|~shouldOverwrite 复用 resolveChildDoc，纯查询动作带 createFile/createDirectory 副作用~|~【影响】判断本身在 U 盘创建目录与空文件，导出取消后残留。【建议】拆出无副作用的 findChildDoc。
+s4~|~M08~|~Medium~|~Medium~|~初稿~|~backend/download/SongDownloadManager.kt:636~|~孤儿恢复只按文件名正则匹配，不校验文件长度，半截文件被误标 COMPLETED~|~【建议】追加 hit.length() > 0 与声明长度校验。
+s4~|~M09~|~Medium~|~Medium~|~初稿~|~backend/local/EmbeddedCoverExtractor.kt:50~|~同步读盘 + 写缓存文件在 Compose 组合期主线程被调用（UnifiedSongRow.kt:366）~|~【影响】列表首次渲染每行同步读盘，TV 滚动大量歌曲易掉帧。【建议】改 LaunchedEffect + withContext(IO)。
+s4~|~M10~|~Medium~|~Medium~|~初稿~|~backend/local/MusicScanner.kt:157~|~scanPath 遍历无取消点，songs 列表无上限增长~|~【建议】循环内 ensureActive()/yield()，改 Sequence 分批输出。
+s4~|~M11~|~Medium~|~Medium~|~初稿~|~backend/export/SongExporter.kt:360~|~mediaScan(devicePath) 参数未使用，扫描的是源文件；导出完成也未重建 USB 索引~|~【影响】导出到 U 盘的歌需重新插拔才可见，与 :81 注释承诺不符。【建议】完成后以 device.path 调 scanUsbDevice。
+s4~|~L12~|~Low~|~Low~|~初稿~|~backend/download/CoverFileWriter.kt:64~|~已有 cover.jpg 压缩失败时回退原始字节，MediaTagWriter 仍按 image/jpeg 内嵌~|~【建议】压缩失败返回 null 走旁路。
+s4~|~L13~|~Low~|~Low~|~初稿~|~backend/local/CoverUrlPersistentCache.kt:189~|~renameTo 失败兜底直接 file.writeText(json)，破坏原子性并残留 .tmp~|~【建议】写另一临时名再 rename，finally 清理临时文件。
+
+s5~|~C17~|~High~|~Medium~|~PARTIALLY CORRECT~|~backend/playlist/PlaylistImporter.kt:52~|~import()/importBytes() 全程未切 IO，读流/解码/解析/写盘都在 Main 协程~|~【复核】5MB readLimited 上限与 DataStore 内部 IO 调度使主线程阻塞小于描述；但每首一次 edit + 全量 JSON 重序列化是 O(n²)、协程在 Main 反复挂起恢复，大歌单仍卡顿。【建议】importBytes 整体包 withContext(Dispatchers.IO)。
+s5~|~C18~|~High~|~Medium~|~CONFIRMED~|~backend/playlist/UrlReachabilityChecker.kt:123~|~不可信 URL 无 host 白名单且跟随任意重定向~|~【复核】调用链确无任何白名单，isPrivateLanUrl 生产调用点唯一在 PlaylistImportViewModel.kt:180，PlaylistEnricher.kt:116 完全无过滤；但请求是无凭据 HEAD、结果仅用于可达性徽标、有 5s 超时与并发 4 限流，属恶意歌单诱导的内网/云元数据探测而非经典 SSRF。【建议】在 check() 内做 IP/域名白名单并逐跳复核重定向目标。
+s5~|~C19~|~Medium~|~Low~|~CONFIRMED~|~backend/network/baidu/BaiduFileIndexCache.kt:360~|~return dirIndex!! 在 synchronized 块外读 @Volatile 字段，与 save/load 置 null 竞态~|~【复核】NPE 会经 BaiduNetdiskService.kt:81 上传，被 SearchAggregator.kt:286 catch(Exception) 兜住降级为空结果，不崩溃；另 :352 也会降级。【建议】返回移进同步块或写 return dirIndex ?: map。
+s5~|~C20~|~Medium~|~Medium~|~CONFIRMED~|~backend/network/baidu/BaiduPanApi.kt:359~|~errno != 0 时把完整未截断未脱敏的响应体写入 w 级日志~|~【复核】AppLog.w 在 release 仍落 LogStore（仅 logcat 受 DEBUG 限制），泄露面是设备私有日志/用户主动导出；同文件 :306 用了 take(200)、:358 用了 sanitizeUrl，团队已有惯例。【建议】body.take(200) + 脱敏或删除该行。
+s5~|~M12~|~Medium~|~Medium~|~初稿~|~backend/playlist/JsonPlaylistParser.kt:60~|~只捕获 JsonParseException，asJsonObject/getAsJsonArray 类型不符抛 IllegalStateException 毁掉整单~|~【建议】判型 + runCatching 包整个 parse + 限制 JSON 嵌套深度（NeteaseCloudPlaylistParser.kt:33 同款）。
+s5~|~M13~|~Medium~|~Medium~|~初稿~|~backend/photo/YuNetFaceDetector.kt:280~|~人脸缩略图先 readBytes() 把整张原图读进内存，inSampleSize 只缩小解码后 Bitmap~|~【影响】数十 MB 照片 + 万张扫描易 OOM（PhotoBuffer.kt:248 同款写法）。【建议】按 ref.size 判死或改有界缓冲流。
+s5~|~M14~|~Medium~|~Medium~|~初稿~|~backend/network/mv/MvPersistentCache.kt:84~|~markCompleted() → save() 是同步磁盘写且调用点在主线程~|~【影响】最多 5000 条 Gson 序列化 + 写盘，MV 播完切歌掉帧。【建议】save() 切 IO 或投递后台串行任务。
+s5~|~M15~|~Medium~|~Medium~|~初稿~|~backend/network/baidu/BaiduLyricsProvider.kt:106~|~侧车 LRC 下载 resp.body?.string() 无体积上限，与同文件 downloadRange:206 保护不对称~|~【建议】判 Content-Length 并用有界 BufferedSource（如 1MB）。
+s5~|~M16~|~Medium~|~Medium~|~初稿~|~backend/network/mv/BilibiliMvService.kt:253~|~playurl 的 durl[].url / dash.video[].baseUrl 无 scheme/host 白名单即进 ExoPlayer~|~【建议】只接受 http/https 并校验 B 站 CDN 域名集合。
+s5~|~L14~|~Low~|~Low~|~初稿~|~backend/network/mv/MvPersistentCache.kt:125~|~importAll 先全量塞进 map 再 evict，load() 的 readText() 无体积判死~|~【建议】先 take(MAX_ENTRIES)，改流式 JsonReader。
+s5~|~L15~|~Low~|~Low~|~初稿~|~backend/photo/YuNetFaceDetector.kt:83~|~OrtSession.SessionOptions() 持有 native 资源，createSession 后从未 close~|~【建议】opts.use{} 或 try/finally close。
+s5~|~L16~|~Low~|~Low~|~初稿~|~backend/network/baidu/BaiduOAuthClient.kt:168~|~expires_in 未钳制 *1000 可 Long 溢出，refresh_token 字段缺空校验~|~【建议】coerceIn 后相乘，refresh_token 用可空兜底。
+
+s6~|~C21~|~Critical~|~Critical~|~CONFIRMED~|~backend/network/lx/LxScriptRepo.kt:57~|~来自网络的 JS 仅校验 @name 即被 QuickJS 执行，宿主 __nativeRequest 无目标域限制~|~【复核】穷尽核实四类措施全无：内容哈希 pin（LxSourceEntry.idOf 只是 URL 文件名 hash）、签名校验、域名白名单（5 个 DEFAULT 只是默认登记）、JS 沙箱目标域限制（httpClient 无 interceptor / DNS 限制 / CookieJar）。UI 层 SettingsScreen.kt:796 的 http(s) 校验只作用于下载 URL。准确表述是「未校验远程 JS 执行 + 任意 header/method/body 的 SSRF + 内网/云元数据响应内容外带」，而非「凭据外带」（沙箱不暴露 prefs/文件系统）。【建议】内置源内容哈希 pin、自定义 URL 域名白名单 + 完整性校验；startRequest 拒绝 loopback/link-local/私网并限制可设 header 名。
+s6~|~C22~|~High~|~Medium~|~PARTIALLY CORRECT~|~backend/network/NetworkMusicManager.kt:280~|~catch(Exception) 吞掉 CancellationException，破坏结构化并发~|~【复核】「继续写缓存 / 钉 5 分钟 DEAD」被证伪（catch 里是 playUrlCache.remove，DEAD 只在正常返回且 probedDead=true）；PlaybackService.kt:844 有 if(!isActive) return 兜底，最严重后果已被挡住。同类写法仍遍布 20+ 处。【建议】所有 catch 前显式重抛，async 内不得吞取消。
+s6~|~C23~|~High~|~Medium~|~CONFIRMED~|~backend/radio/RadioBrowserClient.kt:153~|~公共可写数据库 radio-browser.info 的 url_resolved 无 scheme/host 校验即进 streamUrl~|~【复核】favicon 反而有 startsWith("http")；toSong() 是活代码（MainViewModel.kt:4640）；播放器对非 http(s) 会自然失败、无法读回响应外带，主要风险是内网探测与播放异常。【建议】只接受 http/https 并拒绝 loopback/link-local/私网与非标准端口。
+s6~|~C24~|~High~|~Medium~|~CONFIRMED~|~lyrics/LyricsPersistentCache.kt:200~|~两个 LyricsManager 实例各持独立索引与实例私有 saveLock，全量覆盖写同一 lyrics_cache.json~|~【复核】两处构造的 context 同为 Application、同一文件；无单例 / FileLock / 读-合并-写。只读实例的 get() → maybePersistTouch 同样会抹掉条目；被抹的是索引（.lrc 独立命名成磁盘孤儿），有网络回退自愈。【建议】改进程级单例，或读-合并-写 + 跨实例 FileLock + tmp/rename。
+s6~|~C25~|~Medium~|~Medium~|~CONFIRMED~|~backend/network/lx/LxScriptRepo.kt:104~|~2MB 脚本上限实现成静默截断而非拒绝，且不判 read 返回值~|~【复核】半截脚本因 @name 在头部（只看前 4096 字节）仍落盘，违背同文件「更新失败保留旧版」硬约束；LxHostPool 加载失败降级 L1_*FAILED 可重下自愈。【建议】达到上限即抛 IOException 并保留旧版。
+s6~|~M17~|~Medium~|~Medium~|~初稿~|~backend/network/JamendoService.kt:164~|~含 client_id 的完整 URL 被写进 w 级日志（url.take(100) 足以覆盖 query）~|~【建议】只记 path + resp.code，或对 client_id 打码。
+s6~|~M18~|~Medium~|~Medium~|~初稿~|~lyrics/LyricsNetworkProvider.kt:391~|~不可信 JSON 的 id/accesskey/hash/songId 未编码直接拼进 URL~|~【影响】含 &/#/空格即注入或截断 query，异常被下游吞掉后歌词静默失败。【建议】统一 URLEncoder.encode 或 HttpUrl.Builder.addQueryParameter。
+s6~|~M19~|~Medium~|~Medium~|~初稿~|~backend/network/MetingApiService.kt:371~|~302 的 Location 与非 302 3xx 跟跳不限目标域，server 参数也未编码~|~【建议】Location 做 scheme/host 白名单并拒绝私网，server 统一编码（保留既有 302 解析机制）。
+s6~|~M20~|~Medium~|~Medium~|~初稿~|~lyrics/LrcParser.kt:108~|~toLrcText 的逐字时间戳不补零，写出后无法被自身 WORD_TIMESTAMP_REGEX 回读~|~【影响】卡拉 OK 逐字时间轴静默丢失（MainViewModel.kt:3824 写盘路径真实）。【建议】逐字时间戳同样 padStart(2,'0')。
+s6~|~M21~|~Medium~|~Medium~|~初稿~|~backend/network/NetworkMusicManager.kt:424~|~unregisterService 只清 playUrlCache，遗漏 deadProbeCache~|~【影响】重新注册同源后残留 5 分钟 DEAD 判定把本可播的歌静默判死。【建议】同步清 deadProbeCache。
+s6~|~M22~|~Medium~|~Medium~|~初稿~|~backend/network/MetingApiService.kt:645~|~不可信 JSON 字段为 JsonNull 时 ?.asString 抛异常，单曲/整段天气响应被丢弃~|~【建议】统一改用 ?.takeIf { !it.isJsonNull }?.asX（JamendoModels.kt:17 已有范式）。
+s6~|~L17~|~Low~|~Low~|~初稿~|~lyrics/LyricsManager.kt:286~|~实例级全局 Mutex 内直接发网络请求（3 组关键词 × 2 源 × 15s），持锁过久~|~【建议】锁收缩到 containsKey→put 临界区，按 songId 单飞。
+
+s7~|~C26~|~High~|~Medium~|~PARTIALLY CORRECT~|~ui/screens/LibraryScreen.kt:320~|~snapshotFlow 滚动位置回调没有注释所称的节流，每帧写 StateFlow 并反向触发整页重组~|~【复核】无 debounce / 停止判定属实，但「8 个 Tab 子树」不存在（composedRange 最多同时组合 2 个）、写回只进 rememberLazyGridState 的 initial 故非自激闭环、仅 ALBUMS/ARTISTS 两个 grid 触发。【建议】collect 前加 distinctUntilChanged().debounce(300)，或只在滚动停止后 emit 一次。
+s7~|~C27~|~High~|~Medium~|~CONFIRMED~|~ui/screens/BackupTransferDialog.kt:83~|~DisposableEffect 主体在主线程同步生成 360×360 二维码位图并启动 NanoHTTPD~|~【复核】一次性开销、项目自标 P3、server.start() 只是建监听线程非阻塞；ServerConnectScreen 是 150×150。TextInputDialog.kt:177 已有 Dispatchers.Default 正确模板。【建议】对齐该模板（另见复核新增 N09：同类共 7 处需一并整改）。
+s7~|~M23~|~Medium~|~Medium~|~初稿~|~ui/screens/SettingsScreen.kt:1208~|~dismissOnBackPress=false 的真 Dialog 内无 BackHandler，BACK 无法关闭确认弹窗（MineScreen.kt:386 同）~|~【建议】补 BackHandler，或让 ConfirmDialog 在真 Dialog 场景改用 BackHandler。
+s7~|~M24~|~Medium~|~Medium~|~初稿~|~ui/screens/QueueScreen.kt:406~|~竖屏 ⋮ 行菜单是 Box 覆盖层却未注册 RegisterDialogBackHandler，BACK 穿透到 Level 1.5/2~|~【建议】在 QueueItemActionMenu 内首行注册（对照 NowPlayingScreen.kt:2346）。
+s7~|~M25~|~Medium~|~Medium~|~初稿~|~ui/screens/NowPlayingScreen.kt:1146~|~SourceTag 把 onClick=null 兜底成空 lambda，纯展示标签仍占据 D-Pad 焦点~|~【建议】onClick==null 时用普通 Box，或让 FocusableSurface 支持 nullable onClick。
+s7~|~M26~|~Medium~|~Medium~|~初稿~|~ui/screens/NowPlayingScreen.kt:102~|~progressMs 作为顶层参数，1Hz 进度 tick 触发整个播放页重组~|~【建议】把 State<Long> 下推到 ProgressSection/LyricsView/PortraitThinProgress 三个叶子。
+s7~|~M27~|~Medium~|~Medium~|~初稿~|~ui/screens/PlaylistManagementScreen.kt:84~|~DisposableEffect(Unit) 的 BACK handler 闭包持有首次组合的 isPhonePortrait，旋转后陈旧~|~【建议】把 isPhonePortrait 加入 key 或用 rememberUpdatedState。
+s7~|~M28~|~Medium~|~Medium~|~初稿~|~ui/screens/NowPlayingScreen.kt:1602~|~竖屏封面页最后声明的全屏 clickable 覆盖层遮挡 ⓘ 歌曲信息按钮~|~【建议】把 ⓘ 移到 clickable 层之后声明或加 zIndex。
+s7~|~M29~|~Medium~|~Medium~|~初稿~|~ui/screens/AlbumDetailScreen.kt:247~|~列表 key 仅用 song.id，重复曲目会触发 Compose「Key was already used」崩溃（ArtistDetailScreen.kt:212、WeatherRadioScreen.kt:218 同）~|~【建议】改为 "${index}_${song.id}"（QueueScreen.kt:315 已如此）。
+s7~|~L18~|~Low~|~Low~|~初稿~|~ui/theme/Theme.kt:594~|~LocalHighContrast 用 staticCompositionLocalOf，值变化时整棵主题 content 重组~|~【建议】改 compositionLocalOf { false }。
+s7~|~L19~|~Low~|~Low~|~初稿~|~ui/MainActivity.kt:581~|~onDestroy 无条件访问 lateinit networkMonitor，onCreate 提前异常时二次崩溃~|~【建议】加 ::networkMonitor.isInitialized 守卫。
+s7~|~L20~|~Low~|~Low~|~初稿~|~ui/screens/TextInputDialog.kt:141~|~组合体内每次重组做两次 hasSystemFeature binder 查询且新建 Handler~|~【建议】用 remember 包裹。
+
+s8~|~C32~|~High~|~High~|~CONFIRMED~|~ui/viewmodel/PlayerViewModel.kt:449~|~resolve→replay 异步返回后只按 index 回写 streamUrl，缺 songId 校验；代数守卫不覆盖队列增删/移动~|~【复核】442 闸门只比代数；resolveGeneration 的 5 处 ++ 不含编辑入口（MainViewModel.kt:3668-3693、PlayerViewModel.kt:615）；449 读最新队列却按旧 targetIndex 回写，与 :588 的逐项 id 比对形成对照。【建议】回写前校验 id，队列编辑入口递增代数（另见 N01 同族漏项）。
+s8~|~C33~|~High~|~High~|~CONFIRMED~|~ui/viewmodel/SearchViewModel.kt:424~|~网络歌曲搜索/换一批整条路径无代数守卫，旧词结果覆盖新词结果~|~【复核】searchGeneration 只服务 searchSongsOnServer；:429 与 :404 无条件写 Success，:403 连关键词一并回滚；clearNetworkSearch 只清空不取消在途协程。【建议】引入 networkSearchGeneration 或保存并 cancel 在途 Job。
+s8~|~C34~|~High~|~High~|~CONFIRMED~|~ui/viewmodel/MainViewModel.kt:3648~|~15 个子 VM 是普通属性，onCleared 不触发、viewModelScope 永不取消~|~【复核】MainActivity.kt:78 只把 MainViewModel 放进 ViewModelStore；onCleared:3653 只 dispose visualizerVM；VisualizerViewModel 自带 onCleared 但框架不调用，dispose 也只 cancel faceScanObserver，init 的两个无限 collect 无 Job 引用。【建议】每个子 VM 暴露 dispose() 并在 MainViewModel.onCleared 逐一取消。
+s8~|~C35~|~High~|~High~|~CONFIRMED~|~ui/viewmodel/MainViewModel.kt:2582~|~updateMergedData() 每次新起 Default 协程、无取消旧 Job 无代数守卫，多协程并发读-改-写~|~【复核】Grep 得 20+ 调用点（初稿说至少 6 个被低估）；:2678-2688 对 _mergedArtists.value 做读→map→写回，与 :2635 的写入交错会丢更新。【建议】保存 mergeJob 并 cancel，或改用 _mergedArtists.update{}。
+s8~|~C36~|~High~|~Low~|~PARTIALLY CORRECT~|~ui/viewmodel/DownloadViewModel.kt:364~|~downloadModel 协程无 try/finally，异常时 _modelDownloading 永久停留 true~|~【复核】下游 ModelDownloadManager 把常规失败全转成 String? 返回值（tryDownloadUrl:268 catch(Exception) 全覆盖 + sha256Of try-catch），「异常致两个入口永久失灵」被推翻，仅剩边缘取消路径。【建议】仍建议 try/finally 做一致性加固。
+s8~|~M30~|~Medium~|~Medium~|~初稿~|~ui/viewmodel/PlaylistViewModel.kt:115~|~_errorMessage 无任何消费方，歌单 CRUD 失败只写状态、用户看不到提示~|~【建议】注入 showMessage 由 MainViewModel 转发，或在 init 增加 collect。
+s8~|~M31~|~Medium~|~Medium~|~初稿~|~ui/viewmodel/NetworkMusicViewModel.kt:451~|~网盘目录浏览/搜索无代数守卫与旧 Job 取消，旧请求覆盖新结果、旧 finally 提前清 loading~|~【建议】保存 dirJob/searchJob 并 cancel，finally 只在自己仍是最新请求时复位。
+s8~|~M32~|~Medium~|~Medium~|~初稿~|~ui/viewmodel/MvSearchViewModel.kt:234~|~preSearchNextMv 的协程 Job 未保存/取消，pendingNextResult 被旧预搜覆盖~|~【建议】preSearchJob + songId 代数校验，catch 中单独重抛取消。
+s8~|~M33~|~Medium~|~Medium~|~初稿~|~ui/viewmodel/WeatherRadioViewModel.kt:72~|~weatherSeenKeys 普通 MutableSet 被三个协程并发 clear/add，旧构建结果覆盖新 mood 队列~|~【建议】Mutex 串行化 + mood 代数守卫。
+s8~|~M34~|~Medium~|~Medium~|~初稿~|~ui/viewmodel/*.kt 多处~|~多处 catch(Exception)/runCatching 吞掉 CancellationException（MainViewModel.kt:3474、PlaylistImportViewModel.kt:295、PlayStatsViewModel.kt:71、PlayerViewModel.kt:171/311/454）~|~【影响】ViewModel 销毁或 Job 取消时任务不能及时终止、还继续回写 StateFlow；同文件 :3843/:1246 已有正确样板。【建议】所有 catch 前显式重抛。
+s8~|~M35~|~Medium~|~Medium~|~初稿~|~ui/viewmodel/BackupViewModel.kt:60~|~导出/导入/刷新列表在 viewModelScope(Main) 同步做文件与 MediaStore IO、Gson 大对象序列化~|~【建议】整个函数体包 withContext(Dispatchers.IO)，仅 StateFlow 回写留在 Main。
+s8~|~L21~|~Low~|~Low~|~初稿~|~ui/viewmodel/NetworkMusicViewModel.kt:155~|~把解析后的完整直链写日志，百度 dlink / 临时签名等凭据随之落盘~|~【建议】只打 host/path 或 take(30)，绝不打 query。
+
+s9~|~C28~|~High~|~High~|~CONFIRMED~|~ui/components/song/UnifiedSongRow.kt:799~|~SongRowModeCompact 根 Box 既无 clickable 也无 focusable，onClick 形参完全未接线~|~【复核】MODE_COMPACT 唯一调用 PlaylistManagementScreen.kt:266 是活路径；focusRing/onFocusChanged 都不使节点可聚焦；:105 的 requestFocus() 失败被 runCatching 静默吞掉是铁证。TV 遥控器与手机触摸下均无法移除歌曲，无替代交互。【建议】补 .focusable().clickable { onClick() }（与 MODE_ROW:348 一致）。
+s9~|~C29~|~High~|~Medium~|~PARTIALLY CORRECT~|~ui/components/MvPlaybackScreen.kt:189~|~250ms 轮询在组件顶层写 3 个 mutableStateOf，4Hz 驱动整棵子树重组~|~【复核】KaraokeLyricsView 默认 showMvLyrics=false 不在组合中；AndroidView factory 不重建、update 幂等；4Hz 本就是进度条刷新所需且 isPlaying/duration 相等去重。【建议】把 positionMs 下沉到进度条/歌词局部作用域。
+s9~|~C30~|~High~|~Medium~|~CONFIRMED~|~ui/components/KaraokeLyricsView.kt:99~|~50ms 插值时钟每 20fps 写 State 触发全树重组，且 draw 块内每帧分配 + O(N) 线性找行~|~【复核】有 isPlaying 门控（暂停不跑）、remember(text) 缓存 TextLayoutResult、20fps 是平滑卡拉 OK 的产品需求、分配规模极小（rowCount 通常 1-3）。【建议】进度改 draw 阶段读取，indexOfFirst 换二分，rowLengths 按布局缓存。
+s9~|~C31~|~Medium~|~Low~|~CONFIRMED~|~ui/components/LyricsView.kt:296~|~歌词 LazyColumn 的 itemsIndexed 未提供稳定 key~|~【复核】单曲静态列表、item 内无 per-item remember/LaunchedEffect，KaraokeLineText 用 remember(text) 会正确重置；对比基线 UnifiedSongGrid 是死代码。【建议】key = { _, line -> line.time to line.text }。
+s9~|~M36~|~Medium~|~Medium~|~初稿~|~ui/components/LyricsView.kt:154~|~逐字高亮模式 50ms 写 lyricTickMs，20fps 重组 LyricsViewInner 含全部可见 item~|~【建议】derivedStateOf 派生当前行，逐字进度只在当前行 draw 阶段读取。
+s9~|~M37~|~Medium~|~Medium~|~初稿~|~ui/components/VisualEqualizer.kt:298~|~drawClassicalWave/drawNeonPulse/drawColorFlow 每次重绘新建 Path、FloatArray、List~|~【影响】约 30fps 持续 GC 抖动，与项目 draw 内零分配红线冲突。【建议】提升为 remember 复用成员，draw 内只 rewind/覆写。
+s9~|~M38~|~Medium~|~Medium~|~初稿~|~ui/components/AppRoot.kt:118~|~顶层整体收集 playerState 且把 1Hz progress 下传 VisualizerStage，与同文件 F-2/M7 下沉策略不一致~|~【建议】顶层只收集 currentSong，progress 改 lambda provider 或移到渲染器 draw 阶段。
+s9~|~M39~|~Medium~|~Medium~|~初稿~|~ui/components/branches/SettingsBranch.kt:154~|~分支顶层集中收集约 50 个 StateFlow（含高频下载进度），任一变化重组整棵设置页~|~【建议】高频流按分区拆到各自子 composable 内收集。
+s9~|~M40~|~Medium~|~Medium~|~初稿~|~ui/components/KaraokePlaybackScreen.kt:185~|~二维码 Bitmap 在组合期主线程同步生成（MvPlaybackScreen.kt:141 同型）~|~【建议】produceState + Dispatchers.Default，并限制 remoteControlUrl 长度。
+s9~|~L22~|~Low~|~Low~|~初稿~|~ui/components/CoverCarousel.kt:50~|~组合期内直接写 State 并调 onAllFailed()（组合期副作用）~|~【建议】迁到 LaunchedEffect(Unit) / DisposableEffect。
+s9~|~L23~|~Low~|~Low~|~初稿~|~ui/components/LyricsView.kt:208~|~组合期写 seekTargetLine State 并读取 listState.layoutInfo~|~【建议】改 snapshotFlow { layoutInfo } 或 derivedStateOf。
+s9~|~L24~|~Low~|~Low~|~初稿~|~ui/components/BaiduDirPickerDialog.kt:191~|~目录 LazyColumn 的 items(dirs) 缺稳定 key~|~【建议】key = { it.serverFilename }。
+
+s10~|~C37~|~High~|~Medium~|~PARTIALLY CORRECT~|~ui/screens/netdisk/NetdiskScreen.kt:260~|~目录浏览丢弃 hasMore，超过一页的文件看不到且无触底加载~|~【复核】「永远不可见」被索引/全部播放兜底证伪：playAllNetdiskDir:545 优先用 BaiduFileIndexCache 分页构建的全量索引，第 1001+ 文件仍可经全部播放/搜索访问；影响限定为目录浏览页（回退 BFS 仍单页 1000 是残余缺口）。【建议】保存 hasMore/cursor，derivedStateOf 触底追加并保留 footer。
+s10~|~C38~|~High~|~High~|~CONFIRMED~|~ui/screens/netdisk/NetdiskScreen.kt:191~|~「全部加入队列」逐首调用 toggleQueueSong，会把已在队列中的歌曲移出~|~【复核】PlayerViewModel.kt:602-608 KDoc 点名此坑、:605 的 addSongsToQueue 是只增不删实现；全局 Grep 确认 addSongsToQueue 仅 LibraryBranch.kt:208/:226 两处批量入口，其余 toggle 调用均为单首切换语义正确，「唯独网盘搜索页漏改」成立。【建议】改 addSongsToQueue(searchResults)。
+s10~|~C39~|~High~|~Medium~|~CONFIRMED~|~ui/screens/settings/PlaylistImportUploadDialog.kt:82~|~server.start() 失败时仍渲染二维码与可点 URL，失败文案被 qrBitmap?.let 分支吞掉~|~【复核】qrBitmap/serverUrl 在 start() 之前无条件生成，失败时 :134 的 let 分支仍渲染、:172 的 status 不显示；但 :108/:190 仍可退出弹窗，属边缘触发。【建议】仅 started == true 时赋值 qrBitmap/serverUrl，用 started 驱动 UI 分支。
+s10~|~M41~|~Medium~|~Medium~|~初稿~|~ui/screens/stats/PlayStatsScreen.kt:75~|~统计数据的持久化读取与 Gson 反序列化发生在主线程（PlayStatsViewModel.kt:48 launch 未指定 dispatcher）~|~【建议】:51-60 整段包 withContext(Dispatchers.IO)。
+s10~|~M42~|~Medium~|~Medium~|~初稿~|~ui/screens/library/JamendoTab.kt:104~|~顶部筛选 Row 无 horizontalScroll 也无竖屏分支，末尾预置 tag 溢出屏幕且 D-Pad 不可达~|~【建议】照 RadioTab.kt:120 做竖屏分行 + tag 行横滑。
+s10~|~M43~|~Medium~|~Medium~|~初稿~|~ui/screens/settings/PlaylistImportUploadDialog.kt:78~|~DisposableEffect 主线程枚举网卡、360px 二维码像素循环与 Socket 绑定（BaiduAuthDialog.kt:83 同）~|~【建议】URL/二维码生成放 withContext(Dispatchers.Default)。
+s10~|~M44~|~Medium~|~Medium~|~初稿~|~ui/screens/settings/LogsSettingsSection.kt:202~|~最多 100 条日志用 forEach 一次性铺进非 lazy Column 且无 key，整块还是单个 LazyColumn item~|~【建议】改 LazyColumn/items(key = 时间戳+序号)。
+s10~|~M45~|~Medium~|~Medium~|~初稿~|~ui/screens/stats/PlayStatsScreen.kt:291~|~GenreBarChart 高度封顶 320dp，超出流派被裁且 TV 上无法滚动查看~|~【建议】Top-N 折叠或改可聚焦 LazyColumn。
+s10~|~L25~|~Low~|~Low~|~初稿~|~ui/screens/netdisk/NetdiskScreen.kt:180~|~搜索与目录两个 LazyVerticalGrid 未传 state，when 分支切换时滚动位置与焦点全丢~|~【建议】顶层 rememberLazyGridState() 传入两个网格。
+s10~|~L26~|~Low~|~Low~|~初稿~|~ui/screens/settings/CacheSettingsSection.kt:97~|~composition 内对 19 条登记项重复 filter 与求和~|~【建议】snapshot 按 group 预分组后 remember 缓存。
+
+s11~|~C40~|~High~|~Medium~|~CONFIRMED~|~visualizer/renderers/MoleculeRenderer.kt:112~|~bandRange 每帧 intArrayOf(2)，经 atomEnergy 每帧约 81~96 次堆分配~|~【复核】类红线 :48 未把它列为例外（对比 C43 显式列了）；每帧约 3KB 短命对象，属可测的分配纪律破口非崩溃/泄漏。【建议】pickNext():212 按 atomCount*2 预算区间写成成员数组。
+s11~|~M46~|~Medium~|~Medium~|~初稿~|~visualizer/renderers/BatchThreeRenderers.kt:163,222~|~RadarGridRenderer drawContent 每帧最多 29 个 Stroke，与同文件 :43 自述零分配红线冲突~|~【建议】固定宽度预建字段常量，动态宽度量化分桶复用。
+s11~|~M47~|~Medium~|~Medium~|~初稿~|~visualizer/renderers/VintageTvRenderer.kt:625~|~drawVignette 的 Brush 缓存键只记录 w，但渐变 center/radius 同时依赖 h~|~【影响】w 不变而 h 变化（分屏/横竖切换）时暗角错位且不自愈。【建议】缓存键改 (w,h)。
+s11~|~M48~|~Medium~|~Medium~|~初稿~|~visualizer/renderers/VintageTvRenderer.kt:442~|~rollBandH 仅在 onEnter 清零，尺寸变化路径只重建歌词位图，渐变缓存不失效~|~【建议】needRebuild 分支一并清 roll/rollBrush/vignette 缓存。
+s11~|~L27~|~Low~|~Low~|~初稿~|~visualizer/renderers/VintageTvRenderer.kt:412~|~updateNoiseBuffer 生成的噪点坐标绑定旧 w/h，尺寸变化后至多 100ms 不重算~|~【建议】把 w/h 记入缓存键，变化当帧即触发重建。
+s11~|~L28~|~Low~|~Low~|~初稿~|~visualizer/renderers/VintageTvRenderer.kt:594,853~|~每次重建歌词/OSD 位图都覆盖 ImageBitmap 引用，旧位图从不 recycle~|~【影响】与 SeasideRenderer.kt:2765、DesertSmokeRenderer.kt:253 的显式回收口径不一致。【建议】覆盖前 asAndroidBitmap().recycle()。
+
+s12~|~C41~|~High~|~Medium~|~PARTIALLY CORRECT~|~visualizer/renderers/WorldGlobeRenderer.kt:337~|~已 detach 的 WebView 用 View.post 延迟 destroy()，Runnable 可能永不执行~|~【复核】全仓仅两处 destroy、RendererSwapper.release 只调 onExit、舞台级 onDispose 无 destroy 属实，是真实单点脆弱性；但 per-view HandlerActionQueue 是 API 24+ 实现，API≤23（含 minSdk 22 基准机）走 ViewRootImpl.sRunQueues，每次 traversal 都会执行；「onDispose 时已 detach」前提在仓内未证实，也无真机 PSS 验证。【建议】改用类内已有 handler.post 并在 onExit 幂等兜底，catch 加日志。
+s12~|~C44~|~Medium~|~Low~|~PARTIALLY CORRECT~|~visualizer/renderers/WorldGlobeRenderer.kt:386~|~ema() 与 sendAudio() 对 NaN 无防护，Gson 拒 NaN 使 100ms tick 链停摆~|~【复核】代码层定位准（gson.toJson 在 evalJs 的 try 之前求值）；但 NaN 前提被 SpectrumAnalyzer.analyze:208（NaN 比较恒 false）+ emitSilence + SpectrumRepository.boost 三层兜底证伪；后果也低估（实为主线程崩溃而非静默停摆）。【建议】见 N10 的 tickRunnable try/finally。
+s12~|~M49~|~Medium~|~Medium~|~初稿~|~visualizer/renderers/LyricsDotMatrixRenderer.kt:763~|~点阵坐标在采样时烘成绝对像素并跨帧保存，尺寸变化后不重采样~|~【影响】横竖切换后文字偏出屏幕，直到下一句歌词才恢复。【建议】记录采样时 (w,h)，帧头变化强制 resync。
+s12~|~M50~|~Medium~|~Medium~|~初稿~|~visualizer/renderers/TripodFogRenderer.kt:2404~|~drawLinPoly 每帧指令重放为每条渐变指令新建 LinearGradient（约 6 个/帧）~|~【建议】量化坐标 + 色标桶作缓存键复用 Shader。
+s12~|~L29~|~Low~|~Low~|~初稿~|~visualizer/renderers/WorldGlobeRenderer.kt:207~|~WebViewClient 只接管资产域请求，未覆写 shouldOverrideUrlLoading 且 allowFileAccess=true~|~【建议】拒绝非 ASSET_HOST（含 file://）并对非资产域返回 emptyBody。
+s12~|~L30~|~Low~|~Low~|~初稿~|~visualizer/renderers/Caravan.kt:117~|~DesertCaravanTable.build 的 while(t<4200) 无迭代上限，也不保证 t 单调递增~|~【影响】参数被改写为负增量时可能死循环 + 两个 ArrayList 无界增长，且是首帧同步路径。【建议】加增量下界守卫与总迭代上限。
+
+s13~|~C42~|~High~|~Medium~|~PARTIALLY CORRECT~|~visualizer/renderers/EcoGlobeRenderer.kt:260~|~WebView 销毁只挂在已 detach 的 View.post 上，onExit 无兜底~|~【复核】与 C41 完全同款，:255-257 注释同样写「view 可能仍挂在组合销毁流程中」；机制纠正、API 分级、兜底核查与 C41 逐条相同。【建议】同 C41。
+s13~|~C43~|~High~|~撤销~|~REFUTED~|~visualizer/renderers/StarrySkyRenderer.kt:612~|~drawSegments 每帧逐柱 new Stroke（初稿判 High）~|~【复核·撤销】审查引用的 ParticleRenderers.kt:63-68 纪律自带「宽度恒定」前提并自列宽度变化的例外；本类红线 :97-100 已把这个 Stroke 显式登记为例外并写明量级；能缓存的 sprayStroke/底环烘焙/ringPaint 都已缓存，且 :606 sweep>0f 门控与 LOW_ARC_STRIDE 进一步削减分配。【结论】不报；若把零分配升级为绝对红线，属已知卫生项而非新缺陷。
+s13~|~C45~|~Medium~|~撤销~|~REFUTED~|~visualizer/renderers/EcoGlobeRenderer.kt:297~|~音频 NaN 污染 EMA + evalJs 吞异常致每 tick 丢弃（初稿判 Medium）~|~【复核·撤销】gson.toJson 在 sendAudio():323 求值、发生在 evalJs 被调用之前，catch(Throwable) 吞不到；异常冒出 tick() 会直接断链而非逐 tick 丢弃；NaN 前提同 C44 被上游三层兜底证伪。作者已有 isFinite 意识（pollFps():339）。【结论】不报。
+s13~|~M51~|~Medium~|~Medium~|~初稿~|~visualizer/renderers/EcoGlobeRenderer.kt:130~|~WebViewClient 对非资产域 return null 且未覆写 shouldOverrideUrlLoading，javaScriptEnabled=true~|~【建议】非资产域返回 emptyBody，只放行 ASSET_BASE 前缀，assetName 剔除 .. 段。
+s13~|~M52~|~Medium~|~Medium~|~初稿~|~visualizer/renderers/BasicRenderers.kt:173~|~CircularRingRenderer.drawContent 每帧构造 2-3 个 Stroke~|~【建议】恒定宽度提为字段，动态宽度量化分档预建 Array<Stroke>。
+s13~|~M53~|~Medium~|~Medium~|~初稿~|~visualizer/renderers/SnowCedarRenderer.kt:320~|~音频 NaN 无入口兜底，会永久污染风场/雪粒坐标且切画幅前不自愈~|~【影响】粒子 x/y 写成 NaN 后重生判据恒 false，雪景整次进入期间损坏。【建议】:320 前对三个音频量 isFinite 兜底。
+s13~|~L31~|~Low~|~Low~|~初稿~|~visualizer/renderers/AdvancedRenderers.kt:607~|~MatrixRainRenderer 用绝对 frame.timeMs 当数字翻转节拍，暂停恢复会整屏跳变~|~【建议】改用 fx.dt 累加的本地 tickAcc（同文件 LiquidGridRenderer 已如此）。
+s13~|~L32~|~Low~|~Low~|~初稿~|~visualizer/renderers/MoonAudio.kt:168~|~clampUnit 不拦截 NaN，NaN 直接穿透七个幅度函数~|~【建议】首行加 if (v.isNaN()) return 0.0。
+
+s14~|~C46~|~Critical~|~High~|~PARTIALLY CORRECT~|~visualizer/photo/transitions/IrisTransitions.kt:43~|~Iris/Wipe 转场使用 clipPath，违反 minSdk 22 的 hwui 红线且无任何 SDK 降级~|~【复核】(a) 4 处确为 Compose DrawScope.clipPath（IrisTransitions.kt:43/:136、IrisP1Transitions.kt:65/:271）；(b) effective() 仅 LIQUIFY 有 degradeTo、available() 无 SDK 参数、全链条无 clip 类白名单、全仓无 sdkInt<26 的 clipPath 分支；(c) Offscreen 只在主题交叉淡入期开启、try/catch 拦不住 native SIGSEGV；(d) 红线取证语境是 nativeCanvas / Modifier.clip 的 hwui Region 段错误，仓内无 DrawScope.clipPath 触发同一崩溃的直接取证，且 photo-spectrum-effect-plan.md:162 反把 clipPath 标为「全版本」⇒ 降一级，但「红线违规 + 零降级 + 零门禁」确凿。【建议】sdkInt<26 把 IRIS_*/WIPE_* 降级为 CROSSFADE 或改矩形裁剪/遮罩位图表达，并补门禁。
+s14~|~C47~|~High~|~High~|~CONFIRMED~|~visualizer/photo/PhotoWallController.kt:538~|~固定转场档直接返回用户指定枚举值，未过 available()，可导致照片墙永久黑屏~|~【复核】随机档走 available()、固定档只过 effective()；get() 对未实现 id 返回 null → PhotoRenderer.kt:115 `bound ?: return` 每帧直接返回，连底图 a 都不画，且 lastTransitionId 已写入不再重试。UI 已用 available() 挡住，仅备份导入的 33 个「合法但未实现」枚举名可触发。【建议】固定档也过 available()，未命中回落 Default；PhotoRenderer 对 bound==null 回落默认实现。
+s14~|~C48~|~Medium~|~Medium~|~CONFIRMED~|~visualizer/photo/PhotoWallController.kt:385~|~扫描进行中发生的设置变更被 needScan 置起却无人消费~|~【复核】needScan 唯一消费者是 onThemeEntered:312；rescan()/onExternalStorageChanged() 先 cancel 再重启不受影响；旧扫描结束后新设置静默失效直到切主题或重新扫描。【建议】launch 末尾（含 finally）补 if (needScan) { needScan=false; startScan() }。
+s14~|~L33~|~Low~|~Low~|~初稿~|~visualizer/photo/PhotoWallController.kt:130~|~ownScope 无 CoroutineExceptionHandler 且 startScan 的 launch 无 try/catch，逃逸异常走默认 handler 崩应用~|~【建议】加记录日志的 handler，整段扫描 try/catch，失败时恢复 needScan。
+
+s15~|~C49~|~High~|~High~|~CONFIRMED~|~visualizer/renderers/lyricsStage/LyricsSubRenderer.kt:36~|~onLineChanged 默认直接调 onEnter，把三个子渲染器的换行离场状态机全量复位~|~【复核】全仓唯一活调用点 LyricsStageRenderer.kt:139 先于 draw；覆写者仅 DotMatrixSubRenderer:70、FullViewSubRenderer:348（KDoc 自认同款病根）；GlowLine/TiltPulse/Partita 的 startExit 与离场分支永不执行。机制精度：尺寸/画质变化仍会命中 needRebuild → startExit，故限定为换行路径。【建议】三个子渲染器覆写 onLineChanged 为空实现，或拆「首次进入 / 换行通知」两个回调。
+s15~|~C50~|~High~|~Medium~|~PARTIALLY CORRECT~|~visualizer/renderers/lyricsStage/GlowLineSubRenderer.kt:1318~|~换行/切歌状态键只取 currentIndex + line.startTime，不含 lyrics.lines 身份~|~【复核】判据确不含歌曲身份、切歌不重建渲染器、无别处强制复位；但 LyricsStageRenderer:137 在 index 变化时仍触发 onLineChanged → onEnter 清空版面，恰好兜住大部分切歌；仅「切歌前后 index 相同（都 0）」时沿用旧版面。【建议】把 lines 引用或 songId 纳入判据，或 applyLyrics 检测 List 换身份时强制复位。
+s15~|~C51~|~Medium~|~Low~|~CONFIRMED~|~visualizer/renderers/lyricsStage/tilt/SentenceLayout.kt:529~|~secondarySplit 用 UTF-16 算术中点 substring，会切断 emoji 代理对 / 组合字符~|~【复核】上游 JS（Folia）同款、KDoc 明写「保留伪随机中点兜底」；歌词以 CJK/拉丁为主，仅当句子数不足 targetCount 且无合适词间隙时触发。【建议】切点按 code point 对齐（offsetByCodePoints / BreakIterator）。
+s15~|~C52~|~Medium~|~Low~|~PARTIALLY CORRECT~|~visualizer/renderers/lyricsStage/GraphemeSplitter.kt:85~|~ICU 反射路径的兜底 text.map { it.toString() } 是逐 UTF-16 码元切分~|~【复核】行号口径差（:85 是结果为空的防御分支、:89-90 才是异常分支）；主降级路径安全：resolveIcu() 把 Class.forName/getMethod/invoke 全包 catch→null 后走 java.text.BreakIterator（正确处理代理对），minSdk 22 无 android.icu 根本进不了 splitWithIcu，只有 API24+ 实例已建后反射再抛才落到逐码元。【建议】兜底改用 fallback 等价逻辑，缓存 Method。
+s15~|~M54~|~Medium~|~Medium~|~初稿~|~visualizer/renderers/lyricsStage/FullViewSubRenderer.kt:392~|~整曲版面只在 lyrics.lines 引用变化时重建，画布尺寸 / density 变化不触发 rebuildArticle~|~【影响】TV 换分辨率或手机旋转后相机取景与版面不匹配，活动行被裁。【建议】把 w/h/density 纳入重建判据。
+s15~|~M55~|~Medium~|~Medium~|~初稿~|~visualizer/renderers/lyricsStage/LyricsStagePayload.kt:62~|~buildLine 未规整 endTime >= startTime，相邻行时间戳相同或倒序时逐字揭示被提前判完成~|~【影响】fume 子模式整行一次性全亮。【建议】endTime = maxOf(endTimeMs, line.time)（无逐词时间戳时至少 start+0.05）。
+s15~|~L34~|~Low~|~Low~|~初稿~|~visualizer/renderers/lyricsStage/PartitaSubRenderer.kt:480~|~drawPartitaGroup 每帧调 lineContainerMotion 新建对象，违反本文件 draw 零分配~|~【建议】在 buildState 里按 profile 算一次存入 State。
+"""
+
+# 复核新增发现：ID ~|~ 严重度 ~|~ 位置 ~|~ 问题 ~|~ 说明与建议
+NEW = r"""
+N01~|~High~|~ui/viewmodel/PlayerViewModel.kt:494-497~|~tryReplaceByReSearch 回写替换产物与 C32 同族缺 id 比对~|~只有代数闸门，回写仍按 targetIndex；跨源/同源重搜期间队列增删移动会把 replacement 落到已换歌的同一 index，队列缩短时 playQueue 还会带越界索引。【建议】与 C32 一并加 songId 校验。
+N02~|~Medium~|~util/BackupFileUtils.kt:78-116~|~备份「写入不限量、读取硬限 10MB」自相矛盾~|~export() 直接 out.write(json.toByteArray()) 无大小校验，BackupTransferServer 却允许 32MB 上传；恢复/下载统一走 BackupFileUtils.read → LocalFilePicker.readText(MAX_BACKUP_BYTES=10MB)。App 自己导出的大备份或扫码上传的 11~32MB 备份会成功落盘，却永远恢复/下载失败且报「文件过大」。【建议】统一上限并在导出时提示。
+N03~|~Medium~|~player/PlayerManager.kt:1364-1376~|~release() 未调用 sleepTimer.cancel()~|~与 C09 未置空回调叠加：服务/Activity 销毁后定时器仍在运行，到期走 onExpired → pause() + onSleepTimerExpired?.invoke()，操作 player 已置 null、Service 已 onDestroy 的实例。【建议】release() 中取消定时器。
+N04~|~Medium~|~player/PlayerManager.kt:556-571~|~setPlayer() 覆盖旧 player 时只 removeListener 与 removeCallbacks，不 release 旧 ExoPlayer~|~配合 PlaybackService.kt:269 每次 onCreate 无条件 new player，服务重建/重复注入时旧实例缺对称释放（与 C10 同源、独立调用路径）。【建议】覆盖前 release 旧实例。
+N05~|~Medium~|~backend/network/baidu/BaiduPanApi.kt:351~|~executeWithErrnoOnce 的 HTTP 非 2xx 分支同款完整未脱敏响应体写日志~|~与 C20 同一函数、同一根因的漏网点（executeOnce:306 已用 take(200) 形成对照）。【建议】与 C20 一并整改。
+N06~|~Medium~|~backend/export/SongExporter.kt:237-249~|~shouldOverwrite 与增量过滤全部只按文件长度判定，无 hash/mtime/内容比对~|~同名同大小但内容不同的目标文件会被永久跳过，与 C15「不该删却删了」互补的「该覆盖却没覆盖」。【建议】补内容指纹或 mtime 判据。
+N07~|~Medium~|~ui/screens/SettingsScreen.kt:796-802~|~http(s) scheme 校验是 UI 对话框层唯一的 URL 校验~|~MainViewModel.refreshLxScripts() 用 DataStore 已登记 URL 重下、以及 installText（单测直打）都绕过；已登记条目可写入任意 scheme 的 URL，扩大 C21 的入口链攻击面。【建议】把校验下沉到 LxScriptRepo.installFromUrl/installText。
+N08~|~Medium~|~ui/viewmodel/SearchViewModel.kt:403~|~shuffleNetworkSearch 无条件写 _networkSearchKeyword，会回滚用户新输入的关键词~|~C33 只描述「旧词结果覆盖新词」，未覆盖关键词状态本身被覆盖 ⇒ UI 呈现「新输入框 + 旧关键词 + 旧结果」三重错位。【建议】与 networkSearchGeneration 一并加守卫。
+N09~|~Medium~|~QrCodeGenerator.generateQrBitmap 共 7 处~|~组合/主线程同步生成二维码的整改清单不完整~|~除 TextInputDialog.kt:177 已修外，还有 BackupTransferDialog.kt:83、ModelTransferDialog.kt:83、ServerConnectScreen.kt:177、PlaylistImportUploadDialog.kt:82、BaiduAuthDialog.kt:84、MvPlaybackScreen.kt:142、KaraokePlaybackScreen.kt:186。【建议】按同一 Dispatchers.Default 模板统一整改，否则修完 3 处仍留 4 处同类。
+N10~|~Medium~|~WorldGlobeRenderer.kt:354-360 / EcoGlobeRenderer.kt:285-291~|~tickRunnable.run() 缺少 try/finally，是比 NaN 更一般、更易触发的真实缺口~|~两处都把 handler.postDelayed(this, TICK_MS) 置于 tick() 之后且整段无保护；spectrumFrame()/evalJs()/pollFps() 各自有 catch，唯独最外层 run() 没有。tick() 内任意未捕获异常（WorldNetwork 计算、gson.toJson 失败）都会永久掐断 100ms 音频桥且零日志。【建议】把 postDelayed 移入 finally。
+N11~|~Medium~|~visualizer/photo/transitions/（门禁覆盖）~|~「全项目禁用 clipPath」口号下唯一无人守的目录~|~现有源码扫描门都按单文件（SeasideTest.kt:740、MoonlitSkySeaTest.kt:329、BirdsFlockRenderSourceGateTest.kt:97），PerfBudgetContractTest 虽扫 renderers/+photo/ 但判据是零分配，PhotoRenderContractScanTest 无 clipPath 判据 ⇒ 正是 C46 长期未修的直接原因。【建议】加全仓 clipPath 负向门禁。
+N12~|~Medium~|~visualizer/VisualizerRendererFactory.kt:88,123~|~View 型渲染器的 WebView 构造点未被 Context 泄漏门禁覆盖~|~MoonlitRenderer 明确改传 applicationContext（有 MoonlitContextLeakTest 扫字段赋值），但 WorldGlobeRenderer/EcoGlobeRenderer 的 createView() 里 WebView(context) 仍绑定 Activity context；C41/C42 的 destroy 未执行场景下会放大后果。【建议】纳入同一门禁扫描范围（是否改 applicationContext 需先验证主题/资源兼容性）。
+N13~|~Low~|~lyrics/LyricsPersistentCache.kt:119-124~|~clear() 只清当前实例内存索引，另一实例后续 saveIndex 会写回幽灵索引~|~「设置页清空歌词缓存」在双实例场景下可能不彻底，是 C24 的追加后果。【建议】随 C24 一并改单例。
+N14~|~Low~|~ui/components/song/UnifiedSongRow.kt:695-781~|~SongRowModeCard 与 C28 同款未接线，但其入口 UnifiedSongGrid 全项目零调用~|~属死代码，暂无实际影响。【建议】清理死代码或一并修复，避免后续启用时踩坑。
+N15~|~Low~|~visualizer/renderers/DesertSmokeBakes.kt:320-321~|~烘焙期 android.graphics.Canvas.clipPath 是 clipPath 红线的另一处漏网~|~非逐帧 hwui 路径，不必然崩，但说明该红线在仓内从未做全仓扫描。【建议】随 N11 的门禁一并核验。
+"""
+
+SUBS = [
+    ("s1", "应用骨架 / 配置 / 偏好 / 本地服务", "app/src/main/java/.../{根, data/**, util/**, net/**} + AndroidManifest / build.gradle.kts / proguard / CI workflow", "109 文件 · 13,178 行（含 5 个配置）"),
+    ("s2", "播放器 / MediaSession / 音频 DSP", "app/src/main/java/com/nasmusic/tv/player/**", "23 文件 · 7,419 行"),
+    ("s3", "NAS 后端适配器与认证链", "backend/*.kt + backend/impl/**", "12 文件 · 6,725 行"),
+    ("s4", "本地媒体 / 下载 / 导出", "backend/local/** + backend/download/** + backend/export/**", "34 文件 · 5,741 行"),
+    ("s5", "云盘 / MV / 照片墙 / 歌单导入", "backend/network/{baidu,mv,netease}/** + backend/photo/** + backend/playlist/**", "41 文件 · 7,081 行"),
+    ("s6", "网络音乐 / 音源 / 歌词 / 电台 / 天气", "backend/network/*.kt + lx/** + lyrics/** + backend/{radio,weather}/**", "42 文件 · 7,481 行"),
+    ("s7", "UI 主屏 / 导航 / 主题", "ui/*.kt + ui/theme/** + ui/screens/*.kt", "22 文件 · 12,452 行"),
+    ("s8", "ViewModel 层", "ui/viewmodel/**", "18 文件 · 10,125 行"),
+    ("s9", "UI 组件与分支", "ui/components/**（含 branches/、song/、common/ 等）", "53 文件 · 12,260 行"),
+    ("s10", "设置 / 库浏览 / 网盘 / 统计子屏", "ui/screens/{settings,library,netdisk,stats}/**", "33 文件 · 9,408 行"),
+    ("s11", "视觉渲染器组 A", "visualizer/renderers/ 中 18 个文件（Seaside / Molecule / DesertSmoke / VintageTv / Dna 等）", "18 文件 · 17,005 行"),
+    ("s12", "视觉渲染器组 B", "visualizer/renderers/ 中 21 个文件（TripodFog / Moonlit / WorldGlobe / BirdsFlock 等）", "21 文件 · 17,006 行"),
+    ("s13", "视觉渲染器组 C", "visualizer/renderers/ 中 21 个文件（StarrySky / SnowCedar / Qianli / EcoGlobe 等）", "21 文件 · 17,044 行"),
+    ("s14", "视觉框架 / fx / 照片墙 / 千里江山移植", "visualizer/*.kt + fx/** + photo/**（含 transitions/）+ qianli/**（含 port/）", "66 文件 · 15,116 行"),
+    ("s15", "歌词舞台渲染器", "visualizer/renderers/lyricsStage/**（含 fume/、tilt/、partita/）", "31 文件 · 11,784 行"),
+]
+
+STRENGTHS = r"""
+s1~|~net/HttpRequestBody.kt 的统一请求体读取器质量很高：chunked 优先于 Content-Length、块头 128B 上限、逐 16KB 读取且绝不按声明 size 预分配、块体后强制校验 CRLF、超限一律 noKeepAlive 断连；3 个 server 已接入。
+s1~|~鉴权与模板注入防护成体系：LocalServerAuth 一次性随机 token + 二维码 ?t= + Cookie + 403，5 个 server 首行鉴权；RemoteControlHtml 与 BackupTransferServer 按 HTML 文本/属性上下文分别转义（含单引号转义），JSON 响应用 Gson 构造而非拼接。
+s1~|~凭据处理克制：CryptoUtils 每次 SecureRandom 生成 12B IV 并显式传 GCMParameterSpec；备份导出/恢复剔除 apiToken/password/accessCode/isConnected；UrlSanitizer 对 api_key/token/t/s/u/p 脱敏，AppLog 只打印解密后长度。
+s1~|~NasMusicApp 的 applicationScope 带 SupervisorJob + Dispatchers.IO + CoroutineExceptionHandler；崩溃路径用 LogStore.appendBlocking（fd.sync()）同步落盘并把异常交还原处理器；onTerminate 显式 closeAll + cancel。
+s1~|~Gson/R8 兼容链条完整：BackupGson 容错枚举工厂三级回落 + 可空接收者 nameOrDefault/ordinalOrDefault 兜底，AppSettings 明确「新增字段必须带默认值」，proguard keep 覆盖反射、Signature、TypeToken 匿名子类。
+s2~|~ONNX native 资源释放覆盖异常路径：DemucsSeparator 用嵌套 try/finally 保证 OnnxTensor 与 OrtSession.Result 全路径 close；releaseInternal 明确绝不 close 进程级 OrtEnvironment；pendingRelease + tryLock 解决「分离中收到 release」的丢失窗口。
+s2~|~PCM 通道并发模型清晰：PcmRingBuffer 单写单读 @Synchronized、容量强制 2 的幂并用 mask 回绕、version 跳帧；FFT 移到独立 HandlerThread 不阻塞播放线程；Radix2Fft 预计算旋转因子、零分配。
+s2~|~MediaSessionAccessPolicy 抽成不依赖 Media3 实例的纯函数，连接一律 accept、命令集合以 DEFAULT_SESSION_AND_LIBRARY_COMMANDS 为基线只增不减，规避车机/蓝牙按键失效。
+s2~|~ModelDownloadManager 用固定 SHA-256 + verifyModelIntegrity() + renameTo 原子落盘，并把「主线程快速判定」与「IO 线程权威校验」明确分离，下载失败逐源回退、临时文件清理到位。
+s2~|~Android Auto 回调统一 serviceScope.launch + SettableFuture 并保证非 null 返回；CoilBitmapLoader 用 enqueue 异步解码并转发 future 取消，封面解码不在主线程。
+s3~|~12 个文件的原生 OkHttp 调用覆盖 2xx / 非 2xx / body==null / 解析异常各分支，execute().use{} + body.string()/bytes() 自动关闭，未发现一处 Response 泄漏；各适配器有集中式唯一出口便于审计。
+s3~|~日志脱敏体系一致：UrlSanitizer 覆盖 api_key/token/access_token/u/p/t/s；FeiniuAdapter.recordNetworkError 只取异常类名不取 e.message；streamHeaders 用 provider 实时绑定 + forHost 精确匹配。
+s3~|~并发防御扎实：Jellyfin reauthMutex + tokenGeneration、Feiniu reloginMutex + 令牌代数、allTracksRefreshMutex 单飞且拿锁后重查缓存、Subsonic getSongsByIds 信号量限流 8。
+s3~|~Gson 解析防御到位：Feiniu 的 str/intOf/longOf 安全访问器 + fetchAllPages 逐条 runCatching 隔离，单条脏数据只丢自己；dataOf 对 code!=0 与 data 可为 null 分类处理。
+s3~|~BackendRegistry 共享 ConnectionPool/Dispatcher 且所有 close() 明确禁止 shutdown/evictAll；testConnection 构造一次性适配器并对称 logout+close、不改动当前状态；disconnect 先 clear 再释放。
+s4~|~DownloadPathBuilder 的 ILLEGAL 正则净化 / \ : * ? " < > | 与控制字符，再 trimEnd('.',' ')，可证任何段都不以 . 结尾、不可能等于 ..；扩展名只取白名单。
+s4~|~MediaStore 低版本守卫正确：MusicScanner 按 SDK_INT>=Q 条件性加入 VOLUME_NAME，用 getColumnIndex 而非 getColumnIndexOrThrow 取 VOLUME_NAME/YEAR，避免 API<29 抛异常被宽泛 catch 吞掉。
+s4~|~本地索引破坏性操作保护完整：fullScan/incrementalScan 空扫描保留旧索引，withTransaction 包住 deleteAll + insertAll，deleteByPathsChunked 分批 500 规避 SQLite 999 变量上限。
+s4~|~历史修复项真实落实：下载链路用 BackendAuthHeaders.forHost 精确匹配注入认证头；downloadFile 对 Response/InputStream/OutputStream 全部 use、失败删半成品、finally 清 currentCall；checkCancelled 覆盖下载后置段。
+s4~|~数值单位与 native 回收到位：estimateFromSong 均 *1024L 把 KB 对齐到字节，StorageGuard 按字节预留；MediaTagWriter/MusicScanner/LocalCoverExtractor 均在 finally 回收 Bitmap / release MediaMetadataRetriever。
+s5~|~BaiduFileIndexCache.load() 用 file.length() 做 128MB 判死 + 流式 JsonReader，明确拒绝 readText 的 3× 内存放大；save() tmp+rename 原子写；setCoverUrl(s) 把读-改-写收敛进 cacheLock。
+s5~|~百度 token 生命周期正确：refreshLock Mutex + 加锁后复查避免并发重复刷新，新 refresh_token 原子写回，errno -6/31045 时 forceRefreshAccessToken 重试一次。
+s5~|~Range 读取 OOM 防线：downloadRange 只接受 206，服务器忽略 Range 返回 200 时直接放弃；两段式 ID3 补读上限 16MB，Id3v2Parser 用 tagEnd.coerceAtMost 防越界、readLocalHeaderSmart 全程 Long 比较修掉 ≥2GiB 溢出。
+s5~|~YuNetFaceDetector 明确绝不 close 进程级 OrtEnvironment、用 Result 迭代器避开 Optional(API 24)、result/input 双 finally、warmUp 兜 Throwable；YuNetPostprocess 的 clamp 与 exp 宽高有注释自证。
+s5~|~三个 PhotoSource 的 status/listPhotos/openStream 均自带 withContext(IO)，聚合器对关闭来源连 status() 都不调用；collection 对 VOLUME_EXTERNAL 做了 Q 守卫，PARTIAL_PERMISSION 被正确视为可读。
+s6~|~洛雪链路取消语义被认真处理：MetingApiService.kt:420 显式 throw cancelled，LxProbeRunner 三处 throw c，finally 同时 setProbing(false) 与 host.cancelPending()。
+s6~|~PlayabilityProbe.classify 单向放行（不确定一律 UNKNOWN、绝不误判 DEAD 并负面缓存），只在 withContext(IO) 内调用且带 Range: bytes=0-0 不下载整首歌；LxUrlInspector 只取前 8 字节魔数。
+s6~|~MetingJsonShape 把根数组 / 包装对象 / 错误信封 / 非 JSON 收敛成带 shape 的诊断串并截断 240 字符；LxStatusCodec 刻意不把直链 URL 与响应头落盘。
+s6~|~缓存与并发基础设施有明确修复痕迹：ConcurrentHashMap 防 CME、playUrlKey 把档位纳入缓存键、forceRefresh 同时清负面判定、LxSourceRegistry 脚本级 Broken 与平台级 Degraded 两级状态互不覆盖。
+s6~|~歌词落盘与解析守卫到位：LyricsPersistentCache 对 LRC 正文 tmp+rename 原子写、songId 非法字符替换挡路径穿越；LrcParser offset 用 toLongOrNull、时间 coerceAtLeast(0)、二分查行、正则保留纯时间标签清屏行。
+s7~|~BACK 机制两套语义划分清晰：RegisterDialogBackHandler 用 rememberUpdatedState + DisposableEffect(Unit) 消除以 lambda 为 key 的注册空窗，并把「Box 覆盖层 vs 真 Dialog」写成硬约定。
+s7~|~Compose 性能高级用法到位：LibraryScreen 用 rememberUpdatedState 包三个 pointerInput 回调，derivedStateOf + graphicsLayer 使 pager 动画只触发 draw 失效，列表普遍带稳定 key。
+s7~|~生命周期与泄漏处理严谨：四个 registerForActivityResult 全在字段期注册；onDestroy 用 isFinishing 区分真退出与配置重建并对称断开 Activity 引用；Theme 的 ContentObserver 与三个 NanoHTTPD 弹窗都在 onDispose 停止。
+s7~|~空安全与降级防御普遍；Theme 按 API 23/26 回退系统栏底色；UiMode 对 DataStore 脏数据回落 UNSPECIFIED；startPlaybackServiceSafely 规避 API 26 后台启动崩溃；退出流程 disconnect 移出主线程并加 withTimeout。
+s7~|~values/strings.xml 与 values-en/strings.xml 的 name 集合双向差集为 0，英文 locale 下不存在 stringResource 缺失崩溃。
+s8~|~resolveGeneration 五处配对覆盖 playSong/playQueue/两个 resolve/恢复队列，且 tryReplaceByReSearch、trySameSourceReplace、tryCrossSourceReplace 在每个挂起点后补校验；updateRestoredQueueStreamUrls 更做逐项 id 比对。
+s8~|~结构化并发有正面样板：MainViewModel.kt:3843 与 :1246 显式重抛 CancellationException；verifyAllLxScripts 用 isActive 响应「停止」，stopLxVerify 与 finally 幂等收尾。
+s8~|~一次性事件用 SharedFlow(replay=0) + extraBufferCapacity 表达，由 MainViewModel.init 单点 collect 转 errorMessage，UI 侧有明确消费方，避免旋转后重放。
+s8~|~消息通道有单调版本号防旧定时器清掉新消息（MainViewModel:1424/1439、ServerViewModel:87）。
+s8~|~构造期竞态防御成体系：constructorReady + 类尾 complete() + by lazy 声明顺序（有门禁 MainViewModelConstructionOrderTest）+ 接线整体后置；手机遥控回调统一 mainHandler.post 切主线程；封面缓存用 ConcurrentHashMap。
+s9~|~ExoPlayer 生命周期对称：MvPlaybackScreen 用 remember 创建、DisposableEffect 对称 release，Listener add/remove 成对，PlayerView 禁焦三件套避免 D-Pad 被 Android 视图层吞掉。
+s9~|~高频流下沉与零重组绘制：AppRoot:127 明确下沉 progress/duration/downloadStates；VisualizerStage 用 withFrameNanos + frame provider 逐帧绘制不触发重组，draw 做 try/catch 且一次性告警；RendererSwapper.release 与 onDispose 对称。
+s9~|~焦点系统严谨：FocusableSurface 把焦点环挂修饰符链尾；requestFocus() 全放 LaunchedEffect，没有组合期直接夺焦；KaraokePlaybackScreen 以「两个弹窗都不可见」为 key 在节点移除后显式归还焦点。
+s9~|~列表 key 与图片加载：UnifiedSongGrid/PlaylistGrid/PlaylistManagementScreen 都用了稳定 key；CoverImage 统一封装 Coil AsyncImage；UnifiedSongRow 把内嵌封面提取放进 remember 缓存避免每次重组读盘。
+s9~|~minSdk 22 兼容细致：VisualizerStage 用 drawBehind/drawCircle 规避 Android 5.1 hwui Region 段错误；「版权存疑」角标全矢量绘制避免豆腐块；BlendMode.Difference(API29+) 用双层 clipRect 替代。
+s10~|~不可信上传链路校验完整：PlaylistUploadServer 5MB 硬上限 + 一次性 token 鉴权 + 拒绝路径 noKeepAlive；PlaylistImporter 首 4KB 嗅探 + 扩展名选 parser；PlaylistImportViewModel 用 runBlocking 在 NanoHTTPD worker 桥接、URL 检查另起 IO。
+s10~|~缓存占用线程纪律到位：CacheSettingsSection 把 19 条落盘扫描收敛到单个 LaunchedEffect，CacheInventory 用 withContext(IO) 且有 4000 文件上限，清理后 refreshKey++ 重算，统计与清除口径同源。
+s10~|~触底续页的 derivedStateOf 都带稳定字段 key（SearchTab.kt:119、SongList.kt:83）；五个列表统一接 LocalListBackHandler 回顶并用 runCatching 防 item 未组合时 requestFocus 抛异常。
+s10~|~破坏性操作有确认与语义色：清空下载上抛宿主确认弹窗，日志删除用真 Dialog 包 ConfirmDialog(destructive=true)，清理/删除用 danger=true；PlayStatsViewModel 加载异常有 catch + finally 复位 loading。
+s10~|~设置项默认值四处一致（focusHighlightEnabled 均 true 且写回同一 key），values/values-en 各 1481 项 name 集合完全一致。
+s11~|~SeasideRenderer.kt 是零分配纪律标杆：类头列全 Paint/Path/FloatArray/Brush/Stroke/ImageBitmap/IntArray 预建；绝不读 ctx.nowMs 只用单调 fx.nowMs；releaseResources 逐张 recycle；爬痕轨迹有明确上界并原地压实。
+s11~|~时间基准与几何边界统一：5 个渲染器 draw 入口均有 w<2f 或 h<2f 早退，相位一律 dt 累加并钳上限；SpectrumRepository.nowMs 明确为单调时钟。
+s11~|~取模回绕与索引防负/越界处理：wrapTau、((x%n)+n)%n、AudioFrame.bandMean 对 to<from 早退、Molecule bandRange 用 coerceIn + coerceAtLeast、FormulaLayout.removeAt 前判空。
+s11~|~18 文件内零 mutableMapOf/HashMap，运行期状态全是定长 FloatArray/IntArray；DesertSmokeRenderer 显式 recycle 且 safeBitmap 对非法尺寸返回 null。
+s11~|~门禁与死代码判定准确：MoonOpBudget 是纯 JVM 表并用生产几何单测对账；WorldCities/WorldProjection 仅被单测引用、生产零调用点，按纪律未报其内部问题。
+s12~|~热路径复用彻底：BirdsFlock/TripodFog/Moonlit 把 Paint/Path/RectF/数组全做成成员；LyricsDotMatrixRenderer 用 12 个定长 pointBuffers + 两遍扫描合批 drawPoints，resetSubBatches 只清计数。
+s12~|~大对象生命周期有显式收口：TripodFogRenderer 逐槽 recycle 并交出 bakeQueue/bakePx；BirdsFlockRenderer 先置 null ShaderBrush 再逐张 recycle；MoonlitRenderer recycleDisk；LyricsDotMatrixRenderer 用 try/finally 保证采样 Bitmap 异常路径也回收。
+s12~|~数值边界防护成体系：BirdsFlockMath 用 !(m2>=1e-12f) 掐断 NaN 毒化、wrap 双重取模处理负余数；WorldTerminator 对 acos 定义域显式短路；SeasideAudioMap 同时钳 dtMs 与 k；WorldMapData 对损坏编码保守跳过。
+s12~|~缓存失效键设计周全：TripodFogRenderer 用「派生后色标 + 桶」当指纹而非逐帧漂移的 α，prepareGrade 按 w/h 重建；MoonlitRenderer 按 geomW/geomH 重建并置 dirty；MoonWater 涟漪队列存比例 u 而非绝对 y。
+s12~|~WorldGlobeRenderer 用 host 而非前缀判定资产域，favicon 与越界路径恒返回空 body（不返回 null 以免回退真联网），appContext 存字段避免 Activity 泄漏，城市经 Gson 注入而不加载 cities.json。
+s13~|~SnowCedarRenderer 的 releaseBitmaps 先把三个 ShaderBrush 置 null 再逐张 recycle，releaseAll 被 onEnterContent 首行与 onExitContent 共用，堵住画质重入不经过 onExit 的泄漏路径。
+s13~|~RendererFx 用 final 的 draw/onEnter/onExit 从语法上锁死后处理不漏调、dt 只从 FrameClock 取；FrameClock 用 initialized 布尔而非 lastMs==0L 哨兵，并对 dt 做 0..100ms 双向钳制。
+s13~|~SeasideWaves 全文件零 Android import、零音频引用，随机一律确定性 hash32；resize() 主动 reset 清掉按旧尺寸写的湿沙记忆；fsin() 用 and SIN_LUT_MASK 保证 LUT 索引不越界。
+s13~|~StarrySkyRenderer 把天幕渐变、天极辉光、山脊/枯树 Path 全部收敛到 rebuildGeometry，ensureRingLayer 还把 density 纳入底环缓存键。
+s13~|~SmokeChain.variantOf 用双重取模处理负余数，SnowField.streakEndX/Y 对 sp==0.0 显式兜底，状态数组一律只在 alloc/reset 时换、逐帧路径不分配。
+s14~|~SpectrumRepository 双缓冲预分配，@Volatile writeIndex 先翻转再发布 frameSeq，注释准确说明 volatile happens-before 与「序号挂在实例上读端会看到 1,1,2,2」的坑；meanOf 用 coerceIn 防越界、boost 防除零。
+s14~|~PhotoTransitionClock 相位一律 += dt 并钳 MAX_DT_MS=100，start() 时定死串行/交叉模型；recompute 在 enterMs==0 跳过除法、hold<=0 单独分支，无除零。
+s14~|~PhotoBuffer 用 generation 世代号丢弃在途解码结果，LRU/invalidateSource/clear/close 四条路径全部 recycle，peek 检查 isRecycled；MAX_DECODE_SIDE=2048 明确挡住 4K 画布下 3 张 59MB 的 OOM。
+s14~|~VisualizerRendererFactory 的 when(theme) 枚举穷尽、没有 else 吞掉未知主题；MOONLIT 传 applicationContext 避免 Activity 泄漏；availableThemes 与 selectable 单一真源。
+s14~|~转场实现普遍守住 render 零分配：Path/Paint/IntArray/ColorFilter 全提到字段，saveLayer/restore 配对；CoverPaletteProvider 在 Dispatchers.Default 取色、不 recycle 外来封面 Bitmap；MaskCache 单例常驻 256KB 有明确上界。
+s15~|~GlowWordHalo.obtain 用数值字段线性比对做缓存键，命中不拼字符串不建对象；KDoc 明确解释「不 recycle」是为避免跨帧持有旧 Entry 抛 recycled bitmap，而真正需回收的 FullViewSubRenderer/FumeLiveRaster 都做了 recycle。
+s15~|~全子系统无 BlurMaskFilter/RenderEffect，改用 Paint.setShadowLayer + 预烘焙位图规避硬件画布丢弃 MaskFilter；FumeTextDrawer/TiltPulse/Partita 一律用带参 getFontMetrics(buffer) 避免每帧 new FontMetrics。
+s15~|~数值边界防御密集：GraphemeTimingBuilder 空表早退 + max(end-start,0) 防除零，FumeReveal/FumeTextStyle/FumeMath 先 clamp/判 isFinite，stepSpring 有 guard<64，UnitBezier/CssEasing 固定 24 次迭代。
+s15~|~逐帧零分配覆盖彻底：FumeCameraStep 的 input/result/焦点点/飞行桥、FumeBlockFrame 的 Timing/StaticLayers、FullViewSubRenderer 的 viewport/liveFrame 全是可变复用对象；isCJK 正则判定预烘焙进 block 字段。
+s15~|~越界与 save/restore 配对完整：LyricsStagePayload.current/next、DotMatrixSubRenderer、FumeTextMeasure 均用 getOrNull/coerceIn 兜底；所有 Canvas.save() 与 restore() 逐处配对。
+"""
+
+# 不报为缺陷的既有取舍
+TRADEOFFS = [
+    "手工 DI 容器（NasMusicApp 构造全局实例，调用方 app as NasMusicApp），无 DI 框架、无 getInstance() 单例。",
+    "后端适配器用原生 OkHttp 而非 Retrofit；BackendRegistry 只在内存持有当前适配器；testConnection() 构造一次性适配器且不改状态。",
+    "播放进度由 PlayerManager 的 1000ms Handler 轮询驱动，刻意不用 ExoPlayer 回调；网络歌曲的 resolve→replay 流程本身是有意设计。",
+    "usesCleartextTraffic=true（用户自填任意本地 NAS http 地址）；本地 HTTP 服务无鉴权（家庭局域网场景，所有者接受）。",
+    "凭据 AES-GCM 加密、TLS 使用系统默认证书校验（2026-09-09 已移除 trust-all）；streamHeaders 用 provider 实时读取 + host 精确匹配注入，不放宽 host 匹配。",
+    "gradlew 指向本地 file:// zip（有意离线构建）；本地构建需 --no-daemon + Kotlin in-process；onnxruntime 固定 1.17.1（minSdk 22 / 16KB 页对齐权衡）。",
+    "proguard-rules.pro 的 keep 规则必须保留（曾因 Gson 类型擦除崩溃）；拼音用 TinyPinyin（API 22 不能用 android.icu.Transliterator）。",
+    "单 Activity + 手动 when(currentScreen) 导航（无 Jetpack Navigation）；五级 BACK 状态机；DialogBackHandler 的两套语义约定。",
+    "电视 + 手机双支持，3 个 uses-feature 全 required=false，方向运行时决定；Android 13+ 媒体/图片权限按设置页开关按需申请；通知权限已刻意删除。",
+    "Jellyfin 的 GBK ID3 字节乱码客户端无法完全修复；E51「像素城市」/ E52「旷野公路」源码与资产在 main 分支上不存在（私有分支专属），app/src/e51-overlay/ 是 gitignored 本地覆盖层。",
+    "MediaSession.Callback.onConnect 禁止 reject()，安全边界在 setAvailableSessionCommands 且只能增补默认命令集；DemucsSeparator 输出恒 44100Hz 立体声；OrtEnvironment 是进程级单例绝不能 close。",
+    "渲染器刻意零分配 / 预烘焙 / 预算控制；E41 世界由 3D WebView 提供且资产拆两处；E54 生态地球复用 /globe/ 三份库、运行时零网络；E50 千里江山 MIT 移植的具体美术口径；VisualizerStage 过渡期每帧重组是定稿取舍。",
+    "AppLog.d/i/w 有 BuildConfig.DEBUG 守卫（release 下 R8 折掉字符串），AppLog.e 无守卫；lint 输出里的 LintCliClient/UAST 异常栈是既有噪音。",
+]
+
+
+def parse(block):
+    out = []
+    for line in block.strip().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = [p.strip() for p in line.split(SEP)]
+        out.append(parts)
+    return out
+
+
+findings = parse(RAW)
+news = parse(NEW)
+strengths = parse(STRENGTHS)
+assert all(len(x) == 8 for x in findings), "finding 字段数错误"
+assert all(len(x) == 5 for x in news), "new 字段数错误"
+assert all(len(x) == 2 for x in strengths), "strength 字段数错误"
+
+e = html.escape
+SEV_ORDER = {"Critical": 0, "High": 1, "Medium": 2, "Low": 3, "撤销": 4}
+SEV_LABEL = {"Critical": "Critical", "High": "High", "Medium": "Medium", "Low": "Low", "撤销": "撤销"}
+
+
+def sev_pill(s):
+    cls = "void" if s == "撤销" else (s.lower() if s in SEV_ORDER else "low")
+    return '<span class="pill sev-%s">%s</span>' % (cls, e(SEV_LABEL.get(s, s)))
+
+
+def loc_html(loc):
+    """位置串：在 / 与「扩展名:行号」之间插零宽空格，避免被按字符硬断成 SongDownloa/dManager.kt。"""
+    t = e(loc).replace("/", "/&#8203;")
+    return re.sub(r"(\.[A-Za-z0-9]+)(:\d)", r"\1&#8203;\2", t)
+
+
+def verdict_pill(v):
+    cls = {"CONFIRMED": "ok", "PARTIALLY CORRECT": "warn", "REFUTED": "bad", "初稿": "draft"}.get(v, "draft")
+    label = {"CONFIRMED": "已确认", "PARTIALLY CORRECT": "部分成立", "REFUTED": "已撤销", "初稿": "初稿"}.get(v, v)
+    return '<span class="pill v-%s">%s</span>' % (cls, label)
+
+
+by_sub = {}
+for f in findings:
+    by_sub.setdefault(f[0], []).append(f)
+by_str = {}
+for s in strengths:
+    by_str.setdefault(s[0], []).append(s[1])
+
+# 最高优先级：复核后 Critical / High
+top = [f for f in findings if f[3] in ("Critical", "High")]
+top.sort(key=lambda x: (SEV_ORDER[x[3]], x[0]))
+
+# 统计
+orig_count = {"Critical": 0, "High": 0, "Medium": 0, "Low": 0}
+for f in findings:
+    orig_count[f[2]] = orig_count.get(f[2], 0) + 1
+final_count = {"Critical": 0, "High": 0, "Medium": 0, "Low": 0, "撤销": 0}
+for f in findings:
+    final_count[f[3]] = final_count.get(f[3], 0) + 1
+rv_count = {"Critical": 0, "High": 0, "Medium": 0, "Low": 0, "撤销": 0}
+for f in findings:
+    if f[4] != "初稿":
+        rv_count[f[3]] = rv_count.get(f[3], 0) + 1
+verdict_count = {}
+for f in findings:
+    verdict_count[f[4]] = verdict_count.get(f[4], 0) + 1
+
+parts = []
+parts.append('<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">')
+parts.append('<meta name="viewport" content="width=device-width,initial-scale=1">')
+parts.append('<title>NASMusicTV 全系统代码审查报告 · 2026-11-09</title>')
+parts.append('''<style>
+:root{--bg:#f5f7fa;--card:#fff;--ink:#1c2430;--muted:#5b6879;--line:#e3e8ef;--brand:#1f4e79;--brand2:#2563eb;--soft:#eef3f9}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.7 -apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei","PingFang SC",sans-serif}
+a{color:var(--brand2);text-decoration:none}
+a:hover{text-decoration:underline}
+.wrap{max-width:1240px;margin:0 auto;padding:0 24px}
+header.hero{background:linear-gradient(135deg,#1f4e79 0%,#2d6ca8 55%,#3f8fd0 100%);color:#fff;padding:40px 0 34px}
+header.hero h1{margin:0 0 8px;font-size:30px;letter-spacing:.5px}
+header.hero .sub{opacity:.9;font-size:15px}
+.herometa{display:flex;flex-wrap:wrap;gap:10px;margin-top:20px}
+.herometa span{background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.3);padding:5px 12px;border-radius:20px;font-size:12.5px}
+nav.bar{position:sticky;top:0;z-index:20;background:rgba(255,255,255,.96);border-bottom:1px solid var(--line);backdrop-filter:blur(6px)}
+nav.bar .wrap{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding-top:10px;padding-bottom:10px}
+nav.bar a{font-size:13px;color:var(--muted)}
+.filters{margin-left:auto;display:flex;gap:6px;flex-wrap:wrap}
+.filters button{border:1px solid var(--line);background:#fff;color:var(--muted);border-radius:16px;padding:4px 12px;font-size:12.5px;cursor:pointer}
+.filters button.on{background:var(--brand);border-color:var(--brand);color:#fff}
+.layout{display:flex;gap:26px;margin-top:26px;align-items:flex-start}
+aside{width:210px;flex:0 0 210px;position:sticky;top:62px;max-height:calc(100vh - 84px);overflow:auto;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px}
+aside h4{margin:0 0 8px;font-size:12px;color:var(--muted);letter-spacing:1px}
+aside a{display:block;font-size:12.5px;padding:3px 0;color:var(--muted)}
+main{flex:1;min-width:0}
+section{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:22px 24px;margin-bottom:22px}
+h2{font-size:20px;margin:0 0 14px;color:var(--brand);border-bottom:2px solid var(--soft);padding-bottom:9px}
+h3{font-size:15.5px;margin:22px 0 9px;color:#243b55}
+p{margin:9px 0}
+.muted{color:var(--muted)}
+.small{font-size:12.5px}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:14px 0}
+.kpi{background:var(--soft);border:1px solid var(--line);border-radius:10px;padding:14px}
+.kpi .n{font-size:26px;font-weight:700;color:var(--brand);line-height:1.2}
+.kpi .t{font-size:12px;color:var(--muted)}
+.dist{display:flex;height:22px;border-radius:6px;overflow:hidden;margin:12px 0;border:1px solid var(--line)}
+.dist i{display:block;height:100%}
+.legend{display:flex;gap:16px;flex-wrap:wrap;font-size:12.5px;color:var(--muted)}
+.legend b{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px}
+table{width:100%;border-collapse:collapse;font-size:13px;margin:10px 0}
+th,td{border:1px solid var(--line);padding:9px 10px;text-align:left;vertical-align:top}
+th{background:var(--soft);font-weight:600;color:#33465e;white-space:nowrap}
+td.loc{font-family:Consolas,"Courier New",monospace;font-size:11.5px;color:#33465e;word-break:normal;overflow-wrap:break-word;min-width:186px}
+tr[data-sev]{transition:opacity .15s}
+.pill{display:inline-block;border-radius:5px;padding:1px 8px;font-size:11.5px;font-weight:600;white-space:nowrap}
+.sev-critical{background:#fde8e8;color:#b91c1c}.sev-high{background:#fff0e4;color:#c2410c}
+.sev-medium{background:#fdf3d8;color:#92610a}.sev-low{background:#eef1f5;color:#5b6879}
+.v-ok{background:#e5f5ea;color:#15803d}.v-warn{background:#fdf3d8;color:#92610a}
+.v-bad{background:#f1f2f4;color:#6b7280}.v-draft{background:#eef3f9;color:#40618a}
+.sev-void{background:#f1f2f4;color:#6b7280;text-decoration:line-through}
+.scope{font-size:12.5px;color:var(--muted);background:var(--soft);border-radius:8px;padding:9px 12px;margin-bottom:12px}
+ul{margin:8px 0;padding-left:22px}li{margin:5px 0}
+.callout{border-left:4px solid var(--brand2);background:var(--soft);padding:11px 14px;border-radius:0 8px 8px 0;margin:12px 0}
+.roadmap{border-left:3px solid var(--line);padding-left:18px;margin-left:6px}
+.roadmap h3{margin-top:16px}
+footer{color:var(--muted);font-size:12.5px;text-align:center;padding:26px 0 40px}
+@media(max-width:900px){aside{display:none}.layout{display:block}header.hero h1{font-size:23px}}
+</style></head><body>''')
+
+parts.append('''<header class="hero"><div class="wrap">
+<h1>NASMusicTV 全系统代码审查报告</h1>
+<div class="sub">15 个子系统并行深审 + 52 条高优先级发现独立怀疑式复核 · 分支 main @ ce1e237 · versionName 2.39.15</div>
+<div class="herometa"><span>审查日期 2026-11-09</span><span>生产源码 539 个 Kotlin 文件 / 约 168,750 行</span><span>15 个互不重叠子系统</span><span>覆盖 app/src/main + 构建/Manifest/CI 配置</span><span>两阶段：并行审查 → 独立复核</span></div>
+</div></header>''')
+
+parts.append('''<nav class="bar"><div class="wrap">
+<a href="#summary">执行摘要</a><a href="#top">最高优先级</a><a href="#verify">复核结论</a><a href="#new">复核新增</a><a href="#subs">各子系统</a><a href="#strength">跨模块优点</a><a href="#roadmap">整改路线</a><a href="#scope">口径与取舍</a>
+<div class="filters"><button class="on" data-f="all">全部</button><button data-f="Critical">Critical</button><button data-f="High">High</button><button data-f="Medium">Medium</button><button data-f="Low">Low</button></div>
+</div></nav>''')
+
+parts.append('<div class="wrap layout"><aside><h4>目录</h4>')
+parts.append('<a href="#summary">1. 执行摘要</a><a href="#top">2. 最高优先级修复</a><a href="#verify">3. 独立复核结论</a><a href="#new">4. 复核新增发现</a><a href="#subs">5. 各子系统</a>')
+for i, (sid, name, _, _) in enumerate(SUBS, 1):
+    parts.append('<a href="#%s">&nbsp;&nbsp;5.%d %s</a>' % (sid, i, e(name)))
+parts.append('<a href="#strength">6. 跨模块优点</a><a href="#roadmap">7. 整改路线</a><a href="#scope">8. 口径与已知取舍</a></aside><main>')
+
+# 执行摘要
+parts.append('<section id="summary"><h2>1. 执行摘要</h2>')
+parts.append('<p>本次审查把 <b>app/src/main</b> 按目录边界切成 15 个互不重叠的子系统，各由一个独立审查代理逐文件实读（合计生产 Kotlin 539 文件 / 约 168,750 行，另含 AndroidManifest、build.gradle.kts、proguard-rules.pro、gradle.properties 与 CI workflow）。随后对<b>全部 2 条 Critical、32 条 High 以及 18 条关键 Medium（共 52 条）</b>派独立复核代理做怀疑式二次核验：重读源码、grep 调用点、穷尽搜索兜底/降级/清理方法、逐条核对机制描述。</p>')
+parts.append('<div class="callout"><b>核心结论：</b>初稿 141 条发现中，34 条 Critical/High 经复核后仅 <b>13 条</b>仍处于该档（其中 1 条由 Critical 降为 High），21 条离开该档（18 → Medium、2 → Low、1 撤销）；按严重度变化计，52 条复核项中有 <b>30 条</b>严重度发生变化（28 条下调、2 条撤销），无一条上调。主要降级原因是「上层兜底已存在、机制描述说错、影响范围被夸大」。代码库整体工程质量较高（资源治理、日志脱敏、并发单飞、数值边界、门禁测试都有成体系实践），真正需要发版前处理的集中在<b>洛雪音源脚本执行链、前台服务/ExoPlayer 释放、SAF 覆盖导出数据丢失、照片墙 clipPath 与黑屏、ViewModel 生命周期与代数守卫、以及一个 TV 上完全不可点的歌单歌曲行</b>。</div>')
+parts.append('<h3>初稿统计（141 条）</h3><div class="cards">')
+for k, v in [("Critical", 2), ("High", 32), ("Medium", 73), ("Low", 34)]:
+    parts.append('<div class="kpi"><div class="n">%d</div><div class="t">%s</div></div>' % (v, k))
+parts.append('</div>')
+parts.append('<div class="dist"><i style="width:1.4%;background:#b91c1c"></i><i style="width:22.7%;background:#ea580c"></i><i style="width:51.8%;background:#d19a22"></i><i style="width:24.1%;background:#94a3b8"></i></div>')
+parts.append('<div class="legend"><span><b style="background:#b91c1c"></b>Critical 2</span><span><b style="background:#ea580c"></b>High 32</span><span><b style="background:#d19a22"></b>Medium 73</span><span><b style="background:#94a3b8"></b>Low 34</span></div>')
+parts.append('<h3>复核后统计（52 条复核项）</h3><div class="cards">')
+for k, v in [("CONFIRMED", verdict_count.get("CONFIRMED", 0)), ("PARTIALLY CORRECT", verdict_count.get("PARTIALLY CORRECT", 0)), ("REFUTED", verdict_count.get("REFUTED", 0)), ("离开 Crit/High", 21)]:
+    parts.append('<div class="kpi"><div class="n">%d</div><div class="t">%s</div></div>' % (v, k))
+parts.append('</div>')
+parts.append('<p class="small muted">52 条复核项复核后：Critical %d / High %d / Medium %d / Low %d / 撤销 %d。其余 89 条（Medium 55、Low 34）维持初稿判定，报告中标为「初稿」且未经独立复核。全库 141 条复核后终稿分布为 Critical %d / High %d / Medium %d / Low %d / 撤销 %d；连同复核阶段新增的 15 条（High 1 / Medium 11 / Low 3），全库有效发现合计 <b>154 条</b>：Critical 1 / High 13 / Medium 94 / Low 46。</p>' % (rv_count["Critical"], rv_count["High"], rv_count["Medium"], rv_count["Low"], rv_count["撤销"], final_count["Critical"], final_count["High"], final_count["Medium"], final_count["Low"], final_count["撤销"]))
+parts.append('<h3>方法说明</h3><ul>')
+parts.append('<li><b>阶段一 · 并行深审</b>：每个子系统给定精确文件清单与领域专属缺陷清单，要求先 grep 确认调用点（排除死代码误报）、引用真实行号、只报可举证的问题。</li>')
+parts.append('<li><b>阶段二 · 独立复核</b>：8 组复核代理对 52 条逐条判定 CONFIRMED / PARTIALLY CORRECT / REFUTED / UNVERIFIABLE，重点猎杀四类常见误差：错误文件归因与死代码、夸大泄漏范围、机制描述错误、忽略已存在的清理/兜底方法。</li>')
+parts.append('<li><b>口径</b>：AGENTS.md 明确记载的所有者已接受取舍（手工 DI、明文 HTTP、本地服务无鉴权、gradle 离线、onnxruntime 版本、E51/E52 私有分支缺失等）一律不作为缺陷；历史 code-review 文档中已修复项不重复报。</li>')
+parts.append('<li><b>限制</b>：本次为静态源码审查，未编译、未跑单测、未做真机/帧率验证；涉及 native 崩溃（clipPath / hwui Region）、WebView 销毁、ANR 的判断均标注了取证充分性，凡仓内无直接真机证据者已主动降档。</li>')
+parts.append('</ul></section>')
+
+# 最高优先级
+parts.append('<section id="top"><h2>2. 最高优先级修复（来自初稿的复核后 Critical / High，共 %d 条；复核新增的 1 条 High 见第 4 节）</h2>' % len(top))
+parts.append('<p class="muted small">按严重度排序；每行给出复核后的准确机制与可执行修法。筛选按钮对全报告所有表格生效。</p>')
+parts.append('<table><thead><tr><th>严重度</th><th>判定</th><th>位置</th><th>问题 / 影响 / 建议</th></tr></thead><tbody>')
+for f in top:
+    sid, fid, so, sf, v, loc, title, detail = f
+    parts.append('<tr data-sev="%s"><td>%s</td><td>%s</td><td class="loc">%s</td><td><b>%s</b><br><span class="small">%s</span></td></tr>' % (
+        e(sf), sev_pill(sf), verdict_pill(v), loc_html(loc), e(title), e(detail)))
+parts.append('</tbody></table></section>')
+
+# 复核结论
+parts.append('<section id="verify"><h2>3. 独立复核结论</h2>')
+parts.append('<h3>3.1 判定汇总</h3><table><thead><tr><th>判定</th><th>数量</th><th>含义</th></tr></thead><tbody>')
+for k, meaning in [("CONFIRMED", "断言完全成立，机制、范围、影响经逐字核对无误"), ("PARTIALLY CORRECT", "现象存在，但机制描述、影响范围或严重度需要纠正"), ("REFUTED", "不成立或代码已修；从有效发现中撤销"), ("UNVERIFIABLE", "证据不足，不纳入结论")]:
+    parts.append('<tr data-sev="Low"><td>%s</td><td>%d</td><td>%s</td></tr>' % (verdict_pill(k), verdict_count.get(k, 0), e(meaning)))
+parts.append('</tbody></table>')
+parts.append('<h3>3.2 严重度降级清单（30 条；其中 22 条来自原 Critical/High，含 1 条 Critical → High）</h3><table><thead><tr><th>ID</th><th>初稿 → 复核后</th><th>位置</th><th>降级依据</th></tr></thead><tbody>')
+down = [f for f in findings if SEV_ORDER[f[3]] > SEV_ORDER[f[2]] or f[3] == "撤销"]
+down.sort(key=lambda x: (SEV_ORDER[x[2]], x[1]))
+for f in down:
+    sid, fid, so, sf, v, loc, title, detail = f
+    parts.append('<tr data-sev="%s"><td><b>%s</b></td><td>%s → %s</td><td class="loc">%s</td><td class="small">%s</td></tr>' % (
+        e(sf if sf != "撤销" else "Low"), e(fid), sev_pill(so), sev_pill(sf), loc_html(loc), e(detail[:240])))
+parts.append('</tbody></table>')
+parts.append('<h3>3.3 撤销项（2 条，不计入有效发现）</h3><ul>')
+parts.append('<li><b>C43 · StarrySkyRenderer.kt:612 每帧 new Stroke</b> — 审查引用的 ParticleRenderers.kt:63-68 纪律自带「宽度恒定」前提并自列宽度变化例外；本类红线 :97-100 已把该 Stroke 显式登记为例外并写明量级；能缓存的资源都已缓存。属已知卫生项，非新缺陷。</li>')
+parts.append('<li><b>C45 · EcoGlobeRenderer.kt:297 NaN 污染 EMA</b> — gson.toJson 在 sendAudio():323 求值、发生在 evalJs 的 try 之前，catch 吞不到；异常会直接断链而非逐 tick 丢弃；NaN 前提被 SpectrumAnalyzer.analyze:208 + emitSilence + SpectrumRepository.boost 三层兜底证伪。</li>')
+parts.append('</ul>')
+parts.append('<h3>3.4 复核中最常见的误报模式（供后续审查复用）</h3><ul>')
+parts.append('<li><b>忽略上层 catch / 内部调度</b>：BaiduFileIndexCache 的 NPE 被 SearchAggregator.kt:286 兜成空结果；DataStore 自己把写盘调度到 IO；ModelDownloadManager 把网络失败全转成返回值 —— 三者分别让 C19、C17、C36 降级。</li>')
+parts.append('<li><b>把条件性风险写成必然</b>：C41/C42 的 View.post 在 API≤23（含 minSdk 22 基准机）走 ViewRootImpl.sRunQueues、每次 traversal 都会执行；C11 的 5 秒约束只在 startForegroundService 降级路径生效。</li>')
+parts.append('<li><b>威胁模型定性过宽</b>：C21 沙箱不暴露 prefs/文件系统，准确表述是「未校验远程 JS + SSRF + 响应内容外带」而非「凭据外带」；C18 是无凭据 HEAD，属内网探测而非经典 SSRF。</li>')
+parts.append('<li><b>对比基线本身是死代码</b>：C31 引用的 UnifiedSongGrid 全项目零调用；C46 的 clipPath 红线取证语境是 nativeCanvas/Modifier.clip，仓内无 DrawScope.clipPath 触发同一 SIGSEGV 的直接证据。</li>')
+parts.append('<li><b>清理方法其实存在，只是没被调用或只在特定路径</b>：C14 的 OrtSession 在退出时会被 releaseInternal 关闭，真正泄漏在「同进程重试覆盖引用」；C15 的 doc.delete() 删的是用户已有的目标文件（机制核对后严重度反而维持 High）。</li>')
+parts.append('</ul></section>')
+
+# 复核新增
+parts.append('<section id="new"><h2>4. 复核阶段新增发现（15 条）</h2>')
+parts.append('<p class="muted small">复核代理在核验调用链与兜底时额外确认的真实问题，其中 N01 与 C32 同族且可达，建议并入 P0。</p>')
+parts.append('<table><thead><tr><th>严重度</th><th>位置</th><th>问题 / 影响 / 建议</th></tr></thead><tbody>')
+for n in news:
+    nid, sev, loc, title, detail = n
+    parts.append('<tr data-sev="%s"><td>%s</td><td class="loc">%s</td><td><b>%s · %s</b><br><span class="small">%s</span></td></tr>' % (
+        e(sev), sev_pill(sev), loc_html(loc), e(nid), e(title), e(detail)))
+parts.append('</tbody></table></section>')
+
+# 各子系统
+parts.append('<section id="subs"><h2>5. 各子系统审查结果</h2><p class="muted small">每个子系统列出全部发现（含复核后严重度、判定、位置、机制与建议）与该模块的强项。<br><b>编号规则</b>：<code>C</code> = 进入独立复核的高优先级候选（初稿 Critical / High 及 18 条关键 Medium，共 52 条）；<code>M</code> / <code>L</code> = 未进入复核的 Medium / Low（共 89 条，判定列标注「初稿」）；<code>N</code> = 复核阶段新增发现。编号在各自前缀内连续，但不代表优先级排序，实际严重度以「严重度」列（复核后）为准。</p></section>')
+for i, (sid, name, scope, stats) in enumerate(SUBS, 1):
+    rows = by_sub.get(sid, [])
+    rows = sorted(rows, key=lambda x: (SEV_ORDER[x[3]], x[1]))
+    cnt = {}
+    for r in rows:
+        cnt[r[3]] = cnt.get(r[3], 0) + 1
+    parts.append('<section id="%s"><h2>5.%d %s</h2>' % (sid, i, e(name)))
+    parts.append('<div class="scope"><b>范围</b>：%s<br><b>规模</b>：%s</div>' % (e(scope), e(stats)))
+    pills = " ".join(sev_pill(k) + " " + str(v) for k, v in sorted(cnt.items(), key=lambda x: SEV_ORDER[x[0]]))
+    parts.append('<p>%s</p>' % pills)
+    parts.append('<table><thead><tr><th>严重度</th><th>判定</th><th>位置</th><th>问题 / 复核说明 / 建议</th></tr></thead><tbody>')
+    for f in rows:
+        _, fid, so, sf, v, loc, title, detail = f
+        parts.append('<tr data-sev="%s"><td>%s</td><td>%s</td><td class="loc">%s</td><td><b>%s · %s</b><br><span class="small">%s</span></td></tr>' % (
+            e(sf if sf != "撤销" else "Low"), sev_pill(sf), verdict_pill(v), loc_html(loc), e(fid), e(title), e(detail)))
+    parts.append('</tbody></table>')
+    parts.append('<h3>该子系统强项</h3><ul>')
+    for s in by_str.get(sid, []):
+        parts.append('<li>%s</li>' % e(s))
+    parts.append('</ul></section>')
+
+# 跨模块优点
+parts.append('<section id="strength"><h2>6. 跨模块优点（已实证，建议保持）</h2><ul>')
+for s in [
+    "资源治理是全库最扎实的一层：原生 OkHttp 的 Response 全部集中式出口 + .use{}；Bitmap/Canvas/MediaMetadataRetriever/OnnxTensor/OrtSession.Result 都有显式 recycle/close，且覆盖异常路径；OrtEnvironment 进程级单例绝不 close 的口径在每个 ONNX 使用点都写清了理由。",
+    "并发防御成体系：Jellyfin reauthMutex + tokenGeneration、Feiniu reloginMutex + 令牌代数、allTracksRefreshMutex 单飞后重查缓存、Subsonic 信号量限流 8、NetworkMusicManager ConcurrentHashMap + 档位缓存键、LxSourceRegistry 两级状态、PhotoBuffer generation 世代号。代数守卫在 PlayerViewModel 里覆盖 5 个入口并在每个挂起点后复查。",
+    "安全基线已恢复并文档化：TLS 用系统默认证书校验（trust-all 已移除）、凭据 AES-GCM 加密、UrlSanitizer 覆盖常见 token 参数、备份导出/恢复剔除凭据字段、LocalServerAuth 一次性 token + 二维码 + Cookie 三重、RemoteControlHtml 按 HTML 上下文分别转义、HttpRequestBody 对 chunked 请求做严格块头与体积上限。",
+    "minSdk 22 兼容与数值边界有真实投入：MediaStore 列用 getColumnIndex 而非 OrThrow、拼音用 TinyPinyin、可视化用 drawBehind/drawCircle 规避 Android 5.1 hwui Region 段错误、BlendMode.Difference(API29+) 用双层 clipRect 替代、FFT/噪声/投影全部定长数组与确定性 hash、渲染器普遍有 w<2f 早退与 dt 钳制。",
+    "门禁测试把「文档化取舍」变成可执行的约束：VisualizerThemeStringsGateTest、FxCoverageScanTest、MainViewModelConstructionOrderTest、PrivateOverlayDriftGateTest、ReleaseSigningGateTest、MediaSessionAccessPolicyTest 等，且多处单测从真机/原型脚本再生黄金基线，避免手抄常数漂移。",
+    "测试与文档规模匹配代码规模：290 个单测文件、docs/ 下 107 份 md 与 31 个脚本；历史 code-review 报告对修复项有逐条核对记录，本次审查确认多项历史修复（下载认证头注入、空扫描保护、空间单位、cancelAll 串行队列、SAF 增量导出、resolve 代数守卫）确实已落地。",
+]:
+    parts.append('<li>%s</li>' % e(s))
+parts.append('</ul></section>')
+
+# 路线图
+parts.append('<section id="roadmap"><h2>7. 分阶段整改路线</h2><p class="muted small">覆盖范围：<b>全部 13 条复核后 Critical / High 均已立项</b>（另含新增的 N01），Medium 立项 47/83（按主题归并，其余 36 条见第 5 节明细，属同类批量修），Low 立项 19/43。每个条目括号内的编号可直接回第 5 节定位。</p><div class="roadmap">')
+parts.append('<h3>P0 · 发版前阻断（8 项）</h3><ul>')
+for s in [
+    "<b>C21 洛雪音源脚本执行链</b>：把 http(s)/域名校验下沉到 LxScriptRepo，内置源内容哈希 pin，startRequest 拒绝 loopback/link-local/私网并限制可设 header（连同 N07）。",
+    "<b>C10 + C11 + N03 + N04 播放服务生命周期</b>：onDestroy 无条件 release 主 ExoPlayer、置空两个回调、取消 sleepTimer；onCreate 起占位前台通知以满足 startForegroundService 降级路径的 5 秒约束；setPlayer 覆盖旧实例时对称 release。",
+    "<b>C15 SAF 覆盖导出数据丢失</b>：SAF 分支改用 .part 临时文件 + 成功后替换，catch 只删临时文件；顺带修 N06（同名同大小内容不同被永久跳过）。",
+    "<b>C28 歌单歌曲行不可点</b>：SongRowModeCompact 补 focusable + clickable，并清理 N14 的 MODE_CARD 死代码。",
+    "<b>C32 + N01 + C33 + N08 状态回写竞态</b>：resolve/replace 回写前校验 songId，队列编辑入口递增代数；网络搜索引入 networkSearchGeneration 并保护关键词状态。",
+    "<b>C34 + C35 ViewModel 生命周期与合并竞态</b>：MainViewModel.onCleared 逐一 dispose 子 VM（补齐 VisualizerViewModel 的两个 init collect）；updateMergedData 保存 mergeJob 并取消，_mergedArtists 改 update{}。",
+    "<b>C38 + C47 + C49 功能性不可用</b>：网盘「全部加入队列」改 addSongsToQueue；固定照片转场过 available() 且 PhotoRenderer 对 bound==null 回落默认实现；三个歌词舞台子渲染器覆写 onLineChanged。",
+    "<b>C46 + N11 clipPath 降级与门禁</b>：sdkInt&lt;26 把 IRIS_*/WIPE_* 降级为 CROSSFADE，并补一个全仓 clipPath 负向扫描门禁（现有门禁都是单文件，photo/transitions/ 无人守）。",
+]:
+    parts.append('<li>%s</li>' % s)
+parts.append('</ul><h3>P1 · 一个月内（数据安全 / 崩溃 / 线程）</h3><ul>')
+for s in [
+    "前台与下载：C16 下载完整性校验（0 字节与 chunked）、C06 USB 空扫描保护、C07 Already 状态回写、N02 备份 10MB/32MB 上限矛盾。",
+    "取消语义：C13、C22、M04、M34 以及 N10 的 tickRunnable try/finally —— 统一在所有 catch(Exception) 前重抛 CancellationException，并把 postDelayed 移入 finally。",
+    "凭据与日志卫生：C20 + N05 的 BaiduPanApi 完整响应体、L08 Jellyfin 裸 URL、M17 Jamendo client_id、L10/L21 令牌片段与直链、L01 CI cryptoPassphrase。",
+    "不可信输入：C18 + M19 的 URL 白名单/逐跳校验、M16 MV playurl scheme/host、C23 电台 url_resolved、M12 歌单 JSON 判型与深度限制。",
+    "状态一致性：C24 + N13 歌词缓存改单例、C04 后端 provider 移入同步块、C03 restClient 认证态同步、M31/M32/M33 三条 ViewModel 代数守卫。",
+    "主线程 IO：C17 歌单导入、M35 备份、M41 统计、M09 内嵌封面提取、M14 MV 缓存写盘、C27 + N09 共 7 处二维码生成统一切 Default/IO。",
+]:
+    parts.append('<li>%s</li>' % s)
+parts.append('</ul><h3>P2 · 架构与性能（重构窗口）</h3><ul>')
+for s in [
+    "Compose 重组下沉：C26/C29/C30 的滚动与逐帧进度状态、M26/M36 逐字时钟、M38/M39 分支顶层状态收集、M37 VisualEqualizer 的 draw 零分配。",
+    "渲染器分配纪律：C40、M46、M50、M52、L34 的每帧 intArrayOf/Stroke/LinearGradient/对象分配；M47/M48/M49 的缓存键补齐 (w,h)；L28 位图 recycle 口径统一。",
+    "WebView 加固：C41/C42 改用 handler.post + onExit 幂等兜底、M51/L29 补 shouldOverrideUrlLoading 与资产域白名单、N12 把 View 型构造点纳入 Context 泄漏门禁。",
+    "照片墙与歌词舞台：C48 needScan 补偿、C50 状态键纳入歌曲身份、M54 版面按尺寸/density 重建、M55 endTime 规整、C51 按 code point 切分。",
+    "文档漂移：PlaybackServiceStart.kt:30 与 technical-overview.md 仍写「onCreate 立刻 startForeground」；photo-spectrum-effect-plan.md:162 把 clipPath 标为全版本可用，与后来的全仓红线冲突。",
+]:
+    parts.append('<li>%s</li>' % s)
+parts.append('</ul><h3>P3 · 清理与一致性（低危）</h3><ul>')
+for s in [
+    "Low 级一致性项：列表稳定 key（L24、C31）、KDoc 与实现不符（C26 的节流注释、L09 normalizeKey）、组合期副作用（L22/L23）、lateinit 守卫（L19）、下载失败态未复位（C36）、噪声/位图缓存（L27/L28/L31/L32）。",
+    "已撤销项 C43/C45 不立项，但可作为「零分配红线是否升级为绝对规则」的讨论输入；若升级，需同步改类头红线注释避免自相矛盾。",
+    "按项目规范联动：修复后同步 CHANGELOG.md（只写做了什么、不写根因/行号）、docs/technical-overview.md §10.N（写机制与验证）、以及相应门禁测试；同一效果/同一版本的多轮修复不单独升版本号（v2.39.15 口径）。",
+]:
+    parts.append('<li>%s</li>' % s)
+parts.append('</ul></div></section>')
+
+# 口径与取舍
+parts.append('<section id="scope"><h2>8. 审查范围、口径与已知取舍</h2>')
+parts.append('<h3>8.1 范围</h3><ul>')
+parts.append('<li><b>纳入</b>：app/src/main/java/com/nasmusic/tv/** 全部生产 Kotlin（539 文件）；AndroidManifest.xml、app/build.gradle.kts、app/proguard-rules.pro、gradle.properties、.github/workflows/build.yml。</li>')
+parts.append('<li><b>未纳入</b>：app/src/test/**（290 个单测文件，仅用于核对调用点与门禁）、app/src/e51-overlay/（gitignored 本地覆盖层）、assets/ 下的 HTML/JS/GLB 二进制资源、docs/ 内容本身、feat/e51-private 私有分支。</li>')
+parts.append('<li><b>验证手段</b>：静态源码阅读 + grep 调用点与兜底 + 文档交叉核对。未执行 Gradle 编译 / lint / 单测 / 真机验证，故所有「崩溃」「ANR」「帧率」类结论均标注了取证充分性。</li>')
+parts.append('</ul><h3>8.2 已核验但不作为缺陷的所有者取舍</h3><ul>')
+for t in TRADEOFFS:
+    parts.append('<li>%s</li>' % e(t))
+parts.append('</ul><h3>8.3 历史审查修复情况核对</h3><p>本次确认以下历史问题已真实落地，未重复上报：下载链路认证头注入（BackendAuthHeaders.forHost）、recoverAfterCrash 孤儿恢复、fullScan/incrementalScan 空扫描保护、空间预估单位错 1000 倍、cancelAll 新旧 loop 并存、SAF 增量导出判定、下载失败用户通知、resolve→replay 代数守卫五处配对、playQueue 代数守卫、手机遥控移除队列项跨线程崩溃、chunked 1MB 请求体绕过、QualityOverrides 并发竞态、applicationScope 异常处理器。<b>但 C32/C34/C35 表明同类竞态在新的入口仍有残留</b>，建议按 P0/P1 一并收口。</p>')
+parts.append('</section>')
+
+parts.append('<footer>NASMusicTV 全系统代码审查 · 2026-11-09 · 15 个子系统并行深审 + 8 组独立复核 · 本报告为静态审查结论，落地修复后请按项目规范回归编译 / lint / 单测</footer>')
+parts.append('</main></div>')
+parts.append('''<script>
+(function(){
+  var btns=document.querySelectorAll('.filters button');
+  btns.forEach(function(b){b.addEventListener('click',function(){
+    btns.forEach(function(x){x.classList.remove('on')});b.classList.add('on');
+    var f=b.getAttribute('data-f');
+    document.querySelectorAll('tr[data-sev]').forEach(function(tr){
+      tr.style.display=(f==='all'||tr.getAttribute('data-sev')===f)?'':'none';
+    });
+  })});
+})();
+</script></body></html>''')
+
+out = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "docs", "archive", "NASMusicTV-代码审查报告-2026-11-09.html")
+out = os.path.normpath(out)
+with open(out, "w", encoding="utf-8") as fp:
+    fp.write("".join(parts))
+print("written:", out)
+print("findings:", len(findings), "new:", len(news), "top:", len(top), "strengths:", len(strengths))
+print("bytes:", os.path.getsize(out))

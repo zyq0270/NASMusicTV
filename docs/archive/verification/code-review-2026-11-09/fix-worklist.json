@@ -1,0 +1,1388 @@
+[
+ {
+  "id": "C01",
+  "sev": "Low",
+  "verdict": "PARTIALLY CORRECT",
+  "loc": "data/prefs/AppPreferences.kt:2375",
+  "title": "importBackupData 把 4 个数值字段原样写入 DataStore，绕过钳制",
+  "detail": "【复核】四个字段中只有 setLyricsFontScale 的 setter 有 [0.7,1.6] 钳制，其余 setter 本就不钳制，「绕过 setter 的 coerceIn」机制说错；消费端 blur>0、Equalizer gainMb.coerceIn、设置页加减按钮等多处兜底，仅影响显示偏好、不丢数据。【建议】恢复路径统一 coerceIn + isFinite，equalizerBands 校验长度与每元素范围。",
+  "sub": "s1"
+ },
+ {
+  "id": "C02",
+  "sev": "Medium",
+  "verdict": "CONFIRMED",
+  "loc": "util/LocalFilePicker.kt:163",
+  "title": "sizeOf() 返回 -1 时 10MB 上限失效，readText() 全量入内存",
+  "detail": "【复核】仅 SAF provider 不报 SIZE（返回 -1）时失效，size 已知时仍拦截；-1 是文档化放行。BackupTransferServer 的恢复/下载同样走 BackupFileUtils.read，一样受影响。【建议】未知大小时改带累计上限的流式读取，或直接拒绝。",
+  "sub": "s1"
+ },
+ {
+  "id": "M01",
+  "sev": "Medium",
+  "verdict": "初稿",
+  "loc": ".github/workflows/build.yml:56",
+  "title": "D5 fail-fast 只校验 SIGNING_KEYSTORE_BASE64 与 CRYPTO_PASSPHRASE，其余 3 个签名 secret 缺失时不拦截",
+  "detail": "【影响】漏配时写出空值 keystore.properties，到打包阶段才失败，违背 fail-fast。【建议】5 个 secret 一并做非空断言。",
+  "sub": "s1"
+ },
+ {
+  "id": "M02",
+  "sev": "Medium",
+  "verdict": "初稿",
+  "loc": "data/cache/CacheInventory.kt:165",
+  "title": "MAX_FILES=4000 只置 truncated 标记，walkTopDown().forEach 不短路，仍遍历整棵目录树",
+  "detail": "【影响】目录项遍历这一主要开销未减少，下载曲库数万文件时设置页仍可能卡顿。【建议】用 take(MAX_FILES+1) 或计数达上限即终止序列。",
+  "sub": "s1"
+ },
+ {
+  "id": "L01",
+  "sev": "Low",
+  "verdict": "初稿",
+  "loc": ".github/workflows/build.yml:93",
+  "title": "sed 只打码 storePassword/keyPassword，cryptoPassphrase 明文进 CI 日志，注释却写 passwords redacted",
+  "detail": "【建议】把 cryptoPassphrase 一并打码，或只打印键名并修正注释。",
+  "sub": "s1"
+ },
+ {
+  "id": "L02",
+  "sev": "Low",
+  "verdict": "初稿",
+  "loc": "data/prefs/AppPreferences.kt:2339",
+  "title": "importBackupData 对收藏/歌单/最近播放/播放次数无条件回写，空列表会清空本机数据，与同函数 isNotEmpty() 保护口径不一",
+  "detail": "【建议】统一跳过空值口径，或在 UI 明确提示「恢复将替换全部数据」。",
+  "sub": "s1"
+ },
+ {
+  "id": "C09",
+  "sev": "Medium",
+  "verdict": "CONFIRMED",
+  "loc": "player/PlaybackService.kt:217",
+  "title": "onCreate 注册两个捕获本 Service 的 lambda，onDestroy 未注销",
+  "detail": "【复核】单例只持最新一个 Service，下次 onCreate 覆盖自愈、不累积；但销毁后仍持有已销毁 Context，且 sleepTimer 到期仍会回调。【建议】onDestroy 对称置空两个回调，PlayerManager.release() 也清理。",
+  "sub": "s2"
+ },
+ {
+  "id": "C10",
+  "sev": "High",
+  "verdict": "CONFIRMED",
+  "loc": "player/PlaybackService.kt:876",
+  "title": "主 ExoPlayer 只在 mediaLibrarySession 非空时才被 release",
+  "detail": "【复核】onCreate:269 无条件 new 并注入单例，ensureMediaSessionActive 唯一调用点是 onIsPlayingChanged(true):185，全仓仅此处 player.release()；PlayerManager.release():1371 只置 null。泄漏仅限「启动后从未起播」分支，但未 release 的 player 持有 playback Looper 与 AudioTrack。【建议】onDestroy 保存 onCreate 创建的引用并显式 release。",
+  "sub": "s2"
+ },
+ {
+  "id": "C11",
+  "sev": "High",
+  "verdict": "PARTIALLY CORRECT",
+  "loc": "player/PlaybackService.kt:301",
+  "title": "startForeground 被延迟到首次播放，与 startForegroundService 降级路径的假设矛盾",
+  "detail": "【复核】普通冷启动不受 5 秒约束；仅 startService 被拒走 PlaybackServiceStart.kt:51 降级时触发，该路径 2026-11-02 真机已证实可达且无框架兜底。文档（PlaybackServiceStart.kt:30、technical-overview.md:18160）仍写「onCreate 立刻前台化」，与代码矛盾。【建议】onCreate/onStartCommand 无条件起一个占位前台通知。",
+  "sub": "s2"
+ },
+ {
+  "id": "C12",
+  "sev": "Medium",
+  "verdict": "CONFIRMED",
+  "loc": "player/HqSeparationOrchestrator.kt:314",
+  "title": "OkHttp Response 在 !isSuccessful 与 body==null 两条提前 return 路径未关闭",
+  "detail": "【复核】成功路径靠 body.byteStream().use 释放，两条早退无兜底，连接滞留连接池。【建议】用 response.use{} 包裹全分支。",
+  "sub": "s2"
+ },
+ {
+  "id": "C13",
+  "sev": "Medium",
+  "verdict": "CONFIRMED",
+  "loc": "player/HqSeparationOrchestrator.kt:365",
+  "title": "resolveInputPath 的 catch(Exception) 吞掉 CancellationException",
+  "detail": "【复核】取消被转成「下载失败」返回 null，外层 separationJob:584 收不到，随后回退 FAST 模式并在已 release 的播放器上 host.play()。【建议】catch(Exception) 前显式重抛 CancellationException。",
+  "sub": "s2"
+ },
+ {
+  "id": "C14",
+  "sev": "Medium",
+  "verdict": "PARTIALLY CORRECT",
+  "loc": "player/DemucsSeparator.kt:200",
+  "title": "initialize() 通用 catch 分支未关闭已创建的 OrtSession",
+  "detail": "【复核】HqSeparationOrchestrator.release → releaseInternal 会在退出时关当前 session，不是必然永久泄漏；真正泄漏在同进程重试 initialize 时覆盖 modelSession 引用（约 166MB 权重）。【建议】两个 catch 分支 close 并复位 isInitialized。",
+  "sub": "s2"
+ },
+ {
+  "id": "M03",
+  "sev": "Medium",
+  "verdict": "初稿",
+  "loc": "player/HqSeparationOrchestrator.kt:617",
+  "title": "finally 无条件把临时输入缓存为 original.wav，半截音频被当成永久原声",
+  "detail": "【影响】分离被取消或下载中断时缓存损坏文件，因 if(!dest.exists()) 保护后续成功也不覆盖。【建议】仅 result != null 时才 saveOriginalFile。",
+  "sub": "s2"
+ },
+ {
+  "id": "M04",
+  "sev": "Medium",
+  "verdict": "初稿",
+  "loc": "player/MediaLibraryTree.kt:257",
+  "title": "loadChildren 的 catch(Exception) 吞掉取消，与同文件 search():346 显式重抛不一致",
+  "detail": "【影响】onGetChildren 的 withTimeoutOrNull 语义被破坏，车机可能一直转圈。【建议】与 search() 对齐。",
+  "sub": "s2"
+ },
+ {
+  "id": "M05",
+  "sev": "Medium",
+  "verdict": "初稿",
+  "loc": "player/PlayerManager.kt:1343",
+  "title": "playRandom() 只更新 currentIndex，破坏 PlayerState 的 queue/currentIndex/currentSong 同帧发布契约",
+  "detail": "【影响】next(SHUFFLE) 与 onPlaybackEnded(SHUFFLE) 都会走它，UI 读到「新索引 + 旧歌名」错帧。【建议】同步 copy(currentSong = queue.getOrNull(idx))。",
+  "sub": "s2"
+ },
+ {
+  "id": "L03",
+  "sev": "Low",
+  "verdict": "初稿",
+  "loc": "player/ModelDownloadManager.kt:272",
+  "title": "HttpURLConnection 全程未 disconnect，且 contentLength=-1 时完成进度判断恒失效",
+  "detail": "【建议】try/finally disconnect；-1 时以输入流 EOF 作为完成事件。",
+  "sub": "s2"
+ },
+ {
+  "id": "L04",
+  "sev": "Low",
+  "verdict": "初稿",
+  "loc": "player/SpectrumAnalyzer.kt:139",
+  "title": "release() 与 FFT 线程的 analyze() 未共用同一把锁",
+  "detail": "【建议】release() 加 @Synchronized 或先 stop 后 join 再清缓冲。",
+  "sub": "s2"
+ },
+ {
+  "id": "L05",
+  "sev": "Low",
+  "verdict": "初稿",
+  "loc": "player/PlaybackService.kt:952",
+  "title": "切歌覆盖 cachedArtworkBitmap 时旧 Bitmap 未 recycle",
+  "detail": "【建议】覆盖前 recycle 或改用 LRU 缓存。",
+  "sub": "s2"
+ },
+ {
+  "id": "C03",
+  "sev": "Low",
+  "verdict": "CONFIRMED",
+  "loc": "backend/impl/SubsonicAdapter.kt:765",
+  "title": "getSongsTotalCount() 委托给从未注入认证态的 restClient，Subsonic 分页总数恒 0",
+  "detail": "【复核】initialize 只写本类字段，NavidromeAdapter.kt:92-95 才有四行同步；但 SongsPagingState.resolveError 有「total==0 不误报」保护、hasMore 不依赖 totalCount，分页实际正常，仅显示 X/0。【建议】initialize 补齐 restClient.baseUrl/username/password/salt。",
+  "sub": "s3"
+ },
+ {
+  "id": "C04",
+  "sev": "Medium",
+  "verdict": "CONFIRMED",
+  "loc": "backend/BackendRegistry.kt:149",
+  "title": "BackendAuthHeaders.update 在 synchronized(lock) 外执行，并发 initialize 时旧请求可回写覆盖新 provider",
+  "detail": "【复核】ServerViewModel.kt:102/:216 两条协程无防重入；host 精确匹配已挡住凭据泄漏，真正影响是 currentAdapter/provider 指向已被 releaseAdapter 关闭的旧 adapter → 播放/封面 401。【建议】update 移入同一 synchronized 块并加世代校验。",
+  "sub": "s3"
+ },
+ {
+  "id": "C05",
+  "sev": "Medium",
+  "verdict": "PARTIALLY CORRECT",
+  "loc": "backend/impl/FeiniuAdapter.kt:963",
+  "title": "自定义头 x-access-code 不随跨 host 302 剥离（OkHttp 只删 Authorization）",
+  "detail": "【复核】机制成立但属条件性：仅「跨 host 302 且访问码非空」分支会外泄，目标域由用户配置 NAS 决定；streamHeaders 的 host 精确匹配是另一条链路，不构成兜底。【建议】加网络拦截器在 host 变化时 removeHeader，或 API client 直接 followRedirects(false)。",
+  "sub": "s3"
+ },
+ {
+  "id": "M06",
+  "sev": "Medium",
+  "verdict": "初稿",
+  "loc": "backend/impl/SubsonicRestClient.kt:137",
+  "title": "非 2xx 响应被静默吞成 null，401/403/5xx 与空曲库无法区分",
+  "detail": "【影响】用户改错密码或 NAS 报 500 时只显示「暂无歌曲」。【建议】记录脱敏后的 response.code 并覆写 lastErrorDetail。",
+  "sub": "s3"
+ },
+ {
+  "id": "L06",
+  "sev": "Low",
+  "verdict": "初稿",
+  "loc": "backend/impl/DaoliyuAdapter.kt:555",
+  "title": "parseSong 的 albumId 回退路径重复加前缀，得到 daoliyu_daoliyu_XXX",
+  "detail": "【建议】回退值先 stripPrefix 或不再加前缀。",
+  "sub": "s3"
+ },
+ {
+  "id": "L07",
+  "sev": "Low",
+  "verdict": "初稿",
+  "loc": "backend/BackendRegistry.kt:154",
+  "title": "异常分支对同一 adapter 执行两次 releaseAdapter，且释放后才读诊断",
+  "detail": "【建议】catch 内去掉 release，诊断取值提前到异常现场。",
+  "sub": "s3"
+ },
+ {
+  "id": "L08",
+  "sev": "Low",
+  "verdict": "初稿",
+  "loc": "backend/impl/JellyfinAdapter.kt:1154",
+  "title": "GBK 回退分支把未脱敏的 request.url（含 api_key）写进日志，同函数 :1157 已脱敏",
+  "detail": "【建议】统一改用 UrlSanitizer.sanitize。",
+  "sub": "s3"
+ },
+ {
+  "id": "L09",
+  "sev": "Low",
+  "verdict": "初稿",
+  "loc": "backend/SearchAggregator.kt:438",
+  "title": "normalizeKey 的 KDoc 承诺合并连续空格，实现未做，去重漏判",
+  "detail": "【建议】补 replace(Regex(\"\\\\s+\"), \" \") 或修正注释。",
+  "sub": "s3"
+ },
+ {
+  "id": "L10",
+  "sev": "Low",
+  "verdict": "初稿",
+  "loc": "backend/impl/FeiniuAdapter.kt:438",
+  "title": "登录成功日志写入 userToken.take(8)",
+  "detail": "【建议】只记 tokenGeneration。",
+  "sub": "s3"
+ },
+ {
+  "id": "L11",
+  "sev": "Low",
+  "verdict": "初稿",
+  "loc": "backend/impl/NavidromeAdapter.kt:909",
+  "title": "close() 清空本类口令却未清 restClient 中同步过的明文 password/salt",
+  "detail": "【建议】close() 同步清空 restClient 四个字段。",
+  "sub": "s3"
+ },
+ {
+  "id": "C06",
+  "sev": "Medium",
+  "verdict": "CONFIRMED",
+  "loc": "backend/local/LocalMusicRepository.kt:230",
+  "title": "scanUsbDevice 缺空扫描保护，scanned 为空仍删除该 USB 设备全部索引",
+  "detail": "【复核】删的是可重建的 Room 索引而非音频文件，下次扫描自愈；scanPath 抛异常会整体抛出，仅「返回空列表」分支触发（设备刚挂载、MediaStore 未索引时概率不低）。【建议】与 incrementalScan:66、fullScan:190 同口径判空返回。",
+  "sub": "s4"
+ },
+ {
+  "id": "C07",
+  "sev": "Medium",
+  "verdict": "PARTIALLY CORRECT",
+  "loc": "backend/download/SongDownloadManager.kt:230",
+  "title": "DownloadResult.Already 直接 return 不更新 _downloadStates，UI 永久卡 Downloading(0)",
+  "detail": "【复核】入口幂等的 Already 分支已写回 Completed，问题只对 singleAttempt:289 返回的 Already 成立；clearAllStates/recoverAfterCrash 可清但不自动发生。【建议】按实际档位写回 Completed 或移除状态条目。",
+  "sub": "s4"
+ },
+ {
+  "id": "C08",
+  "sev": "Low",
+  "verdict": "PARTIALLY CORRECT",
+  "loc": "backend/download/SongDownloadManager.kt:186",
+  "title": "任务入口 cancelRequested=false 与 cancelAll:522 置位存在竞态窗口",
+  "detail": "【复核】M4 的三处 checkCancelled()（:338/:345/:365）+ currentCall.cancel + clearAll 二次删除已兜住绝大部分路径，残留窗口极窄。【建议】用单调 cancelGeneration 代替布尔标志。",
+  "sub": "s4"
+ },
+ {
+  "id": "C15",
+  "sev": "High",
+  "verdict": "CONFIRMED",
+  "loc": "backend/export/SongExporter.kt:262",
+  "title": "SAF 覆盖导出失败时 doc.delete() 会删掉目标上用户原有文件",
+  "detail": "【复核】doc 来自 resolveChildDoc:312 的 findFile（已存在目标），openOutputStream(\"w\") 先截断；File 分支 :271-284 已有 .part + rename 正确实现，SAF 分支缺。注释「写失败即删除半截文件」与反查已有文件自相矛盾。原文件不可恢复。【建议】SAF 也用 .part 临时文件，成功后替换，catch 只删临时文件。",
+  "sub": "s4"
+ },
+ {
+  "id": "C16",
+  "sev": "Medium",
+  "verdict": "CONFIRMED",
+  "loc": "backend/download/SongDownloadManager.kt:466",
+  "title": "完整性校验仅 declaredLength > 0 时生效，chunked 与 0 字节响应不校验",
+  "detail": "【复核】chunked 流被截断通常抛 IOException 触发清理 + 3 次重试，确凿缺口是 Content-Length:0 的 0 字节文件被标 COMPLETED，且 repo.isDownloaded 幂等检查阻止自动重下。【建议】改为「written > 0 且（declared > 0 时 written == declared）」。",
+  "sub": "s4"
+ },
+ {
+  "id": "M07",
+  "sev": "Medium",
+  "verdict": "初稿",
+  "loc": "backend/export/SongExporter.kt:244",
+  "title": "shouldOverwrite 复用 resolveChildDoc，纯查询动作带 createFile/createDirectory 副作用",
+  "detail": "【影响】判断本身在 U 盘创建目录与空文件，导出取消后残留。【建议】拆出无副作用的 findChildDoc。",
+  "sub": "s4"
+ },
+ {
+  "id": "M08",
+  "sev": "Medium",
+  "verdict": "初稿",
+  "loc": "backend/download/SongDownloadManager.kt:636",
+  "title": "孤儿恢复只按文件名正则匹配，不校验文件长度，半截文件被误标 COMPLETED",
+  "detail": "【建议】追加 hit.length() > 0 与声明长度校验。",
+  "sub": "s4"
+ },
+ {
+  "id": "M09",
+  "sev": "Medium",
+  "verdict": "初稿",
+  "loc": "backend/local/EmbeddedCoverExtractor.kt:50",
+  "title": "同步读盘 + 写缓存文件在 Compose 组合期主线程被调用（UnifiedSongRow.kt:366）",
+  "detail": "【影响】列表首次渲染每行同步读盘，TV 滚动大量歌曲易掉帧。【建议】改 LaunchedEffect + withContext(IO)。",
+  "sub": "s4"
+ },
+ {
+  "id": "M10",
+  "sev": "Medium",
+  "verdict": "初稿",
+  "loc": "backend/local/MusicScanner.kt:157",
+  "title": "scanPath 遍历无取消点，songs 列表无上限增长",
+  "detail": "【建议】循环内 ensureActive()/yield()，改 Sequence 分批输出。",
+  "sub": "s4"
+ },
+ {
+  "id": "M11",
+  "sev": "Medium",
+  "verdict": "初稿",
+  "loc": "backend/export/SongExporter.kt:360",
+  "title": "mediaScan(devicePath) 参数未使用，扫描的是源文件；导出完成也未重建 USB 索引",
+  "detail": "【影响】导出到 U 盘的歌需重新插拔才可见，与 :81 注释承诺不符。【建议】完成后以 device.path 调 scanUsbDevice。",
+  "sub": "s4"
+ },
+ {
+  "id": "L12",
+  "sev": "Low",
+  "verdict": "初稿",
+  "loc": "backend/download/CoverFileWriter.kt:64",
+  "title": "已有 cover.jpg 压缩失败时回退原始字节，MediaTagWriter 仍按 image/jpeg 内嵌",
+  "detail": "【建议】压缩失败返回 null 走旁路。",
+  "sub": "s4"
+ },
+ {
+  "id": "L13",
+  "sev": "Low",
+  "verdict": "初稿",
+  "loc": "backend/local/CoverUrlPersistentCache.kt:189",
+  "title": "renameTo 失败兜底直接 file.writeText(json)，破坏原子性并残留 .tmp",
+  "detail": "【建议】写另一临时名再 rename，finally 清理临时文件。",
+  "sub": "s4"
+ },
+ {
+  "id": "C17",
+  "sev": "Medium",
+  "verdict": "PARTIALLY CORRECT",
+  "loc": "backend/playlist/PlaylistImporter.kt:52",
+  "title": "import()/importBytes() 全程未切 IO，读流/解码/解析/写盘都在 Main 协程",
+  "detail": "【复核】5MB readLimited 上限与 DataStore 内部 IO 调度使主线程阻塞小于描述；但每首一次 edit + 全量 JSON 重序列化是 O(n²)、协程在 Main 反复挂起恢复，大歌单仍卡顿。【建议】importBytes 整体包 withContext(Dispatchers.IO)。",
+  "sub": "s5"
+ },
+ {
+  "id": "C18",
+  "sev": "Medium",
+  "verdict": "CONFIRMED",
+  "loc": "backend/playlist/UrlReachabilityChecker.kt:123",
+  "title": "不可信 URL 无 host 白名单且跟随任意重定向",
+  "detail": "【复核】调用链确无任何白名单，isPrivateLanUrl 生产调用点唯一在 PlaylistImportViewModel.kt:180，PlaylistEnricher.kt:116 完全无过滤；但请求是无凭据 HEAD、结果仅用于可达性徽标、有 5s 超时与并发 4 限流，属恶意歌单诱导的内网/云元数据探测而非经典 SSRF。【建议】在 check() 内做 IP/域名白名单并逐跳复核重定向目标。",
+  "sub": "s5"
+ },
+ {
+  "id": "C19",
+  "sev": "Low",
+  "verdict": "CONFIRMED",
+  "loc": "backend/network/baidu/BaiduFileIndexCache.kt:360",
+  "title": "return dirIndex!! 在 synchronized 块外读 @Volatile 字段，与 save/load 置 null 竞态",
+  "detail": "【复核】NPE 会经 BaiduNetdiskService.kt:81 上传，被 SearchAggregator.kt:286 catch(Exception) 兜住降级为空结果，不崩溃；另 :352 也会降级。【建议】返回移进同步块或写 return dirIndex ?: map。",
+  "sub": "s5"
+ },
+ {
+  "id": "C20",
+  "sev": "Medium",
+  "verdict": "CONFIRMED",
+  "loc": "backend/network/baidu/BaiduPanApi.kt:359",
+  "title": "errno != 0 时把完整未截断未脱敏的响应体写入 w 级日志",
+  "detail": "【复核】AppLog.w 在 release 仍落 LogStore（仅 logcat 受 DEBUG 限制），泄露面是设备私有日志/用户主动导出；同文件 :306 用了 take(200)、:358 用了 sanitizeUrl，团队已有惯例。【建议】body.take(200) + 脱敏或删除该行。",
+  "sub": "s5"
+ },
+ {
+  "id": "M12",
+  "sev": "Medium",
+  "verdict": "初稿",
+  "loc": "backend/playlist/JsonPlaylistParser.kt:60",
+  "title": "只捕获 JsonParseException，asJsonObject/getAsJsonArray 类型不符抛 IllegalStateException 毁掉整单",
+  "detail": "【建议】判型 + runCatching 包整个 parse + 限制 JSON 嵌套深度（NeteaseCloudPlaylistParser.kt:33 同款）。",
+  "sub": "s5"
+ },
+ {
+  "id": "M13",
+  "sev": "Medium",
+  "verdict": "初稿",
+  "loc": "backend/photo/YuNetFaceDetector.kt:280",
+  "title": "人脸缩略图先 readBytes() 把整张原图读进内存，inSampleSize 只缩小解码后 Bitmap",
+  "detail": "【影响】数十 MB 照片 + 万张扫描易 OOM（PhotoBuffer.kt:248 同款写法）。【建议】按 ref.size 判死或改有界缓冲流。",
+  "sub": "s5"
+ },
+ {
+  "id": "M14",
+  "sev": "Medium",
+  "verdict": "初稿",
+  "loc": "backend/network/mv/MvPersistentCache.kt:84",
+  "title": "markCompleted() → save() 是同步磁盘写且调用点在主线程",
+  "detail": "【影响】最多 5000 条 Gson 序列化 + 写盘，MV 播完切歌掉帧。【建议】save() 切 IO 或投递后台串行任务。",
+  "sub": "s5"
+ },
+ {
+  "id": "M15",
+  "sev": "Medium",
+  "verdict": "初稿",
+  "loc": "backend/network/baidu/BaiduLyricsProvider.kt:106",
+  "title": "侧车 LRC 下载 resp.body?.string() 无体积上限，与同文件 downloadRange:206 保护不对称",
+  "detail": "【建议】判 Content-Length 并用有界 BufferedSource（如 1MB）。",
+  "sub": "s5"
+ },
+ {
+  "id": "M16",
+  "sev": "Medium",
+  "verdict": "初稿",
+  "loc": "backend/network/mv/BilibiliMvService.kt:253",
+  "title": "playurl 的 durl[].url / dash.video[].baseUrl 无 scheme/host 白名单即进 ExoPlayer",
+  "detail": "【建议】只接受 http/https 并校验 B 站 CDN 域名集合。",
+  "sub": "s5"
+ },
+ {
+  "id": "L14",
+  "sev": "Low",
+  "verdict": "初稿",
+  "loc": "backend/network/mv/MvPersistentCache.kt:125",
+  "title": "importAll 先全量塞进 map 再 evict，load() 的 readText() 无体积判死",
+  "detail": "【建议】先 take(MAX_ENTRIES)，改流式 JsonReader。",
+  "sub": "s5"
+ },
+ {
+  "id": "L15",
+  "sev": "Low",
+  "verdict": "初稿",
+  "loc": "backend/photo/YuNetFaceDetector.kt:83",
+  "title": "OrtSession.SessionOptions() 持有 native 资源，createSession 后从未 close",
+  "detail": "【建议】opts.use{} 或 try/finally close。",
+  "sub": "s5"
+ },
+ {
+  "id": "L16",
+  "sev": "Low",
+  "verdict": "初稿",
+  "loc": "backend/network/baidu/BaiduOAuthClient.kt:168",
+  "title": "expires_in 未钳制 *1000 可 Long 溢出，refresh_token 字段缺空校验",
+  "detail": "【建议】coerceIn 后相乘，refresh_token 用可空兜底。",
+  "sub": "s5"
+ },
+ {
+  "id": "C21",
+  "sev": "Critical",
+  "verdict": "CONFIRMED",
+  "loc": "backend/network/lx/LxScriptRepo.kt:57",
+  "title": "来自网络的 JS 仅校验 @name 即被 QuickJS 执行，宿主 __nativeRequest 无目标域限制",
+  "detail": "【复核】穷尽核实四类措施全无：内容哈希 pin（LxSourceEntry.idOf 只是 URL 文件名 hash）、签名校验、域名白名单（5 个 DEFAULT 只是默认登记）、JS 沙箱目标域限制（httpClient 无 interceptor / DNS 限制 / CookieJar）。UI 层 SettingsScreen.kt:796 的 http(s) 校验只作用于下载 URL。准确表述是「未校验远程 JS 执行 + 任意 header/method/body 的 SSRF + 内网/云元数据响应内容外带」，而非「凭据外带」（沙箱不暴露 prefs/文件系统）。【建议】内置源内容哈希 pin、自定义 URL 域名白名单 + 完整性校验；startRequest 拒绝 loopback/link-local/私网并限制可设 header 名。",
+  "sub": "s6"
+ },
+ {
+  "id": "C22",
+  "sev": "Medium",
+  "verdict": "PARTIALLY CORRECT",
+  "loc": "backend/network/NetworkMusicManager.kt:280",
+  "title": "catch(Exception) 吞掉 CancellationException，破坏结构化并发",
+  "detail": "【复核】「继续写缓存 / 钉 5 分钟 DEAD」被证伪（catch 里是 playUrlCache.remove，DEAD 只在正常返回且 probedDead=true）；PlaybackService.kt:844 有 if(!isActive) return 兜底，最严重后果已被挡住。同类写法仍遍布 20+ 处。【建议】所有 catch 前显式重抛，async 内不得吞取消。",
+  "sub": "s6"
+ },
+ {
+  "id": "C23",
+  "sev": "Medium",
+  "verdict": "CONFIRMED",
+  "loc": "backend/radio/RadioBrowserClient.kt:153",
+  "title": "公共可写数据库 radio-browser.info 的 url_resolved 无 scheme/host 校验即进 streamUrl",
+  "detail": "【复核】favicon 反而有 startsWith(\"http\")；toSong() 是活代码（MainViewModel.kt:4640）；播放器对非 http(s) 会自然失败、无法读回响应外带，主要风险是内网探测与播放异常。【建议】只接受 http/https 并拒绝 loopback/link-local/私网与非标准端口。",
+  "sub": "s6"
+ },
+ {
+  "id": "C24",
+  "sev": "Medium",
+  "verdict": "CONFIRMED",
+  "loc": "lyrics/LyricsPersistentCache.kt:200",
+  "title": "两个 LyricsManager 实例各持独立索引与实例私有 saveLock，全量覆盖写同一 lyrics_cache.json",
+  "detail": "【复核】两处构造的 context 同为 Application、同一文件；无单例 / FileLock / 读-合并-写。只读实例的 get() → maybePersistTouch 同样会抹掉条目；被抹的是索引（.lrc 独立命名成磁盘孤儿），有网络回退自愈。【建议】改进程级单例，或读-合并-写 + 跨实例 FileLock + tmp/rename。",
+  "sub": "s6"
+ },
+ {
+  "id": "C25",
+  "sev": "Medium",
+  "verdict": "CONFIRMED",
+  "loc": "backend/network/lx/LxScriptRepo.kt:104",
+  "title": "2MB 脚本上限实现成静默截断而非拒绝，且不判 read 返回值",
+  "detail": "【复核】半截脚本因 @name 在头部（只看前 4096 字节）仍落盘，违背同文件「更新失败保留旧版」硬约束；LxHostPool 加载失败降级 L1_*FAILED 可重下自愈。【建议】达到上限即抛 IOException 并保留旧版。",
+  "sub": "s6"
+ },
+ {
+  "id": "M17",
+  "sev": "Medium",
+  "verdict": "初稿",
+  "loc": "backend/network/JamendoService.kt:164",
+  "title": "含 client_id 的完整 URL 被写进 w 级日志（url.take(100) 足以覆盖 query）",
+  "detail": "【建议】只记 path + resp.code，或对 client_id 打码。",
+  "sub": "s6"
+ },
+ {
+  "id": "M18",
+  "sev": "Medium",
+  "verdict": "初稿",
+  "loc": "lyrics/LyricsNetworkProvider.kt:391",
+  "title": "不可信 JSON 的 id/accesskey/hash/songId 未编码直接拼进 URL",
+  "detail": "【影响】含 &/#/空格即注入或截断 query，异常被下游吞掉后歌词静默失败。【建议】统一 URLEncoder.encode 或 HttpUrl.Builder.addQueryParameter。",
+  "sub": "s6"
+ },
+ {
+  "id": "M19",
+  "sev": "Medium",
+  "verdict": "初稿",
+  "loc": "backend/network/MetingApiService.kt:371",
+  "title": "302 的 Location 与非 302 3xx 跟跳不限目标域，server 参数也未编码",
+  "detail": "【建议】Location 做 scheme/host 白名单并拒绝私网，server 统一编码（保留既有 302 解析机制）。",
+  "sub": "s6"
+ },
+ {
+  "id": "M20",
+  "sev": "Medium",
+  "verdict": "初稿",
+  "loc": "lyrics/LrcParser.kt:108",
+  "title": "toLrcText 的逐字时间戳不补零，写出后无法被自身 WORD_TIMESTAMP_REGEX 回读",
+  "detail": "【影响】卡拉 OK 逐字时间轴静默丢失（MainViewModel.kt:3824 写盘路径真实）。【建议】逐字时间戳同样 padStart(2,'0')。",
+  "sub": "s6"
+ },
+ {
+  "id": "M21",
+  "sev": "Medium",
+  "verdict": "初稿",
+  "loc": "backend/network/NetworkMusicManager.kt:424",
+  "title": "unregisterService 只清 playUrlCache，遗漏 deadProbeCache",
+  "detail": "【影响】重新注册同源后残留 5 分钟 DEAD 判定把本可播的歌静默判死。【建议】同步清 deadProbeCache。",
+  "sub": "s6"
+ },
+ {
+  "id": "M22",
+  "sev": "Medium",
+  "verdict": "初稿",
+  "loc": "backend/network/MetingApiService.kt:645",
+  "title": "不可信 JSON 字段为 JsonNull 时 ?.asString 抛异常，单曲/整段天气响应被丢弃",
+  "detail": "【建议】统一改用 ?.takeIf { !it.isJsonNull }?.asX（JamendoModels.kt:17 已有范式）。",
+  "sub": "s6"
+ },
+ {
+  "id": "L17",
+  "sev": "Low",
+  "verdict": "初稿",
+  "loc": "lyrics/LyricsManager.kt:286",
+  "title": "实例级全局 Mutex 内直接发网络请求（3 组关键词 × 2 源 × 15s），持锁过久",
+  "detail": "【建议】锁收缩到 containsKey→put 临界区，按 songId 单飞。",
+  "sub": "s6"
+ },
+ {
+  "id": "C26",
+  "sev": "Medium",
+  "verdict": "PARTIALLY CORRECT",
+  "loc": "ui/screens/LibraryScreen.kt:320",
+  "title": "snapshotFlow 滚动位置回调没有注释所称的节流，每帧写 StateFlow 并反向触发整页重组",
+  "detail": "【复核】无 debounce / 停止判定属实，但「8 个 Tab 子树」不存在（composedRange 最多同时组合 2 个）、写回只进 rememberLazyGridState 的 initial 故非自激闭环、仅 ALBUMS/ARTISTS 两个 grid 触发。【建议】collect 前加 distinctUntilChanged().debounce(300)，或只在滚动停止后 emit 一次。",
+  "sub": "s7"
+ },
+ {
+  "id": "C27",
+  "sev": "Medium",
+  "verdict": "CONFIRMED",
+  "loc": "ui/screens/BackupTransferDialog.kt:83",
+  "title": "DisposableEffect 主体在主线程同步生成 360×360 二维码位图并启动 NanoHTTPD",
+  "detail": "【复核】一次性开销、项目自标 P3、server.start() 只是建监听线程非阻塞；ServerConnectScreen 是 150×150。TextInputDialog.kt:177 已有 Dispatchers.Default 正确模板。【建议】对齐该模板（另见复核新增 N09：同类共 7 处需一并整改）。",
+  "sub": "s7"
+ },
+ {
+  "id": "M23",
+  "sev": "Medium",
+  "verdict": "初稿",
+  "loc": "ui/screens/SettingsScreen.kt:1208",
+  "title": "dismissOnBackPress=false 的真 Dialog 内无 BackHandler，BACK 无法关闭确认弹窗（MineScreen.kt:386 同）",
+  "detail": "【建议】补 BackHandler，或让 ConfirmDialog 在真 Dialog 场景改用 BackHandler。",
+  "sub": "s7"
+ },
+ {
+  "id": "M24",
+  "sev": "Medium",
+  "verdict": "初稿",
+  "loc": "ui/screens/QueueScreen.kt:406",
+  "title": "竖屏 ⋮ 行菜单是 Box 覆盖层却未注册 RegisterDialogBackHandler，BACK 穿透到 Level 1.5/2",
+  "detail": "【建议】在 QueueItemActionMenu 内首行注册（对照 NowPlayingScreen.kt:2346）。",
+  "sub": "s7"
+ },
+ {
+  "id": "M25",
+  "sev": "Medium",
+  "verdict": "初稿",
+  "loc": "ui/screens/NowPlayingScreen.kt:1146",
+  "title": "SourceTag 把 onClick=null 兜底成空 lambda，纯展示标签仍占据 D-Pad 焦点",
+  "detail": "【建议】onClick==null 时用普通 Box，或让 FocusableSurface 支持 nullable onClick。",
+  "sub": "s7"
+ },
+ {
+  "id": "M26",
+  "sev": "Medium",
+  "verdict": "初稿",
+  "loc": "ui/screens/NowPlayingScreen.kt:102",
+  "title": "progressMs 作为顶层参数，1Hz 进度 tick 触发整个播放页重组",
+  "detail": "【建议】把 State<Long> 下推到 ProgressSection/LyricsView/PortraitThinProgress 三个叶子。",
+  "sub": "s7"
+ },
+ {
+  "id": "M27",
+  "sev": "Medium",
+  "verdict": "初稿",
+  "loc": "ui/screens/PlaylistManagementScreen.kt:84",
+  "title": "DisposableEffect(Unit) 的 BACK handler 闭包持有首次组合的 isPhonePortrait，旋转后陈旧",
+  "detail": "【建议】把 isPhonePortrait 加入 key 或用 rememberUpdatedState。",
+  "sub": "s7"
+ },
+ {
+  "id": "M28",
+  "sev": "Medium",
+  "verdict": "初稿",
+  "loc": "ui/screens/NowPlayingScreen.kt:1602",
+  "title": "竖屏封面页最后声明的全屏 clickable 覆盖层遮挡 ⓘ 歌曲信息按钮",
+  "detail": "【建议】把 ⓘ 移到 clickable 层之后声明或加 zIndex。",
+  "sub": "s7"
+ },
+ {
+  "id": "M29",
+  "sev": "Medium",
+  "verdict": "初稿",
+  "loc": "ui/screens/AlbumDetailScreen.kt:247",
+  "title": "列表 key 仅用 song.id，重复曲目会触发 Compose「Key was already used」崩溃（ArtistDetailScreen.kt:212、WeatherRadioScreen.kt:218 同）",
+  "detail": "【建议】改为 \"${index}_${song.id}\"（QueueScreen.kt:315 已如此）。",
+  "sub": "s7"
+ },
+ {
+  "id": "L18",
+  "sev": "Low",
+  "verdict": "初稿",
+  "loc": "ui/theme/Theme.kt:594",
+  "title": "LocalHighContrast 用 staticCompositionLocalOf，值变化时整棵主题 content 重组",
+  "detail": "【建议】改 compositionLocalOf { false }。",
+  "sub": "s7"
+ },
+ {
+  "id": "L19",
+  "sev": "Low",
+  "verdict": "初稿",
+  "loc": "ui/MainActivity.kt:581",
+  "title": "onDestroy 无条件访问 lateinit networkMonitor，onCreate 提前异常时二次崩溃",
+  "detail": "【建议】加 ::networkMonitor.isInitialized 守卫。",
+  "sub": "s7"
+ },
+ {
+  "id": "L20",
+  "sev": "Low",
+  "verdict": "初稿",
+  "loc": "ui/screens/TextInputDialog.kt:141",
+  "title": "组合体内每次重组做两次 hasSystemFeature binder 查询且新建 Handler",
+  "detail": "【建议】用 remember 包裹。",
+  "sub": "s7"
+ },
+ {
+  "id": "C32",
+  "sev": "High",
+  "verdict": "CONFIRMED",
+  "loc": "ui/viewmodel/PlayerViewModel.kt:449",
+  "title": "resolve→replay 异步返回后只按 index 回写 streamUrl，缺 songId 校验；代数守卫不覆盖队列增删/移动",
+  "detail": "【复核】442 闸门只比代数；resolveGeneration 的 5 处 ++ 不含编辑入口（MainViewModel.kt:3668-3693、PlayerViewModel.kt:615）；449 读最新队列却按旧 targetIndex 回写，与 :588 的逐项 id 比对形成对照。【建议】回写前校验 id，队列编辑入口递增代数（另见 N01 同族漏项）。",
+  "sub": "s8"
+ },
+ {
+  "id": "C33",
+  "sev": "High",
+  "verdict": "CONFIRMED",
+  "loc": "ui/viewmodel/SearchViewModel.kt:424",
+  "title": "网络歌曲搜索/换一批整条路径无代数守卫，旧词结果覆盖新词结果",
+  "detail": "【复核】searchGeneration 只服务 searchSongsOnServer；:429 与 :404 无条件写 Success，:403 连关键词一并回滚；clearNetworkSearch 只清空不取消在途协程。【建议】引入 networkSearchGeneration 或保存并 cancel 在途 Job。",
+  "sub": "s8"
+ },
+ {
+  "id": "C34",
+  "sev": "High",
+  "verdict": "CONFIRMED",
+  "loc": "ui/viewmodel/MainViewModel.kt:3648",
+  "title": "15 个子 VM 是普通属性，onCleared 不触发、viewModelScope 永不取消",
+  "detail": "【复核】MainActivity.kt:78 只把 MainViewModel 放进 ViewModelStore；onCleared:3653 只 dispose visualizerVM；VisualizerViewModel 自带 onCleared 但框架不调用，dispose 也只 cancel faceScanObserver，init 的两个无限 collect 无 Job 引用。【建议】每个子 VM 暴露 dispose() 并在 MainViewModel.onCleared 逐一取消。",
+  "sub": "s8"
+ },
+ {
+  "id": "C35",
+  "sev": "High",
+  "verdict": "CONFIRMED",
+  "loc": "ui/viewmodel/MainViewModel.kt:2582",
+  "title": "updateMergedData() 每次新起 Default 协程、无取消旧 Job 无代数守卫，多协程并发读-改-写",
+  "detail": "【复核】Grep 得 20+ 调用点（初稿说至少 6 个被低估）；:2678-2688 对 _mergedArtists.value 做读→map→写回，与 :2635 的写入交错会丢更新。【建议】保存 mergeJob 并 cancel，或改用 _mergedArtists.update{}。",
+  "sub": "s8"
+ },
+ {
+  "id": "C36",
+  "sev": "Low",
+  "verdict": "PARTIALLY CORRECT",
+  "loc": "ui/viewmodel/DownloadViewModel.kt:364",
+  "title": "downloadModel 协程无 try/finally，异常时 _modelDownloading 永久停留 true",
+  "detail": "【复核】下游 ModelDownloadManager 把常规失败全转成 String? 返回值（tryDownloadUrl:268 catch(Exception) 全覆盖 + sha256Of try-catch），「异常致两个入口永久失灵」被推翻，仅剩边缘取消路径。【建议】仍建议 try/finally 做一致性加固。",
+  "sub": "s8"
+ },
+ {
+  "id": "M30",
+  "sev": "Medium",
+  "verdict": "初稿",
+  "loc": "ui/viewmodel/PlaylistViewModel.kt:115",
+  "title": "_errorMessage 无任何消费方，歌单 CRUD 失败只写状态、用户看不到提示",
+  "detail": "【建议】注入 showMessage 由 MainViewModel 转发，或在 init 增加 collect。",
+  "sub": "s8"
+ },
+ {
+  "id": "M31",
+  "sev": "Medium",
+  "verdict": "初稿",
+  "loc": "ui/viewmodel/NetworkMusicViewModel.kt:451",
+  "title": "网盘目录浏览/搜索无代数守卫与旧 Job 取消，旧请求覆盖新结果、旧 finally 提前清 loading",
+  "detail": "【建议】保存 dirJob/searchJob 并 cancel，finally 只在自己仍是最新请求时复位。",
+  "sub": "s8"
+ },
+ {
+  "id": "M32",
+  "sev": "Medium",
+  "verdict": "初稿",
+  "loc": "ui/viewmodel/MvSearchViewModel.kt:234",
+  "title": "preSearchNextMv 的协程 Job 未保存/取消，pendingNextResult 被旧预搜覆盖",
+  "detail": "【建议】preSearchJob + songId 代数校验，catch 中单独重抛取消。",
+  "sub": "s8"
+ },
+ {
+  "id": "M33",
+  "sev": "Medium",
+  "verdict": "初稿",
+  "loc": "ui/viewmodel/WeatherRadioViewModel.kt:72",
+  "title": "weatherSeenKeys 普通 MutableSet 被三个协程并发 clear/add，旧构建结果覆盖新 mood 队列",
+  "detail": "【建议】Mutex 串行化 + mood 代数守卫。",
+  "sub": "s8"
+ },
+ {
+  "id": "M34",
+  "sev": "Medium",
+  "verdict": "初稿",
+  "loc": "ui/viewmodel/*.kt 多处",
+  "title": "多处 catch(Exception)/runCatching 吞掉 CancellationException（MainViewModel.kt:3474、PlaylistImportViewModel.kt:295、PlayStatsViewModel.kt:71、PlayerViewModel.kt:171/311/454）",
+  "detail": "【影响】ViewModel 销毁或 Job 取消时任务不能及时终止、还继续回写 StateFlow；同文件 :3843/:1246 已有正确样板。【建议】所有 catch 前显式重抛。",
+  "sub": "s8"
+ },
+ {
+  "id": "M35",
+  "sev": "Medium",
+  "verdict": "初稿",
+  "loc": "ui/viewmodel/BackupViewModel.kt:60",
+  "title": "导出/导入/刷新列表在 viewModelScope(Main) 同步做文件与 MediaStore IO、Gson 大对象序列化",
+  "detail": "【建议】整个函数体包 withContext(Dispatchers.IO)，仅 StateFlow 回写留在 Main。",
+  "sub": "s8"
+ },
+ {
+  "id": "L21",
+  "sev": "Low",
+  "verdict": "初稿",
+  "loc": "ui/viewmodel/NetworkMusicViewModel.kt:155",
+  "title": "把解析后的完整直链写日志，百度 dlink / 临时签名等凭据随之落盘",
+  "detail": "【建议】只打 host/path 或 take(30)，绝不打 query。",
+  "sub": "s8"
+ },
+ {
+  "id": "C28",
+  "sev": "High",
+  "verdict": "CONFIRMED",
+  "loc": "ui/components/song/UnifiedSongRow.kt:799",
+  "title": "SongRowModeCompact 根 Box 既无 clickable 也无 focusable，onClick 形参完全未接线",
+  "detail": "【复核】MODE_COMPACT 唯一调用 PlaylistManagementScreen.kt:266 是活路径；focusRing/onFocusChanged 都不使节点可聚焦；:105 的 requestFocus() 失败被 runCatching 静默吞掉是铁证。TV 遥控器与手机触摸下均无法移除歌曲，无替代交互。【建议】补 .focusable().clickable { onClick() }（与 MODE_ROW:348 一致）。",
+  "sub": "s9"
+ },
+ {
+  "id": "C29",
+  "sev": "Medium",
+  "verdict": "PARTIALLY CORRECT",
+  "loc": "ui/components/MvPlaybackScreen.kt:189",
+  "title": "250ms 轮询在组件顶层写 3 个 mutableStateOf，4Hz 驱动整棵子树重组",
+  "detail": "【复核】KaraokeLyricsView 默认 showMvLyrics=false 不在组合中；AndroidView factory 不重建、update 幂等；4Hz 本就是进度条刷新所需且 isPlaying/duration 相等去重。【建议】把 positionMs 下沉到进度条/歌词局部作用域。",
+  "sub": "s9"
+ },
+ {
+  "id": "C30",
+  "sev": "Medium",
+  "verdict": "CONFIRMED",
+  "loc": "ui/components/KaraokeLyricsView.kt:99",
+  "title": "50ms 插值时钟每 20fps 写 State 触发全树重组，且 draw 块内每帧分配 + O(N) 线性找行",
+  "detail": "【复核】有 isPlaying 门控（暂停不跑）、remember(text) 缓存 TextLayoutResult、20fps 是平滑卡拉 OK 的产品需求、分配规模极小（rowCount 通常 1-3）。【建议】进度改 draw 阶段读取，indexOfFirst 换二分，rowLengths 按布局缓存。",
+  "sub": "s9"
+ },
+ {
+  "id": "C31",
+  "sev": "Low",
+  "verdict": "CONFIRMED",
+  "loc": "ui/components/LyricsView.kt:296",
+  "title": "歌词 LazyColumn 的 itemsIndexed 未提供稳定 key",
+  "detail": "【复核】单曲静态列表、item 内无 per-item remember/LaunchedEffect，KaraokeLineText 用 remember(text) 会正确重置；对比基线 UnifiedSongGrid 是死代码。【建议】key = { _, line -> line.time to line.text }。",
+  "sub": "s9"
+ },
+ {
+  "id": "M36",
+  "sev": "Medium",
+  "verdict": "初稿",
+  "loc": "ui/components/LyricsView.kt:154",
+  "title": "逐字高亮模式 50ms 写 lyricTickMs，20fps 重组 LyricsViewInner 含全部可见 item",
+  "detail": "【建议】derivedStateOf 派生当前行，逐字进度只在当前行 draw 阶段读取。",
+  "sub": "s9"
+ },
+ {
+  "id": "M37",
+  "sev": "Medium",
+  "verdict": "初稿",
+  "loc": "ui/components/VisualEqualizer.kt:298",
+  "title": "drawClassicalWave/drawNeonPulse/drawColorFlow 每次重绘新建 Path、FloatArray、List",
+  "detail": "【影响】约 30fps 持续 GC 抖动，与项目 draw 内零分配红线冲突。【建议】提升为 remember 复用成员，draw 内只 rewind/覆写。",
+  "sub": "s9"
+ },
+ {
+  "id": "M38",
+  "sev": "Medium",
+  "verdict": "初稿",
+  "loc": "ui/components/AppRoot.kt:118",
+  "title": "顶层整体收集 playerState 且把 1Hz progress 下传 VisualizerStage，与同文件 F-2/M7 下沉策略不一致",
+  "detail": "【建议】顶层只收集 currentSong，progress 改 lambda provider 或移到渲染器 draw 阶段。",
+  "sub": "s9"
+ },
+ {
+  "id": "M39",
+  "sev": "Medium",
+  "verdict": "初稿",
+  "loc": "ui/components/branches/SettingsBranch.kt:154",
+  "title": "分支顶层集中收集约 50 个 StateFlow（含高频下载进度），任一变化重组整棵设置页",
+  "detail": "【建议】高频流按分区拆到各自子 composable 内收集。",
+  "sub": "s9"
+ },
+ {
+  "id": "M40",
+  "sev": "Medium",
+  "verdict": "初稿",
+  "loc": "ui/components/KaraokePlaybackScreen.kt:185",
+  "title": "二维码 Bitmap 在组合期主线程同步生成（MvPlaybackScreen.kt:141 同型）",
+  "detail": "【建议】produceState + Dispatchers.Default，并限制 remoteControlUrl 长度。",
+  "sub": "s9"
+ },
+ {
+  "id": "L22",
+  "sev": "Low",
+  "verdict": "初稿",
+  "loc": "ui/components/CoverCarousel.kt:50",
+  "title": "组合期内直接写 State 并调 onAllFailed()（组合期副作用）",
+  "detail": "【建议】迁到 LaunchedEffect(Unit) / DisposableEffect。",
+  "sub": "s9"
+ },
+ {
+  "id": "L23",
+  "sev": "Low",
+  "verdict": "初稿",
+  "loc": "ui/components/LyricsView.kt:208",
+  "title": "组合期写 seekTargetLine State 并读取 listState.layoutInfo",
+  "detail": "【建议】改 snapshotFlow { layoutInfo } 或 derivedStateOf。",
+  "sub": "s9"
+ },
+ {
+  "id": "L24",
+  "sev": "Low",
+  "verdict": "初稿",
+  "loc": "ui/components/BaiduDirPickerDialog.kt:191",
+  "title": "目录 LazyColumn 的 items(dirs) 缺稳定 key",
+  "detail": "【建议】key = { it.serverFilename }。",
+  "sub": "s9"
+ },
+ {
+  "id": "C37",
+  "sev": "Medium",
+  "verdict": "PARTIALLY CORRECT",
+  "loc": "ui/screens/netdisk/NetdiskScreen.kt:260",
+  "title": "目录浏览丢弃 hasMore，超过一页的文件看不到且无触底加载",
+  "detail": "【复核】「永远不可见」被索引/全部播放兜底证伪：playAllNetdiskDir:545 优先用 BaiduFileIndexCache 分页构建的全量索引，第 1001+ 文件仍可经全部播放/搜索访问；影响限定为目录浏览页（回退 BFS 仍单页 1000 是残余缺口）。【建议】保存 hasMore/cursor，derivedStateOf 触底追加并保留 footer。",
+  "sub": "s10"
+ },
+ {
+  "id": "C38",
+  "sev": "High",
+  "verdict": "CONFIRMED",
+  "loc": "ui/screens/netdisk/NetdiskScreen.kt:191",
+  "title": "「全部加入队列」逐首调用 toggleQueueSong，会把已在队列中的歌曲移出",
+  "detail": "【复核】PlayerViewModel.kt:602-608 KDoc 点名此坑、:605 的 addSongsToQueue 是只增不删实现；全局 Grep 确认 addSongsToQueue 仅 LibraryBranch.kt:208/:226 两处批量入口，其余 toggle 调用均为单首切换语义正确，「唯独网盘搜索页漏改」成立。【建议】改 addSongsToQueue(searchResults)。",
+  "sub": "s10"
+ },
+ {
+  "id": "C39",
+  "sev": "Medium",
+  "verdict": "CONFIRMED",
+  "loc": "ui/screens/settings/PlaylistImportUploadDialog.kt:82",
+  "title": "server.start() 失败时仍渲染二维码与可点 URL，失败文案被 qrBitmap?.let 分支吞掉",
+  "detail": "【复核】qrBitmap/serverUrl 在 start() 之前无条件生成，失败时 :134 的 let 分支仍渲染、:172 的 status 不显示；但 :108/:190 仍可退出弹窗，属边缘触发。【建议】仅 started == true 时赋值 qrBitmap/serverUrl，用 started 驱动 UI 分支。",
+  "sub": "s10"
+ },
+ {
+  "id": "M41",
+  "sev": "Medium",
+  "verdict": "初稿",
+  "loc": "ui/screens/stats/PlayStatsScreen.kt:75",
+  "title": "统计数据的持久化读取与 Gson 反序列化发生在主线程（PlayStatsViewModel.kt:48 launch 未指定 dispatcher）",
+  "detail": "【建议】:51-60 整段包 withContext(Dispatchers.IO)。",
+  "sub": "s10"
+ },
+ {
+  "id": "M42",
+  "sev": "Medium",
+  "verdict": "初稿",
+  "loc": "ui/screens/library/JamendoTab.kt:104",
+  "title": "顶部筛选 Row 无 horizontalScroll 也无竖屏分支，末尾预置 tag 溢出屏幕且 D-Pad 不可达",
+  "detail": "【建议】照 RadioTab.kt:120 做竖屏分行 + tag 行横滑。",
+  "sub": "s10"
+ },
+ {
+  "id": "M43",
+  "sev": "Medium",
+  "verdict": "初稿",
+  "loc": "ui/screens/settings/PlaylistImportUploadDialog.kt:78",
+  "title": "DisposableEffect 主线程枚举网卡、360px 二维码像素循环与 Socket 绑定（BaiduAuthDialog.kt:83 同）",
+  "detail": "【建议】URL/二维码生成放 withContext(Dispatchers.Default)。",
+  "sub": "s10"
+ },
+ {
+  "id": "M44",
+  "sev": "Medium",
+  "verdict": "初稿",
+  "loc": "ui/screens/settings/LogsSettingsSection.kt:202",
+  "title": "最多 100 条日志用 forEach 一次性铺进非 lazy Column 且无 key，整块还是单个 LazyColumn item",
+  "detail": "【建议】改 LazyColumn/items(key = 时间戳+序号)。",
+  "sub": "s10"
+ },
+ {
+  "id": "M45",
+  "sev": "Medium",
+  "verdict": "初稿",
+  "loc": "ui/screens/stats/PlayStatsScreen.kt:291",
+  "title": "GenreBarChart 高度封顶 320dp，超出流派被裁且 TV 上无法滚动查看",
+  "detail": "【建议】Top-N 折叠或改可聚焦 LazyColumn。",
+  "sub": "s10"
+ },
+ {
+  "id": "L25",
+  "sev": "Low",
+  "verdict": "初稿",
+  "loc": "ui/screens/netdisk/NetdiskScreen.kt:180",
+  "title": "搜索与目录两个 LazyVerticalGrid 未传 state，when 分支切换时滚动位置与焦点全丢",
+  "detail": "【建议】顶层 rememberLazyGridState() 传入两个网格。",
+  "sub": "s10"
+ },
+ {
+  "id": "L26",
+  "sev": "Low",
+  "verdict": "初稿",
+  "loc": "ui/screens/settings/CacheSettingsSection.kt:97",
+  "title": "composition 内对 19 条登记项重复 filter 与求和",
+  "detail": "【建议】snapshot 按 group 预分组后 remember 缓存。",
+  "sub": "s10"
+ },
+ {
+  "id": "C40",
+  "sev": "Medium",
+  "verdict": "CONFIRMED",
+  "loc": "visualizer/renderers/MoleculeRenderer.kt:112",
+  "title": "bandRange 每帧 intArrayOf(2)，经 atomEnergy 每帧约 81~96 次堆分配",
+  "detail": "【复核】类红线 :48 未把它列为例外（对比 C43 显式列了）；每帧约 3KB 短命对象，属可测的分配纪律破口非崩溃/泄漏。【建议】pickNext():212 按 atomCount*2 预算区间写成成员数组。",
+  "sub": "s11"
+ },
+ {
+  "id": "M46",
+  "sev": "Medium",
+  "verdict": "初稿",
+  "loc": "visualizer/renderers/BatchThreeRenderers.kt:163,222",
+  "title": "RadarGridRenderer drawContent 每帧最多 29 个 Stroke，与同文件 :43 自述零分配红线冲突",
+  "detail": "【建议】固定宽度预建字段常量，动态宽度量化分桶复用。",
+  "sub": "s11"
+ },
+ {
+  "id": "M47",
+  "sev": "Medium",
+  "verdict": "初稿",
+  "loc": "visualizer/renderers/VintageTvRenderer.kt:625",
+  "title": "drawVignette 的 Brush 缓存键只记录 w，但渐变 center/radius 同时依赖 h",
+  "detail": "【影响】w 不变而 h 变化（分屏/横竖切换）时暗角错位且不自愈。【建议】缓存键改 (w,h)。",
+  "sub": "s11"
+ },
+ {
+  "id": "M48",
+  "sev": "Medium",
+  "verdict": "初稿",
+  "loc": "visualizer/renderers/VintageTvRenderer.kt:442",
+  "title": "rollBandH 仅在 onEnter 清零，尺寸变化路径只重建歌词位图，渐变缓存不失效",
+  "detail": "【建议】needRebuild 分支一并清 roll/rollBrush/vignette 缓存。",
+  "sub": "s11"
+ },
+ {
+  "id": "L27",
+  "sev": "Low",
+  "verdict": "初稿",
+  "loc": "visualizer/renderers/VintageTvRenderer.kt:412",
+  "title": "updateNoiseBuffer 生成的噪点坐标绑定旧 w/h，尺寸变化后至多 100ms 不重算",
+  "detail": "【建议】把 w/h 记入缓存键，变化当帧即触发重建。",
+  "sub": "s11"
+ },
+ {
+  "id": "L28",
+  "sev": "Low",
+  "verdict": "初稿",
+  "loc": "visualizer/renderers/VintageTvRenderer.kt:594,853",
+  "title": "每次重建歌词/OSD 位图都覆盖 ImageBitmap 引用，旧位图从不 recycle",
+  "detail": "【影响】与 SeasideRenderer.kt:2765、DesertSmokeRenderer.kt:253 的显式回收口径不一致。【建议】覆盖前 asAndroidBitmap().recycle()。",
+  "sub": "s11"
+ },
+ {
+  "id": "C41",
+  "sev": "Medium",
+  "verdict": "PARTIALLY CORRECT",
+  "loc": "visualizer/renderers/WorldGlobeRenderer.kt:337",
+  "title": "已 detach 的 WebView 用 View.post 延迟 destroy()，Runnable 可能永不执行",
+  "detail": "【复核】全仓仅两处 destroy、RendererSwapper.release 只调 onExit、舞台级 onDispose 无 destroy 属实，是真实单点脆弱性；但 per-view HandlerActionQueue 是 API 24+ 实现，API≤23（含 minSdk 22 基准机）走 ViewRootImpl.sRunQueues，每次 traversal 都会执行；「onDispose 时已 detach」前提在仓内未证实，也无真机 PSS 验证。【建议】改用类内已有 handler.post 并在 onExit 幂等兜底，catch 加日志。",
+  "sub": "s12"
+ },
+ {
+  "id": "C44",
+  "sev": "Low",
+  "verdict": "PARTIALLY CORRECT",
+  "loc": "visualizer/renderers/WorldGlobeRenderer.kt:386",
+  "title": "ema() 与 sendAudio() 对 NaN 无防护，Gson 拒 NaN 使 100ms tick 链停摆",
+  "detail": "【复核】代码层定位准（gson.toJson 在 evalJs 的 try 之前求值）；但 NaN 前提被 SpectrumAnalyzer.analyze:208（NaN 比较恒 false）+ emitSilence + SpectrumRepository.boost 三层兜底证伪；后果也低估（实为主线程崩溃而非静默停摆）。【建议】见 N10 的 tickRunnable try/finally。",
+  "sub": "s12"
+ },
+ {
+  "id": "M49",
+  "sev": "Medium",
+  "verdict": "初稿",
+  "loc": "visualizer/renderers/LyricsDotMatrixRenderer.kt:763",
+  "title": "点阵坐标在采样时烘成绝对像素并跨帧保存，尺寸变化后不重采样",
+  "detail": "【影响】横竖切换后文字偏出屏幕，直到下一句歌词才恢复。【建议】记录采样时 (w,h)，帧头变化强制 resync。",
+  "sub": "s12"
+ },
+ {
+  "id": "M50",
+  "sev": "Medium",
+  "verdict": "初稿",
+  "loc": "visualizer/renderers/TripodFogRenderer.kt:2404",
+  "title": "drawLinPoly 每帧指令重放为每条渐变指令新建 LinearGradient（约 6 个/帧）",
+  "detail": "【建议】量化坐标 + 色标桶作缓存键复用 Shader。",
+  "sub": "s12"
+ },
+ {
+  "id": "L29",
+  "sev": "Low",
+  "verdict": "初稿",
+  "loc": "visualizer/renderers/WorldGlobeRenderer.kt:207",
+  "title": "WebViewClient 只接管资产域请求，未覆写 shouldOverrideUrlLoading 且 allowFileAccess=true",
+  "detail": "【建议】拒绝非 ASSET_HOST（含 file://）并对非资产域返回 emptyBody。",
+  "sub": "s12"
+ },
+ {
+  "id": "L30",
+  "sev": "Low",
+  "verdict": "初稿",
+  "loc": "visualizer/renderers/Caravan.kt:117",
+  "title": "DesertCaravanTable.build 的 while(t<4200) 无迭代上限，也不保证 t 单调递增",
+  "detail": "【影响】参数被改写为负增量时可能死循环 + 两个 ArrayList 无界增长，且是首帧同步路径。【建议】加增量下界守卫与总迭代上限。",
+  "sub": "s12"
+ },
+ {
+  "id": "C42",
+  "sev": "Medium",
+  "verdict": "PARTIALLY CORRECT",
+  "loc": "visualizer/renderers/EcoGlobeRenderer.kt:260",
+  "title": "WebView 销毁只挂在已 detach 的 View.post 上，onExit 无兜底",
+  "detail": "【复核】与 C41 完全同款，:255-257 注释同样写「view 可能仍挂在组合销毁流程中」；机制纠正、API 分级、兜底核查与 C41 逐条相同。【建议】同 C41。",
+  "sub": "s13"
+ },
+ {
+  "id": "M51",
+  "sev": "Medium",
+  "verdict": "初稿",
+  "loc": "visualizer/renderers/EcoGlobeRenderer.kt:130",
+  "title": "WebViewClient 对非资产域 return null 且未覆写 shouldOverrideUrlLoading，javaScriptEnabled=true",
+  "detail": "【建议】非资产域返回 emptyBody，只放行 ASSET_BASE 前缀，assetName 剔除 .. 段。",
+  "sub": "s13"
+ },
+ {
+  "id": "M52",
+  "sev": "Medium",
+  "verdict": "初稿",
+  "loc": "visualizer/renderers/BasicRenderers.kt:173",
+  "title": "CircularRingRenderer.drawContent 每帧构造 2-3 个 Stroke",
+  "detail": "【建议】恒定宽度提为字段，动态宽度量化分档预建 Array<Stroke>。",
+  "sub": "s13"
+ },
+ {
+  "id": "M53",
+  "sev": "Medium",
+  "verdict": "初稿",
+  "loc": "visualizer/renderers/SnowCedarRenderer.kt:320",
+  "title": "音频 NaN 无入口兜底，会永久污染风场/雪粒坐标且切画幅前不自愈",
+  "detail": "【影响】粒子 x/y 写成 NaN 后重生判据恒 false，雪景整次进入期间损坏。【建议】:320 前对三个音频量 isFinite 兜底。",
+  "sub": "s13"
+ },
+ {
+  "id": "L31",
+  "sev": "Low",
+  "verdict": "初稿",
+  "loc": "visualizer/renderers/AdvancedRenderers.kt:607",
+  "title": "MatrixRainRenderer 用绝对 frame.timeMs 当数字翻转节拍，暂停恢复会整屏跳变",
+  "detail": "【建议】改用 fx.dt 累加的本地 tickAcc（同文件 LiquidGridRenderer 已如此）。",
+  "sub": "s13"
+ },
+ {
+  "id": "L32",
+  "sev": "Low",
+  "verdict": "初稿",
+  "loc": "visualizer/renderers/MoonAudio.kt:168",
+  "title": "clampUnit 不拦截 NaN，NaN 直接穿透七个幅度函数",
+  "detail": "【建议】首行加 if (v.isNaN()) return 0.0。",
+  "sub": "s13"
+ },
+ {
+  "id": "C46",
+  "sev": "High",
+  "verdict": "PARTIALLY CORRECT",
+  "loc": "visualizer/photo/transitions/IrisTransitions.kt:43",
+  "title": "Iris/Wipe 转场使用 clipPath，违反 minSdk 22 的 hwui 红线且无任何 SDK 降级",
+  "detail": "【复核】(a) 4 处确为 Compose DrawScope.clipPath（IrisTransitions.kt:43/:136、IrisP1Transitions.kt:65/:271）；(b) effective() 仅 LIQUIFY 有 degradeTo、available() 无 SDK 参数、全链条无 clip 类白名单、全仓无 sdkInt<26 的 clipPath 分支；(c) Offscreen 只在主题交叉淡入期开启、try/catch 拦不住 native SIGSEGV；(d) 红线取证语境是 nativeCanvas / Modifier.clip 的 hwui Region 段错误，仓内无 DrawScope.clipPath 触发同一崩溃的直接取证，且 photo-spectrum-effect-plan.md:162 反把 clipPath 标为「全版本」⇒ 降一级，但「红线违规 + 零降级 + 零门禁」确凿。【建议】sdkInt<26 把 IRIS_*/WIPE_* 降级为 CROSSFADE 或改矩形裁剪/遮罩位图表达，并补门禁。",
+  "sub": "s14"
+ },
+ {
+  "id": "C47",
+  "sev": "High",
+  "verdict": "CONFIRMED",
+  "loc": "visualizer/photo/PhotoWallController.kt:538",
+  "title": "固定转场档直接返回用户指定枚举值，未过 available()，可导致照片墙永久黑屏",
+  "detail": "【复核】随机档走 available()、固定档只过 effective()；get() 对未实现 id 返回 null → PhotoRenderer.kt:115 `bound ?: return` 每帧直接返回，连底图 a 都不画，且 lastTransitionId 已写入不再重试。UI 已用 available() 挡住，仅备份导入的 33 个「合法但未实现」枚举名可触发。【建议】固定档也过 available()，未命中回落 Default；PhotoRenderer 对 bound==null 回落默认实现。",
+  "sub": "s14"
+ },
+ {
+  "id": "C48",
+  "sev": "Medium",
+  "verdict": "CONFIRMED",
+  "loc": "visualizer/photo/PhotoWallController.kt:385",
+  "title": "扫描进行中发生的设置变更被 needScan 置起却无人消费",
+  "detail": "【复核】needScan 唯一消费者是 onThemeEntered:312；rescan()/onExternalStorageChanged() 先 cancel 再重启不受影响；旧扫描结束后新设置静默失效直到切主题或重新扫描。【建议】launch 末尾（含 finally）补 if (needScan) { needScan=false; startScan() }。",
+  "sub": "s14"
+ },
+ {
+  "id": "L33",
+  "sev": "Low",
+  "verdict": "初稿",
+  "loc": "visualizer/photo/PhotoWallController.kt:130",
+  "title": "ownScope 无 CoroutineExceptionHandler 且 startScan 的 launch 无 try/catch，逃逸异常走默认 handler 崩应用",
+  "detail": "【建议】加记录日志的 handler，整段扫描 try/catch，失败时恢复 needScan。",
+  "sub": "s14"
+ },
+ {
+  "id": "C49",
+  "sev": "High",
+  "verdict": "CONFIRMED",
+  "loc": "visualizer/renderers/lyricsStage/LyricsSubRenderer.kt:36",
+  "title": "onLineChanged 默认直接调 onEnter，把三个子渲染器的换行离场状态机全量复位",
+  "detail": "【复核】全仓唯一活调用点 LyricsStageRenderer.kt:139 先于 draw；覆写者仅 DotMatrixSubRenderer:70、FullViewSubRenderer:348（KDoc 自认同款病根）；GlowLine/TiltPulse/Partita 的 startExit 与离场分支永不执行。机制精度：尺寸/画质变化仍会命中 needRebuild → startExit，故限定为换行路径。【建议】三个子渲染器覆写 onLineChanged 为空实现，或拆「首次进入 / 换行通知」两个回调。",
+  "sub": "s15"
+ },
+ {
+  "id": "C50",
+  "sev": "Medium",
+  "verdict": "PARTIALLY CORRECT",
+  "loc": "visualizer/renderers/lyricsStage/GlowLineSubRenderer.kt:1318",
+  "title": "换行/切歌状态键只取 currentIndex + line.startTime，不含 lyrics.lines 身份",
+  "detail": "【复核】判据确不含歌曲身份、切歌不重建渲染器、无别处强制复位；但 LyricsStageRenderer:137 在 index 变化时仍触发 onLineChanged → onEnter 清空版面，恰好兜住大部分切歌；仅「切歌前后 index 相同（都 0）」时沿用旧版面。【建议】把 lines 引用或 songId 纳入判据，或 applyLyrics 检测 List 换身份时强制复位。",
+  "sub": "s15"
+ },
+ {
+  "id": "C51",
+  "sev": "Low",
+  "verdict": "CONFIRMED",
+  "loc": "visualizer/renderers/lyricsStage/tilt/SentenceLayout.kt:529",
+  "title": "secondarySplit 用 UTF-16 算术中点 substring，会切断 emoji 代理对 / 组合字符",
+  "detail": "【复核】上游 JS（Folia）同款、KDoc 明写「保留伪随机中点兜底」；歌词以 CJK/拉丁为主，仅当句子数不足 targetCount 且无合适词间隙时触发。【建议】切点按 code point 对齐（offsetByCodePoints / BreakIterator）。",
+  "sub": "s15"
+ },
+ {
+  "id": "C52",
+  "sev": "Low",
+  "verdict": "PARTIALLY CORRECT",
+  "loc": "visualizer/renderers/lyricsStage/GraphemeSplitter.kt:85",
+  "title": "ICU 反射路径的兜底 text.map { it.toString() } 是逐 UTF-16 码元切分",
+  "detail": "【复核】行号口径差（:85 是结果为空的防御分支、:89-90 才是异常分支）；主降级路径安全：resolveIcu() 把 Class.forName/getMethod/invoke 全包 catch→null 后走 java.text.BreakIterator（正确处理代理对），minSdk 22 无 android.icu 根本进不了 splitWithIcu，只有 API24+ 实例已建后反射再抛才落到逐码元。【建议】兜底改用 fallback 等价逻辑，缓存 Method。",
+  "sub": "s15"
+ },
+ {
+  "id": "M54",
+  "sev": "Medium",
+  "verdict": "初稿",
+  "loc": "visualizer/renderers/lyricsStage/FullViewSubRenderer.kt:392",
+  "title": "整曲版面只在 lyrics.lines 引用变化时重建，画布尺寸 / density 变化不触发 rebuildArticle",
+  "detail": "【影响】TV 换分辨率或手机旋转后相机取景与版面不匹配，活动行被裁。【建议】把 w/h/density 纳入重建判据。",
+  "sub": "s15"
+ },
+ {
+  "id": "M55",
+  "sev": "Medium",
+  "verdict": "初稿",
+  "loc": "visualizer/renderers/lyricsStage/LyricsStagePayload.kt:62",
+  "title": "buildLine 未规整 endTime >= startTime，相邻行时间戳相同或倒序时逐字揭示被提前判完成",
+  "detail": "【影响】fume 子模式整行一次性全亮。【建议】endTime = maxOf(endTimeMs, line.time)（无逐词时间戳时至少 start+0.05）。",
+  "sub": "s15"
+ },
+ {
+  "id": "L34",
+  "sev": "Low",
+  "verdict": "初稿",
+  "loc": "visualizer/renderers/lyricsStage/PartitaSubRenderer.kt:480",
+  "title": "drawPartitaGroup 每帧调 lineContainerMotion 新建对象，违反本文件 draw 零分配",
+  "detail": "【建议】在 buildState 里按 profile 算一次存入 State。",
+  "sub": "s15"
+ },
+ {
+  "id": "N01",
+  "sev": "High",
+  "verdict": "新增",
+  "loc": "ui/viewmodel/PlayerViewModel.kt:494-497",
+  "title": "tryReplaceByReSearch 回写替换产物与 C32 同族缺 id 比对",
+  "detail": "只有代数闸门，回写仍按 targetIndex；跨源/同源重搜期间队列增删移动会把 replacement 落到已换歌的同一 index，队列缩短时 playQueue 还会带越界索引。【建议】与 C32 一并加 songId 校验。",
+  "sub": "new"
+ },
+ {
+  "id": "N02",
+  "sev": "Medium",
+  "verdict": "新增",
+  "loc": "util/BackupFileUtils.kt:78-116",
+  "title": "备份「写入不限量、读取硬限 10MB」自相矛盾",
+  "detail": "export() 直接 out.write(json.toByteArray()) 无大小校验，BackupTransferServer 却允许 32MB 上传；恢复/下载统一走 BackupFileUtils.read → LocalFilePicker.readText(MAX_BACKUP_BYTES=10MB)。App 自己导出的大备份或扫码上传的 11~32MB 备份会成功落盘，却永远恢复/下载失败且报「文件过大」。【建议】统一上限并在导出时提示。",
+  "sub": "new"
+ },
+ {
+  "id": "N03",
+  "sev": "Medium",
+  "verdict": "新增",
+  "loc": "player/PlayerManager.kt:1364-1376",
+  "title": "release() 未调用 sleepTimer.cancel()",
+  "detail": "与 C09 未置空回调叠加：服务/Activity 销毁后定时器仍在运行，到期走 onExpired → pause() + onSleepTimerExpired?.invoke()，操作 player 已置 null、Service 已 onDestroy 的实例。【建议】release() 中取消定时器。",
+  "sub": "new"
+ },
+ {
+  "id": "N04",
+  "sev": "Medium",
+  "verdict": "新增",
+  "loc": "player/PlayerManager.kt:556-571",
+  "title": "setPlayer() 覆盖旧 player 时只 removeListener 与 removeCallbacks，不 release 旧 ExoPlayer",
+  "detail": "配合 PlaybackService.kt:269 每次 onCreate 无条件 new player，服务重建/重复注入时旧实例缺对称释放（与 C10 同源、独立调用路径）。【建议】覆盖前 release 旧实例。",
+  "sub": "new"
+ },
+ {
+  "id": "N05",
+  "sev": "Medium",
+  "verdict": "新增",
+  "loc": "backend/network/baidu/BaiduPanApi.kt:351",
+  "title": "executeWithErrnoOnce 的 HTTP 非 2xx 分支同款完整未脱敏响应体写日志",
+  "detail": "与 C20 同一函数、同一根因的漏网点（executeOnce:306 已用 take(200) 形成对照）。【建议】与 C20 一并整改。",
+  "sub": "new"
+ },
+ {
+  "id": "N06",
+  "sev": "Medium",
+  "verdict": "新增",
+  "loc": "backend/export/SongExporter.kt:237-249",
+  "title": "shouldOverwrite 与增量过滤全部只按文件长度判定，无 hash/mtime/内容比对",
+  "detail": "同名同大小但内容不同的目标文件会被永久跳过，与 C15「不该删却删了」互补的「该覆盖却没覆盖」。【建议】补内容指纹或 mtime 判据。",
+  "sub": "new"
+ },
+ {
+  "id": "N07",
+  "sev": "Medium",
+  "verdict": "新增",
+  "loc": "ui/screens/SettingsScreen.kt:796-802",
+  "title": "http(s) scheme 校验是 UI 对话框层唯一的 URL 校验",
+  "detail": "MainViewModel.refreshLxScripts() 用 DataStore 已登记 URL 重下、以及 installText（单测直打）都绕过；已登记条目可写入任意 scheme 的 URL，扩大 C21 的入口链攻击面。【建议】把校验下沉到 LxScriptRepo.installFromUrl/installText。",
+  "sub": "new"
+ },
+ {
+  "id": "N08",
+  "sev": "Medium",
+  "verdict": "新增",
+  "loc": "ui/viewmodel/SearchViewModel.kt:403",
+  "title": "shuffleNetworkSearch 无条件写 _networkSearchKeyword，会回滚用户新输入的关键词",
+  "detail": "C33 只描述「旧词结果覆盖新词」，未覆盖关键词状态本身被覆盖 ⇒ UI 呈现「新输入框 + 旧关键词 + 旧结果」三重错位。【建议】与 networkSearchGeneration 一并加守卫。",
+  "sub": "new"
+ },
+ {
+  "id": "N09",
+  "sev": "Medium",
+  "verdict": "新增",
+  "loc": "QrCodeGenerator.generateQrBitmap 共 7 处",
+  "title": "组合/主线程同步生成二维码的整改清单不完整",
+  "detail": "除 TextInputDialog.kt:177 已修外，还有 BackupTransferDialog.kt:83、ModelTransferDialog.kt:83、ServerConnectScreen.kt:177、PlaylistImportUploadDialog.kt:82、BaiduAuthDialog.kt:84、MvPlaybackScreen.kt:142、KaraokePlaybackScreen.kt:186。【建议】按同一 Dispatchers.Default 模板统一整改，否则修完 3 处仍留 4 处同类。",
+  "sub": "new"
+ },
+ {
+  "id": "N10",
+  "sev": "Medium",
+  "verdict": "新增",
+  "loc": "WorldGlobeRenderer.kt:354-360 / EcoGlobeRenderer.kt:285-291",
+  "title": "tickRunnable.run() 缺少 try/finally，是比 NaN 更一般、更易触发的真实缺口",
+  "detail": "两处都把 handler.postDelayed(this, TICK_MS) 置于 tick() 之后且整段无保护；spectrumFrame()/evalJs()/pollFps() 各自有 catch，唯独最外层 run() 没有。tick() 内任意未捕获异常（WorldNetwork 计算、gson.toJson 失败）都会永久掐断 100ms 音频桥且零日志。【建议】把 postDelayed 移入 finally。",
+  "sub": "new"
+ },
+ {
+  "id": "N11",
+  "sev": "Medium",
+  "verdict": "新增",
+  "loc": "visualizer/photo/transitions/（门禁覆盖）",
+  "title": "「全项目禁用 clipPath」口号下唯一无人守的目录",
+  "detail": "现有源码扫描门都按单文件（SeasideTest.kt:740、MoonlitSkySeaTest.kt:329、BirdsFlockRenderSourceGateTest.kt:97），PerfBudgetContractTest 虽扫 renderers/+photo/ 但判据是零分配，PhotoRenderContractScanTest 无 clipPath 判据 ⇒ 正是 C46 长期未修的直接原因。【建议】加全仓 clipPath 负向门禁。",
+  "sub": "new"
+ },
+ {
+  "id": "N12",
+  "sev": "Medium",
+  "verdict": "新增",
+  "loc": "visualizer/VisualizerRendererFactory.kt:88,123",
+  "title": "View 型渲染器的 WebView 构造点未被 Context 泄漏门禁覆盖",
+  "detail": "MoonlitRenderer 明确改传 applicationContext（有 MoonlitContextLeakTest 扫字段赋值），但 WorldGlobeRenderer/EcoGlobeRenderer 的 createView() 里 WebView(context) 仍绑定 Activity context；C41/C42 的 destroy 未执行场景下会放大后果。【建议】纳入同一门禁扫描范围（是否改 applicationContext 需先验证主题/资源兼容性）。",
+  "sub": "new"
+ },
+ {
+  "id": "N13",
+  "sev": "Low",
+  "verdict": "新增",
+  "loc": "lyrics/LyricsPersistentCache.kt:119-124",
+  "title": "clear() 只清当前实例内存索引，另一实例后续 saveIndex 会写回幽灵索引",
+  "detail": "「设置页清空歌词缓存」在双实例场景下可能不彻底，是 C24 的追加后果。【建议】随 C24 一并改单例。",
+  "sub": "new"
+ },
+ {
+  "id": "N14",
+  "sev": "Low",
+  "verdict": "新增",
+  "loc": "ui/components/song/UnifiedSongRow.kt:695-781",
+  "title": "SongRowModeCard 与 C28 同款未接线，但其入口 UnifiedSongGrid 全项目零调用",
+  "detail": "属死代码，暂无实际影响。【建议】清理死代码或一并修复，避免后续启用时踩坑。",
+  "sub": "new"
+ },
+ {
+  "id": "N15",
+  "sev": "Low",
+  "verdict": "新增",
+  "loc": "visualizer/renderers/DesertSmokeBakes.kt:320-321",
+  "title": "烘焙期 android.graphics.Canvas.clipPath 是 clipPath 红线的另一处漏网",
+  "detail": "非逐帧 hwui 路径，不必然崩，但说明该红线在仓内从未做全仓扫描。【建议】随 N11 的门禁一并核验。",
+  "sub": "new"
+ }
+]

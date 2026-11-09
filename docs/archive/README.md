@@ -733,6 +733,33 @@
 > 引用改写 **2 处 / 2 文件**：`docs/archive/e55-cityscape-port-plan.md` ×1（头部 ⭐ 行：路径改归档路径 + 11-09 追记）、`docs/archive/README.md` 第二十二轮表格 ② 列 ×1（活方案 → 同批归档）。📌 计数注后追加 1 段状态补记（本轮之历史记录佐证，非引用改写）。裸文件名 0 处。死链 **0 新增**（终检：全仓 `docs/tendrils-visualizer-plan` 旧路径引用为 0，除本节自引说明外）。
 > ⚠️ 未进 `CHANGELOG.md`：本轮为**纯文档移动 + 所有者裁决**，按本仓规矩（文档改动不入 changelog）不登记；无代码变更。电视探针已 force-stop，真机已恢复原状。
 
+## 第二十四轮（2026-11-09 定稿 / 2026-11-10 归档，1 + 1 组）—— 全库代码审查 154 项落地并出货 v2.39.16
+
+| 文档 / 目录 | 判定依据 | 说明 |
+|---|---|---|
+| `NASMusicTV-代码审查报告-2026-11-09.html` | ✅ 审查闭环：154 条全部落地，v2.39.16 已出货 | 终稿（自审阶段修掉统计口径 / 路径断行 / 版式共 6 处缺陷，见 `verification/code-review-2026-11-09/report-tools/`） |
+| `verification/code-review-2026-11-09/` | 同一批的**证据与可复现材料** | 30 个落地补丁 + 5 个报告工具 + 6 张自审截图 + 工单 JSON + 索引 `README.md` |
+
+**为什么归档**：报告自 2026-11-09 21:57 定稿后未再变更，154 条已全部落成代码并通过编译 / 单测 / lint 三关。
+`logs_temp/` 是 gitignored 目录，其中的工单 JSON 与补丁脚本是**唯一可复现证据** ⇒ 沿用
+2026-09-20「验证证据迁移」先例：**复制**入版本控制，原件留在 `logs_temp/` 原样不动（未 `mv`、未改名）。
+
+**落地摘要**：源码 135 文件改动；新增门禁 `PhotoTransitionClipGateTest`（7 用例）与
+`LyricsLineChangeExitTest`；`testDebugUnitTest` 2906 用例全绿；交付
+`output/apk/NASMusicTV-release-v2-39-16.apk`（44,413,340 字节，SHA256 `4e5d3de0e125…`）；
+本地提交 `de2f233`（未 push）。
+
+**三条「审查建议没有照做」**（复盘重点，详见该目录 `README.md` §2 与 `technical-overview.md` §10.374）：
+
+1. **M50 否决** —— `drawLinPoly` 复用 shader + `setLocalMatrix` 与 `TripodFillMechanismGateTest` G2
+   的实机红线同路（创维 E46 / API 22，多顶点凹/自交路径 + 矩阵变换，80 帧 0 像素）⇒ 保持逐帧新建；
+2. **M55 收窄** —— 行时长只在 `endTime <= startTime` 时兜底，否则 50ms 真实短行会被抬出 `micro` 档；
+3. **M16 采纳但改测试** —— B 站直链白名单上线后，原用 `example.com` 的造数全部失效 ⇒
+   换真实 CDN 主机 + 补「外部域 / 内网地址」两条负样本。
+
+⚠️ **未新增 `CHANGELOG.md` 条目**：本轮为纯文档/证据归档；代码改动已随 v2.39.16 记入 CHANGELOG。
+引用改写 1 处（`docs/technical-overview.md` §10.374 增补归档路径），报告 HTML 内 0 处。
+
 ## 回滚
 
 归档为**纯移动**（`git mv`，历史保留），未删除任何内容。整体回滚：
