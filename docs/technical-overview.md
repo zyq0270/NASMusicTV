@@ -25799,3 +25799,66 @@ Kotlin 里「换行后以 `+` 开头的行」是**一条独立语句**（一元�
 - 改：`scripts/e52/sky_sim.py`（标注模拟器仍按原 ue 近似，不代表最终屏幕覆盖）
 - 改：`CHANGELOG.md` / `app/build.gradle.kts`（按所有者裁定，两轮同属 v2.39.15 / versionCode 200，不单独升版本）
 - ⛔ 本节涉及的 E52 代码**只在私有分支** `feat/e51-private`（上游 Slow Roads 无授权 ⇒ 不外发）
+
+
+### 10.369 v2.39.15（同版本内第三轮）—— 丘陵系列「云层还是没有拉到地平线」：根因 = 云采样的 **mipmap LOD 爆炸**（2026-11-09）
+
+#### 一、现象
+
+手机复测 3 张（丘陵·夏季·晴朗·平坦 / 普通 / 日出·简单）：云带下沿仍有**一条水平硬线**，
+下面一整条纯浅青 / 纯粉紫的色板一直延伸到地形。白板没了、雾色板没了，但「云」依旧没铺到地平线。
+
+#### 二、逐个排除（这一轮先把上一轮的改动洗清了）
+
+| 嫌疑 | 数值判据（`logs_temp/sky_seam_2026-11-09/diagnose_hills_band.py`） | 结论 |
+|---|---|---|
+| 雾 `fogFactor` | `uFogNear=3245` 对应屏幕 **y≈120.6**；y=130 才 0.03、y=140 才 0.58 | ❌ 不是它 |
+| 云淡出 `cloudFade` | `fadeStart=15197` 对应 **y≈140.7**；y≤140 全程 = 1.00 | ❌ 不是它 |
+| 云图本身没有云 | `clouds_01b.png` 全图 alpha 均值 0.593、`>0.1` 占 96.5%，10 个纵向分段均匀 | ❌ 不是它 |
+| `skyCol` 退化 | `dist = max(0, 1-sqrt(vX²+vY²))`，`vUv.y≥0.7` 即 `dist=0` ⇒ **y≈65.4 px 起恒为纯 `farCol`** | ⚠️ 是「色板的颜色」，但不是云消失的原因 |
+
+#### 三、真正的根因
+
+`HighwayTextures.upload()` 对云图做了 `glGenerateMipmap` + `GL_LINEAR_MIPMAP_LINEAR`。
+上游 D1068 的云采样 uv 取**世界坐标** `vUUv.y = (wPos.z + uTime) / 7000`，而外扩 8·ue 后
+`wPos.z` 随屏幕 y 逼近地平线而发散：
+
+| 屏幕 y | z | `dz/dy` | `d(vUUv.y)/dy` | 256² 贴图的 LOD |
+|---|---|---|---|---|
+| 100 | 1942 | 37 | 0.0053 | ≈0.4（清晰） |
+| 120 | 3380 | 92 | 0.0131 | ≈1.8 |
+| 130 | 5433 | 205 | 0.0293 | ≈2.9（开始糊） |
+| 140 | 14134 | 1259 | 0.180 | ≈5.5 |
+| 145 | 74008 | 11975 | 1.71 | ≈8.8（≥ 最粗 mip，1×1 平均色） |
+
+⇒ 从某个屏幕 y 起，GPU 取到的 mip 层把云纹**平均成常量**；`diffuseColor = mix(skyCol, cloudCol, cloudCol.a)`
+里的 `skyCol` 又早已是纯 `farCol` ⇒ 一整条纯色板。
+这也解释了硬线为什么是水平的：LOD 是屏幕纵向导数的函数，跳变沿水平线发生。
+
+#### 四、修法：远景云改用「屏幕线性」坐标
+
+| 改动 | 内容 |
+|---|---|
+| `SKY_VS` | **不改**（⛔ 曾用 NDC varying，但外扩四边形有顶点在相机后方 ⇒ 近平面裁剪会改写 varying 的线性插值，裁剪边缘正靠近地平线，已弃用） |
+| `SKY_FS` | 声明 `uniform vec2 uScreenSize`、`uniform float uTime`（与 VS 同名同类型，linker 合并 ⇒ 沿用现有 `glUniform1f(uSkyTime, t)`）；远景云坐标一律取 `gl_FragCoord`（GL 内置窗口坐标，零插值误差） |
+| `HighwayGlScene` | 新增 `uSkyScreenSize` location，`drawSky` 逐帧 `glUniform2f(uSkyScreenSize, viewportWidth, viewportHeight)` |
+| 远景云 | `screenDown = 1 - gl_FragCoord.y / uScreenSize.y`（= 屏幕归一化纵坐标）、`screenX = gl_FragCoord.x / uScreenSize.x * 2 - 1`；`farBand = smoothstep(0.10, 0.24, screenDown) * uHasClouds`；`farUv = vec2(screenX*0.42 + uTime/7000, 0.08 + 2.0*screenDown)`，双层 `max` 采样后按 `farBand*0.92` 混进 `diffuseColor.rgb` / `.a` |
+| 为什么有效 | `d(farUv.y)/d(px) = 2/H ≈ 0.0037` ⇒ `0.95 texel/px` ⇒ **LOD 恒为 0**，云纹频率不受地平线发散影响；`farBand` 从 y≈54 平滑过渡到 y≈130 完全接管，近处云纹逐位不变 |
+| 地平线收口 | 接管后的云纹再走原有的 `cloudFade`（y≈140.7 起）与 `fogFactor`（y≈130 起）⇒ 云 → 雾 → 地形连续，无底色层 |
+
+⛔ 没有改上游 D1064 / D1068 / D1076 / D1080 任何一个字（13 个 GLSL 常量逐字门禁不变），
+新增代码全部落在自写的 SKY_VS / SKY_FS 段落里。
+
+#### 五、门禁与文件清单
+
+`HighwaySkyBlendGateTest` 新增 ⑧：源码扫描「不许再出现 `vSkyNdc`」、`uniform vec2 uScreenSize` / `uniform float uTime`、
+`gl_FragCoord` 的 `screenDown` / `screenX`、`smoothstep(0.10, 0.24, ...)`、`farUv` 屏幕线性、
+`drawSky` 上传 `uSkyScreenSize`、
+`diffuseColor.rgb = mix(..., farTint, ...)`（防止「只算不写」）。
+
+- 改：`scripts/e52/e52_gen_glsl_kotlin.mjs`（SKY_FS）⇒ 重跑生成器刷新 `HighwayGlsl.kt`
+- 改：`HighwayGlScene.kt`（`uSkyScreenSize` location + 逐帧上传）
+- 改：`HighwaySkyBlendGateTest.kt`（⑧ 新增）
+- 改：`CHANGELOG.md` / `docs/technical-overview.md`（本节）
+- 未改：`HighwayGlScene.kt` / `HighwaySkyFog.kt` / 版本号 —— 按所有者裁定三轮同属 **v2.39.15 / versionCode 200**
+- ⛔ 本节涉及的 E52 代码**只在私有分支** `feat/e51-private`（上游 Slow Roads 无授权 ⇒ 不外发）
