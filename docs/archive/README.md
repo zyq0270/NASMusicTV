@@ -858,6 +858,37 @@
 **新增门禁**：`scripts/check_doc_parity.py` + `DocParityGateTest`
 ⇒ 逐字节比对两分支 `docs/` 树，除白名单外有任何差异即判红；CI 无私有分支 ref ⇒ 退出码 2 ⇒ 跳过。
 
+## 第二十七轮（2026-11-10）—— 覆盖层挂载脚本迁进**仓库**（正文入库 + 本机只留一枚壳）
+
+**所有者要求**（2026-11-10）：「那这个文档：`~/.gradle/init.d/10-nasmusic-e51-local.gradle`，
+能放在项目目录内吗？这样好管理」
+
+**机制约束**：Gradle **只**自动加载 `$GRADLE_USER_HOME/init.d/*.gradle`，仓库里的脚本文件不会被自动扫到
+⇒「完全不要壳」在 Gradle 机制下做不到 ⇒ 折中：**正文进仓库**，本机只留一枚**自动生成**的壳。
+
+**新的三件套**（详见 `docs/technical-overview.md` §10.383）：
+
+| 文件 | 位置 | 作用 |
+|---|---|---|
+| `scripts/local-e51-overlay.gradle` | **仓库内（入库）** | 挂载正文：覆盖层 → app 模块 main 源集 + Kotlin 任务层二选一排除 |
+| `scripts/install_local_init_shim.py` | **仓库内（入库）** | 幂等装 / 刷 / 校验壳（`--check` / `--print` / `--uninstall` / `--force`） |
+| `10-nasmusic-e51-local.gradle` | `~/.gradle/init.d/`（**仅本机**） | 壳：按**本次构建的根项目目录**找到正文并 `apply from:` |
+
+⭐ 壳里**不含绝对路径**（旧版写死了 `D:/hxzhang/MyGithubSoftware/NasAudio/NASMusicTV/app/src/e51-overlay`）
+⇒ 仓库改名 / 换盘 / 换克隆都**无须重装**；正文改了也**无须重装**（壳是运行时按路径找的）。
+安装器覆盖掉旧的手写 init 文件前会自动备份成 `.bak`。
+
+**正文的行为改动**：路径全部运行时推导；守卫从「路径含 NASMusicTV」换成「仓库里有标记文件
+`scripts/sync_private_overlay.py`」；覆盖层目录缺失时不再加进源集（交给 `app/build.gradle.kts` 的护栏显式失败）。
+其余（`E51_TRACKED` 7 项 / `repoHasHiddenSources` 二选一 / 只排除 main 变体编译任务 / 资产择一挂载）**不变**。
+
+**新增门禁**：`OverlaySourceListGateTest`（挂载正文的 `E51_TRACKED` ⇔ `sync_private_overlay.py` 的
+`SHADOWED_JAVA` 必须逐项一致；正文不得被 `.gitignore` 挡住）。
+
+⚠️ **历史段里的旧路径描述指的是当时的形态**：§10.280 / §10.378 等段落写的
+「`~/.gradle/init.d/10-nasmusic-e51-local.gradle` 就是那份脚本」已改为「正文在
+`scripts/local-e51-overlay.gradle`，壳仍在 `~/.gradle/init.d/`」（壳的路径未变）。
+
 ## 回滚
 
 归档为**纯移动**（`git mv`，历史保留），未删除任何内容。整体回滚：

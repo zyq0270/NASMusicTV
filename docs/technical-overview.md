@@ -26622,3 +26622,56 @@ main 侧的归档注记，两边同文）。
 **新增门禁**：`scripts/check_doc_parity.py` + `DocParityGateTest`
 ⇒ 逐字节比对两分支的 `docs/` 树，除**显式白名单**（E51/E52 上游衍生件）外有任何差异即判红；
 CI 上没有私有分支 ref ⇒ 退出码 2 ⇒ 跳过（与 `PrivateOverlayDriftGateTest` 同款处理）。
+
+### 10.383 覆盖层挂载脚本迁进**仓库**（正文入库 + 本机只留一枚壳）（2026-11-10）
+
+**要求原文**（所有者 2026-11-10）：「那这个文档：`~/.gradle/init.d/10-nasmusic-e51-local.gradle`，
+能放在项目目录内吗？这样好管理」
+
+**机制约束**：Gradle **只**自动加载 `$GRADLE_USER_HOME/init.d/*.gradle`（默认 `~/.gradle/init.d/`），
+仓库里的脚本文件**不会被**自动扫到 ⇒「完全不要壳」在 Gradle 机制下做不到。
+⇒ 折中：**正文进仓库**（可版本化 / 可 diff / 可 review），**本机只留一枚自动生成的壳**。
+
+#### 一、新的三件套
+
+| 文件 | 位置 | 作用 |
+|---|---|---|
+| `scripts/local-e51-overlay.gradle` | **仓库内（入库）** | 挂载正文：把覆盖层挂成 app 模块 main 源集的额外源目录 + 在 Kotlin 编译任务层二选一排除 |
+| `scripts/install_local_init_shim.py` | **仓库内（入库）** | 幂等安装 / 刷新 / 校验那枚壳（`--check` / `--print` / `--uninstall` / `--force`） |
+| `10-nasmusic-e51-local.gradle` | `~/.gradle/init.d/`（**仅本机**） | 壳：按**本次构建的根项目目录**找到正文并 `apply from:` |
+
+⭐ **壳里不含任何绝对路径**（旧版写死了 `D:/hxzhang/MyGithubSoftware/NasAudio/NASMusicTV/app/src/e51-overlay`）
+⇒ 仓库改名 / 换盘 / 换克隆 / 用 worktree 都**无须重装**；正文改了也**无须重装**（壳是运行时按路径找的）。
+
+#### 二、正文的关键改动
+
+1. **路径全部运行时推导**：`OVERLAY` = `<构建根项目目录>/app/src/e51-overlay`（不再写死绝对路径）。
+2. **守卫从「路径含 NASMusicTV」换成「仓库里有标记文件 `scripts/sync_private_overlay.py`」**
+   ⇒ 那枚壳对本机**所有** Gradle 构建生效，靠这个标记把别的构建挡掉（不写死目录名）。
+3. **挂载时机**：`apply from:` 由壳在 `projectsLoaded` 阶段打到**根项目**上 ⇒ 与旧 init 脚本同一时机，
+   `e51.overlay` 项目属性照旧在 app 模块求值**之前**就位。
+4. **覆盖层目录不存在时不再加进源集**（AGP 对空额外源目录的报错难懂）⇒ 交给 `app/build.gradle.kts`
+   的护栏显式失败（那里能说清「怎么补」）。
+5. 其余行为（`E51_TRACKED` 7 项 / `repoHasHiddenSources` 二选一 / 只排除 main 变体编译任务 /
+   资产只在仓库里没有 `e52_highway/` 时才挂）**逐条保持不变**。
+
+#### 三、新增门禁
+
+`app/src/test/java/com/nasmusic/tv/visualizer/OverlaySourceListGateTest.kt`
+· `覆盖层挂载清单两处必须一致`：`scripts/local-e51-overlay.gradle` 的 `E51_TRACKED`
+  ⇔ `scripts/sync_private_overlay.py` 的 `SHADOWED_JAVA`（此前只靠注释里的口头约定）。
+· `覆盖层挂载正文不得被git忽略`：`git check-ignore` 命中即判红（正文被挡住 ⇒ 换机器就挂不上覆盖层）。
+
+#### 四、验证（2026-11-10 实跑）
+
+- `python scripts/install_local_init_shim.py` → 写入壳（旧手写文件自动备份成 `.bak`）；再跑一次幂等；
+  `--check` 退出码 0。
+- `:app:compileDebugKotlin`（`--rerun` 强制重跑）⇒ 日志出现
+  `[E51/E52] 覆盖层已挂入 app：…app/src/e51-overlay（⛔ 不上传）；仓库里没有隐藏分支源码 ⇒ 用覆盖层那份`
+  ⇒ **BUILD SUCCESSFUL**；产物里 `visualizer/e51` / `visualizer/highway` 的类齐全。
+- `lofi.city=true` + `highway.enabled=true` 下构建**通过** ⇒ 反证覆盖层确实被挂上
+  （护栏在「开关打开但覆盖层缺失」时会直接 `GradleException`）。
+
+⚠️ **历史段里的旧路径描述指的是当时的形态**：§10.280 / §10.378 等段落写的
+「`~/.gradle/init.d/10-nasmusic-e51-local.gradle` 就是那份脚本」在 2026-11-10 之后改为
+「正文在 `scripts/local-e51-overlay.gradle`，壳仍在 `~/.gradle/init.d/`」（壳的路径未变）。

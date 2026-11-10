@@ -23,7 +23,9 @@ Android TV music player (Kotlin + Jetpack Compose for TV) that connects to **Jel
 
 📦 **删除前的全量备份**：`logs_temp/backup_private_dirs_2026-11-09/`（被 `.gitignore:106` 的 `logs_temp/` 忽略 ⇒ 含密钥的文件不会泄漏、不污染 git status），按原件父路径分两个子目录、保留原名：`MyGithubSoftware/NASMusicTV-private/`（4 文件 / 6470 B，临时脚本与 §10.366 旧草稿）与 `NasAudio/NASMusicTV-private/`（10440 文件 / 269312810 B，含 keystore.properties / logs_temp / build 缓存）。`diff -rq` 全量逐字节 0 差异。原件位置：`D:/hxzhang/MyGithubSoftware/NASMusicTV-private` 与 `D:/hxzhang/MyGithubSoftware/NasAudio/NASMusicTV-private`。
 
-**为什么两个分支都能本地编出真 E51/E52 效果**：`~/.gradle/init.d/10-nasmusic-e51-local.gradle`（仅本机）按 `repoHasHiddenSources` 二选一 —— 在 `feat/e51-private` 上编译仓库自带的 `visualizer/e51/**`、`visualizer/highway/**`、`assets/e52_highway/**`，并在 Kotlin 编译任务层排除覆盖层同名文件；在 `main` 上（仓库内 0 个 e51 文件）改编译 gitignored 的 `app/src/e51-overlay/`（250 文件）。`app/build.gradle.kts` 的 `lofi.city` / `highway.enabled` 护栏只要任一来源存在即放行。覆盖层是 gitignored 的，切分支不会被删，两份来源同时在盘上、由 init 脚本二选一，不是冲突。
+**为什么两个分支都能本地编出真 E51/E52 效果**：挂载正文在**仓库内** —— `scripts/local-e51-overlay.gradle` 按 `repoHasHiddenSources` 二选一 —— 在 `feat/e51-private` 上编译仓库自带的 `visualizer/e51/**`、`visualizer/highway/**`、`assets/e52_highway/**`，并在 Kotlin 编译任务层排除覆盖层同名文件；在 `main` 上（仓库内 0 个 e51 文件）改编译 gitignored 的 `app/src/e51-overlay/`（250 文件）。`app/build.gradle.kts` 的 `lofi.city` / `highway.enabled` 护栏只要任一来源存在即放行。覆盖层是 gitignored 的，切分支不会被删，两份来源同时在盘上、由正文二选一，不是冲突。
+
+⚠️ **正文在仓库里，但 Gradle 不会自动加载它**（Gradle 只自动扫 `$GRADLE_USER_HOME/init.d/`）⇒ 本机需要一枚**壳** `~/.gradle/init.d/10-nasmusic-e51-local.gradle`（自动生成、勿手改）把正文 apply 进来。装 / 刷新 / 校验：`python scripts/install_local_init_shim.py`（`--check` 只校验、`--uninstall` 拆掉）。壳里**不含绝对路径** ⇒ 仓库改名 / 换克隆都不用重装。
 
 ⚠️ **改完私有分支的 E51/E52 源码必做**（在 `feat/e51-private` 上跑，源取工作树、含未提交改动）：
 `python scripts/sync_private_overlay.py` → `python scripts/sync_private_overlay.py --check`（须 0 漂移）。
@@ -48,7 +50,7 @@ $env:JAVA_HOME = "C:\Program Files\Android\Android Studio\jbr"
 ```
 
 > ⭐ **Local builds default to WITH E51「像素城市」** (owner ruling, 2026-10-29) — always pass `-Plofi.city=true`.
-> The E51 sources are **not tracked in git** (⛔ they are upstream translations with no license grant — see the E51 ruling below); they live in the **in-tree, gitignored** overlay `app/src/e51-overlay/` (the repo already uses the same pattern for `app/src/lofi-upstream/` and `app/src/globe-upstream/`), mounted by `~/.gradle/init.d/10-nasmusic-e51-local.gradle` (this init script exists only on this machine).
+> The E51 sources are **not tracked in git** (⛔ they are upstream translations with no license grant — see the E51 ruling below); they live in the **in-tree, gitignored** overlay `app/src/e51-overlay/` (the repo already uses the same pattern for `app/src/lofi-upstream/` and `app/src/globe-upstream/`), mounted by the in-repo script `scripts/local-e51-overlay.gradle` (the local `~/.gradle/init.d/10-nasmusic-e51-local.gradle` is just a generated shim that pulls that script in — Gradle only auto-loads `$GRADLE_USER_HOME/init.d/`).
 > The guard in `app/build.gradle.kts` **fails the build** when the switch is on but neither the overlay nor the branch sources are present ⇒ a missing overlay fails loudly instead of silently producing a "theme present, effect is the generic fallback" fake package.
 > CI / public builds keep `lofi.city` off (no E51 byte ever reaches GitHub).
 > ⛔ A package built with E51 is **local-only**: never push / tag / release it.
@@ -368,22 +370,26 @@ JAVA_HOME="C:/Program Files/Android/Android Studio/jbr" \
 
   ⭐ **本地构建携带隐藏分支效果 / GitHub 构建不含**（所有者 2026-11-04 明示）
     「**在 `main` 分支上本地编译时，也要携带隐藏分支的效果；推送到 GitHub 上编译时，不包含隐藏分支效果。**」
-    实现 = **仓库树内但被 gitignore 的覆盖层** + **仅本机的 Gradle 初始化脚本**（两者都不进版本库，⛔ 不外泄）：
+    实现 = **仓库树内但被 gitignore 的覆盖层** + **仓库内的挂载正文** + **仅本机的一枚 init 壳**：
     · 覆盖层：`app/src/e51-overlay/ovl/app/src/{main/java,main/assets}/...`
       （2026-11-07 从仓库**外**迁入仓库**内**；仓库里已有同样的先例：`app/src/lofi-upstream/`、`app/src/globe-upstream/`）
       （E51 源码 + E52 源码 + `e52_highway/` 资产），由 `python scripts/sync_private_overlay.py`
       从本地分支 `feat/e51-private`（⛔ 从不推送）同步而来 ⇒ 覆盖层天然不外泄。
-    · 初始化脚本：`~/.gradle/init.d/10-nasmusic-e51-local.gradle`（**仅本机**）把覆盖层挂成
+    · 挂载正文（**在仓库里**，可版本化 / 可 diff）：`scripts/local-e51-overlay.gradle` 把覆盖层挂成
       app 模块 main 源集的额外源目录（Kotlin 走 java 源目录、资产走 assets 源目录），
       并在 **Kotlin 编译任务层**排除仓库里那几份同名文件（否则 Redeclaration）。
-    ⛔ **CI / 公开构建不含**：GitHub runner 上没有 init 脚本 ⇒ 没有覆盖层 ⇒ 一行隐藏分支代码都
+    · init 壳（**仅本机**）：`~/.gradle/init.d/10-nasmusic-e51-local.gradle` —— Gradle **只**自动扫
+      `$GRADLE_USER_HOME/init.d/`，仓库里的文件不会被自动加载 ⇒ 必须留这枚壳把正文 apply 进来。
+      ⭐ 壳是**自动生成**的（`python scripts/install_local_init_shim.py`；`--check` 只校验、`--uninstall` 拆掉），
+      且**不含任何绝对路径** ⇒ 仓库改名 / 换盘 / 换克隆都不用重装；正文改了也不用重装。
+    ⛔ **CI / 公开构建不含**：GitHub runner 上没有那枚壳 ⇒ 没有覆盖层 ⇒ 一行隐藏分支代码都
     不会被编译进公开包；两个开关（`lofi.city` / `highway.enabled`）在 CI 上缺省 false。
     ⚠️ **改了隐藏分支的 E51/E52 代码 ⇒ 必须先同步覆盖层**：
     `python scripts/sync_private_overlay.py`（在私有分支上跑，或在其它分支上由脚本从本地 ref 抽取），
     否则本地包不含新代码而 CI 却能编过 ⇒ 本地与 CI 行为分叉；
     `python scripts/sync_private_overlay.py --check` 退出码 1 = 有漂移。
-    ⚠️ **两处清单必须一一对应**：init 脚本的 `E51_TRACKED` ⇔ `scripts/sync_private_overlay.py`
-    的 `SHADOWED_JAVA`（⛔ 改一处就要改另一处）。
+    ⚠️ **两处清单必须一一对应**：挂载正文的 `E51_TRACKED` ⇔ `scripts/sync_private_overlay.py`
+    的 `SHADOWED_JAVA`（⛔ 改一处就要改另一处；由 `OverlaySourceListGateTest` 判红）。
     ⚠️ **排除只作用于 main 变体的编译任务**（`compileDebugKotlin` / `compileReleaseKotlin`）：
     单测编译任务的源根是 `app/src/test/java`，同样排除会把 E51/E52 的**单测源码**也排掉
     ⇒ 本地单测会静默少跑一批用例。

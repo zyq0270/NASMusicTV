@@ -245,8 +245,19 @@ scripts/lofi_city_registry_sync.py      // Sync script (parses upstream bundle)
   (ROM-extracted sprites + tiles) stay `.gitignore`d — they are the local porting baseline only.
 - ⛔ E51 / E52 are **unaffected** by this ruling: their implementations stay on `feat/e51-private`
   only, and `arcade` was removed from the overlay shadow lists
-  (`scripts/sync_private_overlay.py` + the local Gradle init script) precisely so the new
+  (`scripts/sync_private_overlay.py` + the in-repo `scripts/local-e51-overlay.gradle`) precisely so the new
   `main` sources are not shadowed by stale overlay copies.
+
+### Local Overlay Mounting (in-repo body + machine-local shim)
+
+- The overlay-mount logic now lives **in the repo**: `scripts/local-e51-overlay.gradle` (versionable, diffable).
+- Gradle only auto-loads `$GRADLE_USER_HOME/init.d/*.gradle` ⇒ a generated shim
+  `~/.gradle/init.d/10-nasmusic-e51-local.gradle` pulls the body in. Install/refresh/verify with
+  `python scripts/install_local_init_shim.py` (`--check` / `--print` / `--uninstall` / `--force`).
+- ⭐ The shim contains **no absolute paths** ⇒ renaming/moving/cloning the repo needs no reinstall;
+  editing the body needs no reinstall either.
+- `OverlaySourceListGateTest` enforces that the body's `E51_TRACKED` matches
+  `scripts/sync_private_overlay.py` → `SHADOWED_JAVA`, and that the body is not `.gitignore`d.
 
 ### If You Need to Push Other Changes from This Branch
 **Do NOT push directly** — E51 commits are interleaved with other features in history. Owner must explicitly authorize history rewrite (rebase/cherry-pick) to extract non-E51 commits. See `docs/archive/e51-lofi-city-plan.md §10 D-m` and `§2.6`.
@@ -283,6 +294,8 @@ scripts/lofi_city_registry_sync.py      // Sync script (parses upstream bundle)
 | `docs/visualizer-effects-list.md` | Live effects registry (must be updated when a theme is added/removed) |
 | `scripts/check_doc_parity.py` | Doc-parity gate: byte-compares `docs/` between `main` and `feat/e51-private` (exit 0/1/2) |
 | `scripts/sync_private_overlay.py` | Syncs hidden-branch E51/E52 sources into the local overlay (exit 0/1/2) |
+| `scripts/local-e51-overlay.gradle` | In-repo overlay-mount body (mounted into `app` main source set; applies the two-source exclusion) |
+| `scripts/install_local_init_shim.py` | Installs/verifies the machine-local `~/.gradle/init.d/` shim that pulls the body in (exit 0/1/2) |
 
 ---
 

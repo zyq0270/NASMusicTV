@@ -528,18 +528,23 @@ interface ArcadeGame {
 | 文件 | 要加的行 |
 |---|---|
 | `scripts/sync_private_overlay.py` → `SHADOWED_JAVA` | `('visualizer/arcade', 'dir')` |
-| `~/.gradle/init.d/10-nasmusic-e51-local.gradle` → `E51_TRACKED` | `'com/nasmusic/tv/visualizer/arcade/**'` |
+| `scripts/local-e51-overlay.gradle` → `E51_TRACKED` | `'com/nasmusic/tv/visualizer/arcade/**'` |
 | `.gitignore` | `app/src/e54-upstream/` ✅ **已加（2026-11-09）**，见该文件第 125-133 行的成组注释（125-132 注释、133 规则）；`git check-ignore` 退出码 0，目录已变为 `!!`（ignored），不再出现在普通 `git status` |
 
 > 两个脚本头部都有明示「改 `E51_TRACKED` 必须同步改 `SHADOWED_JAVA`」。改完跑 `python scripts/sync_private_overlay.py` → `--check` 必须 **0 漂移**（`PrivateOverlayDriftGateTest` 判红）。
+>
+> ⭐ **2026-11-10 所有者要求「init 脚本放项目目录内」后**：挂载正文已从
+> `~/.gradle/init.d/10-nasmusic-e51-local.gradle` 迁到**仓库内**的 `scripts/local-e51-overlay.gradle`
+> （本机那枚 init 壳只剩「把正文 apply 进来」的职责）⇒ 上表第二行指向的是**新位置**；
+> 两处清单的一致性改由 `OverlaySourceListGateTest` 守住（此前只靠注释里的口头约定）。
 
 > ⭐ **2026-11-10 第三次裁决后：上表前两行已作废（arcade 不再走覆盖层）**
 > 「街机合集」的实现与图集已入 `main` ⇒ 不再是「隐藏分支物化」⇒
 > - `scripts/sync_private_overlay.py` 的 `SHADOWED_JAVA` **删掉** `('visualizer/arcade', 'dir')`，
 >   `SHADOWED_ASSETS` **删掉** `('e54_arcade', 'dir')`；
-> - `~/.gradle/init.d/10-nasmusic-e51-local.gradle` 的 `E51_TRACKED` **删掉** `'com/nasmusic/tv/visualizer/arcade/**'`。
+> - `scripts/local-e51-overlay.gradle` 的 `E51_TRACKED` **删掉** `'com/nasmusic/tv/visualizer/arcade/**'`。
 >
-> ⚠️ 删掉的理由不是「省事」，而是**避免主源被影子源盖住**：init 脚本在「仓库里没有隐藏分支源码」（= 在 `main` 上）
+> ⚠️ 删掉的理由不是「省事」，而是**避免主源被影子源盖住**：挂载正文在「仓库里没有隐藏分支源码」（= 在 `main` 上）
 > 时会**排除仓库里那几份同名文件**、改用覆盖层那份 ⇒ `main` 刚入仓的 arcade 源码会被旧副本顶掉。
 > ⛔ 两处仍要**成对改**（`E51_TRACKED` ↔ `SHADOWED_JAVA`），否则漂移门禁判红。
 > 第三行（`.gitignore` 的 `app/src/e54-upstream/`）**仍然有效** —— 上游原件依旧不入仓。
