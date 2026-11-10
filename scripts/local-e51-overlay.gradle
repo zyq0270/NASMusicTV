@@ -1,0 +1,141 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// E51「像素城市」+ E52「旷野公路」· 本地覆盖层挂载正文（**仓库内**，可版本化 / 可 diff）
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// 目的：让**任何分支**（含 main）的**本地**编译都带上真实的隐藏分支效果（E51 像素城市 /
+// E52 旷野公路），而 GitHub 仓库里一个字节的隐藏分支源码都没有 —— CI 构建公开版时既没有
+// 覆盖层、两个开关也是关的（`lofi.city` / `highway.enabled` 缺省 false）。
+//
+// ⭐ 2026-11-10 所有者第三次裁决后，E55「街机合集」**不再是隐藏分支**（它是公开的、在 main 分支下的）
+// ⇒ 它不在下面的 E51_TRACKED 里。
+//    ⛔ 必须不列：仓库里没有隐藏分支源码时（= 在 main 上）本脚本会**排除仓库里那几份同名文件**、
+//    改用覆盖层那份 ⇒ 列上就会让 main 刚入仓的 arcade 源码被覆盖层旧副本顶掉。
+//    （scripts/sync_private_overlay.py 的 SHADOWED_JAVA / SHADOWED_ASSETS 同步删了 arcade 与 e54_arcade。）
+//
+// ⚠️ **本文件不是被 Gradle 自动加载的**：Gradle 只自动扫 `$GRADLE_USER_HOME/init.d/*.gradle`
+//    ⇒ 仓库里的脚本文件不会被自动扫到。本文件由那枚**壳**引进来：
+//
+//        ~/.gradle/init.d/10-nasmusic-e51-local.gradle   ← 自动生成，勿手改
+//
+//    壳由 `python scripts/install_local_init_shim.py` 生成 / 刷新 / 校验（`--check`）。
+//    也可以不用壳：`gradlew --init-script scripts/local-e51-overlay.gradle …`（每次都得带参数）。
+//    ⭐ 2026-11-10：本文件从「只存在于本机的 `~/.gradle/init.d/`」迁进**仓库**（所有者要求「好管理」），
+//      迁进后正文可版本化 / 可 review / 可 diff，机器上只留一枚不含任何绝对路径的壳。
+//
+// 机制：
+//   · 覆盖层在**仓库树内**：<仓库根>/app/src/e51-overlay/
+//     ⚠️ 它是 `feat/e51-private`（⛔ 从不 push）的**物化副本**，含不可再分发的上游衍生源码
+//        ⇒ 必须被 .gitignore 挡住（见 .gitignore 的 `/app/src/e51-overlay/`）。
+//     目录形态（与 app/build.gradle.kts 里的护栏一一对应）：
+//         <overlay>/ovl/app/src/main/java/com/nasmusic/tv/...    Kotlin 源码
+//         <overlay>/ovl/app/src/main/assets/...                  资产（e52_highway/）
+//     （里面的文件路径刻意多一层 `ovl/`，这样下面的排除模式命不中它们）
+//   · 把覆盖层加成 **app 模块** main 源集的额外源目录（Kotlin 源码走 java 源目录）。
+//   · 覆盖层与仓库里那几份隐藏分支相关文件**同名**，不能同时进 Kotlin 编译（Redeclaration）
+//     ⇒ 在 **Kotlin 编译任务层**二选一地排除：
+//       · 仓库里有隐藏分支源码（= 当前处在私有分支 feat/e51-private 上）⇒ **用仓库那份**
+//         （最新的，不需要先同步覆盖层）；排除覆盖层那份。
+//       · 仓库里没有（= 当前在 main 等分支上）⇒ **用覆盖层那份**；排除仓库里那几份同名文件。
+//   · 资产（e52_highway/）：仓库里有（私有分支）就不挂覆盖层的（否则资产合并撞同名），
+//     没有（main）才挂覆盖层的。
+//   · `e51.overlay` 这个根项目属性给 app/build.gradle.kts 的护栏用（护栏据此判断
+//     "开关打开却没有隐藏分支源码" ⇒ 直接构建失败，而不是静默编出兜底假包）。
+//
+// ⛔ 改这里的 E51_TRACKED 必须同步改 scripts/sync_private_overlay.py 的 SHADOWED_JAVA
+//    （由 OverlaySourceListGateTest 守住这条不变量）。
+//
+// ⚠️ 本文件**不含**任何上游代码（只有路径与清单）⇒ 可以随公开仓库发布。
+//    （覆盖层本体 `app/src/e51-overlay/` 仍然 .gitignore、仍然不入仓。）
+
+// ── 路径（全部运行时推导，⛔ 不写死任何绝对路径）──────────────────────────────
+// 仓库根 = 当前构建的**根项目目录**（那枚壳把本文件 apply 到根项目上 ⇒ 这里拿到的就是本次构建的仓库）。
+def repoRoot = rootProject.projectDir
+
+// 覆盖层根目录（仓库树内、gitignored）
+def OVERLAY = new File(repoRoot, 'app/src/e51-overlay')
+
+// 覆盖层里的资产目录（相对 OVERLAY）
+def OVERLAY_ASSETS = new File(OVERLAY, 'ovl/app/src/main/assets')
+
+// 隐藏分支相关文件（相对 app/src/main/java，即仓库源目录根）
+def E51_TRACKED = [
+        'com/nasmusic/tv/visualizer/e51/**',
+        'com/nasmusic/tv/visualizer/highway/**',
+        'com/nasmusic/tv/ui/components/LofiCityCard.kt',
+        'com/nasmusic/tv/visualizer/renderers/LofiCityRenderer.kt',
+        'com/nasmusic/tv/visualizer/RenderContext.kt',
+        'com/nasmusic/tv/visualizer/VisualizerRendererFactory.kt',
+        'com/nasmusic/tv/ui/components/VisualizerStage.kt',
+]
+
+// 同一批路径在**覆盖层**里的相对位置（相对 OVERLAY，即那层额外源目录的根）
+def OVERLAY_TRACKED = E51_TRACKED.collect { "ovl/app/src/main/java/${it}" }
+
+// ── 守卫：只有当当前构建的根项目**就是本仓库**时才生效 ─────────────────────────
+// 那枚壳对本机**所有** Gradle 构建生效 ⇒ 必须在这里把别的构建挡掉。
+// 标记文件 = scripts/sync_private_overlay.py（本仓库独有）。
+def repoMarker = new File(repoRoot, 'scripts/sync_private_overlay.py')
+if (!repoMarker.isFile()) {
+    // 非本仓库的构建 ⇒ 静默跳过（不打扰别人的构建日志）
+    logger.info("[E51/E52] 当前构建不是 NASMusicTV 仓库（缺 scripts/sync_private_overlay.py），覆盖层未挂载。")
+} else {
+    // `e51.overlay` 这个根项目属性给 app/build.gradle.kts 的护栏用（护栏据此判断
+    // "开关打开却没有隐藏分支源码" ⇒ 直接构建失败，而不是静默编出兜底假包）。
+    rootProject.ext.set('e51.overlay', OVERLAY.absolutePath)
+
+    rootProject.allprojects { ap ->
+        ap.afterEvaluate {
+            def android = ap.extensions.findByName('android')
+            if (android == null) {
+                return
+            }
+            def main = android.sourceSets.getByName('main')
+
+            // 覆盖层目录不存在时**不要**加进源集（AGP 会因为空的额外源目录报难懂的错）；
+            // 交给 app/build.gradle.kts 的护栏去显式失败（那里能说清「怎么补」）。
+            if (OVERLAY.isDirectory()) {
+                main.java.srcDir(OVERLAY)
+            }
+
+            // 仓库里有没有隐藏分支源码？= 当前是不是在私有分支 feat/e51-private 上
+            def repoHasHiddenSources =
+                    new File(ap.projectDir, 'src/main/java/com/nasmusic/tv/visualizer/e51').isDirectory()
+
+            // 资产：只有仓库里没有 e52_highway/ 时才从覆盖层挂（私有分支自带，避免同名合并冲突）
+            def repoHasE52Assets = new File(ap.projectDir, 'src/main/assets/e52_highway').isDirectory()
+            if (!repoHasE52Assets && OVERLAY_ASSETS.isDirectory()) {
+                main.assets.srcDir(OVERLAY_ASSETS)
+                ap.logger.lifecycle("[E51/E52] 资产覆盖层已挂入 ${ap.name}：${OVERLAY_ASSETS}")
+            }
+
+            // ⚠️ 必须在 **Kotlin 编译任务层**排除，不能靠 sourceSets 的 exclude：
+            //  · AGP 的 DefaultAndroidSourceDirectorySet.exclude() 是**空实现**（excludes 永远是 []）；
+            //  · 两份同名文件都进 Kotlin 编译 ⇒ Redeclaration。
+            //
+            // ⛔ 不能在本文件里写 `org.jetbrains.kotlin.gradle.tasks.KotlinCompile`：
+            //    init 脚本 / apply 脚本的 classpath 里没有 Kotlin Gradle 插件 ⇒ MissingPropertyException。
+            //    因此改为「按类名判断 + configureEach（任务真正实例化时才执行）」。
+            //
+            // ⚠️ 只排除 **main 变体**的编译任务（compileDebugKotlin / compileReleaseKotlin）：
+            //    编译单测的那两个任务（compileDebugUnitTestKotlin 等）源根是 app/src/test/java，
+            //    同样的模式会把 E51/E52 的**单测源码**也一起排掉 ⇒ 本地单测静默少跑一批用例。
+            ap.tasks.configureEach { t ->
+                if (!t.class.name.contains('KotlinCompile')) {
+                    return
+                }
+                if (!(t.name ==~ /compile(Debug|Release)Kotlin/)) {
+                    return
+                }
+                // 两种基准都带上：Kotlin 任务的 exclude 模式是相对**源目录根**匹配的
+                // （不是项目根），但保险起见把项目根基准也写一份（命不中就是空转）。
+                def repoPatterns = E51_TRACKED + E51_TRACKED.collect { "app/src/main/java/${it}" }
+                def overlayPatterns = OVERLAY_TRACKED + OVERLAY_TRACKED.collect { "app/src/main/${it}" }
+                t.exclude(repoHasHiddenSources ? overlayPatterns : repoPatterns)
+            }
+            ap.logger.lifecycle("[E51/E52] 覆盖层已挂入 ${ap.name}：${OVERLAY}（⛔ 不上传）；" +
+                    (repoHasHiddenSources
+                            ? "当前分支自带隐藏分支源码 ⇒ 用仓库那份，排除覆盖层那份"
+                            : "仓库里没有隐藏分支源码 ⇒ 用覆盖层那份，排除仓库里那几份同名文件"))
+        }
+    }
+}

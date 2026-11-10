@@ -9,9 +9,13 @@
     app/src/e51-overlay/ovl/app/src/main/java/com/nasmusic/tv/...
     app/src/e51-overlay/ovl/app/src/main/assets/...
 
-`~/.gradle/init.d/10-nasmusic-e51-local.gradle` 把它加成 app 模块 main 源集的额外源目录
+仓库内的挂载正文 `scripts/local-e51-overlay.gradle` 把它加成 app 模块 main 源集的额外源目录
 （Kotlin 源码走 java 源目录、资产走 assets 源目录），并在 **Kotlin 编译任务层**排除仓库里
 那几份同名文件 ⇒ **本地构建实际编译的是覆盖层那份**。
+
+（正文本就在仓库里，可版本化；本机 `~/.gradle/init.d/10-nasmusic-e51-local.gradle` 只是那枚
+**壳** —— Gradle 只自动扫 `$GRADLE_USER_HOME/init.d/`，仓库里的文件不会被自动加载。
+壳由 `python scripts/install_local_init_shim.py` 生成 / 刷新 / 校验。）
 
 ⭐ 于是「**在 main 分支上本地编译也携带隐藏分支（E51 像素城市 / E52 旷野公路）的效果**」
 这件事，靠的就是这份覆盖层；而 GitHub / CI 上没有这份覆盖层 ⇒ 公开包里一行隐藏分支代码都没有。
@@ -37,7 +41,9 @@
 
 环境变量
 --------
-    `PRIVATE_OVERLAY_DIR` —— 覆盖层**源目录根**（即 init 脚本里的 OVERLAY，默认本机路径）。
+    `PRIVATE_OVERLAY_DIR` —— 覆盖层**源目录根**（即挂载正文里的 OVERLAY）。
+                             ⭐ 2026-11-10 起**缺省从仓库根推导**（<repo>/app/src/e51-overlay），
+                               不再是写死的本机路径 ⇒ 仓库换位置不用改任何东西。
     `E51_OVERLAY_DIR`     —— 旧名，语义是「java 包根」（.../ovl/app/src/main/java/com/nasmusic/tv），
                              本脚本会自动折算成源目录根，两个都可用。
 
@@ -58,7 +64,7 @@ import sys
 import tempfile
 
 # ── 覆盖层位置 ──────────────────────────────────────────────────────────────
-# 覆盖层里 java 包根相对「源目录根」的位置（多一层 ovl/ ⇒ init 脚本的排除模式命不中覆盖层）
+# 覆盖层里 java 包根相对「源目录根」的位置（多一层 ovl/ ⇒ 挂载正文的排除模式命不中覆盖层）
 OVERLAY_JAVA_REL = os.path.join('ovl', 'app', 'src', 'main', 'java')
 OVERLAY_ASSETS_REL = os.path.join('ovl', 'app', 'src', 'main', 'assets')
 
@@ -79,7 +85,8 @@ DEFAULT_OVERLAY_ROOT = os.path.join(REPO_ROOT, 'app', 'src', 'e51-overlay')
 PRIVATE_REF = 'feat/e51-private'
 
 # ── 需要同步的路径（相对 REPO_JAVA / REPO_ASSETS）────────────────────────────
-# ⛔ 与 init 脚本的 E51_TRACKED 一一对应（⛔ 改这里必须同步改 init 脚本）。
+# ⛔ 与 scripts/local-e51-overlay.gradle 的 E51_TRACKED 一一对应
+#    （⛔ 改这里必须同步改那个文件；由 OverlaySourceListGateTest 守住这条不变量）。
 # 「目录」= 整棵树；「文件」= 单个文件。
 SHADOWED_JAVA = [
     ('visualizer/e51', 'dir'),
@@ -96,7 +103,7 @@ SHADOWED_JAVA = [
 # ⭐ 2026-11-10 所有者第三次裁决（「魂斗罗应该是公开的、在 main 分支下的」）后，
 #    E55「街机合集」的实现与图集**已入 main** ⇒ 它不再是「隐藏分支物化」，
 #    ⛔ 已从 SHADOWED_JAVA / SHADOWED_ASSETS 里删掉（`visualizer/arcade` 与 `e54_arcade`）。
-#    理由不是省事：init 脚本在「仓库里没有隐藏分支源码」（= 在 main 上）时会**排除仓库里
+#    理由不是省事：挂载正文在「仓库里没有隐藏分支源码」（= 在 main 上）时会**排除仓库里
 #    那几份同名文件**、改用覆盖层那份 ⇒ 不删就会让 main 刚入仓的 arcade 源码被旧副本顶掉。
 #    ⛔ 上游原件（app/src/e54-upstream/）仍然 .gitignore、仍然不入仓。
 SHADOWED_ASSETS = [
@@ -105,7 +112,7 @@ SHADOWED_ASSETS = [
 
 
 def overlay_root():
-    """覆盖层「源目录根」：init 脚本把它加成额外源目录的那一层。"""
+    """覆盖层「源目录根」：挂载正文把它加成额外源目录的那一层。"""
     for env in ('PRIVATE_OVERLAY_DIR', 'E51_OVERLAY_DIR'):
         v = os.environ.get(env)
         if not v:

@@ -11,7 +11,8 @@ import java.util.concurrent.TimeUnit
  * ## 为什么要它
  *
  * 本机有一个**仓库树内、但被 `.gitignore` 挡住**的覆盖层（`app/src/e51-overlay/ovl/app/src/...`），
- * 由 `~/.gradle/init.d/10-nasmusic-e51-local.gradle` 挂成 app 模块的额外源目录，
+ * 由仓库内的挂载正文 `scripts/local-e51-overlay.gradle`（本机经 `~/.gradle/init.d/` 那枚
+ * 自动生成的壳 apply 进来）挂成 app 模块的额外源目录，
  * 并在 **Kotlin 编译任务层**与仓库里那几份同名文件二选一地排除：
  *
  * * 仓库里**有**隐藏分支源码（当前在私有分支 `feat/e51-private` 上）⇒ 用**仓库那份**；

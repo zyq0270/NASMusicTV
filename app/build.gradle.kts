@@ -50,17 +50,21 @@ val baiduAppSecret = readKeystoreProperty("baiduAppSecret")
 val cryptoPassphrase = readKeystoreProperty("cryptoPassphrase")
     .ifBlank { System.getenv("CRYPTO_PASSPHRASE").orEmpty() }
 
-// ── 本机「私有覆盖层」（仓库外；CI 与别人的机器上不存在）────────────────────
-// 本机的 Gradle 初始化脚本（~/.gradle/init.d/10-nasmusic-e51-local.gradle）把**仓库外**的
-// 覆盖层挂成 app 模块 main 源集的额外源目录，并在 Kotlin 编译任务层排除仓库里那几份同名文件
-// ⇒ **本地构建实际编译的是覆盖层那份**。覆盖层的目录形态（与 init 脚本一一对应）：
+// ── 本机「私有覆盖层」（仓库树内、gitignored；CI 与别人的机器上不存在）────────
+// 挂载逻辑的**正文在仓库里**：`scripts/local-e51-overlay.gradle`（可版本化 / 可 diff / 可 review）。
+// 本机 `~/.gradle/init.d/10-nasmusic-e51-local.gradle` 只是一枚**壳**（自动生成、勿手改），
+// 负责把正文 apply 进当前构建 —— Gradle 只自动扫 `$GRADLE_USER_HOME/init.d/`，
+// 仓库里的文件不会被自动加载 ⇒ 壳免不了；但壳里**不含绝对路径**
+// ⇒ 仓库改名 / 换盘 / 换克隆都不用改这儿的任何路径。
+// 正文把覆盖层挂成 app 模块 main 源集的额外源目录，并在 Kotlin 编译任务层排除仓库里那几份同名文件
+// ⇒ **本地构建实际编译的是覆盖层那份**。覆盖层的目录形态（与正文一一对应）：
 //     <overlay>/ovl/app/src/main/java/com/nasmusic/tv/...    ← Kotlin 源码
 //     <overlay>/ovl/app/src/main/assets/...                  ← 资产（E52 的 e52_highway/）
-// init 脚本把覆盖层根目录通过项目属性 `e51.overlay` 传进来 ⇒ 这里读同一个属性。
+// 正文把覆盖层根目录通过项目属性 `e51.overlay` 传进来 ⇒ 这里读同一个属性。
 //
 // ⭐ 这就是「**在 main 上本地编译也携带隐藏分支的效果**」的实现：
 //    隐藏分支（feat/e51-private）的 E51/E52 源码与资产经覆盖层进入本地构建；
-//    GitHub / CI 上没有 init 脚本 ⇒ 没有覆盖层 ⇒ 一行隐藏分支代码都不会被编译进公开包。
+//    GitHub / CI 上没有那枚壳 ⇒ 没有覆盖层 ⇒ 一行隐藏分支代码都不会被编译进公开包。
 val privateOverlayRoot: File? = (rootProject.findProperty("e51.overlay") as String?)
     ?.let { File(it) }
     ?.takeIf { it.isDirectory }
@@ -77,8 +81,9 @@ val lofiCityEnabled: String = (readLocalProperty("lofi.city") ?: providers.gradl
 // `lofi.city=true` 的语义是"本次构建要含**真**的像素城市效果"，但 E51 移植件**不上传本仓库**
 // （公开仓库，代码不外发 —— 见方案 §2.6）。它们有两种可能的来源：
 //   ① 分支 `feat/e51-private` 里被跟踪的源码（app/src/main/java/.../visualizer/e51）；
-//   ② 本机 Gradle 初始化脚本挂进来的**仓库外覆盖层**（~/.gradle/init.d/10-nasmusic-e51-local.gradle，
-//      它把 `e51.overlay` 这个项目属性指到覆盖层目录）。
+//   ② 本机覆盖层（仓库树内、gitignored：app/src/e51-overlay/），由仓库内的挂载正文
+//      `scripts/local-e51-overlay.gradle` 挂进来（那枚 init 壳只负责把正文 apply 进来），
+//      正文把 `e51.overlay` 这个项目属性指到覆盖层目录。
 // 两者都没有时带着这个开关构建，Gradle 不会报错：工厂会把 LOFI_CITY 映射到 `CircularRingRenderer()`
 // （穷尽性兜底），于是会**静默**编出一个"主题在、效果是通用圆环"的假包。故此处显式失败。
 //
@@ -90,9 +95,10 @@ if (lofiCityEnabled == "true") {
     if (!e51Tracked.isDirectory && e51OverlaySources?.isDirectory != true) {
         throw GradleException(
             "E51「像素城市」：lofi.city=true，但既没有分支内的 E51 源码，覆盖层里也没有。\n" +
-                "  · 要出**带真效果**的本地包：切到分支 feat/e51-private 构建，或让本机 Gradle 初始化脚本\n" +
-                "    （~/.gradle/init.d/10-nasmusic-e51-local.gradle）挂上仓库外覆盖层，\n" +
-                "    并用 `python scripts/sync_private_overlay.py` 把覆盖层同步到该分支的 E51/E52 源码与资产。\n" +
+                "  · 要出**带真效果**的本地包：切到分支 feat/e51-private 构建，或在本机把覆盖层挂上：\n" +
+                "    ① `python scripts/install_local_init_shim.py`（装那枚 init 壳，让 Gradle 挂上覆盖层）\n" +
+                "    ② `python scripts/sync_private_overlay.py`（把该分支的 E51/E52 源码与资产同步进覆盖层）\n" +
+                "    ⇒ 覆盖层本体在 app/src/e51-overlay/（仓库树内、gitignored、⛔ 不上传）。\n" +
                 "  · 在没有 E51 源码的分支上构建：请把 local.properties 的 lofi.city 设为 false，\n" +
                 "    否则会编出一个「主题可选、效果却是通用兜底」的假包。"
         )
@@ -141,9 +147,10 @@ if (highwayEnabled == "true") {
     if (!repoHighwaySources.isDirectory && overlayHighwaySources?.isDirectory != true) {
         throw GradleException(
             "E52「旷野公路」：highway.enabled=true，但既没有分支内的 E52 源码，覆盖层里也没有。\n" +
-                "  · 要出**带真效果**的本地包：切到分支 feat/e51-private 构建，或让本机 Gradle 初始化脚本\n" +
-                "    （~/.gradle/init.d/10-nasmusic-e51-local.gradle）挂上仓库外覆盖层，\n" +
-                "    并用 `python scripts/sync_private_overlay.py` 把覆盖层同步到该分支的 E52 源码与资产。\n" +
+                "  · 要出**带真效果**的本地包：切到分支 feat/e51-private 构建，或在本机把覆盖层挂上：\n" +
+                "    ① `python scripts/install_local_init_shim.py`（装那枚 init 壳，让 Gradle 挂上覆盖层）\n" +
+                "    ② `python scripts/sync_private_overlay.py`（把该分支的 E51/E52 源码与资产同步进覆盖层）\n" +
+                "    ⇒ 覆盖层本体在 app/src/e51-overlay/（仓库树内、gitignored、⛔ 不上传）。\n" +
                 "  · 在没有 E52 源码的分支上构建：请把 local.properties 的 highway.enabled 设为 false。"
         )
     }
