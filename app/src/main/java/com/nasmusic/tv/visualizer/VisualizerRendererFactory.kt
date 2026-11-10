@@ -62,6 +62,9 @@ object VisualizerRendererFactory {
         } else if (!BuildConfig.HIGHWAY_ENABLED && theme == VisualizerTheme.HIGHWAY) {
             // E52「旷野公路」同上：公开构建（CI 缺省 highway.enabled 未设 ⇒ false）里不渲染它
             CircularRingRenderer()
+        } else if (!BuildConfig.ARCADE_ENABLED && theme == VisualizerTheme.ARCADE_GAMES) {
+            // 「街机合集」同上：公开构建（CI 缺省 arcade.enabled 未设 ⇒ false）里不渲染它
+            CircularRingRenderer()
         } else {
             createEnabled(theme, context)
         }
@@ -121,6 +124,10 @@ object VisualizerRendererFactory {
         // E54「生态地球」：WebView + three.js（与 E41「世界」并列的独立场景）。
         // ⚠️ 传 Context（WebView 需要）；渲染器内部只持有 applicationContext。
         VisualizerTheme.ECO_GLOBE -> EcoGlobeRenderer(context)
+        // 「街机合集」：渲染器实现不随本仓库外发（实现与素材只在本地私有分支/覆盖层）⇒ 此处无实现可创建。
+        // ⚠️ 同 E51/E52：分支必须留着（枚举项恒声明，备份 JSON 按名反查会命中），公开构建在 create()
+        // 外层就被拦下；这里只是穷尽性兜底，回落默认效果。
+        VisualizerTheme.ARCADE_GAMES -> CircularRingRenderer()
     }
 
     /**

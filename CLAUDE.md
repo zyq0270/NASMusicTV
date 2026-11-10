@@ -254,6 +254,7 @@ scripts/lofi_city_registry_sync.py      // Sync script (parses upstream bundle)
 | `app/src/main/java/com/nasmusic/tv/data/prefs/AppPreferences.kt` | DataStore wrapper (singleton) |
 | `app/src/main/java/com/nasmusic/tv/util/CryptoUtils.kt` | AES-256-GCM + Keystore encryption |
 | `app/src/main/java/com/nasmusic/tv/visualizer/VisualizerRendererFactory.kt` | Effect renderer factory |
+| `docs/visualizer-effects-list.md` | Live effects registry (must be updated when a theme is added/removed) |
 
 ---
 
@@ -265,6 +266,11 @@ scripts/lofi_city_registry_sync.py      // Sync script (parses upstream bundle)
 3. Add enum entry in `VisualizerTheme` (with `selectable()` logic if conditional)
 4. Add strings in `strings.xml` (both zh/en)
 5. Update `VisualizerThemeStringsGateTest` key count
+6. **Update `docs/visualizer-effects-list.md` in the same change** (owner rule, 2026-11-10) — that file is the
+   **live effects registry**: add the row to its tier table, update the counts (total / per-tier /
+   "public build selectable"), and mark compile-time-gated effects with ⚠️ + the switch name.
+   ⛔ It is **hand-maintained** — do **not** run `scripts/gen_effects_doc.py` (its template is stale and
+   would wipe the ⚠️ notes and the gating wording).
 
 ### Add New Backend
 1. Implement `BackendAdapter` interface

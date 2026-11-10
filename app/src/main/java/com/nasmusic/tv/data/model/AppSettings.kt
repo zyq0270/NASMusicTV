@@ -534,6 +534,28 @@ enum class VisualizerTheme(
      * 新增效果请往后顺延，⛔ 不要复用空号。
      */
     ECO_GLOBE(R.string.visualizer_theme_eco_globe, "生态地球", Tier.ULTRA, "54", needsParticleBudget = false),
+
+    /**
+     * 「街机合集」—— 一个**自动演示**的街机效果（无需任何按键即可持续运行）。
+     *
+     * ⚠️ 本效果的实现**不随本仓库外发**：渲染器源码、图集、关卡内容与上游快照都只在
+     * 本地私有分支 `feat/e51-private`（或本机覆盖层）里 ⇒ 公开构建里由编译期开关
+     * `BuildConfig.ARCADE_ENABLED`（Gradle 属性 `arcade.enabled`）整个过滤掉，
+     * 与 E51「像素城市」/ E52「旷野公路」**同一种双变体处置**。
+     *
+     * ## 归 [Tier.ADV] + `needsParticleBudget = false`
+     * - **ADV**：与 E51/E52 同档（两者同样标 `false` ⇒ 三档全可用）。
+     * - **false**：渲染器**不读** `ctx.quality.maxParticles` ⇒ 按
+     *   `ParticleBudgetGateTest` 的判据必须标 `false`。
+     *
+     * ## 编号 `"55"` 是**占位号**
+     * 调研文档把「自动玩街机游戏合集」自编号为 E54，而 `"54"` 已被 `ECO_GLOBE`「生态地球」
+     * 占用并随 v2.39.14 发布（改号会让老用户看到编号跳变）⇒ 本效果取自然空号 `"55"`，
+     * ⛔ 待所有者裁定 E54/E55 归属后再改（方案 §0.0）。
+     *
+     * 方案与落点分工见 `docs/archive/e54-contra-porting-plan.md`。
+     */
+    ARCADE_GAMES(R.string.visualizer_theme_arcade_games, "街机合集", Tier.ADV, "55", needsParticleBudget = false),
     ;
 
     /** 效果分级：决定画质档位可用性 */
@@ -623,7 +645,9 @@ private val LEGACY_MAP = mapOf(
          */
         private fun publishable(list: List<VisualizerTheme>): List<VisualizerTheme> {
             val base = if (BuildConfig.LOFI_CITY_ENABLED) list else list.filterNot { it == LOFI_CITY }
-            return if (BuildConfig.HIGHWAY_ENABLED) base else base.filterNot { it == HIGHWAY }
+            val withHighway = if (BuildConfig.HIGHWAY_ENABLED) base else base.filterNot { it == HIGHWAY }
+            // 「街机合集」同 E51/E52：实现不随本仓库外发 ⇒ 公开构建里整个效果不存在。
+            return if (BuildConfig.ARCADE_ENABLED) withHighway else withHighway.filterNot { it == ARCADE_GAMES }
         }
 
         /** 全部效果（含 [PHOTO_WALL]）—— 预生成，避免每次调用重新 `filter` 分配 */

@@ -1404,6 +1404,8 @@
     <string name="visualizer_theme_vintage_tv">Vintage TV</string>
     <string name="visualizer_theme_world">World</string>
     <string name="visualizer_theme_eco_globe">Eco Globe</string>
+    <!-- Arcade: implementation is not published with this repo; the compile-time switch arcade.enabled removes it from public builds -->
+    <string name="visualizer_theme_arcade_games">Arcade</string>
     <!-- E51 pixel city: bottom-right card. City name/tagline live in the generated CityRegistry table (plan 12.6); only UI copy belongs here -->
     <string name="visualizer_city_time_label">Local time</string>
     <!-- photo_transition -->

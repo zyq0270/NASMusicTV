@@ -683,7 +683,12 @@
 > 引用改写 **0 处**（全仓无外部指向本篇的引用）⇒ 死链 **0 新增**。
 > ⚠️ 文内两处**计划产物路径从未存在**（`scripts/kugou/probe.sh`、`docs/archive/verification/kugou_lite_s0.txt`）—— 那是 §12 表格里的**未开工产出**，不是死链。
 > ⚠️ 未进 `CHANGELOG.md`：本轮是**纯文档移动 + 归档登记**，按本仓规矩（文档改动不入 CHANGELOG）不登记；无代码变更。
-> 📌 **`docs/` 根口径**（2026-11-08 实测 `git ls-tree --name-only HEAD docs/ | grep -c '\.md$'`）：入库 Markdown **11 → 10 篇** = 活文档 2（`technical-overview.md` / `conventions-adaptive-ui.md`）+ 现役名册 1（`visualizer-effects-list.md`）+ 在办方案 5（`blackhole-visualizer-plan.md` / `e41-globe-opengl-plan.md` / `e45-orbital-plan.md` / `stellar-spectrum-plan.md` / `e54-run-and-gun-survey.md`）+ 其它 2 篇（`开源横版卷轴游戏总表_核验报告.md` / `开源横版卷轴游戏总表_更新版.md`）。⚠️ 上文各轮里的旧计数一律以本段为准。
+> 📌 **`docs/` 根口径**（2026-11-10 实测 `git ls-tree --name-only HEAD docs/ | grep -c '\.md$'`）：入库 Markdown **11 → 11 篇** = 活文档 2（`technical-overview.md` / `conventions-adaptive-ui.md`）+ 现役名册 1（`visualizer-effects-list.md`）+ 在办方案 6（`blackhole-visualizer-plan.md` / `e41-globe-opengl-plan.md` / `e45-orbital-plan.md` / `stellar-spectrum-plan.md` / `e53-run-and-gun-survey.md` / `e54-run-and-gun-survey.md`）+ 其它 2 篇（`开源横版卷轴游戏总表_核验报告.md` / `开源横版卷轴游戏总表_更新版.md`）。⚠️ 上文各轮里的旧计数一律以本段为准。
+> 📌 **2026-11-10 变更**：本段原为「11 → 10 篇」（在办方案 5）⇒ 第二十五轮把 `e54-contra-porting-plan.md` 归档后，
+> 在办方案少 1 篇（`e54-contra-porting-plan.md` 出根）、但 `e53-run-and-gun-survey.md` 仍在根（见下条）⇒ 净数不变（11 篇）。
+> ⚠️ **`e53-run-and-gun-survey.md` 是 `e54-run-and-gun-survey.md` 的旧版重复件**（E53 编号时代的那一份，blob 与
+> 2026-11-07 改名前的归档件**逐字节相同**；2026-11-08 一次"与私有分支对齐"的同步把它误放回了根目录）
+> ⇒ 与 `E54 生态地球` / `E55 街机合集` 的编号互相混淆，**建议清理**（删除或归档留档），⛔ 待所有者裁决。
 
 ## 第二十一轮（2026-11-08，1 个）—— E54「生态地球」定稿归档（随 v2.39.14 出包）
 
@@ -759,6 +764,53 @@
 
 ⚠️ **未新增 `CHANGELOG.md` 条目**：本轮为纯文档/证据归档；代码改动已随 v2.39.16 记入 CHANGELOG。
 引用改写 1 处（`docs/technical-overview.md` §10.374 增补归档路径），报告 HTML 内 0 处。
+
+## 第二十五轮（2026-11-10，1 个）—— E54「街机合集」第一阶段定稿归档（main 侧镜像）+ 名册补登
+
+| 文档 | 判定依据 | 说明 |
+|---|---|---|
+| `e54-contra-porting-plan.md` | ✅ **已交付**：第一阶段（Phase 0 + Phase 1）落地并经四轮真机反馈修复，交付版本 **v2.39.17 / versionCode 202**（2026-11-10） | 变更记录见 `technical-overview.md` §10.374–§10.376；离线诊断与补丁工具留档 `verification/e54/`（**在本地私有分支上**，随该分支归档） |
+
+**归档的是什么**：本文件是 **main 侧镜像 v1.2**（其状态行「待开发」是**过期标记**）；**权威定稿版 v1.3**
+在本地私有分支 `feat/e51-private` 上、**同一路径** `docs/archive/e54-contra-porting-plan.md` 存着
+⇒ 两分支同路径不同内容，回滚/比对时注意。
+
+**本轮同时补齐的「公开安全外壳」（方案 §5.2 落点分工里要求进 main 的那一半）**：
+
+| 内容 | 落点 | 本轮状态 |
+|---|---|---|
+| 枚举项 `ARCADE_GAMES` + 显示名「街机合集」+ 占位号 `"55"` + `Tier.ADV` | `main` | ✅ 补齐 |
+| 双语字符串、`arcade.enabled` 开关、`publishable()` 过滤 | `main` | ✅ 补齐 |
+| 工厂**回落**分支 `-> CircularRingRenderer()` | `main` | ✅ 补齐 |
+| 计数门禁 G1~G5 更新 | `main` | ✅ 补齐（28 → 29） |
+| 工厂**真实**分支、`visualizer/arcade/**`、图集、sim、bot、8 关内容 | 私有分支 + 覆盖层 | ⛔ 按设计留在私有侧 |
+| `app/src/e54-upstream/**`（上游快照） | 本机 gitignored | ⛔ 按设计不入库 |
+
+⇒ 效果名册 `docs/visualizer-effects-list.md` 同步补登 `| E55 | ARCADE_GAMES | 街机合集 ⚠️ |`
+（29 套 / ADV 19 套；公开版可选仍是 26 套 —— 该项被编译期开关整个过滤掉）。
+⚠️ `"55"` 是**占位号**：`"54"` 已被 `E54 生态地球` 占用并随 v2.39.14 发布（改号会让老用户看到编号跳变）
+⇒ ⛔ 所有者裁定 E54/E55 归属前不要改回 `"54"`。
+
+**同时补齐方案 §5.3 的覆盖层登记**（否则「在 main 上本地编译也携带隐藏分支效果」这条链对 E54 是断的）：
+`scripts/sync_private_overlay.py` 的 `SHADOWED_JAVA` / `SHADOWED_ASSETS` 加 `visualizer/arcade` 与
+`assets/e54_arcade`，本机 `~/.gradle/init.d/10-nasmusic-e51-local.gradle` 的 `E51_TRACKED` 加
+`com/nasmusic/tv/visualizer/arcade/**` ⇒ `sync_private_overlay.py --check` 漂移 **0 处**。
+
+**归档时遗留（⛔ 归档 ≠ 已解决，逐条留痕）**：
+
+1. ⛔ **确认键打断无实际入口**（W9 / D4 半落地）：`ArcadeInputQueue.requestInterrupt()` 无 UI 调用方。
+2. ⛔ **T6 卫生门禁未扩扩展名**：`UpstreamOriginalsHygieneTest` 仍只扫 `.js/.mjs`，未覆盖 `.c/.h/.s/.asm`
+   ⇒ 对 `app/src/e54-upstream/` 的保护尚不完整。
+3. ⛔ **`UPSTREAM.md` 落在 gitignored 目录**里 ⇒ 不入仓；长期 NOTICE 由 `docs/e54-sprite-attribution.md` 承担。
+4. ⛔ **§0.4 的上游镜像未迁 `logs_temp/`** ⇒ `e54_uefi_contra_probe.py --offline` 仍不可用。
+5. ⛔ **私有分支那一份 `scripts/sync_private_overlay.py` 尚未同步本轮的 arcade 登记**（两分支此刻脚本内容不一致）。
+6. ⚠️ **main 上仍含「魂斗罗」/ `UEFI_Contra` 字样**（本文档标题与 §5.2 的硬检查原文）—— 方案 §5.2 的硬检查只约束
+   **shell 提交**，但文档本身作为来源标注带这些词；是否在公开分支保留该措辞 ⇒ **所有者裁决**。
+
+引用改写 **3 处 / 2 文件**：`.gitignore` ×2（`docs/e54-contra-porting-plan.md` → `docs/archive/…`）、
+`docs/e54-run-and-gun-survey.md` ×1（同上）。裸文件名 0 处。死链 **0 新增**。
+⚠️ 未进 `CHANGELOG.md`：本轮公开包**用户可见行为不变**（新增项被编译期开关整个过滤掉，公开版可选仍是 26 套），
+按本仓规矩不登记；代码改动记在 `technical-overview.md` §10.375。
 
 ## 回滚
 

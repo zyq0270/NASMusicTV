@@ -26098,3 +26098,59 @@ Critical/High + 关键 Medium 派**独立怀疑式复核**（砍掉约 1/3 的�
 
 - 版本：**v2.39.16 / versionCode 201**
 
+### 10.375 main 侧补齐 E54「街机合集」的公开安全外壳 + 名册补登 E55（2026-11-10）
+
+**背景**：E54「街机合集」（魂斗罗第一阶段移植）已在**本地私有分支 `feat/e51-private`** 交付
+（v2.39.17 / versionCode 202，2026-11-10），但方案 §5.2「落点分工」要求进 `main` 的那一半
+（枚举 / 双语字符串 / 编译期开关 / 工厂回落 / 计数门禁）**一直空着** ⇒ 后果有两个：
+
+1. `main` 的效果名册 `docs/visualizer-effects-list.md` **只有 28 套**，缺已交付的街机合集；
+2. 更硬的一条：`VisualizerRendererFactory.kt` 在 `E51_TRACKED` 里 ⇒ 本机编译用的是**覆盖层那份**
+   （含 `ARCADE_GAMES` 分支），而 `AppSettings.kt` **不在** `E51_TRACKED` 里 ⇒ `main` 上编译的是仓库那份
+   ⇒ **枚举项缺席 ⇒ `when (theme)` 引用不存在的常量 ⇒ 编译失败**（方案 §5.1 的推导链）。
+
+**本轮落地（`main` 侧，全部在公开仓库内，不含任何上游 C 代码 / 素材 / 上游项目名）**：
+
+| 内容 | 落点 |
+|---|---|
+| 枚举项 `ARCADE_GAMES`（显示名「街机合集」、占位号 `"55"`、`Tier.ADV`、`needsParticleBudget = false`） | `AppSettings.kt` |
+| 双语字符串 `visualizer_theme_arcade_games`（zh「街机合集」/ en「Arcade」） | `values/strings.xml` + `values-en/strings.xml` |
+| 编译期开关 `arcade.enabled` → `BuildConfig.ARCADE_ENABLED` + **源码存在性护栏** | `app/build.gradle.kts` |
+| `publishable()` 过滤（开关关 ⇒ 公开包里**整个效果不存在**） | `AppSettings.kt` |
+| 工厂**回落**分支 `-> CircularRingRenderer()`（真分支在覆盖层 / 私有分支） | `VisualizerRendererFactory.kt` |
+| 计数门禁 G1~G5：28 → **29**（枚举数 / 编号互异 / 显示名互异 / 可选列表基数） | `VisualizerThemeTest.kt` |
+| 注册链硬计数门禁：效果总数 28 → **29** | `StarrySkyTest.kt` |
+
+**同时补齐方案 §5.3 的覆盖层两处登记**（否则「在 main 上本地编译也携带隐藏分支效果」这条链对 E54 是断的）：
+`scripts/sync_private_overlay.py` 的 `SHADOWED_JAVA` 加 `visualizer/arcade`、`SHADOWED_ASSETS` 加
+`assets/e54_arcade`；本机 `~/.gradle/init.d/10-nasmusic-e51-local.gradle` 的 `E51_TRACKED` 加
+`com/nasmusic/tv/visualizer/arcade/**` ⇒ `python scripts/sync_private_overlay.py --check` 漂移 **0 处**。
+
+**名册**：`docs/visualizer-effects-list.md` 补登 `| E55 | ARCADE_GAMES | 街机合集 ⚠️ |`
+⇒ 29 套 / ADV 19 套；**公开版可选仍是 26 套**（该项被编译期开关整个过滤掉，公开包行为不变）。
+⚠️ `"55"` 是**占位号**（`"54"` 已被 `E54 生态地球` 占用并随 v2.39.14 发布，改号会让老用户看到编号跳变）。
+
+**归档**：`docs/e54-contra-porting-plan.md` → `docs/archive/`（main 侧镜像 v1.2；权威定稿版 v1.3 在私有分支同路径），
+引用改写 3 处（`.gitignore` ×2、调研文档 ×1），未闭合项逐条留痕见 `docs/archive/README.md` 第二十五轮。
+
+⚠️ **未升版本号**：本轮**不改变公开包的用户可见行为**（新增项被编译期开关过滤掉）⇒ 版本仍是
+**v2.39.16 / versionCode 201**；公开分支与私有分支的版本号不重叠（私有侧是 v2.39.17 / 202）。
+
+### 10.376 所有者裁决：新增 / 移除频谱效果 ⇒ 必须同步效果名册（2026-11-10）
+
+**裁决原文**：「以后增加一个效果，就自动修改 `docs/visualizer-effects-list.md`。」
+
+**落点**（两处公开约定文件，两个分支必须一致）：
+
+| 文件 | 落点 |
+|---|---|
+| `AGENTS.md` | Conventions 段新增一条 ⛔ 硬规则（新增/移除效果 ⇒ 同一次改动里同步名册的三件事：表格行 + 三个计数 + ⚠️ 门控标记） |
+| `CLAUDE.md` | `Common Tasks → Add New Visualizer Effect` 补第 6 步；`Important Files to Know` 表补 `docs/visualizer-effects-list.md` |
+
+**为什么**：名册是 `docs/` 根唯一的现役效果索引，但它**手维护**且此前**没有**任何"新增效果要改它"的约定
+⇒ 2026-11-10 这轮就漏了一次：E54「街机合集」已在私有分支交付并随 v2.39.17 出货，main 的名册却仍停在 28 套
+（连带 `VisualizerThemeTest` 的硬计数、`StarrySkyTest` 的注册链硬计数都红）。
+
+⛔ **不要跑 `scripts/gen_effects_doc.py` 来"自动更新"**：它的模板已过期（头部还写 v2.39.10 / "枚举第 6 参"），
+跑一遍会**抹掉**名册里现有的 ⚠️ 说明、门控口径与各档计数注解 ⇒ 名册仍是**手维护**的。
+

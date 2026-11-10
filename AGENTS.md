@@ -161,6 +161,15 @@ JAVA_HOME="C:/Program Files/Android/Android Studio/jbr" \
   扔掉 ⇒ 深度算成 0 ⇒ 雾距退化成 `1.0`，编译与单测都"绿"得毫无异样，只有门禁的数值断言能抓住）。
   ⇒ **一律把 `+` 留在行尾**（`val span = a * b +` 换行续写）；跨行算式优先用括号或显式 `add()`。
 - **Doc writing style (user-mandated, 2026-09-20)**: `README.md` lists **features only** — user-facing, concise, drop minor/implementation-level items. `CHANGELOG.md` entries state **what was done only** — one line each, **no root cause, no implementation detail, no source line numbers, no verification narrative**; all of that belongs in `docs/technical-overview.md` §10.N. Touch **only the current version's section** — never rewrite historical sections.
+- ⛔ **新增 / 移除一个频谱效果 ⇒ 同一次改动里必须同步 `docs/visualizer-effects-list.md`**（所有者 2026-11-10 裁决）。
+  该文件是 `docs/` 根唯一的**现役效果名册**（来源 = `AppSettings.kt` 的 `VisualizerTheme` 枚举），要同步三件事：
+  ① 在对应档位表加一行 `| E编号 | 枚举键 | 显示名 |`；② 更新三个计数 —— **总套数**、**各档套数**、
+  **"公开版可选 N 套"**（= 总数 − 被编译期开关过滤掉的那几项）；③ 受编译期开关门控的效果（E51 / E52 / E55）
+  标 **⚠️** 并写明开关名（`BuildConfig.*_ENABLED` / Gradle 属性）。
+  ⛔ **手维护，不要跑 `scripts/gen_effects_doc.py`** —— 它的模板已过期（头部还写 v2.39.10），跑一遍会**抹掉**现有的
+  ⚠️ 说明与门控口径。⚠️ 漏改的代价（真实发生，2026-11-10）：E54「街机合集」已交付并随 v2.39.17 出货，
+  但 main 分支的名册仍停在 28 套 ⇒ 名册与枚举对不上（`VisualizerThemeTest` 的硬计数、`StarrySkyTest` 的注册链
+  硬计数都会红）。
 - ⛔ **Never `reject()` in `MediaSession.Callback.onConnect`** (root cause of "car Bluetooth media buttons dead", §10.165). System-side controllers (Bluetooth AVRCP / SystemUI / car) arrive via the framework `MediaController` and Media3 routes them through `MediaSessionLegacyStub.tryGetController() → onConnect`; rejecting makes Media3 drop the command silently. Put the security boundary in `setAvailableSessionCommands` instead — and since that is **strict set membership** (not additive), only ever **add to** `DEFAULT_SESSION_AND_LIBRARY_COMMANDS`. Gate: `MediaSessionAccessPolicyTest`. ⚠️ Only reproducible in **release** builds.
 
 - ⛔ **E51「像素城市」+ E52「旷野公路」：文档公开、代码私有**（所有者 2026-10-22 / 10-30 / **2026-11-04** 三次裁决）

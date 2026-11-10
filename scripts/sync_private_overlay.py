@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""把隐藏分支（feat/e51-private）的 E51/E52 源码与资产同步到本机的**仓库外覆盖层**。
+"""把隐藏分支（feat/e51-private）的 E51/E52/E54 源码与资产同步到本机的**仓库外覆盖层**。
 
 为什么需要这个脚本
 ------------------
@@ -13,7 +13,7 @@
 （Kotlin 源码走 java 源目录、资产走 assets 源目录），并在 **Kotlin 编译任务层**排除仓库里
 那几份同名文件 ⇒ **本地构建实际编译的是覆盖层那份**。
 
-⭐ 于是「**在 main 分支上本地编译也携带隐藏分支（E51 像素城市 / E52 旷野公路）的效果**」
+⭐ 于是「**在 main 分支上本地编译也携带隐藏分支（E51 像素城市 / E52 旷野公路 / E54 街机合集）的效果**」
 这件事，靠的就是这份覆盖层；而 GitHub / CI 上没有这份覆盖层 ⇒ 公开包里一行隐藏分支代码都没有。
 
 ⚠️⚠️ **代价（2026-11-02 踩过）**：改了隐藏分支的 E51/E52 代码而**没**同步覆盖层
@@ -81,6 +81,7 @@ PRIVATE_REF = 'feat/e51-private'
 SHADOWED_JAVA = [
     ('visualizer/e51', 'dir'),
     ('visualizer/highway', 'dir'),
+    ('visualizer/arcade', 'dir'),
     ('ui/components/LofiCityCard.kt', 'file'),
     ('visualizer/renderers/LofiCityRenderer.kt', 'file'),
     ('visualizer/RenderContext.kt', 'file'),
@@ -89,8 +90,10 @@ SHADOWED_JAVA = [
 ]
 
 # E52 的资产（上游 Slow Roads 贴图与模型）—— 只在 main 上靠覆盖层带进来
+# E54「街机合集」的图集同理（只进本地私有分支 / 覆盖层，⛔ 不进公开仓库）
 SHADOWED_ASSETS = [
     ('e52_highway', 'dir'),
+    ('e54_arcade', 'dir'),
 ]
 
 

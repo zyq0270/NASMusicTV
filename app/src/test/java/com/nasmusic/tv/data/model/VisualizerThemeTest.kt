@@ -30,6 +30,8 @@ class VisualizerThemeTest {
     private val lofiInList = if (BuildConfig.LOFI_CITY_ENABLED) 1 else 0
     /** E52「阔野公路」同理：`BuildConfig.HIGHWAY_ENABLED`（`local.properties` 的 `highway.enabled`）。 */
     private val highwayInList = if (BuildConfig.HIGHWAY_ENABLED) 1 else 0
+    /** 「街机合集」同理：`BuildConfig.ARCADE_ENABLED`（`local.properties` 的 `arcade.enabled`）。 */
+    private val arcadeInList = if (BuildConfig.ARCADE_ENABLED) 1 else 0
 
     @Test
     fun `legacy enum names migrate to the new themes`() {
@@ -70,20 +72,20 @@ class VisualizerThemeTest {
 
     @Test
     fun `theme library is all concrete effects, no auto mode`() {
-        // 28 = 31 − E18「反馈残像」− E24「心跳」− E23「歌词点阵」
+        // 29 = 31 − E18「反馈残像」− E24「心跳」− E23「歌词点阵」
         // （2026-11-07 所有者裁决下线；E23 被 E53「歌词舞台」吸收 ⇒ 只剩 E53 的子模式 0）。
-        // 2026-11-08 新增 E54「生态地球」⇒ 27 → 28。
-        // ⛔ 与 lofi.city 开关无关：枚举恒声明，只有 selectable() 会过滤。
-        assertEquals(28, VisualizerTheme.entries.size)
+        // 2026-11-08 新增 E54「生态地球」⇒ 27 → 28；2026-11-10 新增「街机合集」（占位号 55）⇒ 28 → 29。
+        // ⛔ 与 lofi.city / arcade.enabled 开关无关：枚举恒声明，只有 selectable() 会过滤。
+        assertEquals(29, VisualizerTheme.entries.size)
     }
 
     @Test
     fun `selectable list contains every theme when the photo wall is available`() {
         val selectable = VisualizerTheme.selectable(photoWallAvailable = true)
-        // 26 = 28 项枚举减去被 lofi.city / highway.enabled 两个编译期开关过滤掉的那两项
-        // （本用例照片墙是开着的 ⇒ 不触发列表级门控）。
-        assertEquals(26 + lofiInList + highwayInList, selectable.size)
-        assertEquals(26 + lofiInList + highwayInList, selectable.distinct().size)
+        // 26 = 29 项枚举减去被 lofi.city / highway.enabled / arcade.enabled 三个编译期开关过滤掉的那三项
+        // （本用例照片墙是开着的 ⇒ 不触发列表级门控）。三个开关各自在开时补回 1。
+        assertEquals(26 + lofiInList + highwayInList + arcadeInList, selectable.size)
+        assertEquals(26 + lofiInList + highwayInList + arcadeInList, selectable.distinct().size)
         assertTrue(selectable.contains(VisualizerTheme.PHOTO_WALL))
     }
 
@@ -114,26 +116,27 @@ class VisualizerThemeTest {
             listOf(VisualizerTheme.PHOTO_WALL),
             on.filter { it !in off.toSet() }
         )
-        // 关：25 项（28 − 照片墙）再减两个被开关过滤的；开：26 项再减两个被开关过滤的。
-        assertEquals(25 + lofiInList + highwayInList, off.size)
-        assertEquals(26 + lofiInList + highwayInList, on.size)
+        // 关：25 项（29 − 照片墙 − 三个开关项）；开：26 项（29 − 三个开关项）。开关各自在开时补回 1。
+        assertEquals(25 + lofiInList + highwayInList + arcadeInList, off.size)
+        assertEquals(26 + lofiInList + highwayInList + arcadeInList, on.size)
     }
 
     @Test
     fun `ordinal labels are unique`() {
         val labels = VisualizerTheme.entries.map { it.ordinalLabel }
-        // 28 个编号互异 —— 千里江山取 "50"（E51 占 "51"、E52 占 "52"、E53 占 "53"、E54 占 "54"），不再与 E43「海边」重号。
+        // 29 个编号互异 —— 千里江山取 "50"（E51 占 "51"、E52 占 "52"、E53 占 "53"、E54 占 "54"），
+        // 「街机合集」取占位号 "55"，不再与 E43「海边」重号。
         // ⚠️ E18「反馈残像」("18")、E24「心跳」("24") 与 E23「歌词点阵」("23") 已于 2026-11-07 下线
         //    ⇒ 随主题一同消失，存活主题的 `ordinalLabel` **一个都没动**（它们是稳定的展示编号，不是序号）。
-        assertEquals(28, labels.distinct().size)
+        assertEquals(29, labels.distinct().size)
     }
 
     @Test
     fun `display names are non blank and unique`() {
         val names = VisualizerTheme.entries.map { it.displayName }
         assertTrue(names.none { it.isBlank() })
-        // 「千里江山」「生态地球」都是唯一显示名 ⇒ 28 个互异。
-        assertEquals(28, names.distinct().size)
+        // 「千里江山」「生态地球」都是唯一显示名 ⇒ 29 个互异。
+        assertEquals(29, names.distinct().size)
     }
 
     @Test

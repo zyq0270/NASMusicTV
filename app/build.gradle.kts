@@ -219,6 +219,31 @@ if (highwayEnabled == "true") {
     }
 }
 
+// 「街机合集」发布隔离开关（方案 docs/archive/e54-contra-porting-plan.md §5.2 落点分工）：
+// 本机 local.properties 里写 `arcade.enabled=true` 即把该效果编进包；CI 与公开构建缺省 false。
+// ⚠️ 与 E51/E52 同理：开关只隔离 APK 可选性，不隔离源码文本（该效果的实现只在本地私有分支/覆盖层）。
+val arcadeEnabled: String = (readLocalProperty("arcade.enabled") ?: providers.gradleProperty("arcade.enabled").orNull)
+    .toString().toBooleanStrictOrNull()?.toString() ?: "false"
+
+// 「街机合集」源码存在性护栏：
+// `arcade.enabled=true` 的语义是"本次构建要含**真**的街机合集效果"。源码有两种来源：
+// ① 本地私有分支 `feat/e51-private` 内的 `visualizer/arcade`；
+// ② 本机 Gradle 初始化脚本挂进来的覆盖层。
+// 两者都没有时工厂会回落 `CircularRingRenderer()` ⇒ 静默编出「主题在、效果是通用圆环」的假包，
+// 故此处显式失败（与 E51/E52 的护栏同构）。
+if (arcadeEnabled == "true") {
+    val arcadeTracked = rootProject.file("app/src/main/java/com/nasmusic/tv/visualizer/arcade")
+    val arcadeOverlay = privateOverlayJava?.resolve("com/nasmusic/tv/visualizer/arcade")
+    if (!arcadeTracked.isDirectory && arcadeOverlay?.isDirectory != true) {
+        throw GradleException(
+            "「街机合集」：arcade.enabled=true，但既没有分支内的 arcade 源码，覆盖层里也没有。\n" +
+                "  · 要出**带真效果**的本地包：切到分支 feat/e51-private 构建，或让本机 Gradle 初始化脚本\n" +
+                "    （~/.gradle/init.d/10-nasmusic-e51-local.gradle）挂上仓库外覆盖层。\n" +
+                "  · 在没有 arcade 源码的分支上构建：请把 local.properties 的 arcade.enabled 设为 false。"
+        )
+    }
+}
+
 android {
     namespace = "com.nasmusic.tv"
     compileSdk = 34
@@ -248,6 +273,8 @@ android {
         buildConfigField("boolean", "LOFI_CITY_ENABLED", lofiCityEnabled)
         // E52「阔野公路」：本机/公开双变体开关（读取处见文件顶部）
         buildConfigField("boolean", "HIGHWAY_ENABLED", highwayEnabled)
+        // 「街机合集」：本机/公开双变体开关（读取处见文件顶部，口径见 docs/archive/e54-contra-porting-plan.md §5.2）
+        buildConfigField("boolean", "ARCADE_ENABLED", arcadeEnabled)
     }
 
     // CI 的 Unit tests job 不生成 keystore.properties：无 release 签名配置时跳过创建，
