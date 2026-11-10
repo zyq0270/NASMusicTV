@@ -538,10 +538,12 @@ enum class VisualizerTheme(
     /**
      * 「街机合集」—— 一个**自动演示**的街机效果（无需任何按键即可持续运行）。
      *
-     * ⚠️ 本效果的实现**不随本仓库外发**：渲染器源码、图集、关卡内容与上游快照都只在
-     * 本地私有分支 `feat/e51-private`（或本机覆盖层）里 ⇒ 公开构建里由编译期开关
-     * `BuildConfig.ARCADE_ENABLED`（Gradle 属性 `arcade.enabled`）整个过滤掉，
-     * 与 E51「像素城市」/ E52「旷野公路」**同一种双变体处置**。
+     * ⭐ 2026-11-10 所有者裁定「魂斗罗应当是公开的、在 main 分支下的」⇒ **本效果已整体公开**：
+     * 渲染器源码（`visualizer/arcade/`）、图集（`assets/e54_arcade/contra_atlas.png`）、关卡内容
+     * 与 6 个测试都在 `main` 上 ⇒ 公开构建**默认带**该效果（编译期开关 `BuildConfig.ARCADE_ENABLED`
+     * 由 Gradle 属性 `arcade.enabled` 控制，**缺省 true**；显式写 `arcade.enabled=false` 才裁掉）。
+     * ⚠️ 与 E51「像素城市」/ E52「旷野公路」方向相反 —— 那两个的实现 ⛔ 不随仓库外发，故缺省 false。
+     * 素材出处与许可事实见 `docs/e54-sprite-attribution.md`。
      *
      * ## 归 [Tier.ADV] + `needsParticleBudget = false`
      * - **ADV**：与 E51/E52 同档（两者同样标 `false` ⇒ 三档全可用）。
@@ -552,6 +554,10 @@ enum class VisualizerTheme(
      * 调研文档曾把「自动玩街机游戏合集」自编号为 E54，而 `"54"` 已被 `ECO_GLOBE`「生态地球」
      * 占用并随 v2.39.14 发布（改号会让老用户看到编号跳变）⇒ 本效果取自然空号 `"55"`，
      * ⛔ 不改回 `"54"`（方案 §0.0）。
+     *
+     * ⚠️ **移植件 / 自建件的区分**（方案 §0.1）：sim 层的状态机形状参照上游
+     * `MikeWuPing/UEFI_Contra`（仓库内无 LICENSE 文件，README 自称 MIT）；
+     * **渲染层、全部 8 关地形、敌人布点、boss、bot 决策均为本项目原创**（GPL v3）。
      *
      * 方案与落点分工见 `docs/archive/e54-contra-porting-plan.md`。
      */
@@ -646,7 +652,8 @@ private val LEGACY_MAP = mapOf(
         private fun publishable(list: List<VisualizerTheme>): List<VisualizerTheme> {
             val base = if (BuildConfig.LOFI_CITY_ENABLED) list else list.filterNot { it == LOFI_CITY }
             val withHighway = if (BuildConfig.HIGHWAY_ENABLED) base else base.filterNot { it == HIGHWAY }
-            // 「街机合集」同 E51/E52：实现不随本仓库外发 ⇒ 公开构建里整个效果不存在。
+            // 「街机合集」（E55）：实现已公开入仓 ⇒ 缺省 true 时它在公开版里**可选**；
+            // 只有显式把 arcade.enabled 设为 false 才把它整个过滤掉（逃生阀，不是常态）。
             return if (BuildConfig.ARCADE_ENABLED) withHighway else withHighway.filterNot { it == ARCADE_GAMES }
         }
 

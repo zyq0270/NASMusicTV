@@ -164,8 +164,10 @@ JAVA_HOME="C:/Program Files/Android/Android Studio/jbr" \
 - ⛔ **新增 / 移除一个频谱效果 ⇒ 同一次改动里必须同步 `docs/visualizer-effects-list.md`**（所有者 2026-11-10 裁决）。
   该文件是 `docs/` 根唯一的**现役效果名册**（来源 = `AppSettings.kt` 的 `VisualizerTheme` 枚举），要同步三件事：
   ① 在对应档位表加一行 `| E编号 | 枚举键 | 显示名 |`；② 更新三个计数 —— **总套数**、**各档套数**、
-  **"公开版可选 N 套"**（= 总数 − 被编译期开关过滤掉的那几项）；③ 受编译期开关门控的效果（E51 / E52 / E55）
+  **"公开版可选 N 套"**（= 总数 − 被编译期开关过滤掉的那几项）；③ 受编译期开关**缺省关闭**的效果（E51 / E52）
   标 **⚠️** 并写明开关名（`BuildConfig.*_ENABLED` / Gradle 属性）。
+  ⚠️ 反例：E55「街机合集」的 `arcade.enabled` **缺省 true**（该效果已公开）⇒ 名册里**不标** ⚠️，
+  但要写明「公开版可选 N 套」已把它算进去。
   ⛔ **手维护，不要跑 `scripts/gen_effects_doc.py`** —— 它的模板已过期（头部还写 v2.39.10），跑一遍会**抹掉**现有的
   ⚠️ 说明与门控口径。⚠️ 漏改的代价（真实发生，2026-11-10）：E54「街机合集」已交付并随 v2.39.17 出货，
   但 main 分支的名册仍停在 28 套 ⇒ 名册与枚举对不上（`VisualizerThemeTest` 的硬计数、`StarrySkyTest` 的注册链
@@ -173,6 +175,11 @@ JAVA_HOME="C:/Program Files/Android/Android Studio/jbr" \
 - ⛔ **Never `reject()` in `MediaSession.Callback.onConnect`** (root cause of "car Bluetooth media buttons dead", §10.165). System-side controllers (Bluetooth AVRCP / SystemUI / car) arrive via the framework `MediaController` and Media3 routes them through `MediaSessionLegacyStub.tryGetController() → onConnect`; rejecting makes Media3 drop the command silently. Put the security boundary in `setAvailableSessionCommands` instead — and since that is **strict set membership** (not additive), only ever **add to** `DEFAULT_SESSION_AND_LIBRARY_COMMANDS`. Gate: `MediaSessionAccessPolicyTest`. ⚠️ Only reproducible in **release** builds.
 
 - ⛔ **E51「像素城市」+ E52「旷野公路」：文档公开、代码私有**（所有者 2026-10-22 / 10-30 / **2026-11-04** 三次裁决）
+  - ⭐ **E55「街机合集」不在此列 —— 它是公开的**（所有者 2026-11-10 裁定「魂斗罗应当是公开的、在 main 分支下的」）：
+    实现 `app/src/main/java/com/nasmusic/tv/visualizer/arcade/`、图集 `app/src/main/assets/e54_arcade/contra_atlas.png`、
+    6 个测试与 `docs/e54-sprite-attribution.md` 全部在 `main` 上，公开构建**默认带**该效果
+    （`arcade.enabled` **缺省 true**）。⛔ 但它的**上游原件**（`app/src/e54-upstream/`，ROM 提取的精灵与瓦片）
+    仍然 **.gitignore**、仍然只在私有分支本机作对账基线 —— **那部分不可再分发**，别把它一起拷进 `main`。
   - **文档公开**（两个分支都可访问）：`main` 上在 `docs/archive/`（`e51-lofi-city-plan.md` / `e52-highway-opengl-plan.md` /
     `e52-progress.md`，2026-11-04 双双定稿后归档）；私有分支上另有两份 E52 原型 HTML
     （`docs/archive/e52-highway-preview.html` / `docs/archive/e52-highway-webgl-preview.html`）——

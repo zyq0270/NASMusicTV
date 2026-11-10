@@ -26186,3 +26186,43 @@ Critical/High + 关键 Medium 派**独立怀疑式复核**（砍掉约 1/3 的�
 ⚠️ **版本号一致 ≠ 公开包内容一致**：`main` 的公开构建里「街机合集」仍被 `arcade.enabled` 编译期开关整个过滤
 （公开版可选 26 套）；实现、图集、关卡内容、上游快照只在本地私有分支与本机覆盖层。
 
+### 10.378 所有者第三次裁决：E55「街机合集」**公开分发**（2026-11-10）
+
+**裁决原文**：「魂斗罗应该是公开的，在 main 分支下的。」
+**口径**：**实现上 `main` 且公开包默认也带该效果**（`arcade.enabled` 缺省改 `true`）
+⇒ 公开版可选效果 **26 → 27 套**。版本随之升到 **v2.39.18 / versionCode 203**。
+
+**迁移清单**（自 `feat/e51-private` → `main`）：
+
+| 内容 | 数量 | 说明 |
+|---|---:|---|
+| `app/src/main/java/com/nasmusic/tv/visualizer/arcade/**` | 14 文件 | 渲染器 / sim / bot / 关卡 / GL 场景（依赖全部是公开件，无 E51 耦合） |
+| `app/src/test/java/com/nasmusic/tv/visualizer/arcade/**` | 6 文件 | 42 个用例 |
+| `app/src/main/assets/e54_arcade/contra_atlas.png` | 1 | 489 帧烘焙图集（55,839 B） |
+| `scripts/e54_pack_sprites.py` | 1 | 图集生成器（输入仍是本机 gitignored 的 `app/src/e54-upstream/`） |
+| `docs/e54-sprite-attribution.md` | 1 | NOTICE（分发边界改写为公开口径） |
+
+**开关与门控改向**（与 E51 / E52 **相反** —— 那两个的实现 ⛔ 不随仓库外发，故缺省 false）：
+
+| 项 | 改前 | 改后 |
+|---|---|---|
+| `arcade.enabled` 缺省 | `false` | **`true`** |
+| `AppSettings.publishable()` | 公开版过滤掉 `ARCADE_GAMES` | 公开版**保留**（仅显式 `arcade.enabled=false` 才过滤） |
+| `VisualizerRendererFactory` | `ARCADE_GAMES -> CircularRingRenderer()` | `ARCADE_GAMES -> ArcadeRenderer(context)` |
+| 公开版可选效果 | 26 套 | **27 套**（= 29 − E51 − E52） |
+
+**⛔ 覆盖层影子项必须同步撤掉**：`scripts/sync_private_overlay.py` 的 `SHADOWED_JAVA` / `SHADOWED_ASSETS`
+与本机 `~/.gradle/init.d/10-nasmusic-e51-local.gradle` 的 `E51_TRACKED` 原本都登记了 `visualizer/arcade`。
+⛔ 不撤的话，init 脚本在「仓库里没有隐藏分支源码」（= 在 `main` 上）时会**排除仓库里那几份同名文件**、
+改用覆盖层那份 ⇒ `main` 刚入仓的 arcade 源码会被旧副本顶掉。两处已同步撤除并重跑同步，
+`--check` 漂移 **0** 处（`PrivateOverlayDriftGateTest` 绿）。
+
+**文档同步**：名册（公开版可选 26 → 27；E55 去掉 ⚠️ 门控标记）、`AGENTS.md`（名册约定里
+「E51 / E52 / E55 标 ⚠️」改为「E51 / E52 标 ⚠️」+ 增补「E55 是公开的」一段）、
+`docs/e54-sprite-attribution.md` §2 / §3、归档方案 §5.2 / §5.3 **补记**（原表保留不动，只加改判说明）、
+`.gitignore` 注释、`scripts/e54_pack_sprites.py` 文件头（效果编号 E55、文件名保持 `e54_`）。
+
+**⛔ 仍然不可再分发的部分**：`app/src/e54-upstream/`（上游 ROM 提取原件：232 张精灵 PNG + `tiles_c.h`）
+**仍 .gitignore、仍不入仓**（它只是本机「移植对账基线」）；E51 / E52 的实现与资产**不受本次裁决影响**，
+仍只在私有分支与覆盖层。⛔ 公开包里进的是**烘焙图集 + 本项目自写的 sim / bot / 关卡内容**。
+

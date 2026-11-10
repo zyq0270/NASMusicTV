@@ -30,6 +30,7 @@ import com.nasmusic.tv.visualizer.renderers.StarrySkyRenderer
 import com.nasmusic.tv.visualizer.renderers.TripodFogRenderer
 import com.nasmusic.tv.visualizer.renderers.WorldGlobeRenderer
 import com.nasmusic.tv.visualizer.photo.PhotoRenderer
+import com.nasmusic.tv.visualizer.arcade.ArcadeRenderer
 import com.nasmusic.tv.visualizer.qianli.QianliRenderStyle
 import com.nasmusic.tv.visualizer.renderers.QianliUpstreamRenderer
 
@@ -63,7 +64,8 @@ object VisualizerRendererFactory {
             // E52「旷野公路」同上：公开构建（CI 缺省 highway.enabled 未设 ⇒ false）里不渲染它
             CircularRingRenderer()
         } else if (!BuildConfig.ARCADE_ENABLED && theme == VisualizerTheme.ARCADE_GAMES) {
-            // 「街机合集」同上：公开构建（CI 缺省 arcade.enabled 未设 ⇒ false）里不渲染它
+            // 「街机合集」（E55）同上：只有把 arcade.enabled 显式关掉时才回落
+            // （缺省 true —— 该效果的实现已公开入仓，公开包默认带它）
             CircularRingRenderer()
         } else {
             createEnabled(theme, context)
@@ -124,10 +126,11 @@ object VisualizerRendererFactory {
         // E54「生态地球」：WebView + three.js（与 E41「世界」并列的独立场景）。
         // ⚠️ 传 Context（WebView 需要）；渲染器内部只持有 applicationContext。
         VisualizerTheme.ECO_GLOBE -> EcoGlobeRenderer(context)
-        // 「街机合集」：渲染器实现不随本仓库外发（实现与素材只在本地私有分支/覆盖层）⇒ 此处无实现可创建。
-        // ⚠️ 同 E51/E52：分支必须留着（枚举项恒声明，备份 JSON 按名反查会命中），公开构建在 create()
-        // 外层就被拦下；这里只是穷尽性兜底，回落默认效果。
-        VisualizerTheme.ARCADE_GAMES -> CircularRingRenderer()
+        // 「街机合集」（E55）：View 型（GLSurfaceView），与 E52 同模式。
+        // ⭐ 2026-11-10 所有者裁决「魂斗罗应当是公开的、在 main 分支下的」⇒ 实现整体入仓
+        //    （`visualizer/arcade/`，14 个源文件），公开包默认带该效果。
+        // ⚠️ 传 Context（GLSurfaceView 构造需要）；渲染器内部只持有 applicationContext。
+        VisualizerTheme.ARCADE_GAMES -> ArcadeRenderer(context)
     }
 
     /**

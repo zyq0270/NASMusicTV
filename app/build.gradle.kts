@@ -219,27 +219,28 @@ if (highwayEnabled == "true") {
     }
 }
 
-// 「街机合集」发布隔离开关（方案 docs/archive/e54-contra-porting-plan.md §5.2 落点分工）：
-// 本机 local.properties 里写 `arcade.enabled=true` 即把该效果编进包；CI 与公开构建缺省 false。
-// ⚠️ 与 E51/E52 同理：开关只隔离 APK 可选性，不隔离源码文本（该效果的实现只在本地私有分支/覆盖层）。
+// 「街机合集」（E55）发布隔离开关（方案 docs/archive/e54-contra-porting-plan.md §5.2 落点分工）：
+// ⭐ 所有者 2026-11-10 裁决「魂斗罗应当是公开的、在 main 分支下的」⇒ 实现整体入仓 ⇒ **缺省 true**
+//   （公开构建默认带该效果，可选效果 26 → 27 套）。
+//   需要裁掉公开包的该效果时，在 local.properties / Gradle 属性里写 `arcade.enabled=false`。
+// ⚠️ 与 E51/E52 的 `lofi.city` / `highway.enabled` **方向相反**：那两个缺省 false，因为它们的实现
+//    ⛔ 不随仓库外发（只在私有分支/覆盖层）；本效果的实现已在 main（`visualizer/arcade/`）⇒ 缺省 true。
 val arcadeEnabled: String = (readLocalProperty("arcade.enabled") ?: providers.gradleProperty("arcade.enabled").orNull)
-    .toString().toBooleanStrictOrNull()?.toString() ?: "false"
+    .toString().toBooleanStrictOrNull()?.toString() ?: "true"
 
 // 「街机合集」源码存在性护栏：
-// `arcade.enabled=true` 的语义是"本次构建要含**真**的街机合集效果"。源码有两种来源：
-// ① 本地私有分支 `feat/e51-private` 内的 `visualizer/arcade`；
-// ② 本机 Gradle 初始化脚本挂进来的覆盖层。
-// 两者都没有时工厂会回落 `CircularRingRenderer()` ⇒ 静默编出「主题在、效果是通用圆环」的假包，
-// 故此处显式失败（与 E51/E52 的护栏同构）。
+// `arcade.enabled=true` 的语义是"本次构建要含**真**的街机合集效果"（不是通用圆环兜底）。
+// 实现已入仓（`app/src/main/java/com/nasmusic/tv/visualizer/arcade`）⇒ 这里只需确认工作树完整：
+// 若该目录被误删 / 误改名，工厂会回落 `CircularRingRenderer()` ⇒ 静默编出「主题在、效果是通用圆环」
+// 的假包 ⇒ 提前显式失败。
 if (arcadeEnabled == "true") {
     val arcadeTracked = rootProject.file("app/src/main/java/com/nasmusic/tv/visualizer/arcade")
-    val arcadeOverlay = privateOverlayJava?.resolve("com/nasmusic/tv/visualizer/arcade")
-    if (!arcadeTracked.isDirectory && arcadeOverlay?.isDirectory != true) {
+    if (!arcadeTracked.isDirectory) {
         throw GradleException(
-            "「街机合集」：arcade.enabled=true，但既没有分支内的 arcade 源码，覆盖层里也没有。\n" +
-                "  · 要出**带真效果**的本地包：切到分支 feat/e51-private 构建，或让本机 Gradle 初始化脚本\n" +
-                "    （~/.gradle/init.d/10-nasmusic-e51-local.gradle）挂上仓库外覆盖层。\n" +
-                "  · 在没有 arcade 源码的分支上构建：请把 local.properties 的 arcade.enabled 设为 false。"
+            "「街机合集」：arcade.enabled=true，但仓库里没有 arcade 源码" +
+                "（app/src/main/java/com/nasmusic/tv/visualizer/arcade）。\n" +
+                "  · 该效果的实现已随 v2.39.18 公开入仓 ⇒ 缺失说明工作树不完整（误删 / 未 checkout）。\n" +
+                "  · 确需裁掉公开包的该效果：把 local.properties 的 arcade.enabled 设为 false。"
         )
     }
 }
@@ -252,9 +253,9 @@ android {
         applicationId = "com.nasmusic.tv"
         minSdk = 22
         targetSdk = 34
-        // versionCode 口径：= 185 + 次版本号（2.39.14→199 / 2.39.15→200 / 2.39.16→201 / 2.39.17→202）。
-        versionCode = 202
-        versionName = "2.39.17"
+        // versionCode 口径：= 185 + 次版本号（2.39.14→199 / 2.39.15→200 / 2.39.16→201 / 2.39.17→202 / 2.39.18→203）。
+        versionCode = 203
+        versionName = "2.39.18"
 
         // 洛雪宿主的引擎测试依赖 native 库，只能在设备上跑（见文件末尾 androidTestImplementation 注释）
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"

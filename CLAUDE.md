@@ -234,6 +234,20 @@ docs/archive/e51-lofi-city-plan.md              // Plan doc (contains upstream d
 scripts/lofi_city_registry_sync.py      // Sync script (parses upstream bundle)
 ```
 
+### E55「街机合集」— **Public** (owner ruling 2026-11-10)
+
+- Owner ruling: 「魂斗罗应该是公开的，在 main 分支下的」⇒ the implementation
+  (`visualizer/arcade/`), the baked sprite atlas (`app/src/main/assets/e54_arcade/contra_atlas.png`),
+  the 6 test files and the NOTICE (`docs/e54-sprite-attribution.md`) are **all in `main`**.
+- `arcade.enabled` now defaults to **`true`** ⇒ the public APK ships the effect
+  (selectable effects 26 → **27**); set `arcade.enabled=false` to drop it.
+- ⛔ Still **not** redistributable: the upstream originals in `app/src/e54-upstream/`
+  (ROM-extracted sprites + tiles) stay `.gitignore`d — they are the local porting baseline only.
+- ⛔ E51 / E52 are **unaffected** by this ruling: their implementations stay on `feat/e51-private`
+  only, and `arcade` was removed from the overlay shadow lists
+  (`scripts/sync_private_overlay.py` + the local Gradle init script) precisely so the new
+  `main` sources are not shadowed by stale overlay copies.
+
 ### If You Need to Push Other Changes from This Branch
 **Do NOT push directly** — E51 commits are interleaved with other features in history. Owner must explicitly authorize history rewrite (rebase/cherry-pick) to extract non-E51 commits. See `docs/archive/e51-lofi-city-plan.md §10 D-m` and `§2.6`.
 

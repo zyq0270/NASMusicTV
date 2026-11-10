@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""把隐藏分支（feat/e51-private）的 E51/E52/E54 源码与资产同步到本机的**仓库外覆盖层**。
+"""把隐藏分支（feat/e51-private）的 E51/E52 源码与资产同步到本机的**仓库外覆盖层**。
 
 为什么需要这个脚本
 ------------------
@@ -13,8 +13,11 @@
 （Kotlin 源码走 java 源目录、资产走 assets 源目录），并在 **Kotlin 编译任务层**排除仓库里
 那几份同名文件 ⇒ **本地构建实际编译的是覆盖层那份**。
 
-⭐ 于是「**在 main 分支上本地编译也携带隐藏分支（E51 像素城市 / E52 旷野公路 / E54 街机合集）的效果**」
+⭐ 于是「**在 main 分支上本地编译也携带隐藏分支（E51 像素城市 / E52 旷野公路）的效果**」
 这件事，靠的就是这份覆盖层；而 GitHub / CI 上没有这份覆盖层 ⇒ 公开包里一行隐藏分支代码都没有。
+
+⭐ **E55「街机合集」已不在此列**（2026-11-10 所有者第三次裁决：它是公开的、在 main 分支下的）
+⇒ 它的实现与图集都在 `main` 上 ⇒ 不再进覆盖层（见 SHADOWED_JAVA / SHADOWED_ASSETS 的说明）。
 
 ⚠️⚠️ **代价（2026-11-02 踩过）**：改了隐藏分支的 E51/E52 代码而**没**同步覆盖层
 ⇒ 本地包**根本不含**新代码，而 CI（无覆盖层）却能编过 ⇒ **本地与 CI 行为分叉**，极难察觉。
@@ -81,7 +84,6 @@ PRIVATE_REF = 'feat/e51-private'
 SHADOWED_JAVA = [
     ('visualizer/e51', 'dir'),
     ('visualizer/highway', 'dir'),
-    ('visualizer/arcade', 'dir'),
     ('ui/components/LofiCityCard.kt', 'file'),
     ('visualizer/renderers/LofiCityRenderer.kt', 'file'),
     ('visualizer/RenderContext.kt', 'file'),
@@ -90,10 +92,15 @@ SHADOWED_JAVA = [
 ]
 
 # E52 的资产（上游 Slow Roads 贴图与模型）—— 只在 main 上靠覆盖层带进来
-# E54「街机合集」的图集同理（只进本地私有分支 / 覆盖层，⛔ 不进公开仓库）
+#
+# ⭐ 2026-11-10 所有者第三次裁决（「魂斗罗应该是公开的、在 main 分支下的」）后，
+#    E55「街机合集」的实现与图集**已入 main** ⇒ 它不再是「隐藏分支物化」，
+#    ⛔ 已从 SHADOWED_JAVA / SHADOWED_ASSETS 里删掉（`visualizer/arcade` 与 `e54_arcade`）。
+#    理由不是省事：init 脚本在「仓库里没有隐藏分支源码」（= 在 main 上）时会**排除仓库里
+#    那几份同名文件**、改用覆盖层那份 ⇒ 不删就会让 main 刚入仓的 arcade 源码被旧副本顶掉。
+#    ⛔ 上游原件（app/src/e54-upstream/）仍然 .gitignore、仍然不入仓。
 SHADOWED_ASSETS = [
     ('e52_highway', 'dir'),
-    ('e54_arcade', 'dir'),
 ]
 
 

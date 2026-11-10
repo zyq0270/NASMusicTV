@@ -4,10 +4,14 @@
 > 文档移入 `docs/archive/` **不再维护**。
 > - **本文件是 v1.2（main 侧镜像）**：状态行「待开发」是**过期标记**（AGENTS.md「Never trust the doc's own status header」）。
 >   权威定稿版是 v1.3（在本地私有分支 `feat/e51-private` 上，以同一路径 `docs/archive/e54-contra-porting-plan.md` 存）。
-> - **落地纪实**：变更记录见 `docs/technical-overview.md` §10.374–§10.376；交付版本 v2.39.17。
-> - **实现落点**：渲染器 / 图集 / 关卡内容 / 上游快照**只在本地私有分支与本机覆盖层**（⛔ 不进公开仓库）；
->   `main` 只保留「公开安全外壳」（枚举 + 双语字符串 + `arcade.enabled` 编译期开关 + 工厂回落 + 门禁计数），
->   与 E51 / E52 同构 —— 落点分工见本文件 §5.2。
+> - **落地纪实**：变更记录见 `docs/technical-overview.md` §10.374–§10.376、§10.378；交付版本 v2.39.17，
+>   **v2.39.18 起改为公开分发**。
+> - ⭐ **实现落点（2026-11-10 第三次所有者裁决后已改）**：「魂斗罗应当是公开的、在 main 分支下的」
+>   ⇒ 渲染器 / 图集 / 关卡内容 / 6 个测试**全部已在 `main`**（`visualizer/arcade/` +
+>   `app/src/main/assets/e54_arcade/contra_atlas.png`），`arcade.enabled` **缺省 true**
+>   ⇒ 公开 APK **默认带**该效果（公开版可选 26 → 27 套）。
+>   ⛔ **仍然不可再分发的只有上游原件**（`app/src/e54-upstream/`，ROM 提取的精灵与瓦片）—— 保持 `.gitignore`。
+>   素材出处与许可事实见 `docs/e54-sprite-attribution.md`；落点分工见本文件 §5.2 的 ⭐ 补记。
 > - **离线诊断与补丁工具**留档 `docs/archive/verification/e54/`（**在本地私有分支上**，随该分支归档）。
 > - **状态**（v1.2 原行，已过期）：~~**待开发**~~ ⇒ ✅ **第一阶段已交付**（v2.39.17 / versionCode 202，2026-11-10）。
 > - ⭐ **效果编号 = E55（已定，2026-11-10 所有者裁决「按已开发完成代码中既有的现实来确认」）**：枚举
@@ -483,6 +487,25 @@ interface ArcadeGame {
 
 > ⛔ 提交 `main` 前硬检查：该提交里**不得**出现任何上游 C 代码、`.spr`/`.png` 素材、`UEFI_Contra` 字样、「魂斗罗」字样（显示名用中性词「街机合集」）。仓库是 **PUBLIC**，漏检即不可撤回（`git push` 前须所有者确认）。
 
+> ⭐⭐ **2026-11-10 第三次所有者裁决 —— 上表已过期，落点分工改判如下**
+> （原话：「魂斗罗应该是公开的，在 main 分支下的」；落地版本 **v2.39.18 / versionCode 203**）：
+>
+> | 内容 | 落点（现行） | 进公开仓库 |
+> |---|---|---|
+> | 枚举项 + 双语字符串 + `arcade.enabled` 开关 + `publishable()` 过滤 | `main` | ✅ |
+> | 工厂**真实**分支 `-> ArcadeRenderer(context)` | `main` | ✅ |
+> | `visualizer/arcade/**`（14 个源文件）+ 6 个测试 | `main` | ✅ |
+> | `app/src/main/assets/e54_arcade/contra_atlas.png`（489 帧烘焙图集） | `main` | ✅ |
+> | `docs/e54-sprite-attribution.md`（NOTICE）+ `scripts/e54_pack_sprites.py` | `main` | ✅ |
+> | `app/src/e54-upstream/**`（**上游 ROM 提取原件**） | 本机 gitignored（两分支皆是） | ⛔ |
+> | E51 / E52 的实现与资产 | `feat/e51-private` + 覆盖层 | ⛔（**不受本次裁决影响**） |
+>
+> ⇒ `arcade.enabled` **缺省 true**（与 E51/E52 方向相反）⇒ 公开 APK **默认带**「街机合集」，
+> 公开版可选效果 **26 → 27 套**（= 29 − E51 − E52）。
+> ⛔ 上面那段「不得出现 `.png` 素材 / `UEFI_Contra` 字样」的硬检查**仅对上游原件与上游标识成立**：
+> 烘焙图集与本项目自写的 sim / bot / 关卡内容**已获所有者裁定可以公开**；
+> 但 `app/src/e54-upstream/` 里的 ROM 提取原件**仍然不入仓**。
+
 ### 5.3 覆盖层三处登记 + `.gitignore`
 
 | 文件 | 要加的行 |
@@ -492,6 +515,17 @@ interface ArcadeGame {
 | `.gitignore` | `app/src/e54-upstream/` ✅ **已加（2026-11-09）**，见该文件第 125-133 行的成组注释（125-132 注释、133 规则）；`git check-ignore` 退出码 0，目录已变为 `!!`（ignored），不再出现在普通 `git status` |
 
 > 两个脚本头部都有明示「改 `E51_TRACKED` 必须同步改 `SHADOWED_JAVA`」。改完跑 `python scripts/sync_private_overlay.py` → `--check` 必须 **0 漂移**（`PrivateOverlayDriftGateTest` 判红）。
+
+> ⭐ **2026-11-10 第三次裁决后：上表前两行已作废（arcade 不再走覆盖层）**
+> 「街机合集」的实现与图集已入 `main` ⇒ 不再是「隐藏分支物化」⇒
+> - `scripts/sync_private_overlay.py` 的 `SHADOWED_JAVA` **删掉** `('visualizer/arcade', 'dir')`，
+>   `SHADOWED_ASSETS` **删掉** `('e54_arcade', 'dir')`；
+> - `~/.gradle/init.d/10-nasmusic-e51-local.gradle` 的 `E51_TRACKED` **删掉** `'com/nasmusic/tv/visualizer/arcade/**'`。
+>
+> ⚠️ 删掉的理由不是「省事」，而是**避免主源被影子源盖住**：init 脚本在「仓库里没有隐藏分支源码」（= 在 `main` 上）
+> 时会**排除仓库里那几份同名文件**、改用覆盖层那份 ⇒ `main` 刚入仓的 arcade 源码会被旧副本顶掉。
+> ⛔ 两处仍要**成对改**（`E51_TRACKED` ↔ `SHADOWED_JAVA`），否则漂移门禁判红。
+> 第三行（`.gitignore` 的 `app/src/e54-upstream/`）**仍然有效** —— 上游原件依旧不入仓。
 
 ### 5.4 其余纪律
 

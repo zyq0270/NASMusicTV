@@ -82,8 +82,10 @@ class VisualizerThemeTest {
     @Test
     fun `selectable list contains every theme when the photo wall is available`() {
         val selectable = VisualizerTheme.selectable(photoWallAvailable = true)
-        // 26 = 29 项枚举减去被 lofi.city / highway.enabled / arcade.enabled 三个编译期开关过滤掉的那三项
-        // （本用例照片墙是开着的 ⇒ 不触发列表级门控）。三个开关各自在开时补回 1。
+        // 26 = **三个开关全关时**的基线（29 项枚举减去被 lofi.city / highway.enabled / arcade.enabled
+        // 过滤掉的那三项）；每个开关各自在开时补回 1。
+        // ⭐ arcade.enabled 自 v2.39.18 起**缺省 true**（E55 已公开入仓）⇒ 本机与 CI 的实际值是 **27**。
+        // （本用例照片墙是开着的 ⇒ 不触发列表级门控。）
         assertEquals(26 + lofiInList + highwayInList + arcadeInList, selectable.size)
         assertEquals(26 + lofiInList + highwayInList + arcadeInList, selectable.distinct().size)
         assertTrue(selectable.contains(VisualizerTheme.PHOTO_WALL))

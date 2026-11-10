@@ -1,6 +1,6 @@
 # 可视化效果列表
 
-> **版本**：v2.39.17（versionCode 202）
+> **版本**：v2.39.18（versionCode 203）
 > **更新日期**：2026-11-10
 > **来源**：`app/src/main/java/com/nasmusic/tv/data/model/AppSettings.kt` — `VisualizerTheme` 枚举
 
@@ -48,18 +48,23 @@
 | E51 | LOFI_CITY | 像素城市 ⚠️ |
 | E52 | HIGHWAY | 旷野公路 ⚠️ |
 | E53 | LYRICS_STAGE | 歌词舞台 |
-| E55 | ARCADE_GAMES | 街机合集 ⚠️ |
+| E55 | ARCADE_GAMES | 街机合集 |
 
-> ⚠️ **`E51 像素城市` / `E52 旷野公路` / `E55 街机合集` 只存在于带变体开关的构建**：受编译期开关
+> ⚠️ **`E51 像素城市` / `E52 旷野公路` 只存在于带变体开关的构建**：受编译期开关
 > `BuildConfig.LOFI_CITY_ENABLED`（Gradle 属性 `lofi.city`）/ `BuildConfig.HIGHWAY_ENABLED`
-> （`highway.enabled`）/ `BuildConfig.ARCADE_ENABLED`（`arcade.enabled`）控制，**公开版与 CI 缺省关闭**
-> ⇒ 这三套在公开包里**不出现在效果选择器里**（公开版可选 = 26 套）。
-> 上面的 **29 套 / ADV 19 套**是**含这三套**的口径。
+> （`highway.enabled`）控制，**公开版与 CI 缺省关闭**
+> ⇒ 这两套在公开包里**不出现在效果选择器里**（公开版可选 = 27 套）。
+> 上面的 **29 套 / ADV 19 套**是**含这两套**的口径。
+>
+> ⭐ **`E55 街机合集` 已在 v2.39.18 起公开**：所有者 2026-11-10 裁定「魂斗罗应当是公开的、在 main 分支下的」
+> ⇒ 实现、图集与测试全部入 `main`，编译期开关 `BuildConfig.ARCADE_ENABLED`（`arcade.enabled`）**缺省 true**
+> ⇒ 公开版**可选 = 27 套**（= 29 − E51 − E52）。要裁掉它就把 `arcade.enabled` 显式写成 `false`。
 >
 > `E55 街机合集`：唯一**单文件运行时整合**的效果（`visualizer/arcade/`），256×240 逻辑分辨率、
 > 一次 `glDrawArrays` 画完全场景，绘制路径零分配；自动玩 bot 驱动、无需遥控操作即可自行推进。
 > 渲染器 ⛔ **不读** `ctx.quality.maxParticles` ⇒ `needsParticleBudget = false` ⇒ **三档画质全部可选（含 LOW）**。
-> 实现只在**本地私有分支与本机覆盖层**（公开构建里被编译期开关整个过滤掉）。
+> 实现已公开入仓（`visualizer/arcade/` + `app/src/main/assets/e54_arcade/contra_atlas.png`），
+> 素材出处与许可事实见 `docs/e54-sprite-attribution.md`。
 > 编号为 **`"55"`**（✅ 2026-11-10 所有者裁定「按已开发完成代码中既有的现实来确认」= 枚举 `ARCADE_GAMES` 的
 > `ordinalLabel`）：`"54"` 已被 `E54 生态地球` 占用并随 v2.39.14 发布（改号会让老用户看到编号跳变）⇒ ⛔ 不改回 `"54"`。
 > ⚠️ 脚本与历史文件名仍带 `e54_` 前缀（`scripts/e54_*.py`、标记区 `E54-POOL10`、`app/src/e54-upstream/`）——
@@ -96,7 +101,8 @@
 
 1. **E39 照片墙是唯一有「列表级」门控的效果**：`VisualizerTheme.selectable(photoWallAvailable)` 在三个照片来源
    开关全关时把 `PHOTO_WALL` 从列表里过滤掉（指示器不显示、左右键也切不到）。其余 28 套恒在列表里（受画质档约束）。
-   （E51/E52/E55 的过滤是**编译期**决定的 `publishable()`，不是运行时 `selectable()`，不属本节口径。）
+   （E51/E52 的过滤是**编译期**决定的 `publishable()`，不是运行时 `selectable()`，不属本节口径。
+   E55 自 v2.39.18 起**默认在列表里**，只有显式 `arcade.enabled=false` 才被编译期过滤掉。）
 2. **E14 节拍烟花**：ADV 档里唯一 `needsParticleBudget = true` 且非 ULTRA 的效果 ⇒ `LOW.maxParticles = 0` 时被
    `supports()` 挡下。
 3. **E41**：见上「ULTRA」口径。⛔ 没有任何「按设备能力隐藏效果」的过滤逻辑（`availableThemes()` 只看画质档 +
