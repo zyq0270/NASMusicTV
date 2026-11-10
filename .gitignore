@@ -154,6 +154,8 @@ app/src/lofi-upstream/
 #    不会像项目外的陌生目录那样被当成无关物删掉。同步脚本会**新建**这个目录。
 #    护栏是 `PrivateOverlayDriftGateTest`（.gitignore 挡不住提交 ⇒ 真正的护栏是门禁 + 纪律）。
 /app/src/e51-overlay/
+# E51 流水线产物（拼装备份），不入库
+app/src/main/java/com/nasmusic/tv/visualizer/e51/scenes/*.bak
 # box-agent 会话产物目录（`<日期>-<会话ID前8位>`，自动生成在项目根，不入仓）
 # 例：2026-09-13-384e30ce/ —— 由 agent 运行时创建，内含 output/tasks/… 截图等
 20??-??-??-????????/
