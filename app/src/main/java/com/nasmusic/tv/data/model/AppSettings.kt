@@ -538,17 +538,24 @@ enum class VisualizerTheme(
     /**
      * 「街机合集」—— 一个**自动演示**的街机效果（无需任何按键即可持续运行）。
      *
+     * 内含**魂斗罗全 8 关**（`ContraBot` 是验收硬条件，方案 §4.5 / §4.10 D3）。
+     * 渲染走**原生 OpenGL ES**（GLSurfaceView + 单张运行时图集 + 一次 draw call），
+     * ⛔ 不用 WebView / WebGL（与 C1/C2 一致）。
+     *
      * ⭐ 2026-11-10 所有者裁定「魂斗罗应当是公开的、在 main 分支下的」⇒ **本效果已整体公开**：
      * 渲染器源码（`visualizer/arcade/`）、图集（`assets/e54_arcade/contra_atlas.png`）、关卡内容
      * 与 6 个测试都在 `main` 上 ⇒ 公开构建**默认带**该效果（编译期开关 `BuildConfig.ARCADE_ENABLED`
      * 由 Gradle 属性 `arcade.enabled` 控制，**缺省 true**；显式写 `arcade.enabled=false` 才裁掉）。
      * ⚠️ 与 E51「像素城市」/ E52「旷野公路」方向相反 —— 那两个的实现 ⛔ 不随仓库外发，故缺省 false。
+     * 枚举项本身**必须照常声明**（`entries.size`、双语字符串门禁、预算门禁都按声明计数）。
      * 素材出处与许可事实见 `docs/e54-sprite-attribution.md`。
      *
      * ## 归 [Tier.ADV] + `needsParticleBudget = false`
      * - **ADV**：与 E51/E52 同档（两者同样标 `false` ⇒ 三档全可用）。
      * - **false**：渲染器**不读** `ctx.quality.maxParticles` ⇒ 按
      *   `ParticleBudgetGateTest` 的判据必须标 `false`。
+     *   ⚠️ 渲染器在 `visualizer/arcade/`（不在 `ParticleBudgetGateTest` 的扫描目录里，
+     *   方案 §4.2 G7b）⇒ 若日后真的读取预算，必须把 arcade 目录纳入扫描并改标注为 `true`。
      *
      * ## 编号 `"55"` = **E55 街机合集**（✅ 2026-11-10 所有者裁定「按已开发完成代码中既有的现实来确认」）
      * 调研文档曾把「自动玩街机游戏合集」自编号为 E54，而 `"54"` 已被 `ECO_GLOBE`「生态地球」
