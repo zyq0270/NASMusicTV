@@ -236,6 +236,19 @@ JAVA_HOME="C:/Program Files/Android/Android Studio/jbr" \
     `ui/components/LofiCityCard.kt`、`visualizer/renderers/LofiCityRenderer.kt`、`visualizer/RenderContext.kt`、
     `visualizer/VisualizerRendererFactory.kt`、`ui/components/VisualizerStage.kt`）
     在私有分支上带真实现 ⇒ **必须原地改两处**，不能整份覆盖。
+  - ⛔ **门禁：`python scripts/check_doc_parity.py`**（仓库根跑，退出码 0 = 一致 / 1 = 有差异 / 2 = 本机无私有分支 ref）
+    ⇒ 逐字节比对两分支的 `docs/` 树，**白名单外有任何差异即判红**。
+    单测 `DocParityGateTest` 直接调用它（CI 上没有私有分支 ref ⇒ 退出码 2 ⇒ 跳过）。
+    ⛔ 改完任何 `docs/` 下的文件 ⇒ **必须**复跑它到 0 差异，否则这次改动是半成品。
+  - ✅ **2026-11-10 首次全量对齐**（所有者：「两分支 文档类的内容，应该保持一致，例如：technical-overview.md，应该都一样才行」）：
+    合并了 `technical-overview.md` 的 §10 编号撞车（§10.374–§10.378 五节各有两版 ⇒ 合成 §10.374–§10.382 一条序列）、
+    `docs/archive/e54-contra-porting-plan.md`（v1.2 镜像 + v1.3 落地纪实 ⇒ v1.3 两分支同一份）、
+    `docs/archive/README.md`（main 为超集）；单边文档双向同步（`verification/code-review-2026-11-09/**`
+    与两份 E55 弃用方案 → 私有分支；`verification/e54/**` → `main`）。
+    **白名单（7 项，只在私有分支，⛔ 不可公开）**：`e52-highway-preview.html`、`e52-highway-webgl-preview.html`、
+    `verification/results/lofi_registry_*.json`、`verification/results/e52_golden_vectors.json`、
+    `verification/results/e52_highway_harness_final.txt`、`verification/scripts/e52_highway_{driver.mjs,harness.js}`。
+    白名单清单在 `scripts/check_doc_parity.py` 的 `PRIVATE_ONLY_EXCEPTIONS` ⇒ 增删例外**只改那里**。
 
 - ⛔ **私有分支只保护「代码」；文档与其它文件一律公开**（所有者 2026-11-04 明示：「私有分支保护的只有代码，其他文档和其他文件都应该公开」）
   - ⭐ **判据只有一条：是否含上游代码 / 是上游代码的翻译件或派生物。**

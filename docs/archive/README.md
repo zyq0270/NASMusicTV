@@ -769,7 +769,7 @@
 
 | 文档 | 判定依据 | 说明 |
 |---|---|---|
-| `e54-contra-porting-plan.md` | ✅ **已交付**：第一阶段（Phase 0 + Phase 1）落地并经四轮真机反馈修复，交付版本 **v2.39.17 / versionCode 202**（2026-11-10） | 变更记录见 `technical-overview.md` §10.374–§10.376；离线诊断与补丁工具留档 `verification/e54/`（**在本地私有分支上**，随该分支归档） |
+| `e54-contra-porting-plan.md` | ✅ **已交付**：第一阶段（Phase 0 + Phase 1）落地并经四轮真机反馈修复，交付版本 **v2.39.17 / versionCode 202**（2026-11-10） | 变更记录见 `technical-overview.md` §10.375–§10.377；离线诊断与补丁工具留档 `verification/e54/`（**在本地私有分支上**，随该分支归档） |
 
 **归档的是什么**：本文件是 **main 侧镜像 v1.2**（其状态行「待开发」是**过期标记**）；**权威定稿版 v1.3**
 在本地私有分支 `feat/e51-private` 上、**同一路径** `docs/archive/e54-contra-porting-plan.md` 存着
@@ -812,7 +812,7 @@
 引用改写 **3 处 / 2 文件**：`.gitignore` ×2（`docs/e54-contra-porting-plan.md` → `docs/archive/…`）、
 `docs/e54-run-and-gun-survey.md` ×1（同上）。裸文件名 0 处。死链 **0 新增**。
 ⚠️ 未进 `CHANGELOG.md`：本轮公开包**用户可见行为不变**（新增项被编译期开关整个过滤掉，公开版可选仍是 26 套），
-按本仓规矩不登记；代码改动记在 `technical-overview.md` §10.375。
+按本仓规矩不登记；代码改动记在 `technical-overview.md` §10.378。
 
 > ⭐⭐ **2026-11-10 第三次所有者裁决 —— 上面这一轮的两条落点口径已被推翻**
 > （原话：「魂斗罗应该是公开的，在 main 分支下的」；落地 **v2.39.18 / versionCode 203**）：
@@ -828,7 +828,35 @@
 > 4. ⚠️ 遗留项 6（main 上仍含「魂斗罗」/ `UEFI_Contra` 字样）—— 所有者裁决「当然保留，魂斗罗应该是公开的」
 >    ⇒ **明确保留**，不再是待裁决项。
 >
-> 改判细节见 `docs/technical-overview.md` §10.378 与归档方案 §5.2 / §5.3 的补记。
+> 改判细节见 `docs/technical-overview.md` §10.381 与归档方案 §5.2 / §5.3 的补记。
+
+## 第二十六轮（2026-11-10）—— 两分支**文档**逐字节对齐（合并 §10 编号撞车）
+
+**所有者裁决**（2026-11-10）：「两分支 文档类的内容，应该保持一致，例如：technical-overview.md，应该都一样才行。」
+
+**问题根因**：两个分支各自独立追加 `technical-overview.md` 的 §10 ⇒ **同号不同内容**
+（`§10.374–§10.378` 五节各有两版：main = 代码审查 + main 侧落地 + 名册约定 + 编号定案 + 公开分发裁决；
+私有分支 = 街机合集三轮 + 编号定案 + 公开分发裁决）⇒ 文档在两分支**对不上**。
+
+**处置**（按 AGENTS.md「写一份 → 覆盖到私有分支」，⛔ 不 cherry-pick、不顺延编号）：
+
+| 文档 | 合并方式 |
+|---|---|
+| `docs/technical-overview.md` | 两侧内容**合成唯一序列** §10.374–§10.382，一条不删；节内互引同步改写 |
+| `docs/archive/e54-contra-porting-plan.md` | 取 main 的「一次性全量」正文 + 私有分支的**四轮落地纪实头部** ⇒ v1.3，两分支同一份 |
+| `docs/archive/README.md` | main 是超集（多出第二十二～二十五轮）⇒ 以 main 为准 |
+
+**单边文档同步**：`docs/archive/verification/code-review-2026-11-09/**`（44 个）与
+`docs/archive/e55-cityscape-port-plan.md` / `tendrils-visualizer-plan.md` / `NASMusicTV-代码审查报告-2026-11-09.html`
+（→ 私有分支）；`docs/archive/verification/e54/**`（13 个，E54 离线诊断与补丁工具 → `main`）。
+
+**⛔ 例外（不可公开，白名单在 `scripts/check_doc_parity.py`）**：
+`e52-highway-preview.html` / `e52-highway-webgl-preview.html`（E52 上游移植件本体）、
+`verification/results/lofi_registry_*.json`（E51 上游注册表）、`e52_golden_vectors.json`、
+`e52_highway_harness_final.txt`、`e52_highway_{driver.mjs,harness.js}`（上游对账明细与工具）。
+
+**新增门禁**：`scripts/check_doc_parity.py` + `DocParityGateTest`
+⇒ 逐字节比对两分支 `docs/` 树，除白名单外有任何差异即判红；CI 无私有分支 ref ⇒ 退出码 2 ⇒ 跳过。
 
 ## 回滚
 

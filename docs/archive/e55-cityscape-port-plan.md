@@ -5,6 +5,9 @@
 > 上游（MIT）：`@marianmeres/cityscape`，Copyright © 2026 Marian Meres。
 > ⭐ **放弃原因是视觉效果**（「不好看」），非可行性/成本/架构问题。可行性结论、架构映射、工作量估算（3–4 人日 5 阶段）仍具参考价值 —— 但⚠️ **本文件占用的 E55 编号已被释放**：`docs/archive/tendrils-visualizer-plan.md`（2026-11-09 亦归档）此前也已建议使用 `"55"` 编号。
 > ⚠️ **2026-11-09 追记**：所有者选择方案 A 再弃 E55 藤蔓（GPGPU 路线被实测证伪，见该文头部及附录 A）⇒ **E55 编号现无任何主题归属**。今后不要再用 E55 指代 night-city-skyline，也不要指代藤蔓。
+> ⭐ **2026-11-10 追记（编号已定）**：**E55 现归「街机合集」**（`VisualizerTheme.ARCADE_GAMES` 的
+> `ordinalLabel` = `"55"`，2026-11-10 所有者按代码现实定案）⇒ 本文的「夜城天际」与藤蔓**都不是 E55**，
+> 上文「E55 编号无归属」是 2026-11-09 的历史状态。
 
 > **版本**: v1.0 · 2026-11-08 初版（归档版未修订正文）
 > **上游**: `D:\hxzhang\MyGithubSoftware\NasAudio\cityscape-master`（`@marianmeres/cityscape`，作者 Marian Meres）

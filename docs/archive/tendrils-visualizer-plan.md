@@ -7,6 +7,8 @@
 > **⚠️ 历史记录**:原「原生 GLES GPGPU」路线已被证伪
 > (浮点 FBO 渲染目标全灭,证据见附录 A)
 > 主题编号建议:**E55**(ordinalLabel = `"55"`,现最大已用 `"54"`)
+> ⭐ **2026-11-10 追记（编号已定）**:**E55 现归「街机合集」**(`VisualizerTheme.ARCADE_GAMES`,
+> 2026-11-10 所有者按代码现实定案)⇒ 本文的「藤蔓」**不是 E55**,上文编号建议作废。
 > 主题键建议:`TENDRIL`;显示名建议:**藤蔓 / Tendrils**
 > 日期:2026-11-08(架构选型修订;Phase 0 实测)
 > 参考源码:本地已下载 `D:\hxzhang\MyGithubSoftware\NasAudio\tendrils-master`(MIT 许可,upstream `keeffEoghan/tendrils`)

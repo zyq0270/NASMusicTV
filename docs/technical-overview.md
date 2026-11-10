@@ -26098,7 +26098,358 @@ Critical/High + 关键 Medium 派**独立怀疑式复核**（砍掉约 1/3 的�
 
 - 版本：**v2.39.16 / versionCode 201**
 
-### 10.375 main 侧补齐 E54「街机合集」的公开安全外壳 + 名册补登 E55（2026-11-10）
+### 10.375 v2.39.17 —— 实现「街机合集」（E54 魂斗罗移植，占位编号 `"55"`）（2026-11-10）
+
+> ⚠️ **本节是「第一轮：全自绘」的历史口径**。所有者 2026-11-10 裁定「不要自绘，全部用上游」
+> ⇒ 下面凡是写「精灵/瓦片全自绘」「APK 素材增量 0 字节」「与方案的四处偏离之①」的段落
+> **都已被 §10.376 撤销**。保留原文是为了可复核（⛔ 不要偷偷改写历史记录），
+> 现行口径一律以 §10.376 为准。
+
+按 `docs/archive/e54-contra-porting-plan.md` 的**第一阶段 = Phase 0（基础设施）+ Phase 1（魂斗罗移植）**一次性落地：
+新增一个效果项「街机合集」，内部只注册一个游戏（魂斗罗），**自动玩 bot 驱动**、无需用户操作，
+按 `docs/e54-run-and-gun-survey.md` §5.8 选定的上游 `MikeWuPing/UEFI_Contra` 移植。
+
+#### 交付清单
+
+| 层 | 文件（`visualizer/arcade/` 下） | 行数 | 性质 |
+|---|---|---|---|
+| 契约 | `ArcadeGame.kt` | 87 | 自建：`ArcadeGame` / `GameInput` / `GameSnapshot` / `ArcadeGameManager` |
+| sim | `sim/ContraConst.kt` | 98 | 常量（定点口径照上游 `player.c`） |
+| sim | `sim/ContraLevels.kt` | 375 | **自建**：8 关 × 11~13 屏的 chunk 拼接 + 自绘调色板 + 波次派生 |
+| sim | `sim/ContraSim.kt` | 912 | **移植结构**：8.8 定点逐帧推进（玩家/六种武器/七种敌型/boss） |
+| 快照 | `ContraSnapshot.kt` | 89 | 自建：定长数组快照，每帧**原地写入**（不新建对象） |
+| bot | `bot/ContraBot.kt` | 198 | **自建**：上游 attract mode 是假自玩，AI 本体必须自写 |
+| 渲染 | `render/ArcadeGlScene.kt` | 618 | **重写**：GLES 2.0，单次 `glDrawArrays` 画完全场景 |
+| 渲染 | `render/ArcadeAtlas.kt` | 204 | 自建：运行时烘焙 512×512 图集（`GL_NEAREST` + 关 mipmap） |
+| 渲染 | `render/ArcadePixelArt.kt` | 521 | **自绘**：26 帧角色 + 5 个灰阶瓦片（字符画 → 位图） |
+| 渲染 | `render/ArcadeGLSurfaceView.kt` | 72 | 自建：`GLSurfaceView` 宿主 |
+| 输入 | `ArcadeInputQueue.kt` | 62 | 自建：单写单读无锁环（满了丢最旧） |
+| 装配 | `ContraArcadeGame.kt` | 109 | 自建：TITLE→DEMO→TITLE 状态机 |
+| 装配 | `ArcadeRenderer.kt` | 84 | 自建：`VisualizerRenderer` 实现（View 型） |
+| **合计** | 13 个文件 | **3,429** | |
+
+测试 5 个文件 / **29 个用例**（`ContraSimTest` 8、`ContraLevelsTest` 9、`ContraBotTest` 3、
+`ArcadeInputQueueTest` 4、`ArcadePixelArtTest` 5），合计 509 行，全部 JVM 直跑（sim 层零 `android.*` 依赖）。
+
+#### 效果登记与双变体收口（第三例，前两例是 E51 / E52）
+
+```kotlin
+ARCADE_GAMES(R.string.visualizer_theme_arcade_games, "街机合集", Tier.ADV, "55", needsParticleBudget = false),
+```
+
+| 项 | 决定 | 理由 |
+|---|---|---|
+| 编号 | **占位 `"55"`** | 方案自编号 E54 与既有 `ECO_GLOBE`「生态地球」**撞号**；正式归属待所有者裁定前，先取下一个空号 `"55"` ⇒ 清单里显示 `E55`（`docs/visualizer-effects-list.md` 已注明是占位） |
+| 档位 | `Tier.ADV` | 逻辑 8.8 定点 + 单纹理单批，比 BASIC 重；但**不是** ULTRA（不依赖 WebView / framebuffer） |
+| 粒子预算 | `needsParticleBudget = false` | 渲染器**不读** `ctx.quality.maxParticles`（场景全是固定数量精灵，无粒子池）⇒ **三档画质全部可选（含 LOW）** |
+| 双变体 | `BuildConfig.ARCADE_ENABLED`（Gradle 属性 `arcade.enabled`，**缺省 false**） | 与 E51/E52 同性质：公开包与 CI 缺省**整个效果不出现** |
+
+收口三处（缺一处就能被绕过）：
+1. `VisualizerTheme.publishable()` 加第三条 `filterNot { it == ARCADE_GAMES }`（决定列表里有没有）；
+2. `VisualizerRendererFactory.create()` 外层第三道回落 ⇒ 关掉时拿到 `CircularRingRenderer()`（挡住备份 JSON 里存过的键）；
+3. `app/build.gradle.kts` 的 `arcadeEnabled` + **源码存在性护栏**（`app/src/main/java/.../arcade/` 或覆盖层同名目录都找不到就 `GradleException`）——防止「开关打开但源码没同步」时静默出一个空效果。
+
+#### 三条必须记牢的硬口径
+
+| 口径 | 值 | 为什么不能改 |
+|---|---|---|
+| 逻辑分辨率 | **256×240**，顶点横向 ×**1.25** ⇒ 等效 **320×240（4:3）**，缩放 `k = floor(屏高/240)` 取整 | 与 sim / 上游像素坐标一一对应；非整数倍缩放会让像素图出现半像素撕裂（本项目**全屏是像素图**，比 E51/E52 更敏感） |
+| 固定步 | 逻辑 **60 Hz**，每帧最多追 **3** 步后**丢弃余量**（`MAX_CATCH_UP_STEPS = 3`） | 丢掉余量而不是无限追帧：电视端一次 GC 停顿后连追几十步会滚雪球成「慢动作雪崩」 |
+| 绘制分配 | `buildQuads()` 写进**预分配 FloatBuffer**（`MAX_QUADS = 1024`，超出即丢弃），一帧**一次** `glDrawArrays` | 绘制路径零分配是本仓库既有纪律；满屏地形 ~350 块瓦片 + 精灵若逐个 draw，在 G6110 上直接掉帧 |
+
+其余沿用上游的三处数值（方案 §4.2 明确「可以借」的部分）：标题 **360 帧**进 demo、`> 3840` 帧回标题、
+`START` 打断。
+
+#### 与方案的四处偏离（如实登记）
+
+方案 §3.1 / §1.4 原定「精灵取 `nes-contra-us` 库的 232 张 PNG（48.9 KB）」，实施时**改为全自绘**：
+
+| # | 方案原定 | 实际做法 | 原因 |
+|---|---|---|---|
+| 1 | 精灵取 `nes-contra-us` 精灵库 | **全自绘** 26 帧（`ArcadePixelArt.kt` 字符画） | 该库自述「extracted from the ROM」、**无许可**；沿用上游裁决豁免只能覆盖代码，覆盖不到 ROM 素材 ⇒ 干脆一个字节不取。副作用是 APK **素材增量 0 字节** |
+| 2 | 关卡 / 背景自绘 | 照做，且**关卡结构也自建**（`ContraLevels` 8 关 chunk 拼接） | 上游 `level_data.h` 是 ROM 提取数据（`ff→tile` 映射表），⛔ 不可搬 ⇒ 只能自建等价「8 关 + 每关 11~13 屏」 |
+| 3 | 敌人布置取上游波次 | **自建** `wavesFor(level, screens, chunks)`：按屏轮换兵种，**跳过水坑 / 断桥屏** | 上游波次同样是 ROM 数据；跳过 GAP/BRIDGE 屏是因为「水坑起跳途中被炮台击落」是 bot 的固定死点（见下节） |
+| 4 | 上游原版手感参数 | 四项**为 bot 可通关而调**：水坑 3 格→**2 格**、石柱 3 格→**2 格**、`JUMP_VY` −1152→**−1280**、炮台四向齐发→**两发** + 冷却 130→150 帧 | 上游参数是给人玩的，bot 的「贴脸站桩清敌」策略在这些点上必死。⚠️ 这是**偏离原版手感**，不是修 bug ⇒ 若日后接真人对打需回退 |
+
+#### bot 的死点表（本轮真正的工程量）
+
+bot 的决策顺序（`ContraBot.step`）：过关优先 → 存活判断 → 恒开火 → 跳跃保持 → **敌弹闪避**（预测落点）
+→ boss 战（距离 <60 退、>92 进）→ 强制脱离 → **贴脸停步清敌**（`stopFrames` 90 帧看门狗）
+→ 右移 + 地形感知起跳 → 卡住检测（45 帧窗口位移 <6 px；1 次跳、2 次反退 40 帧、4 次 `restartLevel()`）。
+
+每一条都是被单测逼出来的，失败到通过的链路留档：
+
+| 现象（单测失败信息） | 根因 | 修法 |
+|---|---|---|
+| 第 2 关从未抵达 | bot 在第一个水坑（screen 2，x≈560~624）起跳后落水，横向只走 ~73 px | 水坑 3 格→2 格（32 px）；`JUMP_VY` −1152→−1280；`needJump` 探测收窄到 `bodyCol`+`bodyCol+1` 且 `bodyCol` 偏 +4 px（提前起跳会跳进坑） |
+| 第 3 关从未抵达（卡 lvl2 `x=1729`） | 第 6 屏石柱 3 格高 = 48 px > 跳跃高度 | 石柱 2 格（32 px，跳跃约 53 px 可越过） |
+| 卡第 5 关 `x=2414` | 贴脸炮台站桩清敌：炮台四向齐发近距离是「无解伤害」 | 炮台改两发 + 冷却 150；`nearestThreatAhead` 的 y 窗口 −40..26 → **−10..26**（过高敌人平射打不到，停步只会死锁）；新增 `stopFrames` 90 帧看门狗 |
+| 长跑用例（seed 4242）关卡数不足 | bot 战绩对 seed 敏感 | 长跑改用 `seed = 2026L`（与 8 关用例同 seed），断言消息带上实际经过关卡数 |
+
+最终 **`bot 能连续推进全部 8 关并回到第 1 关`**（第 8 关 boss 死后 `advanceLevel()` 回第 1 关）
+与 **`长跑 108000 步不卡死`** 两条验收硬条件同时通过。
+
+#### 验收缺口（如实登记，⛔ 不要写成已完成）
+
+| 项 | 状态 |
+|---|---|
+| 确认键打断 demo 回标题 | **未接线**。`ArcadeRenderer.requestInterrupt()` 与 `ArcadeGLSurfaceView.dispatchKeyEvent` 两处入口都在，但舞台（`VisualizerStage.kt`）**不可改**、`isFocusable = false`（方向键必须留给 Compose 焦点系统）⇒ 遥控确认键目前到不了渲染器。方案 §4.4 的「START 打断」在本轮**只有代码通路、没有实际入口** |
+| 真机帧率 / 长跑 | **未验**。本轮只做 JVM 单测 + 编译验证；创维 9R54_G8S 实机帧率、遥控方向键冲突、久播稳定性留待真机轮 |
+| 全员规则门禁 | `VisualizerThemeTest` 的 `entries.size` 28→**29**、可选列表 26→**27**（`+arcadeInList`，按 `BuildConfig.ARCADE_ENABLED` 取值）已同步；未新增 arcade 专属门禁测试 |
+
+#### 许可与归属
+
+- 上游 `MikeWuPing/UEFI_Contra` **仓库内无 LICENSE 文件**（README 自称 MIT），法律口径仍是 all-rights-reserved；
+  所有者 2026-11-08 裁决「完全可以继续移植后开源」⇒ **裁决豁免，不是许可合规**。
+- 快照登记：`app/src/e54-upstream/UPSTREAM.md`（repo / commit `e197c07` / 日期 / 许可事实）；
+  `app/src/e54-upstream/` 已进 `.gitignore`（与 `app/src/lofi-upstream/` 同性质），`main` 源集之外、Gradle 不打包。
+- ⚠️ `scripts/gen_effects_doc.py` 的模板停在 v2.39.10，与当前 `docs/visualizer-effects-list.md` 已脱节
+  ⇒ 已在脚本头部加「过时、不要直接跑」警告，本轮清单**手工**改。
+
+- 改：`AppSettings.kt`（+`ARCADE_GAMES`）、`VisualizerRendererFactory.kt`（+映射 +外层回落）、
+  `app/build.gradle.kts`（`arcadeEnabled` + `ARCADE_ENABLED` + 源码护栏）、`values*/strings.xml`（双语名）、
+  `VisualizerThemeTest.kt`（计数）、`.gitignore`（e54-upstream）、`docs/visualizer-effects-list.md`（29 套 / ADV 19 套 / 占位编号说明）
+- 未改：`VisualizerStage.kt`（⛔ 不动舞台）；版本号 **v2.39.17 / versionCode 202**
+
+
+### 10.376 v2.39.17（同版本内第二轮）—— 「街机合集」精灵全面改用上游真图（2026-11-10）
+
+所有者裁定（原话）：
+
+> 「你自绘的肯定不好看，赶快从开源仓库中都把精灵移植过来，就用上游的，全部都拿过来，不要自绘」
+
+⇒ §10.375 第一轮里「精灵全自绘 / APK 素材增量 0 字节 / 与方案四处偏离之①」**全部撤销**，
+回到 `docs/archive/e54-contra-porting-plan.md` §3.1 / §1.4 的**原定素材管线**。按「同一效果的多轮视觉修复不单独升版本号」
+口径 ⇒ **仍是 v2.39.17 / versionCode 202**，APK 文件名不变（交付时必须给包指纹，见文末）。
+
+#### 素材来源（全部进包，⛔ 一张自绘精灵都没有）
+
+| 类别 | 数量 | 来源 | 原始文件 |
+|---|---:|---|---|
+| 精灵 | **232 张 PNG** | `vermiceli/nes-contra-us`（NES 反汇编项目） | `docs/sprite_library/contra_sprites/`；帧名 = `src/bank1.asm` 的 `sprite_ptr_tbl_0/1` 标签 |
+| 关卡瓦片 | **256 块 8×8** | `MikeWuPing/UEFI_Contra` | `src/tiles_c.h` 的 `gNesTiles[256][64]`（level 1 pattern table，每块 64 个 `0x00RRGGBB`） |
+| HUD 文字 | 20 帧 | 本项目 | `ArcadeAtlas.TEXT_FRAMES`（⛔ 不是精灵，只是字母/数字） |
+
+`bank1.asm` 的表注释给了**精确语义**（player walking frame 1..5 / player curled up / soldier running /
+rifle man shooting / boss eye / base 2 boss 金属头盔 / default·M·S·F·L bullets / S·B·F·L·R·M 武器道具 /
+爆炸…），所以帧映射不是猜的：全部登记在 `render/ContraArt.kt` 的类 KDoc + 常量里。
+例：`PLAYER_FRAMES[3] = sprite_08`（player curled up，跳跃翻滚）、`BOSS = sprite_6b`、`BULLET_F = sprite_22`。
+
+#### 管线（构建期打包 + 运行期只补文字帧）
+
+`scripts/e54_pack_sprites.py`（依赖 Pillow）从 gitignored 的 `app/src/e54-upstream/` 读原件，
+按行式装箱产出两个文件：
+
+| 产物 | 值 |
+|---|---|
+| `app/src/main/assets/e54_arcade/contra_atlas.png` | **1024×1024 RGBA / 55,839 B / 489 帧**（232 + 256 + 白块），素材占用到 y=304 |
+| `render/ContraSpriteFrames.kt` | GENERATED 帧表：`name,x,y,w,h;…` 一条长字符串，首次访问解析一次 ⇒ **绘制路径零分配** |
+
+`ArcadeAtlas` 改为 **载入这张图集**（`BitmapFactory.decodeStream` + 逐像素 `getPixels/setPixels`，
+⛔ 不用 `Canvas.drawBitmap` 以免 1:1 被过滤污染），按帧表登记 uv，再在图集底部
+`TEXT_START_Y=306` 起用 Canvas 画 HUD 文字帧 ⇒ **仍是一张纹理、一次 `glDrawArrays`**。
+`ArcadeGLSurfaceView` → `ArcadeGlScene` 传 `applicationContext`（图集从 assets 读）。
+
+采样口径不变：`GL_NEAREST` + 关 mipmap。瓦片是 8×8 原图铺到 16×16 地形格（2× 整数放大，硬边）。
+
+#### 渲染层怎么改
+
+- 删除 `render/ArcadePixelArt.kt`（521 行自绘字符画）与 `ArcadePixelArtTest.kt`；
+  渲染器里的 `gen_*` 帧名（玩家/敌兵/BOSS/子弹）与 `tile_*` 自绘瓦片名**全部替换**成 `ContraArt.*` 映射。
+- 上游玩家帧默认**朝左**，`flipX` 判据由 `playerFacing < 0` 反转为 `> 0`（朝右时翻）。
+- 敌弹不再硬编码 4×4，按上游帧真实 `w/h` 画。
+- ⚠️ **地形不能再用关卡调色板直接染色**：上游瓦片自带绿丛林/棕岩配色，片元是
+  `texture2D * vColor`，整块乘深色会把真图洗成纯色板 ⇒ 改成 `mix(白, 关卡色, 25%)` 轻染；
+  水面单独走蓝色（`0xFF7FB6FF / 0xFF5A8FE8`）。天空/视差仍用关卡调色板，8 关依旧可区分。
+- 地形瓦片不是随便挑的：把 256 块图铺成 4×4 重复块**离线出图肉眼比对**后定
+  `tile_6b`（浓密丛林叶，地表）/ `tile_d0`（深色斑驳，地下）/ `tile_b8`（绿白网格，实心块）/
+  `tile_a1`（横向浅纹，染蓝当水）/ `tile_b1`（绿格砖，平台）。
+  ⛔ 初版选的 `tile_90` 是「纯黑 + 棕竖纹」，铺满地面像脏条纹，已弃用。
+- 上游玩家帧 19×35 大于 10×22 碰撞盒：按脚底对齐（`playerY + PLAYER_H - f.h`）、水平居中，
+  逻辑碰撞盒不动 ⇒ bot 的 8 关推进单测不受影响。
+
+#### 门禁与许可
+
+`UpstreamSpriteAtlasTest` 6 条：① 232+256+白块一帧不少；② 每帧矩形不越 1024 且尺寸 > 0；
+③ `ContraArt` 引用的上游帧名都存在；④ 渲染器不许再出现 `gen_*` 自绘帧名；
+⑤ `assets/e54_arcade/` 里**只有一张烘焙图集**（不许把 232 张 ROM 原件散着塞进 APK）、PNG 头宽高 = 1024；
+⑥ 文字帧 key 规则稳定。
+
+**归属与分发边界**（完整 NOTICE 见 `docs/e54-sprite-attribution.md`）：
+`nes-contra-us` 实测 `license = null`、精灵自述 "extracted from the ROM"；
+`UEFI_Contra` 仓库内无 LICENSE（README 自称 MIT）、`tiles_c.h` 是 ROM 图形字节；
+《Contra》为 Konami 商业 IP ⇒ 法律口径仍是 **all-rights-reserved**，
+所有者 2026-11-08 + 2026-11-10 两次裁决是**豁免，不是许可合规**（⛔ 不许混写）。
+⇒ 含图集的 APK **只在本机用**：私有分支 `feat/e51-private` 永不 push/tag/release；
+`main` / CI 既无该 assets，`arcade.enabled` 也缺省 false ⇒ 公开包里一行 ROM 素材都没有。
+
+#### 验收缺口（沿用 §10.375，未变）
+
+遥控确认键打断 demo 仍只有代码通路、无实际入口；真机（创维 9R54_G8S）帧率、精灵放大观感、
+底色与真图的配色协调**均未实机验证** ⇒ 本轮只做 JVM 单测 + 编译 + 出包，需所有者上机看一眼。
+
+- 改：`render/{ArcadeAtlas,ArcadeGlScene,ArcadeGLSurfaceView,ContraArt,ContraSpriteFrames}.kt`（新增 2 / 重写 1 / 改 2）、
+  `scripts/e54_pack_sprites.py`（新增）、`app/src/main/assets/e54_arcade/contra_atlas.png`（新增）、
+  `UpstreamSpriteAtlasTest.kt`（新增）、`docs/e54-sprite-attribution.md`（新增）、
+  `CHANGELOG.md` / `docs/archive/e54-contra-porting-plan.md` / `docs/technical-overview.md`
+- 未改：sim / bot / 舞台 / 版本号 —— **仍是 v2.39.17 / versionCode 202**
+- ⚠️ 同版本号、同文件名的第二个包 ⇒ 交付时必须给**包指纹**（字节数 / 修改时间 / SHA256 短码），
+  并提醒「先卸载旧版或 `adb install -r`」；旧包只复制到 `output/apk/prev-*/` 留档，不删不改名
+
+#### 最终验证与交付（2026-11-10 10:33 定稿）
+
+| 项 | 结果 |
+|---|---|
+| 生成器自检 | 逐像素 **488 帧一致** / `ContraArt` 26 个引用全部命中 / 最高占用 y=304 |
+| Arcade 定向单测 | 30 用例，`BUILD SUCCESSFUL in 6m 58s` |
+| 全量单测 | **3486 tests / 5 failed / 5 skipped**；5 个失败全是私有分支既有红门禁（见 §10.375 上文清单），**本轮零新增** |
+| release 编译 | `--continue` 下 `:app:packageRelease` + `:app:assembleRelease` 均成功；整体 `BUILD FAILED` **仅**由 `testDebugUnitTest` 触发 ⇒ ⛔ 别把整体失败误读成没出包 |
+| 交付包指纹 | `output/apk/NASMusicTV-release-v2-39-17.apk`：**44,475,021 B** / 2026-11-10 10:33 / `SHA256 90c3873b29ea…`（前 12 位 `90c3873b29ea`） |
+| 版本 | `aapt2 dump badging` = `com.nasmusic.tv versionCode='202' versionName='2.39.17'` |
+| 包内校验 | `docs/archive/verification/e54/e54_verify_apk.py` PASS：assets 仅一张 55,839 B 图集、无散装精灵 PNG；`resources.arsc` 含中英标签；dex 含图集路径 / `ContraSpriteFrames` / `ContraArt` |
+
+旧自绘包留档 `output/apk/prev-v2-39-17-selfdrawn/`（不删不改名）；本地提交 `ce58b2e`
+（`feat/e51-private`，15 files / +722 / −747，**未 push**）。
+⛔ 校验口径补记：`versionCode` 在 AXML 里是二进制 int，字符串搜不到，必须用 `aapt2 dump badging` 读。
+
+### 10.377 v2.39.17（同版本内第三轮）—— 电视实测 4 项反馈修复（2026-11-10）
+
+所有者在创维 `9R54_G8S` 装上第二轮包后反馈（原话）：
+
+> 1. 自动游玩很弱智，只会向前开枪和简单跳跃，有奖励也不会打下来吃掉，要提高自动游玩的智慧，这样过不了关呀
+> 2. 游戏人物的方向不对，是倒着跑，人脸是向后的
+> 3. 游戏背景是不是不全面？感觉跟原著不一样
+> 4. 画面上方的歌词，在其他效果都有个黑背景的，这个没有了，需要加上
+
+按「同一效果的多轮修复不单独升版本号」口径 ⇒ **仍是 v2.39.17 / versionCode 202**，
+APK 文件名不变（第三次同名包，交付必须给指纹）。
+
+#### ① 自动玩 / 过不了关（根因不止一个）
+
+| 根因 | 证据 | 修复 |
+|---|---|---|
+| 只会平射 | bot 恒 `shoot = true`，从不写 `up` / `down`；胶囊在 `AIR_LOW = 96`，玩家枪口 `py + 7 ≈ 161` | bot 新增 `applyAim`：上方目标按 `up`（斜上 45°）、低位目标 `down` 蹲射；sim `fire()` 新增 `diagonalUp = aimUp && vx != 0`，散弹 5 向同步抬升。⚠️ boss 战**保持平射**（水平目标，上瞄会把子弹全打飞） |
+| 奖励打不到也吃不到 | `E_CAPSULE` 在 `y = 96`；击破后 `spawnEnemy(E_ITEM, x, y)`，而 **`E_ITEM` 分支从来没有重力** ⇒ 悬在生成高度做碰撞检测，地面玩家永远碰不到 | `E_ITEM` 补重力（2 px/帧）+ `groundRowNear()` 落地行，落地后轻微浮动 |
+| 吃到奖励反而变弱 | 原 `weapon = (weapon + 1) % WPN_COUNT` 循环轮换 | 改为「升到散弹 `WPN_S`，已是散弹不降级」 |
+| 高处敌人打不到 | `nearestThreatAhead` 过滤 `dy < -10`，停步清敌对高台炮台是死锁 | 高处目标交给斜上射，不再当贴脸威胁 |
+| ⭐ **64 秒强制重来** | `DEMO_FRAMES = 3840` 到点 `toTitle()` → `sim.reset(seed)` **从第 1 关重来**；8 关按 105 px/s 需约 4 min ⇒ 电视上永远看不到过关 | 移除超时回标题：DEMO 持续跑、8 关无限循环，仅确认键回标题；`TITLE_FRAMES` 360 → 150 |
+| 频繁重置本关 | `updateStuck` 4 次窗口就 `restartLevel()` | 放宽到 6 次，先给足机动机会 |
+
+另外 `chasePickup` **只做一件事**：道具还在明显高空且在前方时跳起来够 ——
+道具落地后靠正常前进自然碰撞吃到。⛔ 绝不回头、绝不停步：早期版本一停步，
+`updateStuck(advancing = false)` 就不计卡住，seed 2026 实测在第 7 关跑满 60 万步都过不去；
+同理 `applyAim` 也保持 `right`，斜上弹道由 `up + right` 触发。
+⚠️ 中间还踩过一次：给 boss 战加了「浮到头顶就上瞄」，结果子弹全垂直打飞、第 7 关 boss 打不死
+（seed 2026 跑满 60 万步仍停在 `[1..7]`）⇒ 已撤销并加门禁钉死「boss 分支不许出现 `input.up`」。
+`incomingBullet` 探测窗从 `[-10,26] × ±10` 放宽到 `[-16,40] × ±14`。
+
+#### ② 人物倒着跑
+
+第二轮把上游玩家帧**误判为默认朝左**，把 `flipX` 从 `< 0` 反写成 `> 0` ⇒ 朝右推进时反而被翻转。
+实证：`logs_temp/e54_sprites/prev/player.png` 里 `sprite_0d/0e/0f` 平射帧的枪口与红色子弹明确在**右侧**，
+`sprite_02..04` 的跑动腿也朝右 ⇒ 改回 **`flipX = playerFacing < 0`**；`ContraArt.PLAYER_FRAMES` KDoc 同步纠正。
+
+#### ③ 背景不全面
+
+原 `drawParallax` 是「22 个纯色矩形当山」+ 4 段纯色天空 + 5 条白条云 ⇒ 与原著丛林关差别很大。
+先离线验证上游 `level_data.h` 的 `gLevel1Screens`(13 屏) + `gLevel1Supertiles`(103 个) 配合 `tiles_c.h`
+瓦片确实能还原出真实树冠 / 树干（`logs_temp/e54_bg_preview.py`），但该表的 supertile 索引混用了
+HUD 字体区瓦片，逐屏精确复原会形成字母带 ⇒ **不逐屏照搬**，改为用同一套上游瓦片程序化拼三重视差：
+
+| 层 | 上游瓦片 | 视差 |
+|---|---|---|
+| 远山 | `tile_e0`（细碎绿噪点，染暗 `0xFF4E624E`） | 0.18× |
+| 树干 / 树冠 | `tile_64`（棕竖纹）/ `tile_6b` + `tile_94`（浓密叶纹） | 0.45× |
+| 瀑布 | `tile_a0`（白竖条，染蓝），第 3 / 8 屏固定位 | 随关卡 |
+| 近景灌木 | `tile_6a` | 1× |
+| 第 5 关起（基地） | 树冠换 `tile_b8` / `tile_b1` 网格块 | — |
+
+⛔ 全部是上游 `tiles_c.h` 的 256 块瓦片，**没有新画一张像素**；颜色只做乘色压暗
+（片元 `texture2D * vColor`），不重蹈「把真图洗成纯色板」。另按离线 mock
+（`logs_temp/e54_r3_scene_mock.py`，见 `docs/archive/verification/e54/README.md` 索引）实测，白条云无论 0.19 / 0.35 alpha 都会变成突兀的灰白矩形
+⇒ **去掉假云**（连带删掉只服务于云的 `argb()`），天空保持干净渐变（原著 level 1 本就如此）。
+
+#### ④ 歌词黑背景
+
+`VisualizerStage.LyricTopBar` 的黑底是 `Color.Black.copy(alpha = 0.35f)` 且只包住文字；
+本效果 `isViewBased = true` ⇒ 舞台**整层深色底不画**（否则填死 `SurfaceView` 的洞），
+GL 自己又清成纯黑、4:3 居中留黑边 ⇒ 那块 0.35 黑叠上去等于没有。
+
+修复完全局部：在 `ArcadeGlScene` 新增 `drawLyricScrim()`（顶部 30 逻辑像素 `0xCC000000` 通栏黑带
++ 5px `0x66000000` 渐隐边），并把 HUD 文字从顶部移到画面底部 `y = 226..240`，避免和歌词抢位置。
+⛔ **未改 `VisualizerStage.kt`**（`VisualizerStageThemeAgnosticGateTest` 禁止新增逐主题特例），
+其他效果一行都不受影响。
+
+#### ⑤ ⭐ 收尾：「过不了关」的真实根因不是 bot 不够聪明
+
+第三轮给 bot 加上瞄 / 蹲射 / 追奖励后，`ContraBotTest > bot 能连续推进全部 8 关` 反而红了：
+`第 8 关从未抵达（步数=600000 关卡序列=[1..7]）`。为避开每轮 8 分钟 Gradle，用已编译的
+Kotlin class 直接在 JVM 上跑参数化诊断 `docs/archive/verification/e54/E54Diag3.java`（反射改 `private set` 的
+`weapon` 字段、对 `decide()` 输出做后处理，一次跑 20 组开关组合）：
+
+| 组合 | 结果 |
+|---|---|
+| 现状 | fail，卡第 7 关，934 次死亡 |
+| 禁用 up/down（等于退回增强前的 bot） | 仍 fail，1027 次死亡 ⇒ 退化不全在 bot |
+| 强制普通枪 | 仍 fail，1091 次死亡 ⇒ 不是「永久散弹」单因 |
+| 强制机枪 + 禁用智能 | **PASS 60,410 步 / 99 死** ⇒ 必须同时满足两个条件 |
+| 只做其中一件（强散弹或撤智能） | 全部 fail |
+
+三条耦合根因：
+
+1. `WPN_S` 平射是 `vy = ±3/±1 px/帧` 的 5 向大角度 + `fireCooldown = 16`（普通枪 9）
+   ⇒ 斜弹飞出 60 px 就脱离敌兵 12~16 px 高的碰撞盒，**散弹实际平射 DPS 只有普通枪一半**；
+   叠加「奖励只升不降」后 bot 吃到第一个道具就永久停在这把弱枪上，越吃越弱。
+2. 单发武器（普通 / 机枪 / 激光）在 `aimUp` 时**唯一**那颗子弹变成斜上飞 ⇒ bot 一路上瞄、
+   地面小兵一个都清不掉。
+3. `crouch ⇒ speed = 0` ⇒ bot 一旦发现低位敌人就持续按 `down` 蹲在原地，卡住看门狗救不回来。
+
+修复（`ContraSim.kt` 三处）：散弹收敛为近水平分层扇面 + 冷却 16→12；`aimUp` 给单发武器
+**追加**一发水平弹（上瞄从「替代平射」变成「追加一路弹道」）；蹲射改为半速推进。
+修复后**保留全部智能行为**（up 2,517 帧 / down 2,989 帧），同一诊断从「60 万步卡第 7 关 /
+934 死」变为「**52,641 步走完 8 关 / 92 死**」。新增
+`奖励不能越吃越弱 散弹是净增强且上瞄不吞掉平射` 门禁守住这三条数值，防止被「顺手优化」回去。
+
+#### ⑥ 同版本第四轮：画面横向铺满 + bot 死亡画像驱动的再优化
+
+**① 画面横向占满全屏**（所有者复测裁定「地面和背景应该横向占满全屏」）：撤销
+`onSurfaceChanged` 的「整数倍 k + 4:3 居中」，改为横纵各自铺满（`scaleX = viewportW/320`、
+`scaleY = viewportH/240`），16:9 电视不再有左右黑边（精灵横向拉伸 ≈1.33 倍）。`AndroidView`
+本来就是 `fillMaxSize`，黑边完全来自 GL 侧居中偏移。
+
+**② bot 死亡画像**（`docs/archive/verification/e54/E54Diag4.java` / `E54Diag5.java`，60 万步长跑）：1152 死 / 平均存活
+465 帧（7.8 s）；**第 5 关独占 1005 死**；死亡间隔恰好 = 54（死亡动画）+ 90（无敌）= 144 帧
+⇒ 重生点前方的地堡/炮台「无敌一过就要人命」；40 次死亡明细里 11 次死于**跳跃中**。
+
+两条死结：
+
+1. 站桩清 hp=5 的地堡时，它的 3 发抛物弹雨正好罩住玩家 = 无解伤害（第一轮已把炮台
+   四向砍成两发，这次同一先例：地堡 hp 5→3、弹雨 3→2 发 + 冷却 120→150、炮台 hp 4→3、
+   无敌 90→120 帧）。
+2. 弹幕触发 `jumpHold` → 空中 `py` 抬高 ⇒ `muzzleY` 抬高 ⇒ 水平弹从贴地敌人
+   （y≈162..176）头顶 10px 飞过 ⇒ **hp 敌人永远打不掉** ⇒ 站桩 → 又被弹幕罩死。
+   ⛔ 有贴脸威胁时禁跳（`threat < 0 && incomingBullet(sim)` 才允许起跳）。
+
+⚠️ 一次被证伪的尝试要如实记录：threat 纵窗 [−10,26] 扩到 [−14,44] 反而让 contact 死亡
+307→697 —— 玩家跳起 / 上坡时把「平射根本打不到」的高处敌人也当成威胁 ⇒ 停步空打 90 帧
+→ 撞死。已回退，并加门禁防止再扩。
+
+结果：**通关 52,641 步 / 92 死 → 14,600 步 / 11 死**；60 万步长跑死亡 1235→512、
+平均存活 7.2 s→18.6 s、boss 击杀 12→319 次、第 5 关死亡死角消除（每关 29~118 均匀分布）。
+
+#### 门禁与验收
+
+新增 `ContraBotIntelligenceTest`（12 条）：上瞄行为帧数、跑 60000 步能吃到奖励并升散弹、
+道具重力与奖励不降级、DEMO 跑过 6000 帧不回标题、斜上弹道语句、boss 平射纪律、
+奖励不能越吃越弱（散弹净增强 / 上瞄补平射 / 蹲射半速）、**贴脸清敌禁跳 + 威胁纵窗**、
+**画面横纵铺满不许恢复 4:3 居中**、朝向判据、背景全走 `ContraArt.BG_*` 且帧表命中、
+歌词背板与 HUD 让位。既有 `ContraBotTest` 的
+「8 关全推进 / 同 seed 逐帧可复现 / 108000 步长跑」继续保留。
+
+现行规模：`visualizer/arcade/` **14 文件 / 3,211 行 + 6 个测试文件 / 42 用例**。
+⚠️ 真机帧率、遥控确认键打断 demo 仍只有代码通路；本轮 4 项的**最终真机复测**需所有者上机确认。
+
+### 10.378 main 侧补齐 E54「街机合集」的公开安全外壳 + 名册补登 E55（2026-11-10）
 
 **背景**：E54「街机合集」（魂斗罗第一阶段移植）已在**本地私有分支 `feat/e51-private`** 交付
 （v2.39.17 / versionCode 202，2026-11-10），但方案 §5.2「落点分工」要求进 `main` 的那一半
@@ -26129,7 +26480,7 @@ Critical/High + 关键 Medium 派**独立怀疑式复核**（砍掉约 1/3 的�
 **名册**：`docs/visualizer-effects-list.md` 补登 `| E55 | ARCADE_GAMES | 街机合集 ⚠️ |`
 ⇒ 29 套 / ADV 19 套；**公开版可选仍是 26 套**（该项被编译期开关整个过滤掉，公开包行为不变）。
 ⚠️ `"55"` 是**占位号**（`"54"` 已被 `E54 生态地球` 占用并随 v2.39.14 发布，改号会让老用户看到编号跳变）
-⇒ 已于 §10.377 按代码现实定案。
+⇒ 已于 §10.380 按代码现实定案。
 
 **归档**：`docs/e54-contra-porting-plan.md` → `docs/archive/`（main 侧镜像 v1.2；权威定稿版 v1.3 在私有分支同路径），
 引用改写 3 处（`.gitignore` ×2、调研文档 ×1），未闭合项逐条留痕见 `docs/archive/README.md` 第二十五轮。
@@ -26137,7 +26488,7 @@ Critical/High + 关键 Medium 派**独立怀疑式复核**（砍掉约 1/3 的�
 ⚠️ **未升版本号**：本轮**不改变公开包的用户可见行为**（新增项被编译期开关过滤掉）⇒ 版本仍是
 **v2.39.16 / versionCode 201**；公开分支与私有分支的版本号不重叠（私有侧是 v2.39.17 / 202）。
 
-### 10.376 所有者裁决：新增 / 移除频谱效果 ⇒ 必须同步效果名册（2026-11-10）
+### 10.379 所有者裁决：新增 / 移除频谱效果 ⇒ 必须同步效果名册（2026-11-10）
 
 **裁决原文**：「以后增加一个效果，就自动修改 `docs/visualizer-effects-list.md`。」
 
@@ -26155,11 +26506,12 @@ Critical/High + 关键 Medium 派**独立怀疑式复核**（砍掉约 1/3 的�
 ⛔ **不要跑 `scripts/gen_effects_doc.py` 来"自动更新"**：它的模板已过期（头部还写 v2.39.10 / "枚举第 6 参"），
 跑一遍会**抹掉**名册里现有的 ⚠️ 说明、门控口径与各档计数注解 ⇒ 名册仍是**手维护**的。
 
-### 10.377 所有者裁决：街机合集编号 = **E55**（按代码现实确认）+ 版本号 / CHANGELOG 两分支对齐（2026-11-10）
+### 10.380 所有者裁决：街机合集编号 = **E55**（按代码现实确认）+ 版本号 / CHANGELOG 两分支对齐（2026-11-10）
 
 **裁决原文**：「编号归属：按已经开发完成代码中既有的现实来确认。」
 ⇒ 现实 = 枚举 `VisualizerTheme.ARCADE_GAMES` 的 `ordinalLabel` 就是 **`"55"`** ⇒ **E55 = 街机合集**，
 调研文档当年的「E54」自编号作废（`"54"` 归 `ECO_GLOBE`「生态地球」，已随 v2.39.14 发布，⛔ 不改号）。
+⇒ ⚠️ **前序 §10.375 标题里的「E54」按本条读作 E55**（历史段不回改，只在此澄清）。
 
 **落实范围**（效果编号改 E55，**文件名不动**）：
 
@@ -26168,6 +26520,7 @@ Critical/High + 关键 Medium 派**独立怀疑式复核**（砍掉约 1/3 的�
 | `docs/visualizer-effects-list.md` | 「占位号 / 待裁定」⇒ 已定 `E55 街机合集` |
 | `docs/e54-run-and-gun-survey.md` | 标题与正文 26 处**效果编号**自引用 E54 → E55（脚本 ↔ 文档的契约不动，见下） |
 | `docs/archive/e54-contra-porting-plan.md` | §0.0「占位 `"55"`」⇒ 已裁决 `"55"`（E55）；「遗留」行闭合 |
+| `docs/e54-sprite-attribution.md` | 标题与正文的效果编号自引用 ⇒ 已定 E55（文件名保持 `e54-`） |
 | `AppSettings.kt` 枚举 KDoc | 「待所有者裁定 E54/E55 归属」⇒ 已定 E55 |
 | `docs/archive/README.md` 第二十五轮 | 占位号口径 ⇒ 已定 E55 |
 
@@ -26181,16 +26534,19 @@ Critical/High + 关键 Medium 派**独立怀疑式复核**（砍掉约 1/3 的�
 - `main` 升到 **v2.39.17 / versionCode 202**（与私有分支同版本），并把私有分支的 v2.39.17 段落（街机合集四轮）
   接到 main 的 CHANGELOG 顶部 ⇒ main 的段落序为 `v2.39.17 → v2.39.16 → v2.39.15 → …`；
 - 私有分支那份 CHANGELOG 补进 main 才有的 **v2.39.16**（全库代码审查 154 项）段 ⇒ **两分支 CHANGELOG 逐字一致**；
-- `versionCode` 口径注释统一为：`= 185 + 次版本号（2.39.14→199 / 2.39.15→200 / 2.39.16→201 / 2.39.17→202）`。
+- `versionCode` 口径注释统一为：`= 185 + 次版本号（2.39.14→199 / 2.39.15→200 / 2.39.16→201 / 2.39.17→202）`；
+- **main 侧另补了「公开安全外壳」**（枚举 + 双语字符串 + `arcade.enabled` 开关 + 工厂回落 + 门禁计数 28→29）
+  —— 方案 §5.2 要求进公开仓库的那一半；缺它会让 main 本地编译**引用不存在的常量而失败**
+  （工厂在 `E51_TRACKED` 里、`AppSettings.kt` 不在），见 §10.378。
 
-⚠️ **版本号一致 ≠ 公开包内容一致**：`main` 的公开构建里「街机合集」仍被 `arcade.enabled` 编译期开关整个过滤
-（公开版可选 26 套）；实现、图集、关卡内容、上游快照只在本地私有分支与本机覆盖层。
-
-### 10.378 所有者第三次裁决：E55「街机合集」**公开分发**（2026-11-10）
+⚠️ **版本号一致 ≠ 公开包内容一致**（该口径已于同日 §10.381 改判）：按 v2.39.17 的口径，`main` 的公开构建里
+「街机合集」仍被 `arcade.enabled` 编译期开关整个过滤（公开版可选 26 套）；实现、图集、关卡内容、
+上游快照只在本地私有分支与本机覆盖层。
+### 10.381 所有者第三次裁决：E55「街机合集」**公开分发**（2026-11-10）
 
 **裁决原文**：「魂斗罗应该是公开的，在 main 分支下的。」
 **口径**：**实现上 `main` 且公开包默认也带该效果**（`arcade.enabled` 缺省改 `true`）
-⇒ 公开版可选效果 **26 → 27 套**。版本随之升到 **v2.39.18 / versionCode 203**。
+⇒ 公开版可选效果 **26 → 27 套**。版本随之升到 **v2.39.18 / versionCode 203**（两分支一致）。
 
 **迁移清单**（自 `feat/e51-private` → `main`）：
 
@@ -26214,15 +26570,53 @@ Critical/High + 关键 Medium 派**独立怀疑式复核**（砍掉约 1/3 的�
 **⛔ 覆盖层影子项必须同步撤掉**：`scripts/sync_private_overlay.py` 的 `SHADOWED_JAVA` / `SHADOWED_ASSETS`
 与本机 `~/.gradle/init.d/10-nasmusic-e51-local.gradle` 的 `E51_TRACKED` 原本都登记了 `visualizer/arcade`。
 ⛔ 不撤的话，init 脚本在「仓库里没有隐藏分支源码」（= 在 `main` 上）时会**排除仓库里那几份同名文件**、
-改用覆盖层那份 ⇒ `main` 刚入仓的 arcade 源码会被旧副本顶掉。两处已同步撤除并重跑同步，
+改用覆盖层那份 ⇒ `main` 刚入仓的 arcade 源码会被旧副本顶掉。三处已同步撤除并重跑同步，
 `--check` 漂移 **0** 处（`PrivateOverlayDriftGateTest` 绿）。
 
-**文档同步**：名册（公开版可选 26 → 27；E55 去掉 ⚠️ 门控标记）、`AGENTS.md`（名册约定里
-「E51 / E52 / E55 标 ⚠️」改为「E51 / E52 标 ⚠️」+ 增补「E55 是公开的」一段）、
-`docs/e54-sprite-attribution.md` §2 / §3、归档方案 §5.2 / §5.3 **补记**（原表保留不动，只加改判说明）、
-`.gitignore` 注释、`scripts/e54_pack_sprites.py` 文件头（效果编号 E55、文件名保持 `e54_`）。
+**私有分支（`feat/e51-private`）侧的变化**：
+
+- 本分支的 `visualizer/arcade/**`（14 个源文件）+ 6 个测试 + `contra_atlas.png` **已同步进 `main`**
+  ⇒ 两分支的这三处内容**逐字节一致**（`main` 的 `33e7fcc` 由此而来）；
+- 本分支**保留**自己的一份副本（它是本分支的既有事实，且 `main` 的构建在本机靠覆盖层与本分支同步）；
+- `arcade.enabled` 的缺省值在本分支与 `main` **一致改 `true`** ⇒ 两个分支的本机构建行为相同。
 
 **⛔ 仍然不可再分发的部分**：`app/src/e54-upstream/`（上游 ROM 提取原件：232 张精灵 PNG + `tiles_c.h`）
 **仍 .gitignore、仍不入仓**（它只是本机「移植对账基线」）；E51 / E52 的实现与资产**不受本次裁决影响**，
 仍只在私有分支与覆盖层。⛔ 公开包里进的是**烘焙图集 + 本项目自写的 sim / bot / 关卡内容**。
 
+**文档同步**：名册（公开版可选 26 → 27；E55 去掉 ⚠️ 门控标记）、`AGENTS.md` / `CLAUDE.md`（两分支一致）、
+`docs/e54-sprite-attribution.md` §2 / §3、归档方案 §五 补记、`docs/archive/README.md` 补记、
+`.gitignore` 注释、`scripts/e54_pack_sprites.py` 文件头（效果编号 E55、文件名保持 `e54_`）。
+### 10.382 两分支**文档**逐字节对齐（合并 §10.374–§10.378 的编号撞车）（2026-11-10）
+
+**裁决原文**（所有者 2026-11-10）：「两分支 文档类的内容，应该保持一致，例如：technical-overview.md，
+应该都一样才行。」
+
+**问题根因**：两个分支各自独立追加 §10 ⇒ **同号不同内容**（`§10.374–§10.378` 五节各有两版：
+main = 代码审查 + main 侧落地 + 名册约定 + 编号定案 + 公开分发裁决；
+私有分支 = 街机合集三轮 + 编号定案 + 公开分发裁决）⇒ 文档在两分支**对不上**。
+
+**处置（按 AGENTS.md「写一份 → 覆盖到私有分支」）**：不 cherry-pick、不顺延编号，
+而是把两侧内容**合成唯一序列**，再把**同一份文件**覆盖到私有分支：
+
+| 新编号 | 来源 | 标题 |
+|---|---|---|
+| §10.374 | main §10.374 | v2.39.16 全库代码审查落地（154 项） |
+| §10.375 | 私有 §10.374 | v2.39.17 实现「街机合集」 |
+| §10.376 | 私有 §10.375 | v2.39.17 第二轮：精灵全面改用上游真图 |
+| §10.377 | 私有 §10.376 | v2.39.17 第三轮：电视实测 4 项反馈修复 |
+| §10.378 | main §10.375 | main 侧补齐公开安全外壳 + 名册补登 E55 |
+| §10.379 | main §10.376 | 所有者裁决：新增 / 移除效果必须同步名册 |
+| §10.380 | main §10.377 ∪ 私有 §10.377 | 编号定案 E55 + 版本号 / CHANGELOG 两分支对齐 |
+| §10.381 | main §10.378 ∪ 私有 §10.378 | 第三次裁决：E55 公开分发 |
+
+⇒ 两侧内容**一条不删**，只是重排为连续编号；节内互引（`§10.37x`）同步改写。
+⚠️ 历史段**正文不改写**（仍按 AGENTS.md「只追加新段，不回改历史段」的纪律），只有节号与互引随合并调整。
+
+**其余文档的合并**：`docs/archive/README.md`（main 是超集：多出第二十二～二十五轮 ⇒ 以 main 为准）、
+`docs/archive/e54-contra-porting-plan.md`（私有是 v1.3 权威版、main 是 v1.2 镜像 ⇒ 取 v1.3 正文 +
+main 侧的归档注记，两边同文）。
+
+**新增门禁**：`scripts/check_doc_parity.py` + `DocParityGateTest`
+⇒ 逐字节比对两分支的 `docs/` 树，除**显式白名单**（E51/E52 上游衍生件）外有任何差异即判红；
+CI 上没有私有分支 ref ⇒ 退出码 2 ⇒ 跳过（与 `PrivateOverlayDriftGateTest` 同款处理）。

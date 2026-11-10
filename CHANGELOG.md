@@ -82,7 +82,7 @@
 
 ### Notes
 
-- 未改 `VisualizerStage.kt`（不动舞台）；遥控确认键打断 demo **仅有代码通路、暂无实际入口**（见 `docs/technical-overview.md` §10.374 验收缺口）
+- 未改 `VisualizerStage.kt`（不动舞台）；遥控确认键打断 demo **仅有代码通路、暂无实际入口**（见 `docs/technical-overview.md` §10.375 验收缺口）
 - 同版本号、同文件名**第三次**出包 ⇒ 交付必须给包指纹，并提醒先卸载旧版或 `adb install -r`
 - 真机帧率与遥控键位冲突**未验**，本轮 4 项的最终复测需所有者上机确认
 

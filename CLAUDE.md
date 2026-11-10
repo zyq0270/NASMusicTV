@@ -251,6 +251,18 @@ scripts/lofi_city_registry_sync.py      // Sync script (parses upstream bundle)
 ### If You Need to Push Other Changes from This Branch
 **Do NOT push directly** — E51 commits are interleaved with other features in history. Owner must explicitly authorize history rewrite (rebase/cherry-pick) to extract non-E51 commits. See `docs/archive/e51-lofi-city-plan.md §10 D-m` and `§2.6`.
 
+### Doc Parity Between Branches (owner ruling 2026-11-10)
+
+- Owner ruling: 「两分支 文档类的内容，应该保持一致，例如：technical-overview.md，应该都一样才行。」
+- ⭐ **`docs/` must be byte-identical across `main` and `feat/e51-private`** — write one canonical copy, then
+  `git checkout <other-branch> -- <path>` it over. ⛔ Never cherry-pick + hand-merge + renumber docs
+  (that is exactly how §10 numbers collided in the first place).
+- ⛔ **Gate**: `python scripts/check_doc_parity.py` (exit 0 = identical / 1 = drift / 2 = no private ref on this machine).
+  Unit test `DocParityGateTest` calls it; CI has no private ref ⇒ exit 2 ⇒ skipped.
+- ⚠️ **Only exception**: files containing upstream code or upstream-derived payloads stay private
+  (E51/E52 upstream assets, prototype HTMLs, golden vectors). The 7-item allowlist lives in
+  `scripts/check_doc_parity.py` → `PRIVATE_ONLY_EXCEPTIONS`; edit that list only there.
+
 ---
 
 ## Important Files to Know
@@ -269,6 +281,8 @@ scripts/lofi_city_registry_sync.py      // Sync script (parses upstream bundle)
 | `app/src/main/java/com/nasmusic/tv/util/CryptoUtils.kt` | AES-256-GCM + Keystore encryption |
 | `app/src/main/java/com/nasmusic/tv/visualizer/VisualizerRendererFactory.kt` | Effect renderer factory |
 | `docs/visualizer-effects-list.md` | Live effects registry (must be updated when a theme is added/removed) |
+| `scripts/check_doc_parity.py` | Doc-parity gate: byte-compares `docs/` between `main` and `feat/e51-private` (exit 0/1/2) |
+| `scripts/sync_private_overlay.py` | Syncs hidden-branch E51/E52 sources into the local overlay (exit 0/1/2) |
 
 ---
 
