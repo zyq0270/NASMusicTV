@@ -788,8 +788,10 @@
 
 ⇒ 效果名册 `docs/visualizer-effects-list.md` 同步补登 `| E55 | ARCADE_GAMES | 街机合集 ⚠️ |`
 （29 套 / ADV 19 套；公开版可选仍是 26 套 —— 该项被编译期开关整个过滤掉）。
-⚠️ `"55"` 是**占位号**：`"54"` 已被 `E54 生态地球` 占用并随 v2.39.14 发布（改号会让老用户看到编号跳变）
-⇒ ⛔ 所有者裁定 E54/E55 归属前不要改回 `"54"`。
+✅ 编号 `"55"` = **E55 街机合集**（2026-11-10 所有者裁定「按已开发完成代码中既有的现实来确认」= 枚举
+`ARCADE_GAMES` 的 `ordinalLabel`）；`"54"` 归 `ECO_GLOBE`「生态地球」，⛔ 不改回 `"54"`。
+⚠️ 脚本与历史文件名仍带 `e54_` 前缀（`scripts/e54_*.py`、标记区 `E54-POOL10`、`app/src/e54-upstream/`）——
+那是脚本 ↔ 文档的契约，**效果编号改 E55、文件名不动**。
 
 **同时补齐方案 §5.3 的覆盖层登记**（否则「在 main 上本地编译也携带隐藏分支效果」这条链对 E54 是断的）：
 `scripts/sync_private_overlay.py` 的 `SHADOWED_JAVA` / `SHADOWED_ASSETS` 加 `visualizer/arcade` 与
