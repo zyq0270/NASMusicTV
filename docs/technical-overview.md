@@ -26743,8 +26743,9 @@ CI 上没有私有分支 ref ⇒ 退出码 2 ⇒ 跳过（与 `PrivateOverlayDri
 
 #### 七、📌 `docs/` 根口径（2026-11-11 实测 `git ls-tree --name-only HEAD docs/`）
 
-**入库 Markdown 11 → 4 篇** = 活文档 2（`technical-overview.md` / `conventions-adaptive-ui.md`）
-+ 现役名册 1（`visualizer-effects-list.md`）+ 在办方案 1（`e54-run-and-gun-survey.md` —— E55 街机合集的上游调研，**仍在根**）。
+**入库 Markdown 11 → 5 篇** = 活文档 2（`technical-overview.md` / `conventions-adaptive-ui.md`）
++ 现役名册 1（`visualizer-effects-list.md`）+ 素材归属登记 1（`e54-sprite-attribution.md`）
++ 在办方案 1（`e54-run-and-gun-survey.md` —— E55 街机合集的上游调研，**仍在根**）。
 
 **入库原型 html = 1 份**（`globe-present.html` —— E54 页面生成器的**唯一再生源**，⛔ 不得归档、不得手工改产物）。
 
