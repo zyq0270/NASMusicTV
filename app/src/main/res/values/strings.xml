@@ -988,6 +988,8 @@
     <string name="player_download_network_error">网络错误：%s</string>
     <string name="player_download_exception">下载异常：%s</string>
     <string name="player_error_playback">播放错误</string>
+    <string name="player_error_flac_unsupported">本机不支持 FLAC 音频（该设备解码 FLAC 会崩溃），已自动跳过该曲目；如需播放请在服务端转码为 MP3</string>
+    <string name="player_flac_quality_downgraded">本机不支持 FLAC 音频（解码会崩溃），「无损」档已自动降级为 320kbps 播放</string>
     <string name="hq_error_component_not_ready">分离组件未就绪，已切换快速模式</string>
     <string name="hq_error_model_not_downloaded">高质量模型未下载，已切换快速模式</string>
     <string name="hq_error_no_audio_file">无法获取音频文件</string>

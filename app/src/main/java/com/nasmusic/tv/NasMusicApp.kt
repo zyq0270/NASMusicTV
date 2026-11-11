@@ -418,6 +418,23 @@ val baiduOAuthClient: BaiduOAuthClient by lazy { BaiduOAuthClient(this, baiduOkH
         }
     }
 
+    /**
+     * **全局音质档位**（带**设备能力收敛** + 一次性告知）。
+     *
+     * ⛔ 2026-11-11 电视崩溃修正：部分老电视的厂商 OMX **一 configure FLAC 解码器就崩**
+     *（框架 `ACodec.cpp` 的 `CHECK_EQ` 断言 ⇒ 整进程 `SIGABRT`）
+     * ⇒ 「无损」档在这台机器上必须退到 320kbps。
+     *
+     * ⚠️ 降级是**静默**的（不报错、不跳过）⇒ 用户只会看到「音质怎么变差了」。
+     * ⇒ 这里补一次**一次性提示**（只在「用户确实选了无损 + 本机放不了」时弹）。
+     */
+    private fun clampedQualityTier(): Int {
+        val requested = appPreferences.getQualityTierSync()
+        val clamped = com.nasmusic.tv.backend.network.QualityTiers.clampForDevice(requested)
+        com.nasmusic.tv.util.FlacQualityNotice.showIfDowngraded(this, requested, clamped)
+        return clamped
+    }
+
     val applicationScope: CoroutineScope = CoroutineScope(
         SupervisorJob() + Dispatchers.IO + CoroutineExceptionHandler { _, t ->
             AppLog.e("NasMusicApp", "applicationScope 未捕获异常（后台任务失败，不应影响应用）", t)
@@ -522,7 +539,8 @@ val baiduOAuthClient: BaiduOAuthClient by lazy { BaiduOAuthClient(this, baiduOkH
             baseUrlProvider = { appPreferences.network.getMetingApiBaseUrlSync() },
             serverProvider = { appPreferences.network.getMusicSourceSync() },
             // F2-6：音质档位（AUTO=0 不传 br；显式档位走降级链）
-            qualityTierProvider = { appPreferences.getQualityTierSync() },
+            // ⛔ 2026-11-11 电视崩溃修正：本机放不了 FLAC ⇒ 无损档自动退到 320kbps（并一次性告知）
+            qualityTierProvider = { clampedQualityTier() },
             // 艺人全量方案 Q2：网易免鉴权优先。基址复用歌词那个设置项（不新增设置项）
             netease = NeteaseOpenApi(
                 baseUrlProvider = { appPreferences.lyrics.getLyricsNeteaseBaseUrlSync() }
@@ -542,8 +560,13 @@ val baiduOAuthClient: BaiduOAuthClient by lazy { BaiduOAuthClient(this, baiduOkH
             services = bootServices,
             defaultSourceProvider = { appPreferences.network.getDefaultNetworkSourceSync() },
             // v2.35.0 多码率：全局默认档位 + 单曲覆盖（两级模型，方案 §2.3）
-            qualityTierProvider = { appPreferences.getQualityTierSync() },
-            songQualityOverrideProvider = { src, id -> qualityOverrides.tierOf(src, id) }
+            // ⛔ 2026-11-11 电视崩溃修正：本机放不了 FLAC ⇒ 无损档自动退到 320kbps（并一次性告知）
+            qualityTierProvider = { clampedQualityTier() },
+            songQualityOverrideProvider = { src, id ->
+                qualityOverrides.tierOf(src, id)?.let {
+                    com.nasmusic.tv.backend.network.QualityTiers.clampForDevice(it)
+                }
+            }
         )
         // v2.35.0 多码率（修 G5）：档位变化 → 清空播放直链缓存，避免切档后仍命中旧档直链
         appPreferences.setOnQualityTierChanged { networkMusicManager.clearPlayUrlCache() }
@@ -710,7 +733,8 @@ autoDownloadController = com.nasmusic.tv.backend.download.AutoDownloadController
             },
             scope = applicationScope,
             // v2.35.0 多码率：自动下载统一用全局默认档位，不消费单曲覆盖（方案 §2.3.2）
-            qualityTierProvider = { appPreferences.getQualityTierSync() }
+            // ⛔ 2026-11-11 电视崩溃修正：本机放不了 FLAC ⇒ 不要下载 FLAC（下了也播不了，还占空间）
+            qualityTierProvider = { com.nasmusic.tv.backend.network.QualityTiers.clampForDevice(appPreferences.getQualityTierSync()) }
         )
         exportCoordinator = com.nasmusic.tv.backend.export.ExportCoordinator(
             context = this,

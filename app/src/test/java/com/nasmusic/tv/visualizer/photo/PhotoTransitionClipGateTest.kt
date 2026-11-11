@@ -45,7 +45,8 @@ class PhotoTransitionClipGateTest {
         "photo/transitions/IrisTransitions.kt" to
             "IRIS_CIRCLE / WIPE_LINEAR —— 已在 CLIP_BASED 登记，sdkInt<26 由 effective() 降级",
         "photo/transitions/IrisP1Transitions.kt" to
-            "IRIS_DIAMOND/HEXAGON/STAR/SHAPE_RANDOM/WIPE_CLOCK/WIPE_CROSS —— 已全部登记在 CLIP_BASED",
+            "IRIS_DIAMOND/HEXAGON/STAR/SHAPE_RANDOM/WIPE_CLOCK —— 已全部登记在 CLIP_BASED；" +
+            "⚠️ 同文件的 WIPE_CROSS 用的是 clipRect（不是 clipPath）⇒ 不登记",
         "photo/transitions/ShapeP2Transitions.kt" to
             "IRIS_TRIANGLE / WIPE_SPIRAL —— P2 档的两个形状类，已全部登记在 CLIP_BASED",
         "renderers/DesertSmokeBakes.kt" to
@@ -80,31 +81,22 @@ class PhotoTransitionClipGateTest {
 
     // ── 门禁 ②：CLIP_BASED 必须与真实实现严格同步 ────────────────
 
-    /** 源码里每个「实现了某个转场 id」的声明 → 所在文件。 */
-    private fun declaredIdsByFile(): Map<String, List<String>> {
-        val re = Regex("""override\s+val\s+id\s*:\s*PhotoTransitionId\s*=\s*PhotoTransitionId\.([A-Z_]+)""")
-        val out = LinkedHashMap<String, MutableList<String>>()
-        for (f in visualizerFiles()) {
-            val rel = SourceScan.relPath(f)
-            for (m in re.findAll(stripComments(f.readText()))) {
-                out.getOrPut(rel) { ArrayList() }.add(m.groupValues[1])
-            }
-        }
-        return out
-    }
+    /**
+     * 源码索引（**按效果粒度**，见 [TransitionSourceIndex]）。
+     *
+     * ⚠️ 2026-11-11 修正：原来这里是「文件粒度」—— 只看「哪个文件含 `clipPath`」
+     * ⇒ 同文件里**没用** `clipPath` 的效果会被一并算成 clip 类
+     * ⇒ `WIPE_CROSS`（用的是 `clipRect`）就是这么被误登记进 `CLIP_BASED` 的
+     * ⇒ API 22 电视上它一直被降级成交叉淡化，用户从来没看到这个效果。
+     */
+    private val index: TransitionSourceIndex by lazy { TransitionSourceIndex.build() }
 
     @Test
     fun `凡在含 clipPath 的文件里实现的转场都必须登记进 CLIP_BASED`() {
-        val declared = declaredIdsByFile()
         val missing = ArrayList<String>()
-        for ((rel, ids) in declared) {
-            val code = stripComments(src("com/nasmusic/tv/visualizer/$rel").readText())
-            if (!code.contains("clipPath")) continue
-            for (name in ids.distinct()) {
-                if (PhotoTransitionId.entries.none { it.name == name }) continue
-                val id = PhotoTransitionId.valueOf(name)
-                if (id !in PhotoTransitionId.CLIP_BASED) missing.add("$rel → $name")
-            }
+        for (id in index.ids) {
+            if (!index.usesClipPath(id)) continue
+            if (id !in PhotoTransitionId.CLIP_BASED.map { it.name }) missing.add(id)
         }
         assertTrue(
             "以下实现用了 clipPath 却没进 CLIP_BASED（sdkInt<26 不会降级 ⇒ 老平台崩溃）：$missing",
@@ -114,14 +106,10 @@ class PhotoTransitionClipGateTest {
 
     @Test
     fun `CLIP_BASED 里不得有已无 clipPath 使用的陈旧条目`() {
-        val declared = declaredIdsByFile()
-        val clipFiles = declared.keys.filter {
-            stripComments(src("com/nasmusic/tv/visualizer/$it").readText()).contains("clipPath")
-        }
-        val stillClip = clipFiles.flatMap { declared[it] ?: emptyList() }.toSet()
-        val stale = PhotoTransitionId.CLIP_BASED.filter { it.name !in stillClip }
+        val stale = PhotoTransitionId.CLIP_BASED.map { it.name }.filter { !index.usesClipPath(it) }
         assertTrue(
-            "CLIP_BASED 里的 $stale 已找不到 clipPath 实现（要么实现改法了，要么登记写错了）",
+            "CLIP_BASED 里的 $stale 已找不到 clipPath 实现（要么实现改法了，要么登记写错了）" +
+                "⇒ 它们在 API < 26 上会被白白降级，用户看不到那个效果",
             stale.isEmpty(),
         )
     }

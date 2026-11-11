@@ -171,12 +171,23 @@ class CrossfadeController(
         }
     }
 
+    // Media3 的 UnstableApi 走 androidx 的 @RequiresOptIn 机制，必须用 androidx.annotation.OptIn
+    // （kotlin.OptIn 对它无效，且自身会被 lint 标记）。
+    @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
     private fun createCrossfadePlayer(): ExoPlayer {
         val audioAttributes = AudioAttributes.Builder()
             .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
             .setUsage(C.USAGE_MEDIA)
             .build()
+        // ⛔ 2026-11-11 电视崩溃修正：副播放器**同样**要熔断 FLAC
+        //（老电视的厂商 OMX 一 configure FLAC 解码器就触发框架断言 ⇒ 整进程猝死）。
+        // ⇒ 与主播放器用同一套解封装熔断（见 DeviceAudioCaps）。
+        val extractors = FlacGuard.extractorsFactory(
+            androidx.media3.extractor.DefaultExtractorsFactory()
+        )
+        val mediaSourceFactory = androidx.media3.exoplayer.source.DefaultMediaSourceFactory(context, extractors)
         return ExoPlayer.Builder(context)
+            .setMediaSourceFactory(mediaSourceFactory)
             .setAudioAttributes(audioAttributes, false) // 焦点由主 player 独占
             .build()
     }

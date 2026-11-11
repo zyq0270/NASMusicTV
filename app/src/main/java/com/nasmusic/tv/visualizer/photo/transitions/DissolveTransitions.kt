@@ -77,6 +77,18 @@ internal class NoiseDissolveTransition : PhotoTransition {
             drawPhoto(m, maskSrc, geom.dstA, alpha = p, blendMode = BlendMode.DstIn)
             canvas.restore()
         }
+
+        // ⛔ 2026-11-11 电视实测修正：噪声遮罩的**暗格**在 p = 1 时仍会透出旧图
+        // ⇒ HOLD 期定格的是「半新半旧」⇒ 用户读作「照片没出来全就停着」。
+        // ⇒ 末段整幅补画新图（与 P2 档遮罩族同款口径）。
+        if (p > SETTLE_FROM) {
+            drawPhoto(b, geom.srcB, geom.dstB, alpha = (p - SETTLE_FROM) / (1f - SETTLE_FROM))
+        }
+    }
+
+    private companion object {
+        /** 末段补画起点（`p` 超过它 ⇒ 整幅新图渐入，盖住遮罩暗格） */
+        const val SETTLE_FROM = 0.85f
     }
 
     override fun release() {

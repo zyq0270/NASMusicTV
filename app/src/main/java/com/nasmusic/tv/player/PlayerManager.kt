@@ -14,6 +14,7 @@ import com.nasmusic.tv.data.model.Song
 import com.nasmusic.tv.data.prefs.AppPreferences
 import com.nasmusic.tv.util.AppLog
 import android.net.Uri
+import android.widget.Toast
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -147,6 +148,10 @@ class PlayerManager(private val applicationContext: Context) {
     var suppressPlayback = false
 
     private val progressHandler = Handler(Looper.getMainLooper())
+
+    /** 主线程 Handler（给 Toast 等「必须在主线程」的 UI 调用兜底） */
+    private val mainHandler = Handler(Looper.getMainLooper())
+
     private val progressUpdateRunnable = object : Runnable {
         override fun run() {
             val p = player
@@ -241,6 +246,14 @@ class PlayerManager(private val applicationContext: Context) {
 
     private val _playerError = MutableStateFlow<String?>(null)
     val playerError: StateFlow<String?> = _playerError
+
+    /**
+     * 「本机不支持 FLAC」的 Toast **只弹一次**（每次都弹会被 FLAC 曲目的数量刷屏）。
+     *
+     * ⚠️ 2026-11-11 电视实测：`_playerError` **全仓没有 UI 消费** ⇒ 提示必须走系统 Toast 才看得见。
+     */
+    @Volatile
+    private var flacNoticeShown = false
 
     // 人声消除处理器引用（由 PlaybackService 注入）
     private var vocalRemovalProcessor: SpectralMaskProcessor? = null
@@ -476,6 +489,39 @@ class PlayerManager(private val applicationContext: Context) {
             }
             AppLog.e("PlayerManager", "Player error: ${error.message}", error)
             _playerError.value = error.message ?: applicationContext.getString(R.string.player_error_playback)
+            // ⛔ 2026-11-11 电视崩溃修正：FLAC 在部分老电视上**一用解码器就崩**
+            //（厂商 OMX 不实现 OMX_IndexParamAudioFlac + 框架 CHECK_EQ 断言 ⇒ 整进程 SIGABRT）。
+            // ⇒ 已在**解封装层**熔断（DeviceAudioCaps）⇒ 这里收到的是**可捕获**的异常。
+            // ⇒ 处理：给一句「为什么 + 怎么办」的人话提示，并**立刻跳下一首**
+            //（不走「重新解析链接」——那不是链接过期问题，重解析只会再失败一次）。
+            if (error.isFlacUnsupported()) {
+                AppLog.w(
+                    "PlayerManager",
+                    "onPlayerError: 本机 FLAC 解码不可用，跳过本曲（${currentSong?.title ?: "?"}）",
+                )
+                _playerError.value = applicationContext.getString(R.string.player_error_flac_unsupported)
+                // ⚠️ `playerError` 这个 StateFlow **全仓没有任何 UI 消费** ⇒ 只设它用户永远看不到
+                //（2026-11-11 电视实测：用户「没看到 FLAC 的跳过提示」）。
+                // ⇒ 走**系统 Toast**：照片墙这类全屏画面上也能看见（项目既有做法，见 LinkUtils）。
+                // ⛔ 只提示一次（每次都弹会被 FLAC 曲目的数量刷屏）⇒ 其余次走日志。
+                if (!flacNoticeShown) {
+                    flacNoticeShown = true
+                    // ⛔ 必须 post 到主线程：Toast 只能在有 Looper 的线程弹，
+                    // 而 `onPlayerError` 是 player 的回调线程（不保证是主线程）
+                    // ⇒ 这里再抛一次异常就等于「为了不崩而崩」。宁可提示偶尔晚一帧，也不能崩。
+                    mainHandler.post {
+                        Toast.makeText(
+                            applicationContext,
+                            R.string.player_error_flac_unsupported,
+                            Toast.LENGTH_LONG,
+                        ).show()
+                    }
+                }
+                val flacPlayer = player
+                val flacMode = if (flacPlayer != null) derivePlayMode(flacPlayer) else PlayMode.REPEAT_ALL
+                next(flacMode)
+                return
+            }
             // 歌单导入 stub（URL 直链）播放失败（§4.1.8 (5) 回退链）：
             // stub id 在 NAS 上不存在，re-resolve 链路对它必然空转（getSongsByIds 查不到），
             // 直接回调 MainViewModel.playbackFailure → 复测可达性 → 不可达走补全链写回歌单。

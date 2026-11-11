@@ -290,6 +290,12 @@ enum class PhotoTransitionId(
          * 而 `try/catch(Throwable)` 拦不住 native 崩溃 ⇒ 只能在枚举层先降级。
          *
          * ⚠️ 新增 clip 类实现时必须同步加进这里（`PhotoTransitionClipGateTest` 守这条）。
+         *
+         * ⛔ **登记必须精确到「效果」而不是「文件」**（2026-11-11 修正）：
+         * `WIPE_CROSS` 曾被登记在这里 ⇒ 但它用的是 `clipRect`（**不是** `clipPath`）
+         * ⇒ API 22 电视上它被白白降级成交叉淡化，用户**从来没见过**这个效果。
+         * ⇒ 现在由 `PhotoTransitionCompletionGateTest` 按**效果粒度**双向核对：
+         * 用了 `clipPath` 必须登记；登记了必须真用。
          */
         val CLIP_BASED: Set<PhotoTransitionId> = setOf(
             IRIS_CIRCLE,      // IrisTransitions.kt  IrisCircleTransition
@@ -299,9 +305,9 @@ enum class PhotoTransitionId(
             IRIS_STAR,
             SHAPE_RANDOM,     // 复用 PolygonIrisTransition（四个形状全是 clipPath）
             WIPE_CLOCK,       // IrisP1Transitions.kt 扇形折线 clipPath
-            WIPE_CROSS,
             IRIS_TRIANGLE,    // ShapeP2Transitions.kt 正三角形光圈（clipPath）
             WIPE_SPIRAL,      // ShapeP2Transitions.kt 螺线扇形擦除（clipPath）
+            // ⛔ WIPE_CROSS **不在**这里：它用 `clipRect`（十字 = 3 次矩形裁剪），走不到 hwui Region
         )
 
         /** clipPath 安全的最低 API */

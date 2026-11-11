@@ -1,6 +1,7 @@
 package com.nasmusic.tv.backend.network
 
 import com.nasmusic.tv.R
+import com.nasmusic.tv.util.DeviceAudioCaps
 
 /**
  * 音质档位：单一真相源（多码率方案 §2.2）。
@@ -42,6 +43,19 @@ object QualityTiers {
 
     /** 是否为"不传 br"的自动档 */
     fun isNoBr(tier: Int): Boolean = tier == AUTO
+
+    /**
+     * 按**本机解码能力**收敛档位（2026-11-11 电视崩溃修正）。
+     *
+     * 部分老电视的厂商 OMX **一 configure FLAC 解码器就崩**（框架 `ACodec.cpp` 的
+     * `CHECK_EQ` 断言 ⇒ 整进程 `SIGABRT`，Java 层拦不住）⇒ 这台机器上「无损」档
+     * 必须退到 320kbps，否则用户每放一首歌都崩溃一次。
+     *
+     * ⚠️ 只动**无损档**：AUTO / 128 / 192 / 320 都是 MP3 或端点默认 ⇒ 不受影响。
+     * ⚠️ 判定依据见 [DeviceAudioCaps]（框架版本 + 是否为厂商通用解码器）。
+     */
+    fun clampForDevice(tier: Int, flacUnsafe: Boolean = DeviceAudioCaps.isFlacDecodeUnsafe()): Int =
+        if (tier == LOSSLESS && flacUnsafe) HIGH else tier
 
     /** 档位是否合法（用于防御非法持久化值） */
     fun isValid(tier: Int): Boolean = tier in all

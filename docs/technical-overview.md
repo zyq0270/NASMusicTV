@@ -26963,3 +26963,198 @@ enterMs = id.baseDurationMs × (setting / 700)      // 只缩放，不封顶
   （尤其是「固有节奏快的效果仍然快」这一点是否符合预期）。
 - **ARMv7 实测帧率未知**：分块类（最多 60 块 drawImage）在真机上的帧率仍待测；
   根因 ② 的修正只保证「时长不被拉长」，**不保证不卡**。
+
+---
+
+### 10.388 电视崩溃取证：**FLAC 解码在老电视上整进程猝死**（2026-11-11）
+
+> **性质**：**有代码变更**（5 个生产文件 + 1 个测试文件），**版本号不变**（并入未发布的 v2.39.18），
+> 进 `CHANGELOG.md` 的 `Fixed`。
+> 触发来源：用户 2026-11-11 电视实测「软件崩溃了」（发生在照片墙效果播放期间）。
+
+#### 一、取证（adb 崩溃缓冲区）
+
+授权连电视后，`logcat -b crash` 取到 **8 次崩溃**，**全部是同一条断言**：
+
+```
+F/libc    : Fatal signal 6 (SIGABRT), code -6 in tid ... (MediaCodec_loop)
+I/DEBUG   : pid: <app>, tid: ..., name: MediaCodec_loop  >>> com.nasmusic.tv <<<
+I/DEBUG   : Abort message: 'frameworks/av/media/libstagefright/ACodec.cpp:3858
+             CHECK_EQ( mOMX->getParameter( mNode, OMX_IndexParamAudioFlac, &params,
+             sizeof(params)),(status_t)OK) failed: -1010 vs. 0'
+```
+
+主日志给出**直接原因**：
+
+```
+D/RTK_OMX_AUDIO_DEC   : Audio Format audio_decoder.flac
+E/RTK_OMX_NodeInstance: getParameter(54:RTK.decoder, ParamAudioFlac(0x400001c)) ERROR: Unsupported
+```
+
+⇒ **电视固件（Realtek RTD2990 / Android 5.1）的厂商通用 OMX 音频解码器宣称支持 FLAC，
+却不实现 `OMX_IndexParamAudioFlac` 参数**；而 Android 5.x 框架的 `ACodec::getPortFormat()`
+对这个参数是 **`CHECK_EQ` 断言** ⇒ 断言失败即 `SIGABRT` ⇒ **整个进程被打掉**
+（native 崩溃，`try/catch` 拦不住）。
+
+⛔ **与照片墙 / 可视化无关**：崩在 `MediaCodec_loop`（**音频解码线程**），不在渲染路径。
+用户看到的画面是照片（照片墙在播），**音频**在后台切到了 FLAC 曲目 ⇒ 观感上「照片墙把应用搞崩了」。
+
+#### 二、修正（三层防线）
+
+1. **解封装层熔断 FLAC**（`player/FlacGuardExtractors.kt`）
+   ⇒ 格式一旦被解出来就抛 `IOException` ⇒ **解码器永远不会被 `configure`** ⇒
+   Media3 抛**可捕获**的 `PlaybackException` ⇒ 应用「提示 + 跳歌」。
+   ⛔ 为什么不走 `MediaCodecSelector` 屏蔽：这台机器的 FLAC 解码器是**通用解码器**
+   （`OMX.RTK.audio.decoder`，同时顶 mp3/aac/flac），而 Media3 的选择器接口**看不到请求的格式**
+   ⇒ 屏蔽它会连 mp3/aac 一起废掉。
+   ⛔ 为什么不用软件 FLAC 解码：Media3 1.2.1 **不含** FLAC 软件解码器
+   （`media3-exoplayer` 的 classes.jar 里 `flac` 命中 0）⇒ 要引入 `media3-decoder-flac`
+   并自行接渲染器，在 2GB 老电视上与「人声消除 / PCM 频谱」链路叠加风险更高。
+   ⇒ 两条播放器（主播放器 + 交叉淡入副播放器）**都要**挂熔断。
+2. **无损档降级**（`QualityTiers.clampForDevice`）
+   ⇒ 这台机器上「无损（999 = FLAC）」自动退到 **320kbps** ⇒ 根本不去要 FLAC 直链
+   ⇒ 全局默认档 / 单曲覆盖档 / 自动下载档三处入口统一收敛。
+   ⚠️ **降级本身是静默的**（不报错、不跳过）⇒ 用户只会觉得「音质怎么变差了」而不知道原因
+   ⇒ 补 `util/FlacQualityNotice`：**只在「用户确实选了无损 + 本机放不了」时弹一次 Toast**
+   （进程级 `AtomicBoolean` ⇒ 不刷屏；用户没选无损 ⇒ 一句话都不说）。
+3. **错误提示可操作**（`PlayerManager.onPlayerError`）
+   ⇒ 识别熔断异常 ⇒ 给出「本机不支持 FLAC 音频（该设备解码 FLAC 会崩溃），已自动跳过该曲目；
+   如需播放请在服务端转码为 MP3」⇒ **说清是哪一种不可用 + 给出替代路径**，并**立刻跳下一首**
+   （不走「重新解析链接」——那不是链接过期问题）。
+
+⚠️ **提示的「可见性」是另一条独立的缺陷（2026-11-11 电视实测第二轮）**：
+用户装包复测后反馈「**没有看到 FLAC 的跳过提示**，但确实现在不崩溃了」
+⇒ 查 `PlayerManager.playerError`（`StateFlow<String?>`）的**全仓消费方**：**一个都没有**
+⇒ 提示只写进了 StateFlow，从未上过屏幕。
+⇒ 修正：**在 `PlayerManager` 的 FLAC 分支直接弹系统 Toast**（项目既有做法，见 `LinkUtils.kt` /
+`SettingsScreen.kt`）⇒ 照片墙这类**全屏画面**上也看得见；
+⛔ 只弹一次（`@Volatile flacNoticeShown`）⇒ 不会因 FLAC 曲目多而刷屏，其余次只进日志。
+
+⛔ **遗留（既有缺口，非本轮引入）**：`playerError` 这个 `StateFlow` 至今**仍无任何 UI 消费方**
+⇒ 除 FLAC 之外的播放错误**依然不会上屏**。本轮的 Toast 只是 FLAC 这一条路径的兜底，
+**不是**通用错误 UI；要彻底解决需要给播放页加错误条 / 弹窗（另开一轮）。
+
+#### 三、能力判定口径（`util/DeviceAudioCaps`）
+
+判定为「FLAC 一用就崩」需**同时**满足：
+
+1. 框架版本在 `CHECK_EQ` 存在的区间内（`SDK_INT ≤ 22`）；
+2. 宣称支持 `audio/flac` 的是**厂商通用解码器**（`*.audio.decoder`），而非**专用 FLAC 解码器**。
+
+⇒ **宁可误判成「不安全」**：误判 ⇒ 只是 FLAC 播不了；漏判 ⇒ **整进程崩溃**。
+
+#### 四、门禁（`DeviceAudioCapsTest`）
+
+| 用例 | 断言 |
+|---|---|
+| 目标电视的组合（`OMX.RTK.audio.decoder` + API 22） | 必须判「不安全」 |
+| API 30（框架已无该断言） | 不判「不安全」（不误伤新设备） |
+| 专用 FLAC 解码器（`OMX.google.flac.decoder`） | 不判「不安全」 |
+| 无 FLAC 解码器 | 不判「不安全」（没有就没有 configure 风险） |
+| 无损档降级 | 不安全 ⇒ 999 降 320；安全 ⇒ 不动；其它档位一律不动 |
+
+#### 五、⛔ 仍未验证
+
+- **电视复测未做**：熔断 + 降级两条防线的**实机效果**需装包复测
+  （预期：播 FLAC 不再崩溃，而是提示后自动跳下一首；无损档实际落到 320kbps）。
+
+---
+
+### 10.389 全量完成性审计：**76 个转场效果逐个核对「是否在切换窗口内走完」**（2026-11-11）
+
+> **性质**：**有代码变更**（3 个生产文件 + 1 个测试文件），**版本号不变**（并入未发布的 v2.39.18），
+> 进 `CHANGELOG.md` 的 `Fixed`。
+> 触发来源：用户 2026-11-11 电视实测「**还是会有切换时间内没完成，后面的照片还没出来全，
+> 就停着展示的情况**」+「**所有的照片切换效果都查一下，看看哪些是没处理的？
+> 都要保证在切换时间内，完成切换**」。
+
+#### 一、这与 §10.387 是**两个不同的缺陷**
+
+§10.387 修的是「转场**多慢**」（相位没在设定值内走到 `p = 1`）；
+本条说的是「转场**没走完**」⇒ 即使相位按时到了 `p = 1`，**画面本身**未必已经是新照片 ⇒
+HOLD 期（照片定格）就一直显示着半新半旧的画面 ⇒ 用户读作「照片没出来全就停着」。
+
+⇒ 两者必须**分别**修：时钟对了不等于画面对了。
+
+#### 二、根因：**只有「遮罩型」效果会在 `p = 1` 留旧图**
+
+转场画「新照片」的方式只有三类：
+
+| 类型 | 机制 | `p = 1` 时 | 会不会留旧图 |
+|---|---|---|---|
+| **遮罩型**（15 个） | `saveLayer` + 遮罩 `BlendMode.DstIn` | 遮罩 alpha 不为 255 的格子**仍是旧图** | ⛔ **会** ⇒ 必须有「末段补画」 |
+| 裁剪型（9 个） | `clipPath(形状)` | 形状在 `p = 1` 盖满整幅 | 不会（几何保证，G21 门禁钉住多边形） |
+| 几何型（52 个） | 透明度 / 缩放 / 条带 / 分块 / 变换 / `clipRect` | 各参数在 `p = 1` 到达终值 | 不会 |
+
+⇒ **遮罩型 15 个** = P0/P1 的 `NOISE_DISSOLVE` / `THRESHOLD_SWEEP` / `DEPTH_BLUR`
++ P2 档的 12 个（`GRAIN_DISSOLVE` / `HALFTONE` / `INK_SPREAD` / `WATERCOLOR` / `SAND_DISSOLVE` /
+`BURN` / `COLOR_BURN` / `FROST` / `PULSE_DISSOLVE` / `SWIRL` / `MELT` / `RIPPLE`）。
+
+⚠️ **根因的具体来源**：`MaskCache.noise()` 是 **fBm 值噪声**（alpha 随机）⇒
+`DstIn` 只保留「遮罩 alpha 非零」的像素 ⇒ `p = 1` 时**暗格必然透出旧图**。
+图案遮罩同理（网点之间是真空洞、团块之间是真空洞、晶界透明…）。
+
+⇒ §10.387 已给 P2 的 12 个补上「收尾补画」（`settleFrom`），而 **P0/P1 的 3 个是漏网的**
+⇒ 它们在 2026-11-11 之前**一直**留着旧图（这 3 个恰好是随机池里最早、最高频出现的效果）。
+
+#### 三、修正（三处老效果补上「末段整幅补画」）
+
+| 文件 | 效果 | 修正 |
+|---|---|---|
+| `DissolveTransitions.kt` | `NOISE_DISSOLVE` | `p > 0.85` ⇒ 整幅新图按 `(p − 0.85) / 0.15` 渐入，盖住遮罩暗格 |
+| `DissolveP1Transitions.kt` | `THRESHOLD_SWEEP` | 同上；⚠️ **补画必须画在 `clipRect` 之外**（扫过区在 `p < 1` 时还没铺满整幅，补画若被裁掉就等于没补） |
+| `ZoomP1Transitions.kt` | `DEPTH_BLUR` | 同上 |
+
+⇒ 与 P2 档遮罩族**同款口径**（`settleFrom` 语义一致，只是这里是各文件自带的 `SETTLE_FROM` 常量）。
+
+#### 四、顺带查出：`WIPE_CROSS` 被**误登记**进 `CLIP_BASED`（目标电视上一直没出现过）
+
+`CLIP_BASED` 的作用是「用了 `clipPath` 的效果，在 `sdkInt < 26` 时降级成交叉淡化」
+（C46 红线：`clipPath` 在 API 22 的 hwui Region 路径上会 SIGSEGV）。
+⇒ **登记多了会「白白降级」**：效果本来是安全的，却被换成交叉淡化 ⇒ **用户根本看不到它**。
+
+`WIPE_CROSS`（十字擦除）用的是 **`clipRect` × 3**（十字 = 两条矩形），**不是** `clipPath`
+⇒ 它**不需要**登记；但它与真正的 `clipPath` 效果**同文件**（`IrisP1Transitions.kt`）
+⇒ 早前的门禁是**文件粒度**（「这个文件含 clipPath ⇒ 里面所有效果都算 clip 类」）
+⇒ 把它一并登记了进去 ⇒ **API 22 的目标电视上，十字擦除一直显示成交叉淡化**。
+
+⇒ 修正：**从 `CLIP_BASED` 移除 `WIPE_CROSS`**（它走 `clipRect`，不碰 hwui Region）
+⇒ 目标电视上现在能真正看到十字擦除了。
+⇒ 同时把两个 clip 门禁从「文件粒度」升级成「**效果粒度**」（见下）。
+
+⚠️ **这次的教训**：`clipPath` 的登记与核对**必须精确到效果**，不能按文件一刀切。
+同理，「这个效果是什么机制」也不能按文件判 —— `ScanlineDissolveTransition`
+与遮罩型效果同文件，但它**不是**遮罩型。
+
+#### 五、门禁（`PhotoTransitionCompletionGateTest` + `TransitionSourceIndex`）
+
+**为什么需要新增 `TransitionSourceIndex`**：按「文件」或「类」判机制都会错 ——
+① P0 的 8 个效果（`SLIDE_*` / `ZOOM_IN|OUT` / `BLINDS_*`）是**一个实现类 + 构造参数传 id**；
+② P2 的 12 个遮罩效果的 `DstIn` 与 `settleFrom` 都在**基类** `MaskDissolveTransition` 里；
+③ `WIPE_CROSS` 与 `clipPath` 效果同文件却不是 clip 型。
+⇒ 新建 `TransitionSourceIndex`：以**注册表**（`PhotoTransitionRegistry`）为权威映射拿到
+「id → 实现类」，再把「**自身类体 + 父类体 + 内嵌类体**」合并成该效果的**有效源码**
+⇒ 按**效果**判机制。
+
+**源码级**门禁（Windows 上 Robolectric 无 NATIVE 图形 ⇒ 做不了像素回读；沿用仓内既有的
+`PhotoTransitionClipGateTest` 扫描手法）：
+
+| 用例 | 断言 |
+|---|---|
+| `每个已注册效果都能定位到实现类与实现文件` | 注册表 76 项**逐个**找得到实现类与实现文件 |
+| `枚举的每一项都必须进注册表` | 枚举 76 项 == 注册表 76 项（**逐个**比，不靠数量相等蒙混） |
+| `遮罩型转场必须补末段整幅新图` | 用 `BlendMode.DstIn` 的效果**必须**含 `settleFrom` / `SETTLE_FROM` |
+| `遮罩型必须存在且不少于 15 个` | 恰为 15 个（3 个 P0/P1 + 12 个 P2）—— 少一个就说明机制被改写了，必须同步改分类表 |
+| `凡用 clipPath 的效果都必须登记进 CLIP_BASED` | 双向第一向（漏登记 ⇒ API 22 直接崩） |
+| `CLIP_BASED 里不得有不用 clipPath 的条目` | 双向第二向（多登记 ⇒ 老平台白白降级，用户看不到） |
+| `每个效果都被归类到一种完成机制` | 遮罩 15 / 裁剪 9 / 几何 52 **合计 = 76**，三类均非空，且遮罩型与裁剪型**不重叠** |
+
+同时 `PhotoTransitionClipGateTest` 的两条「同步」用例也从**文件粒度**升级成**效果粒度**
+（同一套 `TransitionSourceIndex`）。
+
+#### 六、⛔ 仍未验证
+
+- **电视复测未做**：三处补画的**观感**（末段是否还有残影）需装包复测确认；
+  **十字擦除**在目标电视上第一次真正出现（此前一直被降级），需确认观感。
+- **裁剪型 9 个 / 几何型 52 个效果是**逐个核对源码**得出的结论，不是像素级验证**：
+  本机无法做像素回读 ⇒ 结论依赖几何推导（`p = 1` 时各参数到达终值）。

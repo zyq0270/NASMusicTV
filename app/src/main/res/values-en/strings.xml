@@ -948,6 +948,8 @@
     <string name="player_download_network_error">Network error: %s</string>
     <string name="player_download_exception">Download exception: %s</string>
     <string name="player_error_playback">Playback error</string>
+    <string name="player_error_flac_unsupported">FLAC is not supported on this device (its FLAC decoder crashes), the track was skipped; transcode to MP3 on the server to play it</string>
+    <string name="player_flac_quality_downgraded">FLAC is not supported on this device (its FLAC decoder crashes); the lossless tier was downgraded to 320 kbps</string>
     <string name="hq_error_component_not_ready">Separation component not ready, switched to fast mode</string>
     <string name="hq_error_model_not_downloaded">HQ model not downloaded, switched to fast mode</string>
     <string name="hq_error_no_audio_file">Unable to get audio file</string>
