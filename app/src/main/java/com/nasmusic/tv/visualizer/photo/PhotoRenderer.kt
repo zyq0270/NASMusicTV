@@ -1,5 +1,8 @@
 package com.nasmusic.tv.visualizer.photo
 
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.clipRect
@@ -9,6 +12,28 @@ import com.nasmusic.tv.visualizer.AudioFrame
 import com.nasmusic.tv.visualizer.RenderContext
 import com.nasmusic.tv.visualizer.VisualizerRenderer
 import com.nasmusic.tv.visualizer.photo.transitions.applyHoldMotion
+import com.nasmusic.tv.visualizer.photo.transitions.drawPhoto
+
+/**
+ * **FIT（完整）模式下，转场结束后画面上是否只保留新图。**
+ *
+ * ## 为什么需要这条规则（2026-11-11 电视实测）
+ *
+ * `PhotoScaleMode.FIT` 的语义是「整图缩放放得下，不足处留黑边」⇒
+ * 每张照片在画布上只占一个**内接矩形**（`dstA` / `dstB`）。
+ *
+ * ⇒ 当两张图**宽高比不同**时，两个内接矩形**大小不同**：
+ * 横版图切竖版图时，旧图（横）的矩形**又宽又矮**、新图（竖）的矩形**又窄又高**
+ * ⇒ 旧图有一大片落在新图之外 ⇒ **转场画完（`p = 1`）那一片仍然可见**
+ * ⇒ 用户实测：「前图不能完全覆盖后图…导致有部分后图还显示出来」。
+ *
+ * ⇒ 规则：**FIT + 转场结束 ⇒ 画面上只画新图**（旧图连同它的余部一起清掉）。
+ * CROP（默认）不受影响 —— 那里 `dstA == dstB == 画布`，旧图天然被完全覆盖。
+ *
+ * @param progress **已缓动**的进度（`0..1`；转场窗口结束后恒为 1）
+ */
+internal fun shouldDrawOnlyNewPhoto(scaleMode: PhotoScaleMode, progress: Float): Boolean =
+    scaleMode == PhotoScaleMode.FIT && progress >= 1f
 
 /**
  * 照片墙渲染器（§14.2.4）
@@ -155,6 +180,28 @@ class PhotoRenderer : VisualizerRenderer {
         // 而 Compose 绘制**默认不裁剪**（`ZoomTransition` 自己加 clipRect 正是这个原因）；
         // 统一在这里兜底，所有转场不必各自关心。
         clipRect(0f, 0f, geom.canvasW, geom.canvasH) {
+            // ── FIT（完整）模式的两条硬要求（2026-11-11 电视实测）──
+            //
+            // ① **黑边**：FIT 的定义就是「整图放得下，不足处留黑边」⇒ 整幅先铺黑底。
+            //    （不铺的话黑边处露出的是舞台底色 / 上一帧的残留，而不是照片墙自己的黑边。）
+            //
+            // ② **旧图必须彻底清掉**：FIT 下每张图只占一个**内接矩形**，
+            //    两张图**宽高比不同**时这两个矩形大小不同（横版图切竖版图最明显：
+            //    旧图又宽又矮、新图又窄又高）⇒ 旧图有一大片落在新图之外
+            //    ⇒ 转场画完（`p = 1`）那一片仍然可见
+            //    ⇒ 用户实测：「前图不能完全覆盖后图…导致有部分后图还显示出来」。
+            //    ⇒ 转场结束后**画面上只保留新图**（CROP 不受影响：那里 `dstA == dstB == 画布`）。
+            if (ctx.photoScaleMode == PhotoScaleMode.FIT) {
+                drawRect(
+                    color = Color.Black,
+                    topLeft = Offset.Zero,
+                    size = Size(geom.canvasW, geom.canvasH),
+                )
+                if (shouldDrawOnlyNewPhoto(ctx.photoScaleMode, ctx.photoProgress)) {
+                    drawPhoto(b, geom.srcB, geom.dstB)
+                    return@clipRect
+                }
+            }
             t.run { render(a, b, ctx.photoProgress, geom) }
         }
     }
