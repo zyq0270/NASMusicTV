@@ -63,7 +63,7 @@ import com.nasmusic.tv.visualizer.photo.PhotoTransitionId
 internal abstract class MaskDissolveTransition : PhotoTransition {
 
     /** 本效果用的遮罩种类（由子类给出） */
-    protected abstract fun maskKind(): PhotoMaskKind
+    internal abstract fun maskKind(): PhotoMaskKind
 
     /** 遮罩位图（`MaskCache` 全进程共享，**不 release**） */
     private var mask: ImageBitmap? = null
@@ -107,8 +107,11 @@ internal abstract class MaskDissolveTransition : PhotoTransition {
      * 遮罩的整体透明度 —— 子类覆写以实现「随时间淡入」或「随节拍脉冲」。
      *
      * 默认 = `p`（线性跟随进度）。
+     *
+     * ⚠️ **必须能走到 1**（`p = 1` ⇒ alpha = 1）：任何「乘一个小于 1 的系数」的写法
+     * 都会让转场**走不完**（末帧仍有旧图）—— 2026-11-11 电视实测，§10.387。
      */
-    protected open fun maskAlpha(p: Float, geom: PhotoGeometry): Float = p
+    internal open fun maskAlpha(p: Float, geom: PhotoGeometry): Float = p
 
     /** 遮罩旋转角（度，`0` = 不转）—— 子类覆写以实现「旋转推进」 */
     protected open fun maskRotation(p: Float): Float = 0f
@@ -127,10 +130,11 @@ internal abstract class MaskDissolveTransition : PhotoTransition {
     /**
      * 「收尾」阈值（`0..1`）：超过它之后**整幅新图**叠加回来。
      *
-     * ⛔ 默认 `2f`（= 永不收尾）。凡是遮罩本身**带空洞**的形态（晶界、旋臂、环带）
-     * 都必须开收尾 —— 否则末帧（新图定格在 HOLD 期）仍有旧图从洞里透出来。
+     * ⛔ 默认 `2f`（= 永不收尾）。凡是遮罩本身**带空洞**的形态（晶界、旋臂、环带、
+     * 网点、颗粒）都必须开收尾 —— 否则末帧（新图定格在 HOLD 期）仍有旧图从洞里透出来
+     * ⇒ 用户读作「转场没走完」（2026-11-11 电视实测，§10.387）。
      */
-    protected open fun settleFrom(): Float = 2f
+    internal open fun settleFrom(): Float = 2f
 
     /**
      * 画遮罩层（`DstIn`）—— 子类可覆写以改变「遮罩怎么落」（例如平铺）。
@@ -227,10 +231,15 @@ internal fun scaledShiftedRect(
  * 颗粒溶解（P2）—— 细密的白噪点遮罩。
  *
  * 与 `NOISE_DISSOLVE`（fBm 云雾）的区别：这里是**高频白噪声**，颗粒更细更碎。
+ *
+ * ⚠️ **必须开收尾**：颗粒遮罩的 alpha 是随机的（0..255）⇒ `p = 1` 时仍有旧图
+ * 从暗颗粒里透出来 ⇒ 用户读作「转场没走完」（2026-11-11 电视实测，§10.387）。
  */
 internal class GrainDissolveTransition : MaskDissolveTransition() {
     override val id: PhotoTransitionId = PhotoTransitionId.GRAIN_DISSOLVE
     override fun maskKind(): PhotoMaskKind = PhotoMaskKind.GRAIN
+
+    override fun settleFrom(): Float = 0.85f
 }
 
 /**
@@ -277,6 +286,9 @@ internal class HalftoneTransition : MaskDissolveTransition() {
             }
         }
     }
+
+    // 网点之间是真空洞 ⇒ 末帧必须补画整幅新图
+    override fun settleFrom(): Float = 0.85f
 }
 
 /**
@@ -329,6 +341,9 @@ internal class SandDissolveTransition : MaskDissolveTransition() {
         // 余量 = 0.20H·p ≥ 平移 0.10H·p ⇒ 画布始终被遮罩盖满
         scaledShiftedRect(geom, 1f + 0.40f * p, geom.canvasH * 0.10f * p, out)
     }
+
+    // 颗粒之间是真空洞 ⇒ 末帧必须补画整幅新图
+    override fun settleFrom(): Float = 0.85f
 }
 
 /**
@@ -410,16 +425,26 @@ internal class FrostTransition : MaskDissolveTransition() {
  *
  * ⚠️ `audioReactive = true` ⇒ **不进随机池**（§5.9），只能由用户主动选中。
  * ⚠️ 脉冲取自 `geom.pulse`（律动通道，0..1）；无音频时恒 0 ⇒ 退化为普通溶解。
+ *
+ * ## ⚠️ 脉冲**只能加速、不能减速**（2026-11-11 电视实测修正，§10.387）
+ *
+ * 初版写成 `boost = 0.35 + pulse` ⇒ **没有音频时（`pulse = 0`）整个转场只能推到 35%**
+ * ⇒ 末帧仍有 65% 是旧图 ⇒ 用户读作「转场没走完」。
+ * ⇒ 现在改成 `boost = 1 + 0.6 · pulse`：**至少 1 倍**（保证能走完），
+ * 有鼓点时最多 1.6 倍（溶解在鼓点上「一顿一顿」地窜出去）。
  */
 internal class PulseDissolveTransition : MaskDissolveTransition() {
     override val id: PhotoTransitionId = PhotoTransitionId.PULSE_DISSOLVE
     override fun maskKind(): PhotoMaskKind = PhotoMaskKind.GRAIN
 
     override fun maskAlpha(p: Float, geom: PhotoGeometry): Float {
-        // 脉冲把推进速度顶到 0.35~1.35 倍 ⇒ 溶解在鼓点上「一顿一顿」
-        val boost = 0.35f + 1.00f * geom.pulse
+        // 脉冲只做「加速」：1.0（无音频）~ 1.6（强鼓点）
+        val boost = 1f + 0.60f * geom.pulse.coerceIn(0f, 1f)
         return (p * boost).coerceIn(0f, 1f)
     }
+
+    // 颗粒之间是真空洞 ⇒ 末帧必须补画整幅新图
+    override fun settleFrom(): Float = 0.85f
 }
 
 /**

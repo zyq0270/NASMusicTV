@@ -15,11 +15,25 @@ package com.nasmusic.tv.visualizer.photo
  * | # | 约束 | 写错的后果 |
  * |---|---|---|
  * | 1 | **相位一律 `+= dt` 累加，绝不用 `nowMs × 系数`** | `ctx.nowMs` 是 `System.currentTimeMillis()`（1.7e12 量级）或 `frame.timeMs`（单调毫秒），乘上任何实时系数会把每帧抖动放大千万倍 → 画面闪现跳档 |
- * | 2 | **`dt` 必须钳上限**（[MAX_DT_MS] = 100） | 切后台再回来，一帧 `dt` 可能是几十秒 → 相位瞬间跳到结束 |
+ * | 2 | **只有「时间断层」才钳推进量**（`dt > [JUMP_THRESHOLD_MS]` ⇒ 只推进 [maxDtMs]） | 切后台再回来，一帧 `dt` 可能是几十秒 → 相位瞬间跳到结束 |
  * | 3 | **模型（交叉 / 串行）必须在 [start] 那一刻定死并贯穿本次切换** | 切换进行中改模型 → 正在跑的两张图从交叉切成串行，画面跳变（§5.9） |
  *
  * 约束 1 与 2 的落地方式是同一个：[advance] **只接受绝对时间戳**，内部算差、钳制、再累加。
  * 外部拿不到「相位」的写入口 ⇒ 无法绕过。
+ *
+ * ## ⚠️ 约束 2 的口径（2026-11-11 电视实测修正，见 §10.387）
+ *
+ * 修正前是「**任何**超过 [MAX_DT_MS]（100ms）的 `dt` 一律钳到 100ms」。
+ * 在 API 22 老电视上，P2 档的分块 / 遮罩类效果一帧要 100–200ms（5–10 fps）⇒
+ * **每帧只推进 100ms，而真实过去了 200ms** ⇒ 相位比墙钟慢一倍 ⇒
+ * 「设了 0.7 秒的转场在电视上跑了 1.4 秒」（用户 2026-11-11 实测反馈）。
+ *
+ * ⇒ 现在的口径是**两段式**：
+ *
+ * | 情形 | 判据 | 推进量 |
+ * |---|---|---|
+ * | **慢帧**（掉帧 / 老电视 5–10 fps） | `dt ≤ [JUMP_THRESHOLD_MS]`（1 秒） | **如实推进 `dt`** ⇒ 墙钟不失真 |
+ * | **时间断层**（切后台回来 / 长卡顿） | `dt > 1 秒` | 只推进 [maxDtMs]（100ms）⇒ 相位不暴走 |
  *
  * ## 用哪个时钟
  *
@@ -32,11 +46,18 @@ package com.nasmusic.tv.visualizer.photo
  * 本类的 [Phase] 是**一次切换内的阶段**；`PhotoTransitionId.Phase` 是**交付分期**（P0/P1/P2）。
  * 两者刻意同名（各自贴合自己的语境），⚠️ 同时 import 时务必写全限定名。
  *
- * @param maxDtMs 单帧推进上限（ms）。默认 [MAX_DT_MS]；
- *   ⚠️ 暴露它是为了**负向自证**：传一个很大的值即可模拟「去掉钳制」，
- *   断言相位会一帧跳到结束（证明钳制那一行不是冗余代码）
+ * @param maxDtMs **时间断层**时单帧推进的上限（ms）。默认 [MAX_DT_MS]；
+ *   ⚠️ 暴露它是为了**负向自证**：传一个很大的值即可模拟「去掉断层保护」，
+ *   断言相位会一帧跳到结束（证明那一行不是冗余代码）
+ * @param jumpThresholdMs 判定「时间断层」的阈值（ms）。默认 [JUMP_THRESHOLD_MS]。
+ *   ⚠️ 超过它就认为「这段时间我们根本没渲染」（切后台 / 长卡顿）⇒ 只推进 [maxDtMs]。
+ *   **不能**把它调小到与慢帧同量级 —— 那就退回到修正前的「每帧都钳 100ms」，
+ *   老电视上转场会被拖成设定值的 2 倍时长（2026-11-11 实测，§10.387）。
  */
-class PhotoTransitionClock(private val maxDtMs: Long = MAX_DT_MS) {
+class PhotoTransitionClock(
+    private val maxDtMs: Long = MAX_DT_MS,
+    private val jumpThresholdMs: Long = JUMP_THRESHOLD_MS,
+) {
 
     /** 一次切换内的阶段 */
     enum class Phase { IDLE, ENTER, HOLD, EXIT }
@@ -136,12 +157,19 @@ class PhotoTransitionClock(private val maxDtMs: Long = MAX_DT_MS) {
     /**
      * 推进一帧。**只吃绝对时间戳**（约束 1 / 2 的落地方式）。
      *
-     * `dt` 为负（时钟回拨）按 0 处理；超过 [maxDtMs] 按 [maxDtMs] 处理。
+     * `dt` 为负（时钟回拨）按 0 处理；
+     * `dt > [JUMP_THRESHOLD_MS]`（**时间断层**：切后台回来 / 长卡顿）按 [maxDtMs] 处理；
+     * 其余（**慢帧**）**如实推进** ⇒ 老电视 5–10 fps 时转场仍按墙钟时长走完。
      */
     fun advance(nowMs: Long) {
         if (!started) return
-        val dt = (nowMs - lastNowMs).coerceIn(0L, maxDtMs)
+        val raw = nowMs - lastNowMs
         lastNowMs = nowMs
+        val dt = when {
+            raw <= 0L -> 0L
+            raw > jumpThresholdMs -> maxDtMs
+            else -> raw
+        }
         elapsedMs += dt
         recompute()
     }
@@ -203,14 +231,28 @@ class PhotoTransitionClock(private val maxDtMs: Long = MAX_DT_MS) {
     companion object {
 
         /**
-         * 单帧推进上限（ms）。
+         * **时间断层**时单帧推进的上限（ms）。
          *
          * 60fps 的帧间隔约 16.7ms ⇒ 100ms 已经是「严重掉帧」的量级。
          * 取这个值的意义不是「精确」，而是**给相位推进一个硬上限**：
          * 切后台 30 秒回来，第一帧 `dt` 是 30000ms，钳到 100ms 后画面只是「慢了一帧」，
          * 而不是直接跳到本次切换的终点。
+         *
+         * ⚠️ 它**只**作用于时间断层（`dt > [JUMP_THRESHOLD_MS]`）；普通慢帧如实推进（见 [advance]）。
          */
         const val MAX_DT_MS = 100L
+
+        /**
+         * 判定「时间断层」的阈值（ms）。
+         *
+         * 超过它 ⇒ 这段时间我们**根本没渲染**（切后台回来 / 长 GC / 长卡顿）⇒
+         * 相位只推进 [MAX_DT_MS]，不让动画一帧跳到结束。
+         *
+         * ⛔ **不能调小**（比如调到 100ms = 修正前的口径）：那样老电视 5–10 fps 时
+         * 每帧都被当成「断层」⇒ 相位比墙钟慢 1–2 倍 ⇒
+         * 「设了 0.7 秒的转场跑成 1.4 秒」（2026-11-11 电视实测，§10.387）。
+         */
+        const val JUMP_THRESHOLD_MS = 1_000L
 
         /**
          * 串行模型的暗场点（进度）。

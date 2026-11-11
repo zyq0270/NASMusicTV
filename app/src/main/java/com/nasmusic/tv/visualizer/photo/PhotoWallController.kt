@@ -67,7 +67,7 @@ import kotlin.math.roundToInt
  * 下一帧再试（`clock.finished` 会保持 `true`，因为没人调 `start`）⇒ 画面停在上一张，
  * 等新图就绪才开始转场。
  *
- * ## 与「转场时长」设置项的关系（⚠️ 实现期明确的偏差，见 §15.3 阶段 10）
+ * ## 与「转场时长」设置项的关系（⚠️ 2026-11-11 修正，见 §10.387）
  *
  * §14.2.3 规定 `PhotoTransitionClock` **在拿到转场实例之前**就要读 `baseDurationMs`
  * （每效果的固有节奏，§14.3 表：0.5s ~ 1.2s）；§7.3 又有用户可调的 `photoWallTransitionMs`
@@ -78,8 +78,24 @@ import kotlin.math.roundToInt
  * ```
  *
  * `NEUTRAL_TRANSITION_MS = 700` 即设置项默认值 ⇒ 默认档 = 1.0 倍，各效果走 §14.3 的固有节奏。
- * ⚠️ 因此 §14.6 电视第 2 条写的「转场 0.7s」在默认档实际观测为 **0.5–1.2s**（取决于抽到哪个效果）；
- * 把设置调到 300 / 2000 则是 0.43× / 2.86× 的整体快慢。
+ *
+ * ⛔ **但用户设定同时是「硬上限」**（2026-11-11 电视实测修正）：
+ * 缩放后的值**不得超过**用户设定 ⇒
+ *
+ * ```
+ * enterMs = min(baseDurationMs × (setting / 700), setting)
+ * ```
+ *
+ * **为什么必须封顶**：修正前，默认档（700ms）下 §14.3 表里那 8 个 1200ms 的效果
+ * （`GRID_FLIP` / `MOSAIC` / `PUZZLE` / `INK_SPREAD` / `WATERCOLOR` / `SAND_DISSOLVE` /
+ * `BURN` / `FROST`）与 3 个 1000ms 的效果（`GRAIN_DISSOLVE` / `PIXELATE` / `HALFTONE`）
+ * 实际要跑 **1.0–1.2 秒** ⇒ 用户设了「0.7 秒」却在电视上看到「1.2 秒还没转完」。
+ * 那不是「转场效果不好」，是**设定值没有兑现** ⇒ 封顶后每个转场都保证在设定值内走完。
+ *
+ * ⚠️ 封顶**只压慢的**（固有节奏比设定值长的）；固有节奏更快的（如 `SLIDE_*` 的 500ms）
+ * 仍然按自己的节奏走 ⇒ §14.3 的「每效果固有节奏」这个设计意图被保留。
+ *
+ * 把设置调到 300 / 2000 仍是整体快慢（0.43× / 2.86×），只是**不再越过设定值**。
  *
  * ## 构造签名与 §14.2.5 的差异
  *
@@ -591,8 +607,8 @@ class PhotoWallController(
     /**
      * 转场窗口时长（ms）。
      *
-     * `baseDurationMs`（§14.3 每效果固有节奏）× 用户缩放（§7.3 的 `photoWallTransitionMs`）。
-     * 见类 KDoc 的「与转场时长设置项的关系」。
+     * `baseDurationMs`（§14.3 每效果固有节奏）× 用户缩放（§7.3 的 `photoWallTransitionMs`），
+     * **再被用户设定封顶**（类 KDoc「与转场时长设置项的关系」）。
      *
      * ⛔ [PhotoTransitionId.BEAT_CUT] 是**硬切**（§5.8：窗口为 0），不走 `baseDurationMs` ——
      * 它不在随机池里（`audioReactive`），但**备份导入**可以把 `photoWallFixedTransition`
@@ -600,9 +616,11 @@ class PhotoWallController(
      */
     private fun enterMsOf(id: PhotoTransitionId): Int {
         if (id == PhotoTransitionId.BEAT_CUT) return 0
-        val scaled = id.baseDurationMs.toFloat() *
-            (settings.photoWallTransitionMs.toFloat() / NEUTRAL_TRANSITION_MS)
-        return scaled.roundToInt().coerceIn(MIN_ENTER_MS, MAX_ENTER_MS)
+        // 用户设定先夹到合法区间（挡住「备份导入一个 0 或 99999」）
+        val userMs = settings.photoWallTransitionMs.coerceIn(MIN_ENTER_MS, MAX_ENTER_MS)
+        val scaled = id.baseDurationMs.toFloat() * (userMs / NEUTRAL_TRANSITION_MS)
+        // ⛔ **用户设定是硬上限**：任何转场都不得比它更久（否则「设了 0.7 秒却还在转」）
+        return scaled.roundToInt().coerceIn(MIN_ENTER_MS, userMs)
     }
 
     /**

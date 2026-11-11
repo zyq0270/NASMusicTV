@@ -113,7 +113,10 @@ class PhotoWallControllerTest {
     }
 
     /**
-     * 固定档 + 窗口时长：CROSSFADE 的 `baseDurationMs = 800`，设置 700ms ⇒ 1.0× ⇒ 窗口 800ms。
+     * 固定档 + 窗口时长：CROSSFADE 的 `baseDurationMs = 800`，设置 700ms ⇒ **被封顶到 700ms**。
+     *
+     * ⛔ 2026-11-11 修正（§10.387）：修正前窗口是 800ms（`base × 1.0`）⇒
+     * 用户设的「0.7 秒」没兑现（实际 0.8 秒）。现在**用户设定是硬上限** ⇒ 窗口 = 700ms。
      *
      * ⛔ **不能拿「首图」那一帧来验证窗口**：首图是**硬切起步**（`enterMs = 0`），
      * 进度一开始就是 1。必须等到**第二次**切换（真有旧图、真有窗口）才能观测到 0→1 的过程。
@@ -143,7 +146,7 @@ class PhotoWallControllerTest {
         assertTrue("停留 100ms 后必须开始一次真正的切换（带新图）", sawIncoming)
         assertEquals("固定档必须用用户指定的转场", PhotoTransitionId.CROSSFADE, ctx.photoTransition)
 
-        // 窗口 800ms、16ms/帧 ⇒ 25 帧 ≈ 400ms ≈ 进度 0.5（easeInOutQuad(0.5) = 0.5）
+        // 窗口 700ms、16ms/帧 ⇒ 25 帧 = 400ms ≈ 进度 0.57（easeInOutQuad(0.57) ≈ 0.63）
         pump(25)
         c.applyTo(ctx)
         val p = ctx.photoProgress
@@ -152,12 +155,65 @@ class PhotoWallControllerTest {
             p > 0.05f && p < 0.95f,
         )
 
-        // 再跑 27 帧（累计 52 帧 ≈ 832ms）：已过 800ms 窗口终点、但还没到
-        // 800+100=900ms 的 HOLD 终点 ⇒ 此刻进度必为 1 且仍在停留期（不会又开一次切换）
-        pump(27)
+        // 再跑 20 帧（累计 45 帧 = 720ms）：已过 700ms 窗口终点、但还没到
+        // 700+100=800ms 的 HOLD 终点 ⇒ 此刻进度必为 1 且仍在停留期（不会又开一次切换）
+        pump(20)
         c.applyTo(ctx)
-        assertEquals("800ms 窗口走完后进度为 1", 1f, ctx.photoProgress, EPS)
+        assertEquals("700ms 窗口走完后进度为 1", 1f, ctx.photoProgress, EPS)
         assertTrue("此刻应处于停留期（尚未触发下一次切换）", ctx.photoHoldT > 0f)
+    }
+
+    /**
+     * **用户设定的「转场时长」是硬上限**（2026-11-11 电视实测修正，§10.387）。
+     *
+     * 修正前：`enterMs = baseDurationMs × (setting / 700)` ⇒ 默认档（700ms）下
+     * §14.3 表里那 8 个 **1200ms** 的效果（`GRID_FLIP` / `MOSAIC` / `PUZZLE` /
+     * `INK_SPREAD` / `WATERCOLOR` / `SAND_DISSOLVE` / `BURN` / `FROST`）
+     * 与 3 个 1000ms 的效果实际要跑 **1.0–1.2 秒** ⇒ 用户设了「0.7 秒」
+     * 却在电视上看到「1.2 秒还没转完」⇒ 设定值没兑现。
+     *
+     * ⇒ 现在 `enterMs = min(base × (setting/700), setting)`。
+     */
+    @Test
+    fun `转场窗口不得超过用户设定的时长`() = runTest {
+        val c = controller(this, listOf("a", "b", "c"))
+        c.onSettingsChanged(
+            settings(
+                holdMs = 2_000,
+                transitionMs = 700,
+                randomTransition = false,
+                fixedTransition = PhotoTransitionId.INK_SPREAD,
+            ),
+            VisualQuality.HIGH,
+            SDK,
+        )
+        c.onThemeEntered()
+        advanceUntilIdle()
+        c.applyTo(ctx)
+
+        var sawIncoming = false
+        for (i in 0 until 400) {
+            pump(1)
+            c.applyTo(ctx)
+            if (ctx.photoB != null) {
+                sawIncoming = true
+                break
+            }
+        }
+        assertTrue("必须开始一次真正的切换", sawIncoming)
+        assertEquals("固定档必须用用户指定的转场", PhotoTransitionId.INK_SPREAD, ctx.photoTransition)
+
+        // INK_SPREAD 的 baseDurationMs = 1200（§14.3 最长的一档）⇒ 修正前窗口是 1200ms
+        // ⇒ 700ms 设定下必须被压到 700ms：44 帧（704ms）后进度必为 1
+        pump(44)
+        c.applyTo(ctx)
+        assertEquals(
+            "1200ms 的效果在 700ms 设定下，窗口必须在 700ms 内走完",
+            1f,
+            ctx.photoProgress,
+            EPS,
+        )
+        assertTrue("此刻应处于停留期（holdMs = 2000 还没到）", ctx.photoHoldT > 0f)
     }
 
     // ── ③ 池空 / 读不出（§14.6「切回其他效果不崩」）─────────────────
@@ -364,11 +420,13 @@ class PhotoWallControllerTest {
         randomTransition: Boolean = true,
         scaleMode: PhotoScaleMode = PhotoScaleMode.CROP,
         kenBurns: Boolean = true,
+        fixedTransition: PhotoTransitionId = PhotoTransitionId.Default,
     ): AppSettings = AppSettings(
         photoWallExternalEnabled = external,
         photoWallHoldMs = holdMs,
         photoWallTransitionMs = transitionMs,
         photoWallRandomTransition = randomTransition,
+        photoWallFixedTransition = fixedTransition,
         photoWallScaleMode = scaleMode,
         photoWallKenBurns = kenBurns,
     )

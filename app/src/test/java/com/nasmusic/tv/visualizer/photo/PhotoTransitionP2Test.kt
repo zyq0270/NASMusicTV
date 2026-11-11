@@ -4,6 +4,7 @@ import androidx.compose.ui.geometry.Size
 import com.nasmusic.tv.backend.photo.PhotoScaleMode
 import com.nasmusic.tv.data.model.VisualQuality
 import com.nasmusic.tv.visualizer.RenderContext
+import com.nasmusic.tv.visualizer.photo.transitions.MaskDissolveTransition
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
@@ -235,7 +236,58 @@ class PhotoTransitionP2Test {
         assertTrue("前置条件：燃烧遮罩顶部确实不透明", burn > 200)
     }
 
-    // ────────────────────── ⑦ 遮罩缓存只生成一次 ──────────────────────
+    // ────────────────────── ⑦ 末帧必须真正「走完」（2026-11-11 实测修正）──────────────────────
+
+    /**
+     * **每个遮罩类效果都必须开「收尾补画」**。
+     *
+     * 遮罩带空洞（颗粒 / 网点 / 圆环 / 旋臂 / 团块 / 晶界 / 燃烧前沿）⇒
+     * `p = 1` 时仍有旧图从洞里透出来 ⇒ HOLD 期定格的就是「半新半旧」⇒
+     * 用户读作「转场没走完」（2026-11-11 电视实测，§10.387）。
+     *
+     * ⇒ `settleFrom()` 必须在 `0..1` 内（= 末段整幅补画新图）。
+     */
+    @Test
+    fun `每个遮罩类效果都必须开收尾补画 - 否则末帧仍透出旧图`() {
+        var checked = 0
+        for (id in p2) {
+            val impl = PhotoTransitionRegistry.get(id)!!
+            if (impl !is MaskDissolveTransition) continue
+            checked++
+            assertTrue(
+                "$id 的遮罩带空洞但没有开收尾补画（settleFrom = ${impl.settleFrom()}）—— " +
+                    "末帧会露出旧图 ⇒ 用户读作「转场没走完」",
+                impl.settleFrom() <= 1f,
+            )
+        }
+        assertTrue("应有 12 个遮罩类效果参与检查，实际 $checked", checked == 12)
+    }
+
+    /**
+     * **脉动溶解在无音频时也必须能走到 100%**。
+     *
+     * 初版把脉冲写成 `boost = 0.35 + pulse` ⇒ **没有音频（`pulse = 0`）时整个转场只推到 35%**
+     * ⇒ 末帧仍有 65% 是旧图 ⇒ 正是「转场没走完」的一条。
+     *
+     * ⇒ 现在 `boost = 1 + 0.6 · pulse`：**至少 1 倍**（保证走完），有鼓点时最多 1.6 倍。
+     */
+    @Test
+    fun `脉动溶解在无音频时也能走到 100%`() {
+        val impl = PhotoTransitionRegistry.get(PhotoTransitionId.PULSE_DISSOLVE) as MaskDissolveTransition
+        val geom = geometry()   // geom.pulse = 0（无音频）
+        assertEquals(
+            "无音频时 p=1 必须给出满不透明（否则转场走不完）",
+            1f,
+            impl.maskAlpha(1f, geom),
+            1e-4f,
+        )
+        // 有鼓点时更快（但同样不超过 1）
+        geom.pulse = 1f
+        assertEquals("有鼓点时也不超过 1", 1f, impl.maskAlpha(1f, geom), 1e-4f)
+        assertTrue("有鼓点时中途推进更快", impl.maskAlpha(0.5f, geom) > impl.maskAlpha(0.5f, geometry()))
+    }
+
+    // ────────────────────── ⑧ 遮罩缓存只生成一次 ──────────────────────
 
     @Test
     fun `遮罩按需生成且只生成一次`() {
@@ -257,7 +309,7 @@ class PhotoTransitionP2Test {
     // ────────────────────── 内部工具 ──────────────────────
 
     /** 造一个画好几何的 [PhotoGeometry] */
-    private fun geometry(w: Float, h: Float): PhotoGeometry {
+    private fun geometry(w: Float = 1920f, h: Float = 1080f): PhotoGeometry {
         val ctx = RenderContext().apply {
             canvasSize = Size(w, h)
             safeAreaPx = 0f

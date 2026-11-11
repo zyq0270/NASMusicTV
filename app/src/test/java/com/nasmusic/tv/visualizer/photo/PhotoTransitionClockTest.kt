@@ -91,6 +91,54 @@ class PhotoTransitionClockTest {
         assertTrue("第 3 帧后 progress=${clock.progress}", abs(clock.progress - 0.3f) < EPS)
     }
 
+    /**
+     * **慢帧必须如实推进**（2026-11-11 电视实测修正，§10.387）。
+     *
+     * 修正前是「**任何**超过 [PhotoTransitionClock.MAX_DT_MS]（100ms）的 `dt` 一律钳到 100ms」⇒
+     * 老电视（API 22）上 P2 档分块 / 遮罩类一帧要 100–200ms（5–10 fps）⇒
+     * **每帧只推进 100ms，真实却过去了 200ms** ⇒ 相位比墙钟慢一倍 ⇒
+     * 「设了 0.7 秒的转场在电视上跑了 1.4 秒」。
+     *
+     * ⇒ 现在只有「时间断层」（`dt > [PhotoTransitionClock.JUMP_THRESHOLD_MS]`）才受限，
+     * 慢帧（≤ 1 秒）**如实推进** ⇒ 转场按墙钟时长走完。
+     */
+    @Test
+    fun `慢帧如实推进 - 掉帧时转场仍按墙钟时长走完`() {
+        val clock = PhotoTransitionClock()
+        clock.start(0L, PhotoTransitionId.CROSSFADE, enterMs = 700, holdMs = 8_000, sequential = false)
+
+        // 每帧 200ms（5 fps）：相位必须一步 200ms，不能被截成 100ms
+        clock.advance(200L)
+        assertTrue("第 1 帧后 progress=${clock.progress}", abs(clock.progress - 200f / 700f) < EPS)
+        clock.advance(400L)
+        assertTrue("第 2 帧后 progress=${clock.progress}", abs(clock.progress - 400f / 700f) < EPS)
+        clock.advance(600L)
+        assertTrue("第 3 帧后 progress=${clock.progress}", abs(clock.progress - 600f / 700f) < EPS)
+
+        // 第 4 帧（墙钟 800ms）⇒ 700ms 窗口已过
+        clock.advance(800L)
+        assertTrue("700ms 窗口在墙钟 800ms 时应已走完，实际 progress=${clock.progress}", clock.progress >= 1f)
+        assertTrue("此刻应进入 HOLD", clock.phase == PhotoTransitionClock.Phase.HOLD)
+    }
+
+    /**
+     * **负向自证**：慢帧如实推进这一条**不是恒真的**。
+     *
+     * 把「时间断层」阈值调到 0（= 每帧都算断层）⇒ 回到修正前的口径 ⇒
+     * 200ms 的帧只推进 100ms ⇒ 窗口要走两倍墙钟。
+     */
+    @Test
+    fun `负向自证 - 把断层阈值调到 0 就退回旧口径（慢帧被截半）`() {
+        val clock = PhotoTransitionClock(jumpThresholdMs = 0L)
+        clock.start(0L, PhotoTransitionId.CROSSFADE, enterMs = 700, holdMs = 8_000, sequential = false)
+
+        clock.advance(200L)
+        assertTrue(
+            "阈值 = 0 ⇒ 200ms 的帧只推进 100ms（退回旧口径），实际 progress=${clock.progress}",
+            abs(clock.progress - 100f / 700f) < EPS,
+        )
+    }
+
     /** 时钟回拨（`System.currentTimeMillis()` 被 NTP 调整）不能让相位倒退 */
     @Test
     fun `backwards clock does not rewind the phase`() {
