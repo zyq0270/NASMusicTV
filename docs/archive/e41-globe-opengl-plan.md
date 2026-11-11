@@ -1,9 +1,19 @@
 # E41「世界」原生 OpenGL ES 重写方案
 
 > **版本**: v1.0（2026-11-08）
-> **状态**: 开发方案评审
+> **状态**: 📦 **已归档（2026-11-11）—— 所有者裁决不实施原生 GL 重写，本方案从未开工**
+> ⛔ **归档 ≠ 已实现**：Phase 0~8 **全部未开始** ⇒ 从未产生任何 `visualizer/gl/` 或 `GlobeRenderer` 代码
+> ⇒ **归档不是「做完了」，是「决定不做了」**。
+> ⚠️ **归档时仍未关闭的判断依据（所有者 2026-11-11 口径）**：原生 GL 重写**无法保证与现役 WebView 版的效果一致** ——
+> §5.3 的「合并 program」把 Phong 简化成 Lambert、§5.6 的 D4 裁决把虚线航线改成细实线，
+> 这些**都是有意的观感改动** ⇒ GL 版落地后**必然是一个新的观感**，而不是「同一个地球的另一种实现」。
+> 既然无法保证效果一致，而现役 WebView 版在**手机上是正常工作的**（仅电视端受宿主限制黑屏），
+> ⇒ 所有者裁决**不投入 31~45 个工作日去换一个观感不同的版本**。
+> ⛔ **连带后果（务必一并记住）**：本篇是 E41 / E54 电视端黑屏的**唯一已知解法** ⇒
+> 归档它 = **接受「电视端看不到 E41 / E54」这一既有限制长期存在**，不再有在办方案。
+> **恢复推进的入口**：本文件全文（Phase 0~8 与 §七 的 15 条风险及缓解）。
 > **关联**: `docs/technical-overview.md` §10.215 / §10.216 / §10.197、`docs/archive/e41-tv-blackscreen-fix-plan.md`、`docs/archive/e52-highway-opengl-plan.md`
-> **决策依据**: 所有者 2026-11-08 指示「用 OpenGL ES 方案」
+> **决策依据**: 所有者 2026-11-08 指示「用 OpenGL ES 方案」；**2026-11-11 裁决归档、不实施**
 
 ---
 
@@ -587,7 +597,7 @@ if (deg < 0.08) {                       // 退化阈值
 | `docs/technical-overview.md` §10.215 / §10.216 | 保留（历史纪实）。落地时**追加**新条目，不改历史段 |
 | `docs/archive/e41-tv-blackscreen-fix-plan.md` | 归档（历史）。新方案不依赖它的结论 |
 | `docs/archive/visualizer-texture-upgrade-plan.md` D6 | ⚠️ 该裁决封的是「改回 Compose Canvas」与「推广 WebView/WebView」⇒ **不封原生 GL** ⇒ 本方案不与其冲突，但落地时应请所有者确认 |
-| `docs/stellar-spectrum-plan.md` | 同为 GL 路线 ⇒ **共用 §4.1 的 `visualizer/gl/` 共享层** |
+| `docs/archive/stellar-spectrum-plan.md` | 同为 GL 路线 ⇒ **共用 §4.1 的 `visualizer/gl/` 共享层** |
 
 ---
 

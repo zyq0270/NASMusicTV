@@ -26675,3 +26675,78 @@ CI 上没有私有分支 ref ⇒ 退出码 2 ⇒ 跳过（与 `PrivateOverlayDri
 ⚠️ **历史段里的旧路径描述指的是当时的形态**：§10.280 / §10.378 等段落写的
 「`~/.gradle/init.d/10-nasmusic-e51-local.gradle` 就是那份脚本」在 2026-11-10 之后改为
 「正文在 `scripts/local-e51-overlay.gradle`，壳仍在 `~/.gradle/init.d/`」（壳的路径未变）。
+
+---
+
+### 10.384 v2.39.18（未升版）—— 所有者一次性裁决：**在办方案全数收敛**（2026-11-11）
+
+> **性质**：本轮**没有一行代码变更**（除 1 处 KDoc 路径 + 3 个脚本默认路径）⇒ 按仓库规矩
+> **不升版本号、不进 `CHANGELOG.md`**（文档改动不入 CHANGELOG）。本段是**文档生命周期的裁决记录**。
+
+#### 一、背景
+
+2026-11-11 所有者复核「本项目还有哪些未开发内容」后，对**每一条**未开发内容逐条给出处置口径。
+本轮是一次性的**方案收敛**，不是零散清理。
+
+#### 二、归档（8 份，`git mv` 保留历史）
+
+| 文档 | 裁决 | 判定依据 |
+|---|---|---|
+| `docs/archive/stellar-spectrum-plan.md` | ❌ **不开发** | Phase 0~4 全未勾选、从未产生任何 Kotlin 代码 ⇒ 枚举 `STELLAR_SPECTRUM` 从未进 `AppSettings.kt` |
+| `docs/archive/e41-globe-opengl-plan.md` | ❌ **不实施** | 原生 GL 重写**无法保证与现役 WebView 版效果一致**（§5.3 合并 program 把 Phong 简化成 Lambert、§5.6 的 D4 把虚线航线改成细实线 —— **两者都是有意的观感改动**）⇒ 不投入 31~45 工作日换一个观感不同的版本 |
+| `docs/archive/blackhole-visualizer-plan.md` + `blackhole-preview.html` | ⏸️ **效果没达标，暂停** | 原型跑通结构对账（G4 逐位相等），但**观感没过关** ⇒ 「以后优化后再说」 |
+| `docs/archive/e45-orbital-plan.md` + `e45-orbital-preview.html` | ⏸️ **效果没达标，暂停** | 同上口径 |
+| `docs/archive/开源横版卷轴游戏总表_更新版.md` + `开源横版卷轴游戏总表_核验报告.md` | ✅ **归档（早已被取代）** | 内容自 v4.0 起已并入 `docs/e54-run-and-gun-survey.md` 附录 A / B；根目录两份是独立旧件（许可列 / 存在性列已被 API 复验证伪） |
+
+#### 三、⚠️ 一处归因更正（本轮顺手纠正的误解）
+
+**`stellar-spectrum-plan.md` 不是 E54「生态地球」这个效果的开发文档。**
+
+- E54 自己的方案是 `docs/archive/eco-globe-webview-plan.md`（WebView + three.js r160，随 v2.39.14 定稿归档）；
+- `stellar-spectrum-plan.md` 描述的是**另一个独立效果**（枚举拟名 `STELLAR_SPECTRUM`），
+  只**借鉴** `docs/globe-present.html`（生态地球**演示页**）的氛围语言（星空 / 极光 / 大气 / 粒子 / 流星 / 季节），
+  技术路线是**原生 OpenGL ES**、**画面里没有地球**（§1.2「归因澄清」原本就写明了这一点）。
+
+⇒ 两篇文档**同批归档**，但**不是同一件事**。
+
+#### 四、删除（2 份）
+
+| 文件 | 理由 |
+|---|---|
+| `docs/e53-run-and-gun-survey.md` | **旧版重复件**（E53 编号时代那一份，内容已被 `e54-run-and-gun-survey.md` v5.0 取代）⇒ 所有者裁决直接删除，顺带消除「E53 / E54 / E55」三号混淆 |
+| `docs/11.html` | **E50「千里江山」的重复件**（`803e836` 入库时的早期预览页，11,590 B；正式版 `docs/archive/e50-qianli-jiangshan-preview.html` 84,517 B）⇒ 无任何引用 ⇒ 直接删除。⚠️ **此前工作区里删过两次又出现，是因为只删了工作区文件、没提交** ⇒ 本轮用 `git rm` 落进索引，删除才真正生效 |
+
+#### 五、代码侧改动（3 处，全部是路径跟随）
+
+1. `app/src/main/java/com/nasmusic/tv/visualizer/photo/PhotoTransitionId.kt` —— KDoc 里
+   `docs/blackhole-visualizer-plan.md` → `docs/archive/blackhole-visualizer-plan.md`。
+2. `scripts/e54_pool_table_join.py` —— 默认 `--pool` → `docs/archive/开源横版卷轴游戏总表_更新版.md`
+   （该文件是脚本的**描述列数据源**，归档后路径必须跟）。
+3. `scripts/e54_screenshot_probe.py` —— 同上。
+4. `docs/archive/verification/scripts/blackhole_g4_crosscheck.mjs` —— ⚠️ **相对路径失效**：
+   原型 HTML 下移一层 ⇒ `../../../blackhole-preview.html` → `../../blackhole-preview.html`
+   （已复跑验证：退出码 0，15 行逐位相等 + 参数无漂移）。
+
+#### 六、⛔ 归档时仍未关闭的遗留（逐条留痕，**归档 ≠ 已解决**）
+
+1. ⛔ **E41 / E54 电视端黑屏从此没有在办方案**：归档 `e41-globe-opengl-plan.md` = **接受「电视端看不到 E41 / E54」长期存在**
+   （WebView 宿主在创维机上只画首帧，§10.215）。两个效果仍受 `Tier.ULTRA` 门控 ⇒ **只在 HIGH 画质档出现**。
+2. ⛔ **E45「黑洞」与「近地轨道」的观感未达标** —— 两者都不是「永久放弃」，是**暂停**；恢复入口见各篇状态头。
+3. ⛔ **街机合集（E55）Phase 2~6 仍暂缓**：所有者 2026-11-11 口径「还没想好下一个合进去哪个游戏，先暂不开发」
+   ⇒ 多游戏合集（C7）与上下键切换仍是终局方向。
+4. ⛔ **照片墙转场 P2（33 种）未实现**：枚举一次写全 76 项，`PhotoTransitionRegistry` 只注册 P0+P1 = 43 种
+   ⇒ 所有者口径「要单开一个任务再执行，先暂停」⇒ 本轮**不动代码**，33 个 `Phase.P2` 项仍是空实现。
+5. ⛔ **DHU / 真车端到端验收仍未做**（Android Auto 阶段 1）：内容树加载、点歌链路、状态镜像一致性、
+   包验证白名单是否漏包 —— 这四件事**只有 DHU / 真车能验**；代码级验证（编译 + 单测 + lint + R8 存活 + 产物核对）早已完成。
+6. ⛔ **E51「像素城市」定稿**：57/57 城已落地（私有分支 `feat/e51-private`），但 **P0 真机探针**（放大硬边是否保持
+   nearest、每帧成本）与 **P3 逐城地标相似度人工评分**从未上机执行 ⇒ 定稿 = 停止继续探索，不是「验收已过」。
+
+#### 七、📌 `docs/` 根口径（2026-11-11 实测 `git ls-tree --name-only HEAD docs/`）
+
+**入库 Markdown 11 → 4 篇** = 活文档 2（`technical-overview.md` / `conventions-adaptive-ui.md`）
++ 现役名册 1（`visualizer-effects-list.md`）+ 在办方案 1（`e54-run-and-gun-survey.md` —— E55 街机合集的上游调研，**仍在根**）。
+
+**入库原型 html = 1 份**（`globe-present.html` —— E54 页面生成器的**唯一再生源**，⛔ 不得归档、不得手工改产物）。
+
+⚠️ **历史段不改写**：§10.351 / §10.352 / §10.354 / §10.355 / §10.357 / §10.358 / §10.360 里指向旧路径的
+历史记录按纪律「只追加新段、不回改历史段」**原样保留**，由本段统一交代归档事实。

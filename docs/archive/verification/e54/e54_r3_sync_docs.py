@@ -25,7 +25,7 @@ assert "（10 条：" in s and "52,641 步" in s
 p.write_text(s, encoding="utf-8")
 
 # ── 2. docs/e54-contra-porting-plan.md ──────────────────────────────────────
-p = root / "docs/e54-contra-porting-plan.md"
+p = root / "docs/archive/e54-contra-porting-plan.md"
 s = p.read_text(encoding="utf-8")
 
 old = "第三轮修复后 `visualizer/arcade/` 为 **14 文件 / 约 3.2k 行 + 6 个测试文件 / 38 个用例**；"

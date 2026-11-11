@@ -131,7 +131,7 @@ s = s.replace(old, new)
 p.write_text(s, encoding="utf-8")
 
 # ── 4. docs/e54-contra-porting-plan.md：第四轮说明 ──────────────────────────
-p = Path("docs/e54-contra-porting-plan.md")
+p = Path("docs/archive/e54-contra-porting-plan.md")
 s = p.read_text(encoding="utf-8")
 
 old = "> 第三轮修复后 `visualizer/arcade/` 为 **14 文件 / 3,205 行 + 6 个测试文件 / 40 个用例**；"

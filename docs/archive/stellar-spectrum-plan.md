@@ -1,10 +1,20 @@
-﻿# 频谱效果开发文档 —— 星际四季频谱（OpenGL ES 版）
+# 频谱效果开发文档 —— 星际四季频谱（OpenGL ES 版）
 
 > **版本**: v2.3（2026-11-08，**全量数据来源审计** ⇒ 补回漏移植的**极光带**层、换掉自拟的四季配色/大气/流星参数、删除不可移植的昼夜层；逐项来源见 §0.4）
-> **状态**: 开发方案评审
+> **状态**: 📦 **已归档（2026-11-11）—— 所有者裁决不开发，本方案从未开工**
+> ⛔ **归档 ≠ 已实现**：本文档描述的是一个**独立的新效果**（枚举拟名 `STELLAR_SPECTRUM`，**从未进 `AppSettings.kt`**），
+> 从未产生任何 Kotlin 代码 ⇒ **归档不是「做完了」，是「决定不做了」**。
+> ⚠️ **归因澄清（本轮一并更正一个此前的误解）**：本篇**不是** E54「生态地球」这个效果的开发文档 ——
+> E54 自己的方案是 `docs/archive/eco-globe-webview-plan.md`（已随 v2.39.14 定稿归档），
+> 而本篇是**另一个独立效果**，只**借鉴** `docs/globe-present.html`（生态地球演示页）的氛围语言
+> （星空 / 极光 / 大气 / 粒子 / 流星 / 季节）⇒ 本篇的原型 HTML 是 E54 演示页，**不是** E54 主题本身。
+> ⛔ **`docs/globe-present.html` 仍留在 `docs/` 根目录**：它是 E54 页面生成器
+> （`scripts/build_eco_globe_page.py`）的**唯一再生源** ⇒ 不得归档、不得手工改产物。
+> **恢复推进的入口**：本文件全文（Phase 0~4 里程碑与 §10 单测清单）+ `docs/archive/e41-globe-opengl-plan.md` §4.1
+> （共享 `visualizer/gl/` 层的拆分规则）。实现现状一律以**源码**为准。
 > **关联**:
 > - `docs/globe-present.html`（**视觉与参数的唯一来源**：星空 / 极光 / 大气 / 粒子 / 流星 / 季节）
-> - `docs/e41-globe-opengl-plan.md`（**同批方案**：E41 地球原生 GL 重写，含共享层设计）
+> - `docs/archive/e41-globe-opengl-plan.md`（**同批方案**：E41 地球原生 GL 重写，含共享层设计；**同批归档**）
 > - `docs/technical-overview.md` §10
 
 ---
@@ -33,7 +43,7 @@
 |---|---|---|---|
 | **D1** | E41 档位下放 | ✅ 下放 | 与本方案无直接耦合（E41 自己的枚举改动）。但**同一条规则适用于本效果**：不读 `ctx.quality.maxParticles` ⇒ `needsParticleBudget = false` ⇒ 三档全可选（§5.2 / §10.2） |
 | **D2** | `globe-upstream/` 的 three.js / three-globe ES6 原版 | ✅ **保留** | 本方案**不碰** `assets/globe/` ⇒ 无影响 |
-| **D3** | GL 基础层收敛 | ✅ **收敛到 `visualizer/gl/`** | ⇒ 本方案的 `GlHost` / `GlBridge` / `GlCaps` / `GlProjection` / `GlShader` **不另起炉灶**，直接落在共享层；E52 的同类件改为委托共享层。拆分规则见 `docs/e41-globe-opengl-plan.md` §4.1 |
+| **D3** | GL 基础层收敛 | ✅ **收敛到 `visualizer/gl/`** | ⇒ 本方案的 `GlHost` / `GlBridge` / `GlCaps` / `GlProjection` / `GlShader` **不另起炉灶**，直接落在共享层；E52 的同类件改为委托共享层。拆分规则见 `docs/archive/e41-globe-opengl-plan.md` §4.1 |
 
 ⚠️ **⛔ 共享层纪律**：通用层**不得**包含任何上游常量或上游 GLSL —— 一旦混进去就变成「公开的上游衍生件」⇒ 泄漏（origin 是 public 仓库）。
 
@@ -107,7 +117,7 @@ HTML 的星空是 **2D canvas 静态绘制**（399 点 + 亮星十字光芒 + **
   「Robinson 平面地图」干过的事，2106 行，2026-10-06 作为零实例化死代码删除）；
 - C 类技术上可行，但移植后画面主体会从「星空」变成「一张世界地图」，与「星际四季」定位不符。
 
-⇒ **若目标是「要一颗地球」**，正确路线是 `docs/e41-globe-opengl-plan.md`（原生 OpenGL ES 做**真球面**），
+⇒ **若目标是「要一颗地球」**，正确路线是 `docs/archive/e41-globe-opengl-plan.md`（原生 OpenGL ES 做**真球面**），
 在那里 **A/B/C 全部要素都能正确显示**（因为有真球面可贴）。
 
 ⚠️ 若日后要移植 C 类，所需资产已就位：`docs/assets/tex/terrain.png`（184 KB，R=高程 G=类别）、
@@ -396,7 +406,7 @@ SpectrumRepository（AudioFrame 唯一写入方，双缓冲）
 
 ### 3.2 共享 GL 基础层（`visualizer/gl/`）
 
-> 与 E41 地球 GL 重写**共用**（见 `docs/e41-globe-opengl-plan.md` §4.1）。设计要点：
+> 与 E41 地球 GL 重写**共用**（见 `docs/archive/e41-globe-opengl-plan.md` §4.1）。设计要点：
 
 | 件 | 职责 | 关键约束 |
 |---|---|---|
@@ -407,7 +417,7 @@ SpectrumRepository（AudioFrame 唯一写入方，双缓冲）
 | `GlShader` | program 编译链接 / uniform & attribute location 缓存 | 编译失败打 logcat 并返回 0（⛔ 不抛） |
 
 ✅ **D3 已裁决（2026-11-08 所有者）：收敛到共享层，不写第三套。** 拆分与落地动作详见
-`docs/e41-globe-opengl-plan.md` §4.1，摘要：
+`docs/archive/e41-globe-opengl-plan.md` §4.1，摘要：
 - **通用层**（`GlHost` / `GlBridge` / `GlCaps` / `GlProjection` / `GlShader`）⇒ **main 源集**，公开、两个分支一致；
 - **上游派生层**（E52 的逐字搬运 GLSL、上游常量）⇒ 留私有分支；
 - 改覆盖层副本后跑 `python scripts/sync_private_overlay.py` 同步，`--check` 必须零漂移；
@@ -1101,7 +1111,7 @@ class StellarGlBridge {
 
 ## 十二、参考资料
 
-- `docs/e41-globe-opengl-plan.md` —— **同批方案**（共享 `visualizer/gl/` 层、EGL/线程/生命周期的全部硬约束）
+- `docs/archive/e41-globe-opengl-plan.md` —— **同批方案**（共享 `visualizer/gl/` 层、EGL/线程/生命周期的全部硬约束）
 - `docs/globe-present.html` —— **视觉与参数的唯一来源**（星空 / 极光 / 大气 / 粒子 / 流星 / 季节 / 季节光照）
 - `app/src/main/java/com/nasmusic/tv/visualizer/VisualizerRenderer.kt` —— 渲染器接口（`isViewBased` / `createView` / `renderFps` / `onFrame` 的必要性注释）
 - `app/src/main/java/com/nasmusic/tv/visualizer/AudioFrame.kt` —— 音频帧契约（显示/律动双通道）

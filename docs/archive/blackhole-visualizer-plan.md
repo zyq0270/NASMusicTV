@@ -1,10 +1,14 @@
 # E45「黑洞」视觉化效果开发方案
 
-> **状态**：**阶段 0 · 技术路线已定（A：纯程序化 Canvas 2D）→ ✅ 方案 + 原型已交付并跑通结构对账（2026-10-10，见 §十一）**
-> 起草 2026-10-10。本轮交付 = 本方案 + `docs/blackhole-preview.html`（Canvas 2D 原型）+ 两个验证脚本。
-> ✅ 原型的 `<script>` 已在 `vm` 沙箱与浏览器里各跑过一次：**G4 逐位相等**、五个预设无一异常、
-> 拱位与数表一致，**阴影面在无近侧带遮挡的方向上实测为 0**（低倾角的穿心横线是 §一 判据 3 要求的，见 §十一 ⑤）。
+> **状态**：📦 **已归档（2026-11-11）—— 所有者裁决「还没有达到好看的效果，现在不开发，以后优化后再说」**
+> ⚠️ **归档 ≠ 已实现，也 ≠ 永久放弃**：这是**一次「效果没达标」的暂停**，不是「方案作废」。
 > ⛔ **未开工 Kotlin**，未进 `AppSettings.kt` 枚举，未出包；V1–V6、V8 的**观感判读仍属所有者**，本轮没有替它打勾。
+> ⛔ **归档时仍未关闭的遗留（逐条留痕）**：
+> 1. ⏳ **视觉效果未达所有者预期** —— 原型跑通了结构对账（G4 逐位相等），但**观感没过关** ⇒ 这正是本篇不能读成「做完了」的原因。
+> 2. ⏳ **`"45"` 编号由此空置**（`docs/archive/e50-qianli-jiangshan-plan.md` §205 已登记该预留）。
+> 3. ⏳ **恢复条件**：所有者认为「优化后能达到好看的效果」时，从本篇的 §一（参考图规格）、§二（几何模型）、
+>    §六（参数表）继续；**原型 `docs/archive/blackhole-preview.html` 与两个验证脚本原样保留**，
+>    G4 对账仍可复跑（`node docs/archive/verification/scripts/blackhole_g4_crosscheck.mjs`，退出码 0 = 逐位相等）。
 >
 > **需求原文**（所有者 2026-10-10）：
 > 「能参考这幅图，画一个动态的黑洞吗？」＋ 随后补 4 张参考图（共 5 张，见 §一）。
@@ -12,7 +16,7 @@
 >
 > **路线改判留痕**（️ 这一段是本方案最重要的历史，别在后续讨论中丢失）：
 > 1. 初选 **C**：先用 WebGL 测地线 shader 定观感基准，再降级重画 Canvas 2D 可移植版。
->    已按此写出 `docs/blackhole-preview.html`（WebGL + Schwarzschild 光子测地线 RK4 积分）。
+>    已按此写出 `docs/archive/blackhole-preview.html`（WebGL + Schwarzschild 光子测地线 RK4 积分）。
 > 2. 所有者 2026-10-10 追加硬约束：**「WebView + three.js 已验证无法在电视上展现」**，
 >    且全仓红线本就是「零 GLSL / 零 OpenGL / 零 AGSL」（AGSL 需 API 33+，本项目 minSdk 22）。
 > 3. 改判 **A：纯程序化 Canvas 2D，⛔ 不要测地线计算**。
@@ -314,7 +318,7 @@ V 系列的数字与后续基准剖面**一律从探针读真帧**得到。⛔ �
 ## 十、本轮交付
 
 - 本文档；
-- `docs/blackhole-preview.html` —— **Canvas 2D** 原型（零 WebGL、零测地线），
+- `docs/archive/blackhole-preview.html` —— **Canvas 2D** 原型（零 WebGL、零测地线），
   参数面板 + 预设 + fps 读数 + `window.__bh` 探针 + 参数存 URL hash。
   探针本轮长出三个**抓真帧**用的方法：`ringTable()`（逐环几何）、`profile(axis,samples)`
   （沿轴采样亮度/RGB，供阴影判据与台阶幅度对账）、`captureStill(w,h)`（离屏渲染一帧回 data URL）；

@@ -684,22 +684,24 @@
 > ⚠️ 文内两处**计划产物路径从未存在**（`scripts/kugou/probe.sh`、`docs/archive/verification/kugou_lite_s0.txt`）—— 那是 §12 表格里的**未开工产出**，不是死链。
 > ⚠️ 未进 `CHANGELOG.md`：本轮是**纯文档移动 + 归档登记**，按本仓规矩（文档改动不入 CHANGELOG）不登记；无代码变更。
 > 📌 **`docs/` 根口径**（2026-11-10 实测 `git ls-tree --name-only HEAD docs/ | grep -c '\.md$'`）：入库 Markdown **11 → 11 篇** = 活文档 2（`technical-overview.md` / `conventions-adaptive-ui.md`）+ 现役名册 1（`visualizer-effects-list.md`）+ 在办方案 6（`blackhole-visualizer-plan.md` / `e41-globe-opengl-plan.md` / `e45-orbital-plan.md` / `stellar-spectrum-plan.md` / `e53-run-and-gun-survey.md` / `e54-run-and-gun-survey.md`）+ 其它 2 篇（`开源横版卷轴游戏总表_核验报告.md` / `开源横版卷轴游戏总表_更新版.md`）。⚠️ 上文各轮里的旧计数一律以本段为准。
+> ⚠️ **本段口径已被 2026-11-11 的第二十八轮取代**（Markdown 11 → **4 篇**）⇒ 以**第二十八轮**末尾的实测口径为准。
 > 📌 **2026-11-10 变更**：本段原为「11 → 10 篇」（在办方案 5）⇒ 第二十五轮把 `e54-contra-porting-plan.md` 归档后，
 > 在办方案少 1 篇（`e54-contra-porting-plan.md` 出根）、但 `e53-run-and-gun-survey.md` 仍在根（见下条）⇒ 净数不变（11 篇）。
 > ⚠️ **`e53-run-and-gun-survey.md` 是 `e54-run-and-gun-survey.md` 的旧版重复件**（E53 编号时代的那一份，blob 与
 > 2026-11-07 改名前的归档件**逐字节相同**；2026-11-08 一次"与私有分支对齐"的同步把它误放回了根目录）
 > ⇒ 与 `E54 生态地球` / `E55 街机合集` 的编号互相混淆，**建议清理**（删除或归档留档），⛔ 待所有者裁决。
+> ✅ **已裁决（2026-11-11）**：所有者选择**直接删除**（不是归档留档）⇒ 该文件已从仓库移除，见**第二十八轮**。
 
 ## 第二十一轮（2026-11-08，1 个）—— E54「生态地球」定稿归档（随 v2.39.14 出包）
 
 | 文档 | 判定依据 | 被谁引用（已改写） | 挂起决策 |
 |---|---|---|---|
-| `eco-globe-webview-plan.md` | ✅ **已落地并定稿**：E54「生态地球」随 **v2.39.14 / `versionCode 199`** 出包（本地包，⛔ 未推送）。Phase 0~4 全部闭合：新主题 `ECO_GLOBE`（与 E41「世界」**并列**，非子模式）+ `EcoGlobeRenderer`（WebView + three.js r160）+ 16 个 GLB / 6 张贴图全部离线内置 + 三份 three.js 库**复用** `assets/globe/`（零重复打包）+ 运行时**零网络**。⚠️ 真机第 1 轮暴露的两个问题（① **动物一只都没出来** —— 生成页面时删掉 ESM 具名导入 `import { clone as cloneSkeleton }` 却没补回**局部绑定** ⇒ 摆位抛 `ReferenceError` 被业务 catch 吞成「加载失败，已跳过」；② 画面上的演示页文案）**均已修复并复测通过** ⇒ 方案文档不再是进行中的活文档。移动方式 = **`git mv`**（历史保留），正文 §一～§十二 **一字未删**，只改状态头 + 加 v1.2 版本行 | **8 处引用 / 6 个文件**（`app/src/eco-upstream/build_loaders.mjs` ×1、`AppSettings.kt` ×1、`EcoGlobeRenderer.kt` ×1、`docs/technical-overview.md` ×2、`docs/visualizer-effects-list.md` ×1、`scripts/build_eco_globe_page.py` ×1）⇒ 全部改写为 `docs/archive/eco-globe-webview-plan.md`；**裸文件名引用 0 处**（2026-11-08 `git grep` 实测：旧路径零残留）⇒ 死链 **0 新增** | ⏳ **电视端仍黑屏**（E41 同源的**宿主**问题，§10.215）—— ⚠️ **不是本方案的未决项**，是 WebView 宿主在该机上的既有限制；原生 GL 重写路线见 `docs/e41-globe-opengl-plan.md`（**仍在推进，未归档**）。⏳ §7.2 的手机真机逐项判读（骨骼步态 / 四季 / 龙卷风 / 音频驱动 / 零网络）由所有者执行 |
+| `eco-globe-webview-plan.md` | ✅ **已落地并定稿**：E54「生态地球」随 **v2.39.14 / `versionCode 199`** 出包（本地包，⛔ 未推送）。Phase 0~4 全部闭合：新主题 `ECO_GLOBE`（与 E41「世界」**并列**，非子模式）+ `EcoGlobeRenderer`（WebView + three.js r160）+ 16 个 GLB / 6 张贴图全部离线内置 + 三份 three.js 库**复用** `assets/globe/`（零重复打包）+ 运行时**零网络**。⚠️ 真机第 1 轮暴露的两个问题（① **动物一只都没出来** —— 生成页面时删掉 ESM 具名导入 `import { clone as cloneSkeleton }` 却没补回**局部绑定** ⇒ 摆位抛 `ReferenceError` 被业务 catch 吞成「加载失败，已跳过」；② 画面上的演示页文案）**均已修复并复测通过** ⇒ 方案文档不再是进行中的活文档。移动方式 = **`git mv`**（历史保留），正文 §一～§十二 **一字未删**，只改状态头 + 加 v1.2 版本行 | **8 处引用 / 6 个文件**（`app/src/eco-upstream/build_loaders.mjs` ×1、`AppSettings.kt` ×1、`EcoGlobeRenderer.kt` ×1、`docs/technical-overview.md` ×2、`docs/visualizer-effects-list.md` ×1、`scripts/build_eco_globe_page.py` ×1）⇒ 全部改写为 `docs/archive/eco-globe-webview-plan.md`；**裸文件名引用 0 处**（2026-11-08 `git grep` 实测：旧路径零残留）⇒ 死链 **0 新增** | ✅ **手机真机逐项判读已由所有者确认通过（2026-11-11：「已经验证过了，定稿了」）** —— §7.2 的骨骼步态 / 四季 / 龙卷风 / 音频驱动 / 零网络五项**已关闭**。⛔ **电视端仍黑屏**（E41 同源的**宿主**问题，§10.215）—— ⚠️ **不是本方案的未决项**，是 WebView 宿主在该机上的既有限制；原生 GL 重写路线已于 **2026-11-11 归档不实施**（见 `docs/archive/e41-globe-opengl-plan.md`）⇒ 该限制**长期存在，不再有在办方案** |
 
 **归档时仍未关闭的事项（⛔ 归档 ≠ 已解决，逐条留痕）**：
 
-1. ⏳ **电视端黑屏**：E41 与 E54 共用同一宿主路径（Compose `AndroidView` 承载的 WebView 在创维电视上只画首帧）⇒ 本方案**不做电视兼容**（§4.3，零收益）。解法在 `docs/e41-globe-opengl-plan.md`（原生 GL 重写，**仍在推进**）⇒ 该文档因此**未随本篇归档**。
-2. ⏳ **`stellar-spectrum-plan.md` 仍有未落地要素清单**（§0.4 的 A/B/C 三分类）⇒ 它的命运**尚未落定** ⇒ 按归档纪律（❗「只是暂时没排期的在办方案」不满足归档判据）**留在 `docs/` 根目录**，⛔ 不要把本篇的归档读成「频谱线全部收工」。
+1. ⛔ **电视端黑屏**：E41 与 E54 共用同一宿主路径（Compose `AndroidView` 承载的 WebView 在创维电视上只画首帧）⇒ 本方案**不做电视兼容**（§4.3，零收益）。原定的解法 `docs/archive/e41-globe-opengl-plan.md`（原生 GL 重写）已于 **2026-11-11 由所有者裁决归档不实施**（效果无法保证与现役 WebView 版一致）⇒ **该限制长期存在，不再有在办方案**。
+2. ✅ **`stellar-spectrum-plan.md` 的命运已落定**：**2026-11-11 归档**（不开发）⇒ 原文「未落地要素清单（§0.4 的 A/B/C 三分类）⇒ 命运尚未落定 ⇒ 留在根目录」的判断**已作废**；⛔ 但**不要把它的归档读成「频谱线全部收工」** —— 它描述的是一个**从未开工**的独立效果（枚举拟名 `STELLAR_SPECTRUM`，从未进 `AppSettings.kt`）。
 3. ⏳ **`docs/globe-present.html` 留在 `docs/` 根目录**：它**不是**历史快照，而是 E54 页面生成器的**唯一再生源**（`scripts/build_eco_globe_page.py` 从它幂等生成 `assets/eco-globe/{index.html,globe.js}`）⇒ ⛔ 不得归档、不得手工改产物。
 
 ## 第二十二轮（2026-11-08，2 个）—— 所有者裁决：E55「夜城天际」放弃，视觉调性不符预期
@@ -888,6 +890,52 @@
 ⚠️ **历史段里的旧路径描述指的是当时的形态**：§10.280 / §10.378 等段落写的
 「`~/.gradle/init.d/10-nasmusic-e51-local.gradle` 就是那份脚本」已改为「正文在
 `scripts/local-e51-overlay.gradle`，壳仍在 `~/.gradle/init.d/`」（壳的路径未变）。
+
+## 第二十八轮（2026-11-11）—— 所有者一次性裁决：**在办方案全数收敛**（归档 8 份 / 删除 2 份）
+
+> **背景**：2026-11-11 所有者复核「本项目还有哪些未开发内容」后，对**每一条**未开发内容逐条给出处置口径。
+> 本轮是**一次性的方案收敛**，不是零散清理。⚠️ **归档 ≠ 已解决** —— 下列每份文档的
+> 「归档时仍未关闭的遗留」逐条留痕，**不要把本轮归档读成「这些效果都做完了」**。
+
+### 归档（8 份，`git mv` 保留历史）
+
+| 文档 | 判定依据 | 归档时仍未关闭的遗留 |
+|---|---|---|
+| `stellar-spectrum-plan.md` | ❌ **所有者裁决不开发**（2026-11-11）。**Phase 0~4 全未勾选、从未产生任何 Kotlin 代码** ⇒ 枚举 `STELLAR_SPECTRUM` 从未进 `AppSettings.kt` | ⛔ **归档 ≠ 已实现**（不是「做完了」，是「决定不做了」）。⚠️ **归因更正**：本篇**不是** E54「生态地球」的开发文档 —— E54 自己的方案是 `eco-globe-webview-plan.md`；本篇是**另一个独立效果**，只**借鉴** `globe-present.html` 的氛围语言 |
+| `e41-globe-opengl-plan.md` | ❌ **所有者裁决不实施**（2026-11-11）：原生 GL 重写**无法保证与现役 WebView 版效果一致**（§5.3 合并 program 把 Phong 简化成 Lambert、§5.6 D4 把虚线航线改细实线 —— **都是有意的观感改动**）⇒ 不投入 31~45 工作日换一个观感不同的版本 | ⛔ **Phase 0~8 全未开始**，`visualizer/gl/` 从未建立。⛔ **连带后果**：本篇是 E41 / E54 电视端黑屏的**唯一已知解法** ⇒ 归档它 = **接受「电视端看不到 E41 / E54」长期存在**，不再有在办方案 |
+| `blackhole-visualizer-plan.md` + `blackhole-preview.html` | ⏸️ **效果没达标，暂停**（所有者原话「还没有达到好看的效果，所以现在不开发，以后优化后再说」）⇒ 是**一次暂停**，不是方案作废 | ⛔ **观感未达预期**（原型跑通结构对账 G4 逐位相等，但观感没过关）；`"45"` 编号空置；**恢复条件**：从 §一 / §二 / §六 继续，原型与两个验证脚本原样保留（G4 对账仍可复跑） |
+| `e45-orbital-plan.md` + `e45-orbital-preview.html` | ⏸️ **效果没达标，暂停**（同上口径） | ⛔ **观感未达预期**；**恢复条件**：从 §四（投影与几何数学）/ §五（图元预算）与原型（5 条自带自检 T1–T5）继续 |
+| `开源横版卷轴游戏总表_更新版.md` + `开源横版卷轴游戏总表_核验报告.md` | ✅ **内容早已并入 `e54-run-and-gun-survey.md` 附录 A / B**（v4.0 起）⇒ 根目录这两份是**独立旧件**（其「许可列 / 存在性列」已被 API 复验证伪，数字列一律不采信） | ⚠️ **它们仍是脚本的数据源**（描述列 / 截图列）⇒ 归档时**同步改了 2 个脚本的默认 `--pool` 路径**：`scripts/e54_pool_table_join.py`、`scripts/e54_screenshot_probe.py` |
+
+### 删除（2 份，非 `git mv`）
+
+| 文件 | 理由 |
+|---|---|
+| `docs/e53-run-and-gun-survey.md` | **旧版重复件**（E53 编号时代那一份，内容已被 `e54-run-and-gun-survey.md` v5.0 完全取代）⇒ 所有者裁决**直接删除**（不是归档留档）⇒ 顺带消除「E53 / E54 / E55」三个编号的混淆 |
+| `docs/11.html` | **E50「千里江山」的重复件**（`803e836` 入库时的一个早期预览页，11,590 B；正式版是 `docs/archive/e50-qianli-jiangshan-preview.html`，84,517 B）⇒ 无任何引用 ⇒ **直接删除**。⚠️ 此前工作区里删过两次又出现，是因为**只删了工作区文件、没提交** ⇒ 本轮用 `git rm` 落进索引，删除才真正生效 |
+
+### 引用改写（死链 0 新增）
+
+| 位置 | 处理 |
+|---|---|
+| `docs/archive/stellar-spectrum-plan.md` × 5 / `e41-globe-opengl-plan.md` × 4 / `blackhole-visualizer-plan.md` × 3 / `e45-orbital-plan.md` × 2 | 交叉引用路径改到 `docs/archive/` 下 |
+| `docs/archive/eco-globe-webview-plan.md` × 2 / `docs/archive/e50-qianli-jiangshan-plan.md` × 3 | 同上 |
+| `docs/archive/blackhole-preview.html` × 2 | 原型 HTML 内部注释里的方案路径 |
+| `app/src/main/java/com/nasmusic/tv/visualizer/photo/PhotoTransitionId.kt` × 1 | KDoc 引用（`clipPath` SIGSEGV 取证） |
+| `docs/archive/verification/scripts/blackhole_g4_crosscheck.mjs` × 1 | ⚠️ **相对路径失效**：原型 HTML 下移一层 ⇒ `../../../blackhole-preview.html` → `../../blackhole-preview.html`（已复跑验证：退出码 0，15 行逐位相等） |
+| `scripts/e54_pool_table_join.py` / `scripts/e54_screenshot_probe.py` 各 1 | 默认 `--pool` 路径改到归档位置 |
+
+> ⛔ **历史段不改写**：`docs/technical-overview.md` §10.351 / §10.352 / §10.354 / §10.355 / §10.357 / §10.358 / §10.360 里
+> 指向旧路径的**历史记录**按仓库纪律「只追加新段、不回改历史段」**原样保留** ⇒ 该节末尾追加 §10.384 统一交代本轮归档。
+
+### 📌 `docs/` 根口径（2026-11-11 实测 `git ls-tree --name-only HEAD docs/`）
+
+**入库 Markdown 11 → 4 篇** = 活文档 2（`technical-overview.md` / `conventions-adaptive-ui.md`）
++ 现役名册 1（`visualizer-effects-list.md`）+ **在办方案 1**（`e54-run-and-gun-survey.md` —— E55 街机合集的上游调研，**仍在根**）。
+
+**入库原型 html = 1 份**（`globe-present.html` —— E54 页面生成器的**唯一再生源**，⛔ 不得归档、不得手工改产物）。
+
+⚠️ 上文各轮里的旧计数一律以本段为准。
 
 ## 回滚
 

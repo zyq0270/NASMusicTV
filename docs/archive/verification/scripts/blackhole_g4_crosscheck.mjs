@@ -16,7 +16,9 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const HTML = path.join(HERE, '..', '..', '..', 'blackhole-preview.html');
+// 原型 HTML 已随方案归档到 docs/archive/（2026-11-11）⇒ 相对层级由 ../../../ 改为 ../../
+// （verification/scripts/ → verification/ → archive/ ⇒ archive/blackhole-preview.html）
+const HTML = path.join(HERE, '..', '..', 'blackhole-preview.html');
 const TABLE = path.join(HERE, 'blackhole_model_table.mjs');
 
 /* ---------------------------------------------------------- 1. 数表侧 */

@@ -419,7 +419,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--snapshot", default="logs_temp/e54_upstream_verify.json")
     ap.add_argument("--out", default="logs_temp/e54_screenshots.json")
-    ap.add_argument("--pool", default="docs/开源横版卷轴游戏总表_更新版.md",
+    ap.add_argument("--pool", default="docs/archive/开源横版卷轴游戏总表_更新版.md",
                     help="原表路径，用于把它「截图」列的链接一起实测（不作为未验证的兜底）")
     ap.add_argument("--limit", type=int, default=0, help="只探前 N 个（自查用）")
     ap.add_argument("--stdout", action="store_true")

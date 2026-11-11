@@ -41,7 +41,7 @@
 | 4 | 「优先用 Android Visualizer 取频谱」（§五.2） | ✅ **已是现状**：`SpectrumRepository` 走 `audiofx.Visualizer`，**64 柱 / 20ms 采集 / 33ms 渲染节流**（`SpectrumContract.BAR_COUNT`、`EMIT_INTERVAL_MS`）；⛔ 渲染器不得自行指定柱数 | `SpectrumContract.kt:12,23` |
 | 5 | 「备选：麦克风 `AudioRecord` + FFT；权限 `RECORD_AUDIO` 动态申请」（§五.2、§七、§八.4） | ⛔ **不做**。新增录音权限违背本仓「效果层零新增权限、零新增依赖」的既定约束（E41 起 26 套同源）；需求真正想要的是**"没有音频时也要优雅"**，本仓由 `pulse` 呼吸通道覆盖（§五.5） | 本仓约束；`AudioFrame.pulse` 静音仍有值 |
 | 6 | 「Android 10+ 可选 `MediaProjection` 捕获其他应用音频」（§五.2） | ⛔ **不做**（需求自己也标了"MVP 不强制"）。电视端无投屏音频捕获场景，且引入前台服务与系统授权弹窗 | — |
-| 7 | 「渲染优先 OpenGL ES 2.0/3.0 分层纹理，Canvas 作降级」（§七） | ⛔ **改判为纯 Canvas 2D**，且**这是唯一路线**而不是降级：全仓红线「零 GLSL / 零 OpenGL / 零 AGSL」+ 唯一 WebView 例外（E41）已实测**在目标电视上不显示** | `docs/blackhole-visualizer-plan.md:25`；§10 存档的 E41 黑屏定位 |
+| 7 | 「渲染优先 OpenGL ES 2.0/3.0 分层纹理，Canvas 作降级」（§七） | ⛔ **改判为纯 Canvas 2D**，且**这是唯一路线**而不是降级：全仓红线「零 GLSL / 零 OpenGL / 零 AGSL」+ 唯一 WebView 例外（E41）已实测**在目标电视上不显示** | `docs/archive/blackhole-visualizer-plan.md §一（遮挡规则）`；§10 存档的 E41 黑屏定位 |
 | 8 | 「可配置项：滚动速度 / 频谱灵敏度 / 印章开关 / 粒子强度 / 麦克风」（§七、§十.7） | ⛔ **不加设置项**，只保留既有**画质三档**分档 + 代码内常量（开放项 **O3** 留给"印章开关"）。理由：本仓设置页刻意极简，且需求自己也写「不要求复杂设置页」 | 需求 §八.7 原文 |
 | 9 | 「使用原创绘制 / 公有领域素材，不得复制来源不明的扫描图」（§七·版权） | ✅ **收紧执行**：⛔ **不引入任何外部位图素材**（含《千里江山图》扫描图、印章 PNG、字体文件），山体 / 水 / 绢纹 / 印章**全部程序化烘焙**，延续 E46–E49「零外部资产」传统 | 见 §三、§六.1 |
 | 10 | 「FFT 1024/2048 点、Hann 窗、32 或 64 对数频段、延迟 <100ms」（§五.2） | ✅ **不必新做**：分析层已是 64 柱感知翘曲映射；链路延迟 = 20ms 采集 + 33ms 节流 ≈ **≤53ms**。⛔ **不得**为降延迟改这两个全局常量（会影响 26 套 + 节拍检测） | `SpectrumContract.kt:12,23` |
@@ -202,7 +202,7 @@ QIANLI_SCROLL(R.string.visualizer_theme_qianli_scroll, "千里江山", Tier.ADV,
 - **枚举键** `QIANLI_SCROLL` · 中文名「千里江山」· `Tier.ADV` · `ordinalLabel = "50"` · `needsParticleBudget = false`。
 - **为什么是 `"50"`**（已按源码核对 `AppSettings.kt:190-442` 的 `VisualizerTheme`，共 **27 个成员**）：
   已占用编号最大者为 `"51"`（E51 像素城市 `LOFI_CITY`，`:442`），`"49"`（E49 鸟群）、`"48"`（E48 大漠孤烟）亦已落地；
-  **`"45"` 空置**（E45「黑洞」方案 `docs/blackhole-visualizer-plan.md:260` 为它预留了 `"45"`，但该方案至今未开工）。
+  **`"45"` 空置**（E45「黑洞」方案 `docs/archive/blackhole-visualizer-plan.md §九` 为它预留了 `"45"`，但该方案至今未开工）。
   ⇒ 本主题取 `"50"`，落地后是**第 28 套**，与 E45 是否先落地**无冲突**。
   ⚠️ `docs/visualizer-effects-list.md:7` 现写 **26 套**（LOFI_CITY 落地时未同步）⇒ K8 要一并改成 **27 → 28**，
   ⛔ 不要照抄那个 26。
@@ -228,7 +228,7 @@ QIANLI_SCROLL(R.string.visualizer_theme_qianli_scroll, "千里江山", Tier.ADV,
 
 > ⛔ **v1.x 的图层表已作废**（每层一张周期位图 → 会看出重复，且山的几何是自绘的）。
 > 不变的是**遮挡规则**：API 22 创维在 `Region::createTJunctionFreeRegion` 原生 SIGSEGV ⇒ 全仓红线
-> （`docs/blackhole-visualizer-plan.md:25`），**遮挡只由绘制顺序产生**，⛔ 不写任何裁切/遮罩代码。
+> （`docs/archive/blackhole-visualizer-plan.md §一（遮挡规则）`），**遮挡只由绘制顺序产生**，⛔ 不写任何裁切/遮罩代码。
 
 变化的是**载体**：每层从「1 张周期位图」变成「**N 张唯一分块位图**」，滚动到边界时惰性再生成（§4.1′）。
 

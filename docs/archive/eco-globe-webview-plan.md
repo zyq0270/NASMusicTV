@@ -6,7 +6,7 @@
 >   落地纪实见 `docs/technical-overview.md` §10.363 / §10.364。
 > **关联**:
 > - `docs/globe-present.html` —— **视觉与参数的唯一来源**（本主题要移植的对象）
-> - `docs/e41-globe-opengl-plan.md` —— E41 地球的**原生 OpenGL ES 重写**方案（本主题的替代路线）
+> - `docs/archive/e41-globe-opengl-plan.md` —— E41 地球的**原生 OpenGL ES 重写**方案（本主题的替代路线）
 > - `docs/technical-overview.md` §10.215 / §10.216 —— E41 的宿主问题与资产纪律
 
 ---
@@ -17,7 +17,7 @@
 
 **技术路线**：**复用 E41「世界」现有的 WebView + three-globe 技术方案**（`assets/globe/` 里那套现成的 ES5 UMD 产物 + `WorldGlobeRenderer` 的宿主代码）。
 
-**为什么不走原生 GL**：`docs/e41-globe-opengl-plan.md` 那条路（31~45 工作日）的唯一目的是**解决电视端黑屏**；本主题若只追求「画面与 HTML 完全一致」，WebView 路线保真度更高、工作量约 **1/6**。
+**为什么不走原生 GL**：`docs/archive/e41-globe-opengl-plan.md` 那条路（31~45 工作日）的唯一目的是**解决电视端黑屏**；本主题若只追求「画面与 HTML 完全一致」，WebView 路线保真度更高、工作量约 **1/6**。
 
 **已知代价（明写在前面）**：
 - ⛔ **电视端仍黑屏**（宿主问题，§10.215）⇒ 本主题在创维那类电视上与 E41 同样不可用；

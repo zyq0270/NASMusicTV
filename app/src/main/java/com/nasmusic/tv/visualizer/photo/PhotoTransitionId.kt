@@ -269,7 +269,7 @@ enum class PhotoTransitionId(
          *    会换成另一个效果；其余 M5 项返回自身（降级发生在实现内部）。
          * 2. **clipPath 降级**（`sdkInt < 26`，C46）：[CLIP_BASED] 里的效果一律退化成
          *    [CROSSFADE]。这些实现走 `DrawScope.clipPath`，而 minSdk 22/23/24 的硬件加速
-         *    路径（hwui Region）在本项目有过段错误取证 —— 详见 `docs/blackhole-visualizer-plan.md`。
+         *    路径（hwui Region）在本项目有过段错误取证 —— 详见 `docs/archive/blackhole-visualizer-plan.md`。
          *    ⚠️ 注意 `sdkInt < 26` 与 shader 的 33 是两个独立阈值，必须**分别**判断。
          */
         fun effective(id: PhotoTransitionId, sdkInt: Int): PhotoTransitionId {
