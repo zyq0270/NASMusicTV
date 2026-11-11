@@ -26,87 +26,13 @@ import java.io.File
  */
 class PhotoTransitionClipGateTest {
 
-    // ── 源码定位（沿用仓内既有写法：RenderedTest 的 user.dir 双候选）──
+    // ── 源码定位（共用 [SourceScan]）──
 
-    private fun mainSourceRoot(): File {
-        var dir = File(System.getProperty("user.dir")!!)
-        while (true) {
-            val candidate = File(dir, "app/src/main/java")
-            if (candidate.isDirectory) return candidate
-            val alt = File(dir, "src/main/java")
-            if (alt.isDirectory) return alt
-            dir = dir.parentFile ?: error("找不到 app/src/main/java（user.dir=${System.getProperty("user.dir")}）")
-        }
-    }
+    private fun src(rel: String): File = File(SourceScan.mainSourceRoot(), rel)
 
-    private fun src(rel: String): File = File(mainSourceRoot(), rel)
+    private fun visualizerFiles(): List<File> = SourceScan.visualizerFiles()
 
-    /** 全仓 `visualizer/` 下的 Kotlin 源文件（递归）。 */
-    private fun visualizerFiles(): List<File> {
-        val root = File(mainSourceRoot(), "com/nasmusic/tv/visualizer")
-        assertTrue("找不到 visualizer 目录：${root.absolutePath}", root.isDirectory)
-        return root.walkTopDown().filter { it.isFile && it.extension == "kt" }.toList()
-    }
-
-    /**
-     * 剥掉注释（块注释可嵌套 + 行注释 + 字符串/字符字面量），只留可执行代码。
-     *
-     * ⚠️ 必须保留**原始换行**（断言行号要能对上），所以逐字符重建而不是 `lines().joinToString`。
-     */
-    private fun stripComments(text: String): String {
-        val sb = StringBuilder(text.length)
-        var i = 0
-        var depth = 0
-        var inStr = false
-        var inChar = false
-        var inRawStr = false
-        while (i < text.length) {
-            val c = text[i]
-            val next = if (i + 1 < text.length) text[i + 1] else '\u0000'
-            when {
-                depth > 0 -> {
-                    if (c == '/' && next == '*') { depth++; i++; sb.append(' ') }
-                    else if (c == '*' && next == '/') { depth--; i++; sb.append(' ') }
-                    else sb.append(if (c == '\n') '\n' else ' ')
-                }
-                inRawStr -> {
-                    sb.append(c)
-                    if (c == '"' && text.startsWith("\"\"\"", i)) {
-                        sb.append("\"\"")
-                        i += 2
-                        inRawStr = false
-                    }
-                }
-                inStr -> {
-                    sb.append(c)
-                    when {
-                        c == '\\' && i + 1 < text.length -> { sb.append(text[i + 1]); i++ }
-                        c == '"' -> inStr = false
-                    }
-                }
-                inChar -> {
-                    sb.append(c)
-                    when {
-                        c == '\\' && i + 1 < text.length -> { sb.append(text[i + 1]); i++ }
-                        c == '\'' -> inChar = false
-                    }
-                }
-                c == '/' && next == '*' -> { depth = 1; i++; sb.append("  ") }
-                c == '/' && next == '/' -> {
-                    while (i < text.length && text[i] != '\n') { sb.append(' '); i++ }
-                    if (i < text.length) sb.append('\n')
-                    i++
-                    continue
-                }
-                text.startsWith("\"\"\"", i) -> { sb.append("\"\"\""); i += 2; inRawStr = true }
-                c == '"' -> { inStr = true; sb.append(c) }
-                c == '\'' -> { inChar = true; sb.append(c) }
-                else -> sb.append(c)
-            }
-            i++
-        }
-        return sb.toString()
-    }
+    private fun stripComments(text: String): String = SourceScan.stripComments(text)
 
     // ── 门禁 ①：全仓 clipPath 只许出现在白名单 ────────────────────
 
@@ -120,6 +46,8 @@ class PhotoTransitionClipGateTest {
             "IRIS_CIRCLE / WIPE_LINEAR —— 已在 CLIP_BASED 登记，sdkInt<26 由 effective() 降级",
         "photo/transitions/IrisP1Transitions.kt" to
             "IRIS_DIAMOND/HEXAGON/STAR/SHAPE_RANDOM/WIPE_CLOCK/WIPE_CROSS —— 已全部登记在 CLIP_BASED",
+        "photo/transitions/ShapeP2Transitions.kt" to
+            "IRIS_TRIANGLE / WIPE_SPIRAL —— P2 档的两个形状类，已全部登记在 CLIP_BASED",
         "renderers/DesertSmokeBakes.kt" to
             "cv.clipPath 作用在 Bitmap 的**软件** Canvas 上（烘焙期一次性），不经 hwui",
         "photo/PhotoTransitionId.kt" to
@@ -130,7 +58,7 @@ class PhotoTransitionClipGateTest {
     fun `clipPath 只允许出现在白名单文件的可执行代码里`() {
         val offenders = ArrayList<String>()
         for (f in visualizerFiles()) {
-            val rel = f.relativeTo(File(mainSourceRoot(), "com/nasmusic/tv/visualizer")).invariantSeparatorsPath
+            val rel = SourceScan.relPath(f)
             val code = stripComments(f.readText())
             if (!code.contains("clipPath")) continue
             if (rel !in allowedClipPathFiles) offenders.add(rel)
@@ -157,7 +85,7 @@ class PhotoTransitionClipGateTest {
         val re = Regex("""override\s+val\s+id\s*:\s*PhotoTransitionId\s*=\s*PhotoTransitionId\.([A-Z_]+)""")
         val out = LinkedHashMap<String, MutableList<String>>()
         for (f in visualizerFiles()) {
-            val rel = f.relativeTo(File(mainSourceRoot(), "com/nasmusic/tv/visualizer")).invariantSeparatorsPath
+            val rel = SourceScan.relPath(f)
             for (m in re.findAll(stripComments(f.readText()))) {
                 out.getOrPut(rel) { ArrayList() }.add(m.groupValues[1])
             }

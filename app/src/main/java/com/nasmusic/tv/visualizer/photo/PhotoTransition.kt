@@ -26,7 +26,17 @@ enum class PhotoMechanism {
     /** 分块（每块 1 次 `drawImage`，⚠️ 有块数红线） */
     M4_TILES,
 
-    /** AGSL shader（需 API 33+，老平台降级到 M3 近似） */
+    /**
+     * AGSL shader（需 API 33+，老平台降级到 M3 近似）。
+     *
+     * ⛔ **本仓不实现任何 shader**（全仓零 AGSL / 零 GLSL / 零 OpenGL 红线，
+     * 见 `docs/archive/blackhole-visualizer-plan.md` §一）⇒ 标着 M5 的那几项
+     * （`RIPPLE` / `WAVE_WARP` / `SWIRL` / `LIQUIFY` / `MELT`）**实际实现的全是 M3 近似**
+     * （遮罩位图 / 条带位移），在**所有**平台（含 API 33+）上跑的都是这套近似。
+     *
+     * ⇒ 保留本枚举值是为了让「这条效果在方案里原本要 shader」这件事仍然可见，
+     * 以及让 [PhotoTransitionId.degradeTo] 的降级语义（§4.4 的 M5 → M3 表）保持自洽。
+     */
     M5_SHADER,
 }
 
@@ -114,6 +124,29 @@ class PhotoGeometry {
 
     /** 频谱段数（`0` = 本帧没有频谱数据） */
     val spectrumBars: Int get() = spectrum?.size ?: 0
+
+    /**
+     * 本帧的**波形**（时域，`-1..1`，128 点）—— P2 档 `WAVEFORM_WIPE` 用。
+     *
+     * ⚠️ 同样是「只存引用，不复制」（见 [spectrum] 的说明）。
+     * ⚠️ `AudioFrame.waveform` 是**时域**信号（不是频谱）⇒ 波形擦除的边界直接来自它。
+     */
+    var waveform: FloatArray? = null
+
+    /**
+     * 本帧的**低频能量**（`0..1`，律动通道）—— P2 档 `BASS_BLOOM` 用。
+     *
+     * ⚠️ 取自 `AudioFrame.bass`（**律动通道**，线性未压缩）而不是频谱的低频段 ——
+     * 两者语义不同：`AudioFrame` 明确写了「二者不可混用：用显示通道驱动律动会让强弱差异被 gamma 压扁」。
+     */
+    var bass: Float = 0f
+
+    /**
+     * 本帧的**脉冲包络**（`0..1`，快起慢落）—— P2 档 `PULSE_DISSOLVE` 用。
+     *
+     * ⚠️ 同 [bass]：取自 `AudioFrame.pulse`（律动通道）。
+     */
+    var pulse: Float = 0f
 
     /**
      * 重算全部矩形。

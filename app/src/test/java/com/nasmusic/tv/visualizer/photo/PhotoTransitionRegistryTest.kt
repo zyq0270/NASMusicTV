@@ -27,16 +27,15 @@ import java.io.File
  * ## 为什么用「分期前沿」而不是「每个 id 都有实现」
  *
  * §14.4 表格里 G4 的原文是「**每个 `PhotoTransitionId` 都能 `get()` 到实现**」——
- * 那是**终态**（提交 12 后 43 种）的写法。本方案 P2 的 33 种**不在计划内**
- * （阶段 12 只补到 P1 = 43），所以「76 项全都有实现」从阶段 5 到收尾都**不可能成立**。
- *
- * ⇒ 门禁改成：**注册表恰好等于「≤ 当前已完成分期」的全部项**。
- * 这样从阶段 5 到收尾**一直为真**，且「漏一个 / 多一个」都能判出。
+ * 那是**终态**（76 项全实现）的写法。本门禁用「分期前沿」的形式表达同一件事：
+ * 注册表**恰好等于**「≤ 当前已完成分期」的全部项。
  *
  * ⚠️ 前沿用 [EXPECTED_FRONTIER] **硬编码**而不是从注册表反推 ——
  * 若从 `available` 反推（`available.maxOf { it.phase }`），把**整期**注册项误删后
  * 前沿会一起下沉，门禁静默通过（28 个 P1 效果全没了也不报）。
- * 硬编码的代价是：**阶段 12 完成 P1 后必须把这里改成 `Phase.P1`**。
+ *
+ * ✅ **P2 补齐后**：`EXPECTED_FRONTIER = Phase.P2`，注册表 = 76 项 = 全部枚举项。
+ * 门禁仍然是「漏一个 / 多一个都能判出」。
  *
  * ## 为什么需要 Robolectric
  *
@@ -64,6 +63,13 @@ class PhotoTransitionRegistryTest {
         assertEquals("P0 应为 15 项（§14.3 参数表）", 15, p0.size)
         val p1 = PhotoTransitionId.implemented(PhotoTransitionId.Phase.P1)
         assertEquals("P1 累计应为 43 项（15 + 28）", 43, p1.size)
+        val p2 = PhotoTransitionId.implemented(PhotoTransitionId.Phase.P2)
+        assertEquals("P2 累计应为 76 项（43 + 33）", 76, p2.size)
+        assertEquals(
+            "P2 档本身应是 33 项",
+            33,
+            PhotoTransitionId.entries.count { it.phase == PhotoTransitionId.Phase.P2 },
+        )
     }
 
     /**
@@ -148,9 +154,8 @@ class PhotoTransitionRegistryTest {
             }
         }
         assertTrue(
-            "本方案只实现到 P1（43 种），不可能 76 项全部注册 —— 若全部注册了，" +
-                "说明有人实现了 P2 却没更新本门禁的分期前沿",
-            available.size < PhotoTransitionId.entries.size,
+            "P2 补齐后注册表应覆盖全部 76 项（少一项 ⇒ 该效果在选择器里点了没反应）",
+            available.size == PhotoTransitionId.entries.size,
         )
     }
 
@@ -333,17 +338,24 @@ class PhotoTransitionRegistryTest {
     /**
      * **负向自证**：越期注册**必须**被判出。
      *
-     * 把 P1 的 `FADE_WHITE` 提前塞进 P0 注册表 —— 功能上无害，
-     * 但「P0 = 15 种」的分期声明就不再成立了。
+     * ⚠️ P2 补齐后 76 项全部注册 ⇒ 「拿一个还没实现的项」当越期样例已经不可能。
+     * ⇒ 这里**模拟**「只做到 P1 的那个阶段，却提前注册了 P2 的项」：
+     * 把 P2 的项从真实注册表里摘掉（= 回到 P1 完成时的状态），再塞回一个 P2 项，
+     * 用 `Phase.P1` 的前沿判定 ⇒ 必须被判出。
+     *
+     * 这样这条用例验的仍是**同一个性质**（判定逻辑能识别越期注册），
+     * 而不是随着分期推进而变成恒真的空转用例。
      */
     @Test
     fun `negative proof - a stray registration is caught`() {
-        // ⚠️ 阶段 12 后 P1 已全部注册 ⇒ 越期演示改用 **P2** 的 RIPPLE（仍未实现，性质相同）
-        val real = PhotoTransitionRegistry.available()
-        assertTrue("前置条件：RIPPLE 属 P2，不该注册", PhotoTransitionId.RIPPLE !in real)
+        val p2Only = PhotoTransitionId.entries
+            .filter { it.phase == PhotoTransitionId.Phase.P2 }
+            .toSet()
+        val asIfP1 = PhotoTransitionRegistry.available() - p2Only
+        assertEquals("模拟：摘掉 P2 的 33 项后应正好剩 43 项", 43, asIfP1.size)
 
-        val broken = real + PhotoTransitionId.RIPPLE
-        val violations = registryViolations(broken, EXPECTED_FRONTIER)
+        val broken = asIfP1 + PhotoTransitionId.RIPPLE
+        val violations = registryViolations(broken, PhotoTransitionId.Phase.P1)
         assertTrue("越期注册 RIPPLE 后必须判出问题，实际 $violations", violations.isNotEmpty())
         assertTrue(
             "违例信息应指名道姓说是 RIPPLE，实际 $violations",
@@ -358,7 +370,7 @@ class PhotoTransitionRegistryTest {
      * 把**整期**注册项删掉后前沿会一起下沉、门禁静默通过。
      *
      * ⚠️ 这里的前沿用 **`Phase.P1` 显式给出**，而不是 [EXPECTED_FRONTIER] ——
-     * 因为当前阶段 [EXPECTED_FRONTIER] 就是 P0，「删掉 P1」在 P0 阶段本就无影响，
+     * 因为当前阶段 [EXPECTED_FRONTIER] 已经是 P2，「删掉 P1」在 P2 阶段本就无影响，
      * 拿它当断言会变成一条**恒真**的空转用例（首轮实测即因此失败）。
      * 显式给 P1 之后，本用例在**任何阶段**都验的是同一个性质：
      * 「声明应做到 P1，但 P1 整批丢失」。
@@ -448,11 +460,13 @@ class PhotoTransitionRegistryTest {
         /**
          * 本阶段已完成的最高分期。
          *
-         * 阶段 12 已补齐 P1（提交 12），按本测试 KDoc 的约定改为 `Phase.P1`。
-         * ⚠️ P2 的 33 种不在计划内（§15.3 阶段 12 的范围就是 P1 = 43）；
-         * 若日后补 P2，同样要把这里改成 `Phase.P2`。
+         * P0（阶段 5）→ P1（阶段 12）→ **P2（照片墙转场 P2 档补齐，33 种）**。
+         *
+         * ⚠️ 这个常量必须**硬编码**而不是从注册表反推（见类 KDoc 的「负向自证」一节：
+         * 反推前沿会把「整期被误删」这种事故变成静默通过）。
+         * ⇒ 每补完一期，必须把它改成新的分期。
          */
-        val EXPECTED_FRONTIER = PhotoTransitionId.Phase.P1
+        val EXPECTED_FRONTIER = PhotoTransitionId.Phase.P2
 
         /**
          * 绘制路径上禁止出现的**位图分配**调用。

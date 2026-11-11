@@ -19,6 +19,9 @@ import androidx.annotation.StringRes
  * 但**代码里实现了几种**由 [PhotoTransitionRegistry] 决定。抽池必须基于「真有实现」的集合
  * —— 否则会抽到一个空转场（画面卡住）。见 [randomPool]。
  *
+ * ✅ **P0 / P1 / P2 三期现已全部实现**（76 种，注册表与 `implemented(Phase.P2)` 恰好一致 ——
+ * 门禁 G4 钉住）。`phase` 保留下来是为了让「分期」这件事仍可见（文档与门禁都要用）。
+ *
  * ⚠️ 不要与本文件外的 `PhotoTransitionClock.Phase`（IDLE / ENTER / HOLD / EXIT）混淆：
  * 那个是**一次切换内的阶段**，这里是**交付分期**。
  */
@@ -297,6 +300,8 @@ enum class PhotoTransitionId(
             SHAPE_RANDOM,     // 复用 PolygonIrisTransition（四个形状全是 clipPath）
             WIPE_CLOCK,       // IrisP1Transitions.kt 扇形折线 clipPath
             WIPE_CROSS,
+            IRIS_TRIANGLE,    // ShapeP2Transitions.kt 正三角形光圈（clipPath）
+            WIPE_SPIRAL,      // ShapeP2Transitions.kt 螺线扇形擦除（clipPath）
         )
 
         /** clipPath 安全的最低 API */

@@ -3,6 +3,7 @@ package com.nasmusic.tv.visualizer.photo
 import com.nasmusic.tv.visualizer.photo.transitions.IrisDiamondTransition
 import com.nasmusic.tv.visualizer.photo.transitions.IrisHexagonTransition
 import com.nasmusic.tv.visualizer.photo.transitions.IrisStarTransition
+import com.nasmusic.tv.visualizer.photo.transitions.IrisTriangleTransition
 import com.nasmusic.tv.visualizer.photo.transitions.polygonCoverRadius
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -130,6 +131,7 @@ class PolygonIrisCoverTest {
         "菱形" to IrisDiamondTransition().unitVertices,
         "六边形" to IrisHexagonTransition().unitVertices,
         "五角星" to IrisStarTransition().unitVertices,
+        "正三角形" to IrisTriangleTransition().unitVertices,
         "正方形" to floatArrayOf(-1f, -1f, 1f, -1f, 1f, 1f, -1f, 1f),
     )
 

@@ -26799,3 +26799,89 @@ CI 上没有私有分支 ref ⇒ 退出码 2 ⇒ 跳过（与 `PrivateOverlayDri
 
 §10.384 第六节遗留清单第 5 条（「DHU / 真车端到端验收仍未做」）按纪律
 「只追加新段、不回改历史段」**原样保留** ⇒ 由本节统一交代其已关闭。
+
+---
+
+### 10.386 照片墙转场 **P2 档 33 种全部实现**（转场总数 43 → 76）（2026-11-11）
+
+> **性质**：**有代码变更**（5 个新实现文件 + 5 处既有文件改造 + 5 个测试文件：新增 2 / 改造 3），
+> **版本号不变**（并入尚未 push / 未打 tag 的 v2.39.18），进 `CHANGELOG.md`。
+> 这是 §10.384 第六节遗留清单第 4 条（「照片墙转场 P2（33 种）未实现」）的**关闭**。
+
+#### 一、交付范围
+
+`PhotoTransitionId` 一次写全的 76 项至此**全部有实现**（P0 15 + P1 28 + P2 33）：
+
+| 组 | P2 新增（33 种） | 实现文件 |
+|---|---|---|
+| B 滑动 | 视差滑动 | `TransformP2Transitions.kt` |
+| C 缩放 / 深度 | 3D 纵深推拉、希区柯克变焦 | 同上 |
+| D 遮罩形状 | 三角形展开、螺旋擦除 | `ShapeP2Transitions.kt` |
+| E 条纹 / 分块 | 网格 3D 翻转、马赛克渐显、拼图碎片、像素化过渡、玻璃破碎、Voronoi 碎片化、胶片卷动、漫画分格 | `TilesP2Transitions.kt` |
+| F 溶解 / 噪点 | 颗粒溶解、半调网点 | `MaskP2Transitions.kt` |
+| G 扭曲 | 波纹扭曲、波浪位移、漩涡、液化、融化流淌 | 遮罩族 + 变换族 |
+| H 色彩 / 光效 | 光晕绽放、色彩烧灼 | `MaskP2Transitions.kt` / `TransformP2Transitions.kt` |
+| I 音频反应 | 低频绽放、波形擦除、脉动溶解 | `TransformP2Transitions.kt` / `AudioP2Transitions.kt` / `MaskP2Transitions.kt` |
+| J 风格化 | 3D 翻页、数字雨覆盖、霓虹描边 | `TransformP2Transitions.kt` |
+| K 有机 / 模拟 | 泼墨扩散、水彩晕染、沙化、火焰燃烧、冰冻结晶 | `MaskP2Transitions.kt` |
+
+#### 二、关键口径（**都是被红线逼出来的，不是随手选的**）
+
+1. ⛔ **P2 的 5 项 M5 效果全部走 M3 遮罩近似，仓内零 shader**
+   （`RIPPLE` / `WAVE_WARP` / `SWIRL` / `LIQUIFY` / `MELT`）。
+   依据：全仓红线「零 AGSL / 零 GLSL / 零 OpenGL」（`docs/archive/blackhole-visualizer-plan.md` §一），
+   且 `RuntimeShader` 是 API 33+、`RenderEffect` 是 API 31+，**minSdk 22 两者都不可用** ⇒
+   写了 shader 也只在极少数新机上生效、在目标电视上必然走降级。
+   ⇒ 枚举里保留 `M5_SHADER` 标记（方案原本的规划），但 `PhotoMechanism.M5_SHADER` 的 KDoc
+   已写明「本仓不实现任何 shader」。
+
+2. ⛔ **遮罩一律 256×256 预生成 + `BlendMode.DstIn` 合成**，不做逐像素运算
+   （1080p 单帧 200 万像素，逐像素会掉到个位数帧率）。
+   形态扩到 8 种（颗粒 / 网点 / 圆环 / 螺旋 / 燃烧前沿 / 融化渐变 / 团块 / 胞晶），
+   **按需生成 + 全进程共享**（`MaskCache` 仍是 `object`；每种遮罩只在第一次被用到时建一次）。
+
+3. ⛔ **「收尾补画」机制**（`MaskDissolveTransition.settleFrom`）：
+   带空洞的遮罩（圆环 / 螺旋 / 团块 / 胞晶）在 `p = 1` 时仍有旧图从洞里透出 ⇒
+   这些效果在 `p > 0.82~0.88` 之后**整幅补画新图**。
+   ⛔ 不补画的后果：HOLD 期（新图定格）画面上仍有旧图碎片 ⇒ 用户读作「转场没走完」。
+
+4. ⛔ **「三角形展开 / 螺旋擦除」用 `clipPath` ⇒ 必须登记进 `CLIP_BASED`**
+   ⇒ **API < 26（含目标电视 API 22）由枚举层降级成交叉淡化**。
+   这是 D 组同族口径（其余 8 个形状类本就这样）：`clipPath` 的 hwui SIGSEGV 是项目红线，
+   `try/catch(Throwable)` 拦不住 native 崩溃 ⇒ 只能在枚举层先降级。
+   ⚠️ 代价要说清楚：**这两个效果在 API 22 真机上与交叉淡化无异**（不是「没实现」，是「按红线降级」）。
+
+5. ⛔ **M4 块数红线 ≤ 84**（12×7）：P2 的分块类按画布反推网格并封顶
+   （最大 10×6 = 60；`GRID_FLIP` 8×5 = 40），门禁逐个核对。
+
+6. **音频输入走 `PhotoGeometry`**（新增 `waveform` / `bass` / `pulse` 三个字段）
+   ⇒ 不改 `PhotoTransition.render` 的签名（那会动到全部 76 个实现）。
+   ⚠️ 取值口径：`waveform` 是**时域**信号（`AudioFrame.waveform`），
+   `bass` / `pulse` 是**律动通道**（`AudioFrame.bass` / `.pulse`）——
+   `AudioFrame` 明确写了「二者不可混用：用显示通道（频谱）驱动律动会让强弱差异被 gamma 压扁」。
+
+#### 三、门禁
+
+| 门禁 | 变化 |
+|---|---|
+| **G4**（`PhotoTransitionRegistryTest`） | 分期前沿 `Phase.P1` → **`Phase.P2`**；注册表 43 → **76** 项 |
+| **G5**（`PhotoTransitionPoolTest`） | 不改（它按**完整枚举**算池，71 项 / 老平台折叠数自动跟随 `CLIP_BASED`） |
+| **C46**（`PhotoTransitionClipGateTest`） | `ShapeP2Transitions.kt` 进 `clipPath` 白名单；`CLIP_BASED` 8 → **10** 项 |
+| **G21**（`PolygonIrisCoverTest`） | 形状表纳入**正三角形**（终态半径必须盖住画布，否则四角露旧图） |
+| **新增**（`PhotoTransitionP2Test`） | ① 33 种全部有实现且自报 id ② 音频反应类不进随机池 ③ 每个 `prepare()` / `release()` 跑得通 ④ 块数 ≤ 84 ⑤ **照片墙目录零 shader** ⑥ 遮罩形态符合设计意图 ⑦ 遮罩只生成一次 |
+
+⚠️ **遮罩形态为什么能断言**：Windows 上 Robolectric 的 NATIVE 图形模式不可用 ⇒ **不能像素回读**。
+⇒ 遮罩的形态计算被抽成**纯函数** `MaskCache.sampleAlpha(kind, x, y)`（不建位图），
+于是「燃烧前沿在顶部 / 晶界透明 / 网点有明暗对比」这类**设计意图**可以用纯 JVM 断言。
+
+#### 四、⛔ 仍未验证（长期存在的限制）
+
+- **真机目视未做**：33 种效果的观感只有**几何 / 逻辑口径**的单测覆盖，
+  合成后的实际画面需要在**目标电视（API 22 创维）**上目视验收。
+- **性能未在 ARMv7 上实测**：块数红线已按 ≤84 收口，但分块类（每块 1 次 `drawImage`）在老电视上的
+  实际帧率仍待真机确认。
+
+#### 五、⛔ 历史段不改写
+
+§10.384 第六节遗留清单第 4 条（「照片墙转场 P2（33 种）未实现」）按纪律
+「只追加新段、不回改历史段」**原样保留** ⇒ 由本节统一交代其已关闭。

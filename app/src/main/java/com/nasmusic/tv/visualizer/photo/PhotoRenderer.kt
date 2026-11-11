@@ -98,6 +98,12 @@ class PhotoRenderer : VisualizerRenderer {
         //      直到下一次切换把它换成 `a` 才「跳」回正确形状（用户读作「入场动画没走完」）
         geom.update(ctx, ctx.photoScaleMode, a.width, a.height, b.width, b.height)
         geom.spectrum = frame.spectrum         // 只存引用，不复制
+        // ⚠️ P2 档音频反应类（`BASS_BLOOM` / `WAVEFORM_WIPE` / `PULSE_DISSOLVE`）的输入。
+        // ⚠️ `waveform` 是**时域**信号，`bass` / `pulse` 是**律动通道**（线性未压缩）——
+        // ⚠️ 刻意不用频谱的低频段代替 `bass`（`AudioFrame` 明确禁止两者混用）。
+        geom.waveform = frame.waveform
+        geom.bass = frame.bass
+        geom.pulse = frame.pulse
 
         if (id != lastTransitionId || ctx.quality != lastQuality || ctx.canvasSize.width != lastCanvasW ||
             ctx.canvasSize.height != lastCanvasH
