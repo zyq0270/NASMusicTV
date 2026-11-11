@@ -62,16 +62,50 @@ class PhotoTransitionCompletionGateTest {
 
     @Test
     fun `枚举的每一项都必须进注册表`() {
-        val missing = PhotoTransitionId.entries.map { it.name }.filter { it !in index.ids }
+        val missing = PhotoTransitionId.entries.filter { !it.retired }.map { it.name }.filter { it !in index.ids }
         assertTrue(
             "这些效果在枚举里有、注册表里没有 ⇒ 用户选中它没反应：$missing",
             missing.isEmpty(),
         )
         assertEquals(
-            "注册表的效果数应等于枚举数（${PhotoTransitionId.entries.size}）",
-            PhotoTransitionId.entries.size,
+            "注册表的效果数应等于「枚举项数 − 已下线项数」（${PhotoTransitionId.entries.size} − " +
+                "${PhotoTransitionId.RETIRED.size}）",
+            PhotoTransitionId.entries.size - PhotoTransitionId.RETIRED.size,
             index.ids.size,
         )
+    }
+
+    // ────────────────────── 门禁 ①b：已下线效果不得回流 ──────────────────────
+
+    /**
+     * **已下线**（[PhotoTransitionId.RETIRED]）的 6 个拼块类效果
+     * ⇒ 不得出现在注册表 / 随机池 / 选择器里。
+     *
+     * > 所有者 2026-11-11 裁定：「有几个是将照片切成好多块…但并没有拼成原图，
+     * > 导致图是乱的。如果效果就是这样的，那就把这几个拼块的切换效果去掉。
+     * > 还是要能够显示全部原图的。」
+     *
+     * ⚠️ 这条门禁防的是「有人把 retired 标记去掉 / 把实现加回注册表」
+     * ⇒ 那样它们会重新出现在随机池里 ⇒ 用户又看到「乱的」照片。
+     */
+    @Test
+    fun `已下线的拼块类效果不得回到注册表与随机池`() {
+        assertTrue(
+            "前置条件：应有 6 个已下线效果，实际 ${PhotoTransitionId.RETIRED.size}：${PhotoTransitionId.RETIRED.map { it.name }}",
+            PhotoTransitionId.RETIRED.size == 6,
+        )
+        val leaked = PhotoTransitionId.RETIRED.filter { it.name in index.ids }.map { it.name }
+        assertTrue(
+            "这些效果已下线却仍在注册表里 ⇒ 会重新出现在随机池与选择器上：$leaked",
+            leaked.isEmpty(),
+        )
+        // 池源用「规划集合」（`implemented` 已过滤下线项）⇒ 纯 JVM，不依赖注册表实例
+        val plan = PhotoTransitionId.implemented(PhotoTransitionId.Phase.P2)
+        for (sdk in listOf(22, 33, 34)) {
+            val pool = PhotoTransitionId.randomPool(plan, sdkInt = sdk).map { PhotoTransitionId.entries[it] }
+            val inPool = PhotoTransitionId.RETIRED.filter { it in pool }
+            assertTrue("这些效果已下线却进了 sdk=$sdk 的随机池：${inPool.map { it.name }}", inPool.isEmpty())
+        }
     }
 
     // ────────────────────── 门禁 ②：遮罩型必须补末段整幅新图 ──────────────────────
@@ -158,6 +192,11 @@ class PhotoTransitionCompletionGateTest {
             "分类总数应等于已注册效果数（${allIds.size}）",
             allIds.size,
             mask.size + clip.size + plain.size,
+        )
+        assertEquals(
+            "几何型应等于「总数 − 遮罩型 − 裁剪型」（70 − 15 − 9 = 46）",
+            46,
+            plain.size,
         )
         // 三类都非空 —— 任一类为空说明分类规则漏了一种机制（门禁自身失效）
         assertTrue("遮罩型不应为空（NOISE_DISSOLVE 等）", mask.isNotEmpty())

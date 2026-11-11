@@ -7,7 +7,6 @@ import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.clipRect
-import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import com.nasmusic.tv.visualizer.photo.PhotoGeometry
@@ -18,51 +17,15 @@ import kotlin.math.roundToInt
 /**
  * 风格化类 P1 + 音频反应类 P1（§14.3）
  *
- * - [KaleidoTransition] `KALEIDO`：竖条镜像万花筒
  * - [ChromaticSplitTransition] `CHROMATIC_SPLIT`：RGB 三通道错位叠加、随推进合拢
  * - [RgbSlideTransition] `RGB_SLIDE`：三通道从三个方向滑入合拢
  * - [SpectrumBarsTransition] `SPECTRUM_BARS`：量化为阶梯的频谱柱（★ 默认不进随机池）
  * - [BeatCutTransition] `BEAT_CUT`：节拍硬切（窗口为 0，★ 默认不进随机池）
  * - [CinematicBarsTransition] `CINEMATIC_BARS`：电影黑边收缩（**串行**）
+ *
+ * ⛔ `KALEIDO`（万花筒：竖条镜像）已于 2026-11-12 **下线**（所有者裁定：
+ * 过程中的画面**拼不回原图**）⇒ 实现与注册项都已移除，见 `PhotoTransitionId.RETIRED`。
  */
-
-/**
- * 万花筒：画面竖切 6 条，奇数条**水平镜像**，逐条按对角波次显现。
- * 镜像用 `DrawScope.scale(-1f, 1f, pivot)`（内部 save/restore，零分配）。
- */
-internal class KaleidoTransition : PhotoTransition {
-
-    override val id: PhotoTransitionId = PhotoTransitionId.KALEIDO
-
-    override fun DrawScope.render(a: ImageBitmap, b: ImageBitmap, p: Float, geom: PhotoGeometry) {
-        drawPhoto(a, geom.srcA, geom.dstA)
-
-        val segW = geom.canvasW / SEGS
-        val denom = 1f - STAGGER
-        val cy = geom.canvasH * 0.5f
-        for (i in 0 until SEGS) {
-            val delay = i.toFloat() / (SEGS - 1) * STAGGER
-            val local = ((p - delay) / denom).coerceIn(0f, 1f)
-            if (local <= 0f) continue
-            val x0 = i * segW
-            clipRect(x0, 0f, x0 + segW, geom.canvasH) {
-                if (i % 2 == 1) {
-                    // 奇数条水平镜像（绕该条中轴翻转后整幅绘制，裁剪后只露出该条）
-                    scale(-1f, 1f, pivot = Offset(x0 + segW * 0.5f, cy)) {
-                        drawPhoto(b, geom.srcB, geom.dstB, alpha = local)
-                    }
-                } else {
-                    drawPhoto(b, geom.srcB, geom.dstB, alpha = local)
-                }
-            }
-        }
-    }
-
-    private companion object {
-        const val SEGS = 6
-        const val STAGGER = 0.45f
-    }
-}
 
 /**
  * RGB 三通道错位（共用底座）：三份**单通道染色**的新图副本以 `BlendMode.Plus` 相加 ——

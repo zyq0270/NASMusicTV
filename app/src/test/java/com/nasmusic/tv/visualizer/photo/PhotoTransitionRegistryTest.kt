@@ -62,9 +62,9 @@ class PhotoTransitionRegistryTest {
         val p0 = PhotoTransitionId.implemented(PhotoTransitionId.Phase.P0)
         assertEquals("P0 应为 15 项（§14.3 参数表）", 15, p0.size)
         val p1 = PhotoTransitionId.implemented(PhotoTransitionId.Phase.P1)
-        assertEquals("P1 累计应为 43 项（15 + 28）", 43, p1.size)
+        assertEquals("P1 累计应为 40 项（43 − 3 个已下线）", 40, p1.size)
         val p2 = PhotoTransitionId.implemented(PhotoTransitionId.Phase.P2)
-        assertEquals("P2 累计应为 76 项（43 + 33）", 76, p2.size)
+        assertEquals("P2 累计应为 70 项（76 − 6 个已下线）", 70, p2.size)
         assertEquals(
             "P2 档本身应是 33 项",
             33,
@@ -154,8 +154,8 @@ class PhotoTransitionRegistryTest {
             }
         }
         assertTrue(
-            "P2 补齐后注册表应覆盖全部 76 项（少一项 ⇒ 该效果在选择器里点了没反应）",
-            available.size == PhotoTransitionId.entries.size,
+            "注册表应覆盖全部**可用**项（76 − 6 个已下线 = 70；少一项 ⇒ 选择器里点了没反应）",
+            available.size == PhotoTransitionId.entries.size - PhotoTransitionId.RETIRED.size,
         )
     }
 
@@ -352,7 +352,7 @@ class PhotoTransitionRegistryTest {
             .filter { it.phase == PhotoTransitionId.Phase.P2 }
             .toSet()
         val asIfP1 = PhotoTransitionRegistry.available() - p2Only
-        assertEquals("模拟：摘掉 P2 的 33 项后应正好剩 43 项", 43, asIfP1.size)
+        assertEquals("模拟：摘掉 P2 的项后应正好剩 40 项（P1 累计）", 40, asIfP1.size)
 
         val broken = asIfP1 + PhotoTransitionId.RIPPLE
         val violations = registryViolations(broken, PhotoTransitionId.Phase.P1)
@@ -386,8 +386,8 @@ class PhotoTransitionRegistryTest {
         val hardcoded = registryViolations(wiped, PhotoTransitionId.Phase.P1)
         assertTrue("硬编码前沿 P1 必须判出「整期被删」，实际 $hardcoded", hardcoded.isNotEmpty())
         assertTrue(
-            "应报出 28 项漏注册（P1 累计 43 − P0 的 15），实际 ${hardcoded.size}：$hardcoded",
-            hardcoded.size == 28,
+            "应报出 25 项漏注册（P1 累计 40 − P0 的 15），实际 ${hardcoded.size}：$hardcoded",
+            hardcoded.size == 25,
         )
 
         // ② 反推前沿（被否决的写法）：前沿跟着下沉到 P0 ⇒ 一条都不报
@@ -397,7 +397,7 @@ class PhotoTransitionRegistryTest {
             derivedFrontier == PhotoTransitionId.Phase.P0,
         )
         assertTrue(
-            "反推前沿会静默通过（28 项全没了也不报）—— 这正是本门禁不采用反推的原因",
+            "反推前沿会静默通过（25 项全没了也不报）—— 这正是本门禁不采用反推的原因",
             registryViolations(wiped, derivedFrontier).isEmpty(),
         )
     }

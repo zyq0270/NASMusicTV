@@ -143,7 +143,7 @@ class PhotoRenderer : VisualizerRenderer {
             lastCanvasH = ctx.canvasSize.height
         }
 
-        // C47 兜底：id 对应的实现不存在时（枚举 76 项、注册表 43 项），
+        // C47 兜底：id 对应的实现不存在时（枚举 76 项规划、注册表 70 项可用），
         // 旧实现直接 return ⇒ 整面墙一帧都不画（纯黑）。这里回落默认转场，
         // 宁可效果不对，也不能整面黑屏。
         val t = bound

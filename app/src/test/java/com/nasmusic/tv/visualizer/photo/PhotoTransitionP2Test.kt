@@ -44,21 +44,22 @@ import java.io.File
 @Config(sdk = [34])
 class PhotoTransitionP2Test {
 
-    /** P2 档的全部效果 */
-    private val p2 = PhotoTransitionId.entries.filter { it.phase == PhotoTransitionId.Phase.P2 }
+    /** P2 档**可用**的效果（33 − 3 个已下线 = 30） */
+    // ⛔ 已下线的（[PhotoTransitionId.RETIRED]）没有实现 ⇒ 不在本测试的范围内
+    private val p2 = PhotoTransitionId.entries.filter { it.phase == PhotoTransitionId.Phase.P2 && !it.retired }
 
     // ────────────────────── ① 全部有实现且自报 id ──────────────────────
 
     @Test
-    fun `P2 档 33 种全部有实现且自报 id`() {
-        assertEquals("P2 档应有 33 种", 33, p2.size)
+    fun `P2 档可用的 30 种全部有实现且自报 id`() {
+        assertEquals("P2 档可用 30 种（33 − 3 个已下线）", 30, p2.size)
         for (id in p2) {
             val impl = PhotoTransitionRegistry.get(id)
             assertNotNull("$id 在枚举里但注册表没有实现 ⇒ 用户选中它没反应", impl)
             assertEquals("$id 的实现回报了别的 id", id, impl!!.id)
             assertTrue("$id 应出现在 available() 里（随机池由它构造）", id in PhotoTransitionRegistry.available())
         }
-        assertEquals("注册表应覆盖全部 76 项", 76, PhotoTransitionRegistry.implementedCount)
+        assertEquals("注册表应覆盖全部 70 项可用效果（76 − 6 个已下线）", 70, PhotoTransitionRegistry.implementedCount)
     }
 
     // ────────────────────── ② 音频反应类不进随机池 ──────────────────────
@@ -117,8 +118,8 @@ class PhotoTransitionP2Test {
             .map { it.groupValues[1].toInt() }.toList()
         val rows = Regex("""const val (?:MAX|MIN)_ROWS = (\d+)""").findAll(code)
             .map { it.groupValues[1].toInt() }.toList()
-        assertEquals("分块文件里应有 6 组网格常量", 6, cols.size)
-        assertEquals("分块文件里应有 6 组网格常量", 6, rows.size)
+        assertEquals("分块文件里应有 3 组网格常量", 3, cols.size)
+        assertEquals("分块文件里应有 3 组网格常量", 3, rows.size)
 
         // 每组「列 × 行」都要 ≤ 84
         for (i in cols.indices) {
@@ -129,11 +130,12 @@ class PhotoTransitionP2Test {
             )
         }
 
-        // 期望表与源码一致（顺序 = 文件里类的顺序：GRID_FLIP / MOSAIC / PIXELATE /
-        // PUZZLE / SHATTER / VORONOI）—— 改了常量要同步改这里并复核块数 ≤ 84
+        // 期望表与源码一致（顺序 = 文件里类的顺序：GRID_FLIP / MOSAIC / PIXELATE）——
+        // 改了常量要同步改这里并复核块数 ≤ 84
+        // ⚠️ 2026-11-12：PUZZLE / SHATTER / VORONOI 已下线 ⇒ 6 组变 3 组
         assertEquals(
             "分块网格常量与期望表不一致（改了常量请同步这里并复核块数 ≤ 84）",
-            listOf(8 to 5, 10 to 6, 10 to 6, 8 to 5, 10 to 6, 8 to 5),
+            listOf(8 to 5, 10 to 6, 10 to 6),
             cols.zip(rows),
         )
 

@@ -389,7 +389,7 @@ internal fun PhotoWallSettingsSection(
                         color = NasMusicColors.TextPrimary,
                         fontSize = FontSize.button()
                     )
-                    // §4.5：43 个转场芯片由 PhotoTransitionChips 渲染，它没有说明位 ⇒ 补在这里
+                    // §4.5：70 个转场芯片由 PhotoTransitionChips 渲染，它没有说明位 ⇒ 补在这里
                     SettingsHint(stringResource(R.string.settings_pw_transition_mode_desc))
                     PhotoTransitionChips(
                         selected = s.photoWallFixedTransition,

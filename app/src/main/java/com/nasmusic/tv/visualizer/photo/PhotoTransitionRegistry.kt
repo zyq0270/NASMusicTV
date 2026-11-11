@@ -23,7 +23,6 @@ import com.nasmusic.tv.visualizer.photo.transitions.FadeColorTransition
 import com.nasmusic.tv.visualizer.photo.transitions.FadeWhiteTransition
 import com.nasmusic.tv.visualizer.photo.transitions.FilmRollTransition
 import com.nasmusic.tv.visualizer.photo.transitions.FrostTransition
-import com.nasmusic.tv.visualizer.photo.transitions.GlitchTransition
 import com.nasmusic.tv.visualizer.photo.transitions.GrainDissolveTransition
 import com.nasmusic.tv.visualizer.photo.transitions.GridFlipTransition
 import com.nasmusic.tv.visualizer.photo.transitions.HalftoneTransition
@@ -33,7 +32,6 @@ import com.nasmusic.tv.visualizer.photo.transitions.IrisDiamondTransition
 import com.nasmusic.tv.visualizer.photo.transitions.IrisHexagonTransition
 import com.nasmusic.tv.visualizer.photo.transitions.IrisStarTransition
 import com.nasmusic.tv.visualizer.photo.transitions.IrisTriangleTransition
-import com.nasmusic.tv.visualizer.photo.transitions.KaleidoTransition
 import com.nasmusic.tv.visualizer.photo.transitions.LightSweepTransition
 import com.nasmusic.tv.visualizer.photo.transitions.LiquifyTransition
 import com.nasmusic.tv.visualizer.photo.transitions.MatrixOverlayTransition
@@ -45,7 +43,6 @@ import com.nasmusic.tv.visualizer.photo.transitions.PageFlipTransition
 import com.nasmusic.tv.visualizer.photo.transitions.ParallaxSlideTransition
 import com.nasmusic.tv.visualizer.photo.transitions.PerspectivePushTransition
 import com.nasmusic.tv.visualizer.photo.transitions.PixelateTransition
-import com.nasmusic.tv.visualizer.photo.transitions.PuzzleTransition
 import com.nasmusic.tv.visualizer.photo.transitions.PulseDissolveTransition
 import com.nasmusic.tv.visualizer.photo.transitions.PushTransition
 import com.nasmusic.tv.visualizer.photo.transitions.RevealTransition
@@ -53,15 +50,12 @@ import com.nasmusic.tv.visualizer.photo.transitions.RgbSlideTransition
 import com.nasmusic.tv.visualizer.photo.transitions.RippleTransition
 import com.nasmusic.tv.visualizer.photo.transitions.SandDissolveTransition
 import com.nasmusic.tv.visualizer.photo.transitions.ScanlineDissolveTransition
-import com.nasmusic.tv.visualizer.photo.transitions.ShatterTransition
 import com.nasmusic.tv.visualizer.photo.transitions.ShapeRandomTransition
 import com.nasmusic.tv.visualizer.photo.transitions.SlideTransition
 import com.nasmusic.tv.visualizer.photo.transitions.SpectrumBarsTransition
 import com.nasmusic.tv.visualizer.photo.transitions.SpectrumWipeTransition
 import com.nasmusic.tv.visualizer.photo.transitions.SwirlTransition
 import com.nasmusic.tv.visualizer.photo.transitions.ThresholdSweepTransition
-import com.nasmusic.tv.visualizer.photo.transitions.TileCascadeTransition
-import com.nasmusic.tv.visualizer.photo.transitions.VoronoiTransition
 import com.nasmusic.tv.visualizer.photo.transitions.WatercolorTransition
 import com.nasmusic.tv.visualizer.photo.transitions.WaveformWipeTransition
 import com.nasmusic.tv.visualizer.photo.transitions.WaveWarpTransition
@@ -96,10 +90,12 @@ import com.nasmusic.tv.visualizer.photo.transitions.ZoomTransition
 object PhotoTransitionRegistry {
 
     /**
-     * P0 + P1 + P2 共 **76** 种（§14.3 参数表；P2 档补齐后与
+     * P0 + P1 + P2 共 **70 种可用**（§14.3 参数表共 76 种，其中 6 个拼块类已下线 ——
+     * 见 [PhotoTransitionId.RETIRED]；可用集合与
      * `PhotoTransitionId.implemented(Phase.P2)` 恰好一致 —— G4 钉住）。
      *
      * ⚠️ 新增实现时**必须**同时加进这里，否则抽不到（G4 会拦住「加了枚举没加注册」）。
+     * ⛔ 反过来：**下线**一个效果时要从这里移除（否则它会继续出现在随机池与选择器里）。
      *
      * ⚠️ **追加顺序有意义**：随机池按「降级后的标识」去重时**保留先出现的那一个** ——
      * P2 的项一律追加在既有 43 项之后 ⇒ 老平台上 `CROSSFADE`（枚举第一个常量）
@@ -163,14 +159,11 @@ object PhotoTransitionRegistry {
         // E 条纹 / 分块
         PhotoTransitionId.CHECKERBOARD to CheckerboardTransition(),
         PhotoTransitionId.BLOCKS_RANDOM to BlocksRandomTransition(),
-        PhotoTransitionId.TILE_CASCADE to TileCascadeTransition(),
 
         // F 溶解 / 噪点
         PhotoTransitionId.THRESHOLD_SWEEP to ThresholdSweepTransition(),
         PhotoTransitionId.SCANLINE_DISSOLVE to ScanlineDissolveTransition(),
 
-        // G 扭曲（P1 只含 KALEIDO）
-        PhotoTransitionId.KALEIDO to KaleidoTransition(),
 
         // H 色彩 / 光效
         PhotoTransitionId.CHROMATIC_SPLIT to ChromaticSplitTransition(),
@@ -182,7 +175,6 @@ object PhotoTransitionRegistry {
         PhotoTransitionId.BEAT_CUT to BeatCutTransition(),
 
         // J 风格化
-        PhotoTransitionId.GLITCH to GlitchTransition(),
         PhotoTransitionId.CINEMATIC_BARS to CinematicBarsTransition(),
 
         // ───────── P2（照片墙转场 P2 档补齐，共 33 种）─────────
@@ -201,10 +193,7 @@ object PhotoTransitionRegistry {
         // E 条纹 / 分块（每项块数 ≤ 84，M4 红线）
         PhotoTransitionId.GRID_FLIP to GridFlipTransition(),
         PhotoTransitionId.MOSAIC to MosaicTransition(),
-        PhotoTransitionId.PUZZLE to PuzzleTransition(),
         PhotoTransitionId.PIXELATE to PixelateTransition(),
-        PhotoTransitionId.SHATTER to ShatterTransition(),
-        PhotoTransitionId.VORONOI to VoronoiTransition(),
         PhotoTransitionId.FILM_ROLL to FilmRollTransition(),
         PhotoTransitionId.COMIC_PANEL to ComicPanelTransition(),
 
@@ -247,6 +236,6 @@ object PhotoTransitionRegistry {
     /** 当前**真有实现**的效果集合 —— 随机池只能由它构造（§5.9「池跟着分期走」） */
     fun available(): Set<PhotoTransitionId> = impls.keys
 
-    /** 已实现数量（P0 + P1 + P2 = 76；观察 / 单测用） */
+    /** 已实现数量（P0 + P1 + P2 = 70；观察 / 单测用） */
     val implementedCount: Int get() = impls.size
 }

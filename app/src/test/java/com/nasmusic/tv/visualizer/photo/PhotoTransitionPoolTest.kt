@@ -23,8 +23,9 @@ import org.junit.Test
  */
 class PhotoTransitionPoolTest {
 
-    /** 全部 76 项 —— 用完整枚举当池源，才能同时覆盖 P1 / P2 的规则 */
-    private val all = PhotoTransitionId.entries.toList()
+    /** 全部**可用**项（70 = 76 − 6 个已下线）—— 用完整枚举当池源，才能同时覆盖 P1 / P2 的规则 */
+    // ⛔ 已下线的（[PhotoTransitionId.RETIRED]）不在池里：它们没有实现，也不该被抽到
+    private val all = PhotoTransitionId.entries.filter { !it.retired }.toList()
 
     private val audioReactive = PhotoTransitionId.entries.filter { it.audioReactive }
 
@@ -115,16 +116,16 @@ class PhotoTransitionPoolTest {
     /** 池大小可精确核算 ⇒ 「多了 / 少了」都能被发现 */
     @Test
     fun `pool size matches the rules exactly`() {
-        // 76 项 − 5 音频反应 = 71；老平台在此基础上再折叠降级项（LIQUIFY + clip 类）= 62
+        // 70 项 − 5 音频反应 = 65；老平台在此基础上再折叠降级项（LIQUIFY + clip 类）
         val modern = PhotoTransitionId.randomPool(all, 33)
         assertTrue(
-            "新平台池应为 71 项（76 − 5 音频），实际 ${modern.size}",
-            modern.size == 71,
+            "新平台池应为 65 项（70 − 5 音频），实际 ${modern.size}",
+            modern.size == 65,
         )
         val collapsed = collapsedOnOldPlatform().count { it in modern }
         assertTrue(
-            "老平台池应为 ${71 - collapsed} 项（71 − 降级去重 $collapsed），实际 ${PhotoTransitionId.randomPool(all, 22).size}",
-            PhotoTransitionId.randomPool(all, 22).size == 71 - collapsed,
+            "老平台池应为 ${65 - collapsed} 项（65 − 降级去重 $collapsed），实际 ${PhotoTransitionId.randomPool(all, 22).size}",
+            PhotoTransitionId.randomPool(all, 22).size == 65 - collapsed,
         )
     }
 
@@ -156,8 +157,8 @@ class PhotoTransitionPoolTest {
      * 按分期的便捷重载。
      *
      * P0（15 项）里没有音频反应类、也没有 `LIQUIFY`（P2）⇒ 池 = 15。
-     * P1（累计 43 项）里有 2 个音频反应类（`SPECTRUM_BARS` / `BEAT_CUT`）⇒ 池 = 41。
-     * P2（累计 76 项）⇒ 与完整枚举一致。
+     * P1（累计 40 项 = 43 − 3 个已下线）里有 2 个音频反应类（`SPECTRUM_BARS` / `BEAT_CUT`）⇒ 池 = 38。
+     * P2（累计 70 项 = 76 − 6 个已下线）⇒ 与完整枚举一致。
      */
     @Test
     fun `phase overload follows the phase plan`() {
@@ -166,8 +167,8 @@ class PhotoTransitionPoolTest {
         val collapsed = collapsedOnOldPlatform()
         for ((phase, expectedModern) in listOf(
             PhotoTransitionId.Phase.P0 to 15,  // P0 里没有音频反应类
-            PhotoTransitionId.Phase.P1 to 41,  // 43 − 2 音频反应类
-            PhotoTransitionId.Phase.P2 to 71,  // 76 − 5 音频反应类
+            PhotoTransitionId.Phase.P1 to 38,  // 40 − 2 音频反应类
+            PhotoTransitionId.Phase.P2 to 65,  // 70 − 5 音频反应类
         )) {
             val modern = PhotoTransitionId.randomPool(phase, sdkInt = 33)
             assertTrue(

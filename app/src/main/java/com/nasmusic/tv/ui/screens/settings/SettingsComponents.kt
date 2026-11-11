@@ -670,7 +670,7 @@ internal fun SettingsChip(
  *
  * 存在理由：`Row` 不会换行，芯片多了只能被挤扁或压成 0 宽（方案 §4.8 ①②）。
  * 手动分行而不是 FlowRow / horizontalScroll —— 后两种在 D-Pad 下焦点会跑出屏幕或滚不出去
- * （`PhotoWallSettingsSection` 的 43 个转场芯片早就是这个做法，本原语把它收成一个调用点）。
+ * （`PhotoWallSettingsSection` 的 70 个转场芯片早就是这个做法，本原语把它收成一个调用点）。
  *
  * [equalWidth] 是给「带长说明的整行瓦片」（模型下载那类）用的：需要等宽两枚时，
  * `Box(Modifier.weight(1f))` 这个兜法只在**这里**出现一次（A3：调用方⛔ 不许手抄）；

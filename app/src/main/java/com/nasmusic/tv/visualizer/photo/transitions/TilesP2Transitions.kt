@@ -17,18 +17,19 @@ import kotlin.math.sin
 import kotlin.math.sqrt
 
 /**
- * P2 档「分块」族（§14.3）—— 共 8 种
+ * P2 档「分块」族（§14.3）—— 共 5 种
  *
  * | 效果 | 块数上限 | 手法 |
  * |---|---|---|
  * | [GridFlipTransition] | 8×5 | 每块绕竖轴翻转（旧图 → 新图） |
  * | [MosaicTransition] | 10×6 | 每块从中心放大弹出 |
  * | [PixelateTransition] | 10×6 | 每块取**源图 1 个像素**铺成色块，再收成清晰图 |
- * | [PuzzleTransition] | 8×5 | 每块沿自己的方向滑入归位 |
- * | [ShatterTransition] | 10×6 | 旧图碎片向外飞散，露出新图 |
- * | [VoronoiTransition] | 8×5 | 每块朝自己的「发生点」生长（伪 Voronoi） |
  * | [FilmRollTransition] | 1 带 | 竖向卷动 + 片孔齿边 |
  * | [ComicPanelTransition] | 3×2 | 漫画分格 + 粗黑边框 |
+ *
+ * ⛔ `PUZZLE` / `SHATTER` / `VORONOI` 已于 2026-11-12 **下线**（所有者裁定：
+ * 过程中的画面**拼不回原图** ⇒ 图是乱的）⇒ 实现与注册项都已移除，
+ * 见 `PhotoTransitionId.RETIRED`。
  *
  * ## ⛔ M4 红线：总块数 ≤ 84（12×7，§4.2）
  *
@@ -314,236 +315,6 @@ internal class PixelateTransition : TileGridP2Transition() {
 
         /** 从这个进度开始「收束」成清晰图 */
         const val RESOLVE_FROM = 0.55f
-    }
-}
-
-/**
- * 拼图碎片（P2）—— 每块沿**自己的方向**滑入归位。
- *
- * 方向由散列决定（确定性、零分配），错落由对角波次决定。
- */
-internal class PuzzleTransition : TileGridP2Transition() {
-
-    override val id: PhotoTransitionId = PhotoTransitionId.PUZZLE
-
-    private val srcTmp = PhotoRect()
-    private val dstTmp = PhotoRect()
-
-    override fun maxCols(): Int = MAX_COLS
-
-    override fun maxRows(): Int = MAX_ROWS
-
-    override fun tilePx(): Float = TILE_PX
-
-    override fun DrawScope.render(a: ImageBitmap, b: ImageBitmap, p: Float, geom: PhotoGeometry) {
-        drawPhoto(a, geom.srcA, geom.dstA)
-
-        val denom = 1f - STAGGER
-        for (row in 0 until rows) {
-            val y0 = area.top + row * tileH
-            for (col in 0 until cols) {
-                val idx = row * cols + col
-                val diag = (col.toFloat() / cols + row.toFloat() / rows) * 0.5f
-                val local = ((p - diag * STAGGER) / denom).coerceIn(0f, 1f)
-                if (local <= 0f) continue
-
-                // 每块的方向（0..7 八个方向）
-                val dir = (tileHash(idx * 17 + 3) * 8f).toInt().coerceIn(0, 7)
-                val ang = dir * (Math.PI.toFloat() / 4f)
-                val dist = (1f - local) * TRAVEL
-                val offX = cos(ang) * dist * geom.canvasW
-                val offY = sin(ang) * dist * geom.canvasH
-
-                val x0 = area.left + col * tileW
-                sourceRegion(geom.srcB, geom.dstB, x0, y0, tileW, tileH, srcTmp)
-                dstTmp.set(
-                    geom.dstB.left + offX,
-                    geom.dstB.top + offY,
-                    geom.dstB.right + offX,
-                    geom.dstB.bottom + offY,
-                )
-                clipRect(x0, y0, x0 + tileW, y0 + tileH) {
-                    drawPhoto(b, srcTmp, dstTmp)
-                }
-            }
-        }
-    }
-
-    private companion object {
-        const val MAX_COLS = 8
-        const val MAX_ROWS = 5
-        const val TILE_PX = 240f
-        const val STAGGER = 0.40f
-
-        /** 滑入距离（相对画布尺寸） */
-        const val TRAVEL = 0.35f
-    }
-}
-
-/**
- * 玻璃破碎（P2）—— 旧图的碎片**向外飞散**，露出下面的新图。
- */
-internal class ShatterTransition : TileGridP2Transition() {
-
-    override val id: PhotoTransitionId = PhotoTransitionId.SHATTER
-
-    private val srcTmp = PhotoRect()
-    private val dstTmp = PhotoRect()
-
-    override fun maxCols(): Int = MAX_COLS
-
-    override fun maxRows(): Int = MAX_ROWS
-
-    override fun tilePx(): Float = TILE_PX
-
-    override fun DrawScope.render(a: ImageBitmap, b: ImageBitmap, p: Float, geom: PhotoGeometry) {
-        // 新图铺底
-        drawPhoto(b, geom.srcB, geom.dstB)
-        if (p <= 0f) return
-
-        val cx = geom.canvasW * 0.5f
-        val cy = geom.canvasH * 0.5f
-        val alpha = (1f - p).coerceIn(0f, 1f)
-
-        for (row in 0 until rows) {
-            val y0 = area.top + row * tileH
-            for (col in 0 until cols) {
-                val idx = row * cols + col
-                val x0 = area.left + col * tileW
-                val bx = x0 + tileW * 0.5f
-                val by = y0 + tileH * 0.5f
-                // 碎片方向 = 从画面中心向外（加一点散列扰动，避免完全规则）
-                val jitter = (tileHash(idx * 29 + 11) - 0.5f) * 0.6f
-                var dx = bx - cx
-                var dy = by - cy
-                val len = sqrt(dx * dx + dy * dy)
-                if (len < 0.001f) {
-                    dx = tileHash(idx) - 0.5f
-                    dy = tileHash(idx + 5) - 0.5f
-                } else {
-                    dx /= len
-                    dy /= len
-                }
-                dx += jitter * 0.4f
-                dy += jitter * 0.4f
-                val travel = p * FLY
-                val offX = dx * travel * geom.canvasW
-                val offY = dy * travel * geom.canvasH
-
-                sourceRegion(geom.srcA, geom.dstA, x0, y0, tileW, tileH, srcTmp)
-                dstTmp.set(
-                    geom.dstA.left + offX,
-                    geom.dstA.top + offY,
-                    geom.dstA.right + offX,
-                    geom.dstA.bottom + offY,
-                )
-                clipRect(x0, y0, x0 + tileW, y0 + tileH) {
-                    drawPhoto(a, srcTmp, dstTmp, alpha = alpha)
-                }
-            }
-        }
-    }
-
-    private companion object {
-        const val MAX_COLS = 10
-        const val MAX_ROWS = 6
-        const val TILE_PX = 200f
-
-        /** 飞散距离（相对画布尺寸） */
-        const val FLY = 0.55f
-    }
-}
-
-/**
- * Voronoi 碎片化（P2）—— 每块朝自己的「发生点」**生长**。
- *
- * ## 伪 Voronoi
- *
- * 真正的 Voronoi 需要按最近发生点切分多边形（要 `clipPath`）⇒ 这里用**矩形网格**
- * 近似：给画布撒 12 个发生点，每块取**最近**的那个 ⇒ 每块的生长方向指向它
- * （而真 Voronoi 里每个胞的「发生点」也在胞内、生长方向指向胞心）。
- * 观感上是一堆不规则碎块依次张开 ✓。
- */
-internal class VoronoiTransition : TileGridP2Transition() {
-
-    override val id: PhotoTransitionId = PhotoTransitionId.VORONOI
-
-    /** 发生点（归一化坐标，固定布局 ⇒ 可复现） */
-    private val seedsX = FloatArray(SEEDS) { tileHash(it * 13 + 5) }
-    private val seedsY = FloatArray(SEEDS) { tileHash(it * 13 + 900) }
-
-    private val srcTmp = PhotoRect()
-    private val dstTmp = PhotoRect()
-
-    override fun maxCols(): Int = MAX_COLS
-
-    override fun maxRows(): Int = MAX_ROWS
-
-    override fun tilePx(): Float = TILE_PX
-
-    override fun DrawScope.render(a: ImageBitmap, b: ImageBitmap, p: Float, geom: PhotoGeometry) {
-        drawPhoto(a, geom.srcA, geom.dstA)
-
-        val denom = 1f - STAGGER
-        for (row in 0 until rows) {
-            val y0 = area.top + row * tileH
-            for (col in 0 until cols) {
-                val idx = row * cols + col
-                val local = ((p - tileHash(idx * 7 + 1) * STAGGER) / denom).coerceIn(0f, 1f)
-                if (local <= 0f) continue
-
-                val x0 = area.left + col * tileW
-                val cx = x0 + tileW * 0.5f
-                val cy = y0 + tileH * 0.5f
-
-                // 最近的发生点
-                var best = 0
-                var bestD = Float.MAX_VALUE
-                for (s in 0 until SEEDS) {
-                    val dx = seedsX[s] * geom.canvasW - cx
-                    val dy = seedsY[s] * geom.canvasH - cy
-                    val d = dx * dx + dy * dy
-                    if (d < bestD) {
-                        bestD = d
-                        best = s
-                    }
-                }
-                // 生长方向 = 从发生点指向块心
-                var dx = cx - seedsX[best] * geom.canvasW
-                var dy = cy - seedsY[best] * geom.canvasH
-                val len = sqrt(dx * dx + dy * dy)
-                if (len > 0.001f) {
-                    dx /= len
-                    dy /= len
-                }
-
-                // 块从发生点方向「长」出来
-                val grow = 0.15f + 0.85f * local
-                val halfW = tileW * 0.5f * grow
-                val halfH = tileH * 0.5f * grow
-                val ox = dx * tileW * 0.5f * (1f - grow)
-                val oy = dy * tileH * 0.5f * (1f - grow)
-
-                sourceRegion(geom.srcB, geom.dstB, x0, y0, tileW, tileH, srcTmp)
-                dstTmp.set(
-                    cx - halfW + ox,
-                    cy - halfH + oy,
-                    cx + halfW + ox,
-                    cy + halfH + oy,
-                )
-                clipRect(x0, y0, x0 + tileW, y0 + tileH) {
-                    drawPhoto(b, srcTmp, dstTmp)
-                }
-            }
-        }
-    }
-
-    private companion object {
-        const val MAX_COLS = 8
-        const val MAX_ROWS = 5
-        const val TILE_PX = 240f
-        const val STAGGER = 0.50f
-        const val SEEDS = 12
     }
 }
 

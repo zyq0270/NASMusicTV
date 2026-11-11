@@ -35,8 +35,8 @@ internal abstract class PolygonIrisTransition : PhotoTransition {
      * 恰好等于对角线的一半，所以圆在 `p = 1` 时正好把画布盖满）。多边形的边界比同半径的
      * 圆更靠内：菱形需要 `(宽 + 高) / 2`，五角星因为内径只有 0.45 倍还要更大。
      * 用对角线/2 时**四个角会露在形状外面** ⇒ `p` 走到 1、进入 HOLD 之后旧图仍在四角可见，
-     * 看起来就是「入场动画没走完就停了」（与 [com.nasmusic.tv.visualizer.photo.transitions.GlitchTransition]
-     * 同一类终帧缺陷，见 `docs/technical-overview.md` §10.182）。
+     * 看起来就是「入场动画没走完就停了」（同一类终帧缺陷，见
+     * `docs/technical-overview.md` §10.182）。
      *
      * 在 [prepare] 里按画布算一次（稳态每帧零分配）。
      */

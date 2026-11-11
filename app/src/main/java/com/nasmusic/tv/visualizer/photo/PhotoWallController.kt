@@ -582,7 +582,8 @@ class PhotoWallController(
         val s = settings
         if (!s.photoWallRandomTransition) {
             // C47：固定档也必须过 available()。
-            // 枚举有 76 项、注册表只实现 43 项；effective() 只做平台降级、不看是否有实现
+            // 枚举有 76 项（规划）、注册表只实现 70 项（6 个拼块类已下线）；
+            // effective() 只做平台降级、不看是否有实现
             // ⇒ 备份导入写进一个「合法但未实现」的枚举名后，PhotoRenderer 的
             // `bound ?: return` 会让整面照片墙永远黑屏（且 lastTransitionId 已写入，不再重试）。
             val wanted = PhotoTransitionId.effective(s.photoWallFixedTransition, sdkInt)

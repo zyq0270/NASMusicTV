@@ -5,7 +5,7 @@ import com.nasmusic.tv.R
 import androidx.annotation.StringRes
 
 /**
- * 照片转场效果（**76 种**，§4.2 完整清单）
+ * 照片转场效果（**76 种**，§4.2 完整清单；**其中 6 种已下线 ⇒ 实际可用 70 种**）
  *
  * ## 为什么元信息放在枚举而不是实现类
  *
@@ -19,8 +19,11 @@ import androidx.annotation.StringRes
  * 但**代码里实现了几种**由 [PhotoTransitionRegistry] 决定。抽池必须基于「真有实现」的集合
  * —— 否则会抽到一个空转场（画面卡住）。见 [randomPool]。
  *
- * ✅ **P0 / P1 / P2 三期现已全部实现**（76 种，注册表与 `implemented(Phase.P2)` 恰好一致 ——
+ * ✅ **P0 / P1 / P2 三期现已全部实现**（注册表与 `implemented(Phase.P2)` 恰好一致 ——
  * 门禁 G4 钉住）。`phase` 保留下来是为了让「分期」这件事仍可见（文档与门禁都要用）。
+ *
+ * ⛔ **[retired] = 已下线**（所有者 2026-11-12 裁定）：转场过程中画面**不是位置正确的原图**
+ * 的那 6 个拼块类效果 ⇒ 不进注册表 ⇒ 不进随机池、不出现在设置里。清单见 [RETIRED]。
  *
  * ⚠️ 不要与本文件外的 `PhotoTransitionClock.Phase`（IDLE / ENTER / HOLD / EXIT）混淆：
  * 那个是**一次切换内的阶段**，这里是**交付分期**。
@@ -41,6 +44,25 @@ enum class PhotoTransitionId(
     val requiresSequential: Boolean = false,
     /** 形态由音频数据驱动 ⇒ **排除出随机池**（§5.9：用户主动选中才生效） */
     val audioReactive: Boolean = false,
+    /**
+     * **已下线**（所有者 2026-11-12 裁定）⇒ 不进注册表、不进随机池、不出现在选择器里。
+     *
+     * ## 为什么要保留枚举项而不是直接删掉
+     *
+     * 枚举是 §4.2 的**规划清单**（一次写全，保留交付分期与文档可追溯性）；
+     * 「现在能不能用」由注册表 + 这个标记共同决定 ⇒
+     * **下线不破坏历史清单**，也不需要改动 §4.2 / §14.3 的规划表。
+     *
+     * ## 下线标准（2026-11-11 电视实测）
+     *
+     * > 「有几个是将照片切成好多块…但并没有拼成原图，导致图是乱的。
+     * > 如果效果就是这样的，那就把这几个拼块的切换效果去掉。还是要能够显示全部原图的。」
+     *
+     * ⇒ 标准：**转场过程中的画面必须始终是「位置正确」的原图**
+     * （可以不完整、可以与旧图混合 ⇒ 像 CROSSFADE；但不能出现**错位 / 镜像 / 拉伸**的块）。
+     * ⇒ 不满足的 6 个见 [RETIRED]。
+     */
+    val retired: Boolean = false,
     /**
      * 老平台（`sdkInt < 33`）的**降级目标**（§4.4）。
      *
@@ -134,8 +156,8 @@ enum class PhotoTransitionId(
     BLOCKS_RANDOM(R.string.photo_transition_blocks_random, "随机方块消融", PhotoMechanism.M4_TILES, 1_200, Phase.P1, easing = Easing::easeOutQuad),
     GRID_FLIP(R.string.photo_transition_grid_flip, "网格 3D 翻转", PhotoMechanism.M4_TILES, 1_200, Phase.P2, easing = Easing::easeOutQuad),
     MOSAIC(R.string.photo_transition_mosaic, "马赛克渐显", PhotoMechanism.M4_TILES, 1_200, Phase.P2, easing = Easing::easeOutQuad),
-    TILE_CASCADE(R.string.photo_transition_tile_cascade, "瓦片错落", PhotoMechanism.M4_TILES, 1_200, Phase.P1, easing = Easing::easeOutQuad),
-    PUZZLE(R.string.photo_transition_puzzle, "拼图碎片", PhotoMechanism.M4_TILES, 1_200, Phase.P2, easing = Easing::easeOutQuad),
+    TILE_CASCADE(R.string.photo_transition_tile_cascade, "瓦片错落", PhotoMechanism.M4_TILES, 1_200, Phase.P1, retired = true, easing = Easing::easeOutQuad),
+    PUZZLE(R.string.photo_transition_puzzle, "拼图碎片", PhotoMechanism.M4_TILES, 1_200, Phase.P2, retired = true, easing = Easing::easeOutQuad),
 
     // ────────────────────────── F. 溶解 / 噪点类（6）· §5.3：linear ──────────────────────────
 
@@ -156,9 +178,9 @@ enum class PhotoTransitionId(
         R.string.photo_transition_liquify, "液化", PhotoMechanism.M5_SHADER, 700, Phase.P2,
         degradeTo = NOISE_DISSOLVE, easing = Easing::easeInOutSine,
     ),
-    KALEIDO(R.string.photo_transition_kaleido, "万花筒转场", PhotoMechanism.M4_TILES, 700, Phase.P1, easing = Easing::easeInOutSine),
-    SHATTER(R.string.photo_transition_shatter, "玻璃破碎", PhotoMechanism.M4_TILES, 700, Phase.P2, easing = Easing::easeInOutSine),
-    VORONOI(R.string.photo_transition_voronoi, "Voronoi 碎片化", PhotoMechanism.M4_TILES, 700, Phase.P2, easing = Easing::easeInOutSine),
+    KALEIDO(R.string.photo_transition_kaleido, "万花筒转场", PhotoMechanism.M4_TILES, 700, Phase.P1, retired = true, easing = Easing::easeInOutSine),
+    SHATTER(R.string.photo_transition_shatter, "玻璃破碎", PhotoMechanism.M4_TILES, 700, Phase.P2, retired = true, easing = Easing::easeInOutSine),
+    VORONOI(R.string.photo_transition_voronoi, "Voronoi 碎片化", PhotoMechanism.M4_TILES, 700, Phase.P2, retired = true, easing = Easing::easeInOutSine),
     MELT(R.string.photo_transition_melt, "融化流淌", PhotoMechanism.M5_SHADER, 700, Phase.P2, easing = Easing::easeInOutSine),
 
     // ────────────────────────── H. 色彩 / 光效类（7）· §5.3：easeOutQuad ──────────────────────────
@@ -204,7 +226,7 @@ enum class PhotoTransitionId(
     // ────────────────────────── J. 风格化类（7）· §5.3「按子类型」⇒ 归入最接近的类别 ──────────────────────────
 
     // 故障风 / 胶片卷动 / 漫画分格 = 分块类 ⇒ easeOutQuad
-    GLITCH(R.string.photo_transition_glitch, "故障风", PhotoMechanism.M4_TILES, 800, Phase.P1, easing = Easing::easeOutQuad),
+    GLITCH(R.string.photo_transition_glitch, "故障风", PhotoMechanism.M4_TILES, 800, Phase.P1, retired = true, easing = Easing::easeOutQuad),
     FILM_ROLL(R.string.photo_transition_film_roll, "胶片卷动", PhotoMechanism.M4_TILES, 800, Phase.P2, easing = Easing::easeOutQuad),
     COMIC_PANEL(R.string.photo_transition_comic_panel, "漫画分格", PhotoMechanism.M4_TILES, 800, Phase.P2, easing = Easing::easeOutQuad),
     // 电影黑边收缩 = 暗场语义的裁剪 ⇒ 淡化类 ⇒ easeInOutQuad
@@ -251,18 +273,50 @@ enum class PhotoTransitionId(
          * ⛔ 目前**没有历史名映射**（本枚举只增不改名）。日后若重命名任何常量，
          * 必须在此加映射 —— 否则老备份里的旧名只能走 `BackupGson` 的第 ③ 级回落
          * （首个常量），迁移结果未必正确。见 `docs/technical-overview.md` §10.172。
+         *
+         * ⛔ **已下线的项（[RETIRED]）也返回 [Default]** —— 老设置里存着
+         * 「瓦片错落」这类名字时，不能让它变成一个「选了没反应」的选项。
          */
         fun fromKey(key: String?): PhotoTransitionId =
-            entries.find { it.name == key } ?: Default
+            entries.find { it.name == key && !it.retired } ?: Default
 
         /**
-         * 当前分期应实现的全部效果（`phase.ordinal <= 给定分期`）。
+         * **已下线**的效果（所有者 2026-11-12 裁定）。
+         *
+         * ⇒ 不进注册表 ⇒ 不进随机池、不出现在设置里的转场芯片上。
+         *
+         * | 效果 | 为什么下线（过程中的画面**不是位置正确的原图**） |
+         * |---|---|
+         * | [GLITCH] 故障风 | 横向条带被**随机 X 偏移** ⇒ 条带错位、拼不回原图 |
+         * | [TILE_CASCADE] 瓦片错落 | 每条带整体**纵向错位** ⇒ 画面被撕成错位的条 |
+         * | [KALEIDO] 万花筒转场 | 奇数条**水平镜像** ⇒ 永远是拼不出原图的花纹 |
+         * | [PUZZLE] 拼图碎片 | 碎片沿各自方向**乱飞**到位 ⇒ 过程中是错位的碎片拼图 |
+         * | [SHATTER] 玻璃破碎 | 旧图碎片**向外飞散** ⇒ 旧图被撕碎、拼不回原图 |
+         * | [VORONOI] Voronoi 碎片化 | 碎块从**发生点**生长、位置错开 ⇒ 过程里是错位的碎块 |
+         *
+         * ⚠️ **保留枚举项、不删**：枚举是 §4.2 的规划清单（保留交付分期与可追溯性），
+         * 「能不能用」由注册表 + [retired] 共同决定。
+         */
+        val RETIRED: Set<PhotoTransitionId> = setOf(
+            GLITCH,
+            TILE_CASCADE,
+            KALEIDO,
+            PUZZLE,
+            SHATTER,
+            VORONOI,
+        )
+
+        /**
+         * 当前分期应实现的全部效果（`phase.ordinal <= 给定分期`）**且未下线**。
          *
          * ⚠️ 这只是**规划**，不代表真有实现 —— 抽池请用 [randomPool] 的
          * `available` 重载（由 `PhotoTransitionRegistry` 给出真有实现的集合）。
+         *
+         * ⛔ **已下线的项不在其中**（[RETIRED]）⇒ 「规划集合」与「注册表集合」始终一致
+         * ⇒ 门禁 G4 不用为下线项开特例。
          */
         fun implemented(phase: Phase): List<PhotoTransitionId> =
-            entries.filter { it.phase.ordinal <= phase.ordinal }
+            entries.filter { it.phase.ordinal <= phase.ordinal && !it.retired }
 
         /**
          * 当前平台上的**实际标识**。
