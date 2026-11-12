@@ -27632,5 +27632,86 @@ M44（`de2f233`，v2.39.16 代码审查）把日志行从 `forEach` 改成
 只有真机能回答。改动本身是**回退到本页原先就有的写法**（真机此前一直按它用），
 风险远低于新写一套布局，但这不等于已复测。
 
+### 10.396 电视实测修正：**逐行模式歌词不跳行**（`derivedStateOf` 捕获了普通参数 ⇒ 派生值永不重算）（2026-11-12）
+
+> **性质**：**有代码变更**（1 个生产文件 + 1 个测试文件），**版本号不变**（并入未发布的 v2.39.18）。
+> 触发来源：所有者电视实测「歌词系统出问题了：① 所有展示歌词的页面上
+> ② 逐字模式歌词能正确走 ③ 逐行模式下，歌词不动，不会自动跳当前行」。
+
+#### 一、症状
+
+| 模式 | 表现 |
+|---|---|
+| 逐字（`WORD_BY_WORD`） | 歌词正常逐字点亮、正常跳行 ✅ |
+| **逐行（`LINE_BY_LINE`）** | **歌词不动**，永远停在同一行，**不会自动跳到当前行** ❌ |
+
+影响面：`LyricsView` 被 `NowPlayingScreen` 的三处布局（播放页 / 沉浸页 / 竖屏页）共用
+⇒ **所有展示歌词的页面**都中招。
+
+#### 二、根因：派生状态捕获了「普通参数」
+
+M36（`de2f233`，v2.39.16 代码审查）把「当前行索引」从「组合期直接算」改成了 `derivedStateOf { … }`：
+
+```kotlin
+// 改前（59f2211）：组合期直接算 ⇒ 每次重组都读到**最新**的 currentTimeMs
+val effectiveTimeMs = if (逐字 && 播放中) lyricTickMs else currentTimeMs
+val currentIndex = lyrics.lines.indexOfFirst { it.time > effectiveTimeMs }...
+
+// 改后（de2f233）：派生块**只在 remember 的 key 变化时重建一次**
+val currentIndex by remember(lyrics, wordByWordActive) {
+    derivedStateOf {
+        val tick = if (wordByWordActive) lyricTickMs else currentTimeMs   // ← 问题在这
+        findCurrentLineIndex(lyrics.lines, tick)
+    }
+}
+```
+
+⛔ **关键**：`derivedStateOf` 的 lambda **只在 remember 的 key 变化时重建一次**，
+它捕获的是**首次组合时**那份**普通参数** `currentTimeMs` ⇒
+
+| 模式 | 派生块读的是 | 是不是 State | 进度更新能传进去吗 |
+|---|---|---|---|
+| 逐字 | `lyricTickMs` | ✅ State | ✅ 20fps tick 持续重算 |
+| **逐行** | **`currentTimeMs`（普通参数）** | ❌ | **❌ 每秒的进度更新完全传不进去** |
+
+⇒ 逐行模式的派生值**永不重算** ⇒ 当前行永远停在首次组合时的那一行。
+
+⚠️ **这与本仓 2026-09-25 审查修复 #16 是同一类坑**（`SearchTab` / `SongList` 的注释原话：
+「remember 无 key 时 derivedStateOf 捕获首次组合的参数快照」）⇒ 同一个坑，同一类修法。
+
+#### 三、修法
+
+| # | 改动 | 作用 |
+|---|---|---|
+| 1 | 当前行索引的派生块**统一读 `lyricTickMs`**（本组件唯一的可观察时间源） | 逐行模式下 `lyricTickMs` 由 `LaunchedEffect` 的 else 分支**随播放进度一起被写入** ⇒ 派生值能看到变化 ⇒ **跟得上行** |
+| 2 | 逐字进度那一行也统一读 `lyricTickMs` | 消掉第二处「读普通参数」的写法，避免同类坑复发 |
+| 3 | 删掉不再使用的 `wordByWordActive` | 它本来只为派生块而存在 |
+
+⚠️ 为什么**不**用「把 `currentTimeMs` 加进 remember 的 key」：那样也能修，
+但会让派生块**每秒重建一次**（逐字模式同样）⇒ 放弃 M36 想要的「20fps tick 只通知当前行」设计。
+⇒ 选「统一读 State」：**派生块只建一次**，逐行靠 `lyricTickMs` 的写入驱动重算。
+
+#### 四、其余歌词链路是否同源（整类排查）
+
+| 链路 | 当前行怎么算 | 同一问题？ |
+|---|---|---|
+| `LyricsView`（播放页 / 沉浸页 / 竖屏页） | `derivedStateOf` + 读**普通参数** | ❌ **本次修复** |
+| `KaraokeLyricsView`（K歌页 / MTV 页） | **组合期直接算** `findCurrentLineIndex(lines, lyricTickMs)` | ✅ 没问题（读的是 State） |
+| 可视化歌词主题（`VisualizerStage` / `LyricsDotMatrix` / `LyricsStage`） | 每帧在绘制循环里用 `progressMs` 现算 | ✅ 没问题（本来就每帧重算） |
+
+⇒ **只有 `LyricsView` 这一处**中招。
+
+#### 五、门禁
+
+| 门禁 | 覆盖 |
+|---|---|
+| `LyricsLineFollowGateTest`（新，3 例） | ① **机制复现**（纯 Kotlin 建模 Compose 的「`remember` 保留**第一次**的派生块」+「lambda 捕获**第一次**那个 val 参数槽」）：读普通参数 ⇒ 参数更新**不生效**；读 State ⇒ 生效；② **结构门禁**：含 `findCurrentLineIndex` 的派生块**必须**含 `lyricTickMs`、**不许**含 `currentTimeMs`（⛔ 只看那一个块 —— `seekTargetLineState` 的派生块与当前行无关；`LaunchedEffect` 的 else 分支**合法地**读 `currentTimeMs`）；③ **负向自证** |
+
+#### 六、⛔ 仍未验证
+
+- **尚未装机**：电视在 §10.395 装机时已离线（`192.168.0.114:5555` 连不上，扫全网段无设备开 5555），
+  本条修复与 §10.395 一并待复测。
+- 验收判据：切到**逐行**高亮模式 ⇒ 播放时歌词**逐行自动跳到当前行**（当前行高亮 + 列表自动跟行）。
+
 
 

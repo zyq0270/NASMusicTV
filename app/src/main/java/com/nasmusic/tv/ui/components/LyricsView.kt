@@ -150,6 +150,11 @@ private fun LyricsViewInner(
 
     // 逐字模式下使用本地高频时钟插值，平滑过渡（避免 1000ms progress 导致逐字跳动）
     // 基于上次已知 currentTimeMs（1秒锚点）+ 实际流逝时间估算当前进度
+    //
+    // ⚠️ **`lyricTickMs` 是本组件唯一的「可观察时间源」**（2026-11-12 修复）：
+    //    当前行索引的 `derivedStateOf` 只能读它（读普通参数 `currentTimeMs` 会捕获
+    //    首次组合的旧值 ⇒ 逐行模式永不跳行）。⇒ 非逐字模式**必须**在这里把它
+    //    同步成当前播放进度，否则派生状态看不到任何变化。
     var lyricTickMs by remember(lyrics) { mutableLongStateOf(currentTimeMs) }
     LaunchedEffect(currentTimeMs, isPlaying, highlightMode, lyrics) {
         if (highlightMode == LyricsHighlightMode.WORD_BY_WORD && isPlaying) {
@@ -168,14 +173,11 @@ private fun LyricsViewInner(
                 }
             }
         } else {
-            // 非逐字模式或暂停，直接使用 currentTimeMs
+            // 非逐字模式或暂停：直接跟随当前播放进度
+            // ⚠️ 这个 else 分支是**逐行模式能跟行的唯一来源** —— 别删。
             lyricTickMs = currentTimeMs
         }
     }
-
-    // 逐字模式的判定只跟这两个入参有关，与 tick 无关 ⇒ 先算成普通 Boolean，
-    // 避免在下面的派生状态里重复求值。
-    val wordByWordActive = highlightMode == LyricsHighlightMode.WORD_BY_WORD && isPlaying
 
     // 当前歌词行索引。
     //
@@ -185,10 +187,25 @@ private fun LyricsViewInner(
     // 现在改为 `derivedStateOf`：快照只在**派生结果变化**（换行）时才通知重组，
     // tick 本身只与这个派生状态比较，不触发本层重组；逐字进度则下沉到 item 内部读（见下）。
     // 顺带把 O(N) 的 `indexOfFirst` 换成二分（`findCurrentLineIndex`，与 K 歌页共用）。
-    val currentIndex by remember(lyrics, wordByWordActive) {
+    //
+    // ⛔⛔ **2026-11-12 真机回归修复：派生状态只能读「可观察的 State」**
+    //
+    // 症状（所有展示歌词的页面）：**逐字模式歌词能正确走，逐行模式下歌词不动、不跳当前行**。
+    //
+    // 根因：`derivedStateOf` 的 lambda **只在 remember 的 key 变化时重建一次**，
+    // 它捕获的是**首次组合时**那份**普通参数** `currentTimeMs` ⇒
+    // 之后每秒更新的播放进度**传不进去** ⇒ 派生值永不重算 ⇒ 当前行永远停在第一行。
+    // 逐字模式之所以正常，是因为它读的是 `lyricTickMs`（**State** ⇒ 可观察）。
+    //
+    // ⚠️ 这与本仓 2026-09-25 审查修复 #16 是**同一类坑**（`SearchTab` / `SongList`）：
+    // 「remember 无 key 时 derivedStateOf 捕获首次组合的参数快照」。
+    //
+    // ⇒ 修法：**两种模式都读 `lyricTickMs`**（唯一的可观察时间源）。
+    //    逐行模式下它由上面 LaunchedEffect 的 else 分支随 `currentTimeMs` 一起被写入
+    //    （= 当前播放进度），逐字模式下它是 20fps 插值时钟 ⇒ 两者都可观察。
+    val currentIndex by remember(lyrics) {
         derivedStateOf {
-            val tick = if (wordByWordActive) lyricTickMs else currentTimeMs
-            findCurrentLineIndex(lyrics.lines, tick)
+            findCurrentLineIndex(lyrics.lines, lyricTickMs)
         }
     }
 
@@ -345,7 +362,10 @@ private fun LyricsViewInner(
                         line.time + 3000L // 默认3秒
                     }
                     // M36：tick 在这里读 —— 于是 20fps 只让「当前这一行」的 item 重组。
-                    val tickMs = if (wordByWordActive) lyricTickMs else currentTimeMs
+                    // ⚠️ 读 `lyricTickMs`（State）而不是 `currentTimeMs`（普通参数）：
+                    //    本行是**组合期**读的，普通参数也拿得到最新值，但统一成同一个
+                    //    可观察时间源，避免同类「读到冻结快照」的坑再次出现。
+                    val tickMs = lyricTickMs
                     val progress = lineProgress(line.time, nextLineTime, tickMs)
                     KaraokeLineText(
                         text = line.text,

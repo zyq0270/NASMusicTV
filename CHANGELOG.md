@@ -186,6 +186,26 @@
   —— 验证：testDebugUnitTest 全绿 / lintDebug 0 errors（230 warnings，与基线一致）/ assembleRelease 通过
   —— ⛔ **电视复测未做成**：装机时电视已离线（`192.168.0.114:5555` 连不上，扫全网段无设备开 5555
   ⇒ 关机/掉线），待恢复后装包复测「滚日志时上方信息跟着向上滚」
+- ⭐ **同版本第九轮之四：逐行模式歌词不跳行 —— `derivedStateOf` 捕获了普通参数**（2026-11-12 电视实测）
+  —— 所有者反馈「歌词系统出问题了：① 所有展示歌词的页面上 ② 逐字模式歌词能正确走
+  ③ 逐行模式下，歌词不动，不会自动跳当前行」
+  —— 根因（M36 / `de2f233` 引入）：「当前行索引」从「组合期直接算」改成 `derivedStateOf { … }` 后，
+  派生块的 lambda **只在 remember 的 key 变化时重建一次**，捕获的是**首次组合时**那份
+  **普通参数** `currentTimeMs` ⇒ 每秒更新的播放进度**完全传不进去** ⇒ 派生值永不重算
+  ⇒ 当前行永远停在第一行；**逐字模式正常**是因为它读的是 `lyricTickMs`（**State** ⇒ 可观察）
+  —— ⚠️ 与本仓 2026-09-25 审查修复 #16（`SearchTab`/`SongList`）是**同一类坑**
+  修正：
+  1. 当前行索引的派生块**统一读 `lyricTickMs`**（本组件唯一的可观察时间源）
+     ⇒ 逐行模式下它由 `LaunchedEffect` 的 else 分支随播放进度一起被写入 ⇒ 跟得上行
+  2. 逐字进度那一行也统一读 `lyricTickMs` ⇒ 消掉第二处「读普通参数」的写法
+  3. 删掉不再使用的 `wordByWordActive`
+  —— ⛔ 不用「把 `currentTimeMs` 加进 remember 的 key」：那样派生块每秒重建一次，
+  放弃 M36 想要的「20fps tick 只通知当前行」设计
+  —— 整类排查：K歌页/MTV页（`KaraokeLyricsView`，组合期直接算）与可视化歌词主题
+  （`VisualizerStage` 等，每帧现算）**都没有这个问题** ⇒ 只有 `LyricsView` 这一处
+  新增门禁：`LyricsLineFollowGateTest`（3 例）—— ① 机制复现（纯 Kotlin 建模 Compose 的
+  「remember 保留第一次的派生块 + lambda 捕获第一次那个 val 参数槽」）
+  ② 结构门禁（当前行派生块必须读 `lyricTickMs`、不许读 `currentTimeMs`）③ 负向自证
 
 ### Removed
 
