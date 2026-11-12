@@ -553,6 +553,11 @@ internal fun AboutRow(label: String, value: String) {
  * `fill = false` 时长标签只占自身宽度，`Row` 的剩余空间无人认领、值会紧跟标签，
  * 右侧留一大块空白 —— 正是本函数下方那条「竖屏修正」注释里记的「值把标签挤没 / 值忽左忽右」
  * 同一类排版事故的另一种形态。
+ *
+ * ⛔ **不再有「值列最大宽度」入参**（2026-11-12 删除 `valueMaxWidth`）：
+ * 保留它就等于留一个「顺手就能把封顶加回去」的入口。门禁
+ * `SettingsValueWidthGateTest` 会断言整个设置页包里**不许再出现** `valueMaxWidth`
+ * 与 `infoValueWidth` 这两个名字。
  */
 @Composable
 private fun SettingsLabelValueRow(
@@ -561,7 +566,6 @@ private fun SettingsLabelValueRow(
     labelFontSize: androidx.compose.ui.unit.TextUnit,
     valueFontSize: androidx.compose.ui.unit.TextUnit,
     valueWeight: FontWeight,
-    valueMaxWidth: androidx.compose.ui.unit.Dp? = null,
 ) {
     Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Text(
@@ -573,7 +577,6 @@ private fun SettingsLabelValueRow(
         // 值列：比例分配（标签 1 : 值 1.5 ＝ 40% / 60%）⇒ 长句一行显示得下；
         // 标签那份 40% 恒定 ⇒ 长值也挤不没标签。
         // ⛔ 不再写死 180dp 封顶（那正是「文字堆在最后面、折成三行」的病灶）。
-        // 两档（`valueMaxWidth`）已合并，参数保留只为兼容既有调用点。
         Text(
             text = value,
             color = NasMusicColors.TextPrimary,
@@ -759,8 +762,6 @@ internal fun SettingsInfoRow(
                 labelFontSize = FontSize.body(),
                 valueFontSize = FontSize.body(),
                 valueWeight = FontWeight.Medium,
-                // §4.8 A4：指标行的尾部值列封顶 infoValueWidth，长值不许把标签挤没。
-                valueMaxWidth = SettingsTokens.infoValueWidth,
             )
         }
         if (description != null) {

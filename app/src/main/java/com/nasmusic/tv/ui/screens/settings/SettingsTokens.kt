@@ -43,7 +43,11 @@ internal object SettingsTokens {
     val switchThumbHeight = 24.dp        // 36 - 2×6
     val switchThumbTravel = 58.dp        // 内宽 116 - 滑块 58（= 滑块宽，行程恰好等于半宽）
     val chipMinWidth = 88.dp             // 芯片 wrap 后的下限，防同排宽度跳变（§4.8 A3）
-    val infoValueWidth = 180.dp          // SettingsInfoRow 尾部值列固定宽（§4.8 A4：尾部不参与挤压）
+    // ⛔ 这里**不再**有「值列固定宽」令牌（2026-11-12 真机反馈后删除）：
+    //   旧 `infoValueWidth = 180.dp` 把长句压在窄条里折成三行（用户反馈「文字都堆在最后面…前面
+    //   其实有很大的空间」）。⇒ 值列改**按比例分配**（标签 1 : 值 1.5 ＝ 40% / 60%），
+    //   唯一实现在 `SettingsComponents.kt` 的 `SettingsLabelValueRow`，
+    //   门禁见 `app/src/test/java/com/nasmusic/tv/ui/SettingsValueWidthGateTest.kt`。
 
     val focusScaleRow = 1.03f    // 整行瓦片
     val focusScaleChip = 1.06f   // 小尺寸可选项（芯片 / ± 按钮）

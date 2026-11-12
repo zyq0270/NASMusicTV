@@ -1006,10 +1006,24 @@ class PlaybackService : MediaLibraryService() {
                         .build()
                 )
                 val drawable = result.drawable
-                val bitmap = drawable?.toBitmap()
-                if (bitmap != null && isActive &&
-                    mediaLibrarySession?.player?.currentMediaItem?.mediaId == originMediaId
-                ) {
+                // ⚠️ 必须 **copy 一份**再持有：`toBitmap()` 对 BitmapDrawable 返回的是
+                //   **Coil 内存缓存里的那张 bitmap 本体**（不是副本）⇒ 直接持有它的话，
+                //   下面 `previous.recycle()` 回收掉的就是缓存里的位图 ⇒ 同名单曲再播时
+                //   Coil 命中缓存会拿到一张**已回收**的 bitmap。
+                //   copy 出自有副本 ⇒ 回收只影响我们自己这份，缓存不受污染。
+                val bitmap = drawable?.toBitmap()?.copy(Bitmap.Config.ARGB_8888, false)
+                    ?: return@launch
+                // ⛔ Media3 断言：player 只能在**主线程**访问。
+                //   原实现在这个 IO 协程里读 `player.currentMediaItem` ⇒ 抛
+                //   "Player is accessed on the wrong thread"（2026-11-12 真机日志页实证：
+                //   21:17 反复出现 `loadArtwork failed: Player is accessed on the wrong thread`）。
+                //   ⇒ IO 只负责把图拉下来；「是否仍是同一首」的校验与写入全部切回主线程。
+                withContext(Dispatchers.Main) {
+                    if (!isActive) return@withContext
+                    if (mediaLibrarySession?.player?.currentMediaItem?.mediaId != originMediaId) {
+                        // 切歌了 ⇒ 这张封面没人要，丢弃（自有副本，随 GC 回收）
+                        return@withContext
+                    }
                     // L05：旧封面 bitmap 不回收会随切歌一直累积（256×256 ARGB_8888 ≈ 256KB/首，
                     // `allowHardware(false)` 的位图不参与 GC 的 native 内存管理，长时间连续播放
                     // 会稳定涨到几十 MB）。
@@ -1020,11 +1034,9 @@ class PlaybackService : MediaLibraryService() {
                     cachedArtworkBitmap = bitmap
                     // 重置去重状态，强制下次 updateNotification 重建通知（含新封面）
                     lastNotificationState = null
-                    serviceScope.launch(Dispatchers.Main) {
-                        updateNotification()
-                        if (previous != null && previous !== bitmap && !previous.isRecycled) {
-                            previous.recycle()
-                        }
+                    updateNotification()
+                    if (previous != null && previous !== bitmap && !previous.isRecycled) {
+                        previous.recycle()
                     }
                 }
             } catch (e: Exception) {

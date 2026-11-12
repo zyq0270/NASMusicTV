@@ -27707,11 +27707,12 @@ val currentIndex by remember(lyrics, wordByWordActive) {
 |---|---|
 | `LyricsLineFollowGateTest`（新，3 例） | ① **机制复现**（纯 Kotlin 建模 Compose 的「`remember` 保留**第一次**的派生块」+「lambda 捕获**第一次**那个 val 参数槽」）：读普通参数 ⇒ 参数更新**不生效**；读 State ⇒ 生效；② **结构门禁**：含 `findCurrentLineIndex` 的派生块**必须**含 `lyricTickMs`、**不许**含 `currentTimeMs`（⛔ 只看那一个块 —— `seekTargetLineState` 的派生块与当前行无关；`LaunchedEffect` 的 else 分支**合法地**读 `currentTimeMs`）；③ **负向自证** |
 
-#### 六、⛔ 仍未验证
+#### 六、✅ 电视实测已通过（2026-11-12 21:0x）
 
-- **尚未装机**：电视在 §10.395 装机时已离线（`192.168.0.114:5555` 连不上，扫全网段无设备开 5555），
-  本条修复与 §10.395 一并待复测。
-- 验收判据：切到**逐行**高亮模式 ⇒ 播放时歌词**逐行自动跳到当前行**（当前行高亮 + 列表自动跟行）。
+- 装机：release 包 `NASMusicTV-release-v2-39-18.apk`（18:06 产出）已装上电视（21:08）。
+- 实测：切到**逐行**高亮模式后，正在播放页歌词**逐行自动跳到当前行**
+  （截图实录：当前行「爱人吶 你可愿盼我回家」绿色高亮，其后各行依次排布）。
+- 所有者确认：「**逐行能正常走了**」。
 
 ### 10.397 电视实测修正：**设置页「标签 + 值」的值列宽度被写死 180dp** ⇒ 长句压在最后面折成三行（2026-11-12）
 
@@ -27779,12 +27780,174 @@ val currentIndex by remember(lyrics, wordByWordActive) {
 
 | 门禁 | 覆盖 |
 |---|---|
-| `SettingsValueWidthGateTest`（新，3 例） | ① 值列必须**量内容**（`TextMeasurer` + `measure(`）；② **不许**再写死 `widthIn(max = valueMaxWidth)`；③ 必须保留**行宽比例上限**（`maxWidth`）；④ **负向自证 ×2**（写死封顶的老写法、量了内容却不用于上限计算，都必须判负） |
+| `SettingsValueWidthGateTest`（新，**5 例**） | ① 值列必须**按比例分配**（`Modifier.weight(`）、**不许**写死 `widthIn(max = valueMaxWidth)`、**不许** `Modifier.width(`；② 标签列必须 `weight(1f)`（§4.8 A4「长值不许把标签挤没」天然成立）；③ **封顶的入口不许复活**：`valueMaxWidth`（入参）与 `infoValueWidth`（令牌）两个名字**不许再出现在设置页代码里**（扫描**剔除注释**——KDoc 里恰恰要写明「这两个名字已删除」，不剔注释会自己告自己）；④ **负向自证 ×3**（写死封顶的老写法、标签没有权重、封顶名字被重新引入，都必须判负） |
+
+#### 六、✅ 电视实测已通过（2026-11-12 21:1x）
+
+| 项 | 修前 | 修后 |
+|---|---|---|
+| 「照片数量」那行的值列 | x=**1575**..1821（**246px**），y=861..941（**折 3 行**） | x=**1049**..1821（**772px**），y=861..901（**单行**） |
+| 标签列 | x=495..1025 | x=495..1025（恒定 40%） |
+
+⇒ 值列一次多出 **≈3.1 倍**宽度 ⇒ 长句**一行**显示；标签那份 40% 不变 ⇒ 长值挤不没标签。
+（截图实录：照片墙设置页「图库 0 · 外接 0 · Jellyfin 0」**一行**、右对齐到 x=1821。）
+
+##### 六之二、死代码收尾（同批）
+
+比例分配落地后，原来那套「两档宽度」只剩**空壳**：`valueMaxWidth` 入参仍在传递但**函数体里根本不用**，
+`SettingsTokens.infoValueWidth = 180.dp` 成了**死常量**，注释还在说「尾部值列封顶 infoValueWidth」。
+
+| 改动 | 理由 |
+|---|---|
+| 删 `SettingsLabelValueRow` 的 `valueMaxWidth` 入参 | 留着就等于留一个「顺手把封顶加回去」的把手 |
+| 删 `SettingsTokens.infoValueWidth` 常量 | 死常量 + 误导后来人以为值列还有固定宽 |
+| `SettingsInfoRow` 去掉传参 + 改掉过时注释 | 注释与实现必须一致，否则下一个人会照着注释改回去 |
+
+⇒ 门禁第 ③ 条（封顶名字不许复活）把这三条**钉死**。
+
+##### 六之三、电视**全分区**排版复扫（回答「整个设置所有的页面都查查」）
+
+不是只改完照片墙那行就算数 ⇒ 用 `uiautomator dump` 把设置页 **12 个分区**逐个走了一遍
+（通用 / 播放 / 歌词与 K 歌 / 视觉特效 / 照片墙 / 音乐来源 / 下载 / 缓存管理 / 网络高级 /
+数据管理 / 关于 / 日志），每个分区翻 3 屏。
+
+**判据（自动化、可复跑）**：正文单行高约 **40px** ⇒ 某行文本高度 **≥ 66px** 即「折了两行以上」；
+再叠加宽度 **≤ 600px** ⇒ 属于「**被挤在窄条里折行、而同一行前面还空着**」这一类排版事故
+（正是用户报的那一类）。
+
+| 分区 | 窄列折行命中 |
+|---|---|
+| 通用 / 播放 / 歌词与 K 歌 / 视觉特效 / 照片墙 / 音乐来源 / 下载 / 缓存管理 / 网络高级 / 数据管理 / 关于 / 日志 | **各 0 处** |
+
+⇒ **全设置页无同类问题**：值列封顶是**唯一**一处成因，一处改动 ⇒ 全页面受益。
+
+（复扫脚本：`%TEMP%\scan_settings_layout.ps1`，⛔ 不入库 —— 它是**这台电视**的取证工具，
+判据里的 40px / 66px / 600px 都与 1920×1080 / 240dpi 这台设备绑定。）
+
+### 10.398 电视实测发现并修正：**Media3 线程违规 —— 在 IO 线程读 `player.currentMediaItem`**（2026-11-12）
+
+> **性质**：**有代码变更**（1 个生产文件 + 1 个测试文件），**版本号不变**（并入未发布的 v2.39.18）。
+> 触发来源：复测 §10.395 的**日志页**时，在页面正文里直接看到了这条 W 级错误（真机日志页是自证现场）。
+
+#### 一、现象（真机日志页正文实录）
+
+```
+11-12 21:17:41  W  PlaybackService
+loadArtwork failed: Player is accessed on the wrong thread.
+Current thread: 'DefaultDispatcher-worker-4'
+Expected thread: 'main'
+```
+
+（21:17 连着出现 3 次；每次切歌都来一条。）
+
+#### 二、根因
+
+`PlaybackService.loadArtworkForCurrentItem()` 的封面加载跑在 `serviceScope.launch(Dispatchers.IO)` 里，
+而**校验「当前播放的是不是发起时那一首」**这一步直接读了 player：
+
+```kotlin
+// 修前
+artworkLoadJob = serviceScope.launch(Dispatchers.IO) {
+    val bitmap = drawable?.toBitmap()
+    if (bitmap != null && isActive &&
+        mediaLibrarySession?.player?.currentMediaItem?.mediaId == originMediaId   // ← IO 线程！
+    ) { … }
+}
+```
+
+⇒ Media3 对 player 的**线程归属**有断言（`Player is accessed on the wrong thread`），
+跨线程访问直接抛 `IllegalStateException` ⇒ 整个封面加载失败 ⇒ **通知拿不到新封面**。
+
+#### 三、整类排查：跨线程访问 player 的地方**只有这一处**
+
+| 位置 | 线程 | 判定 |
+|---|---|---|
+| `PlaybackService.loadArtworkForCurrentItem` 的 IO 协程 | **IO** | ❌ **违规**（本节修的就是它） |
+| `PlaybackService.updateNotification()` / `buildNotification()` / `onTaskRemoved()` | 主线程 | ✅ |
+| `MediaNotification.Provider` 回调（`:670/:674`） | 主线程（Media3 契约） | ✅ |
+| `PlayerManager` **内部** | 零调度 ⇒ 全在调用线程 | ✅ |
+| `MainViewModel.triggerEnrichForStubs`（IO 线程调 `playerManager.replaceSongInQueue`） | IO | ✅ 该方法**只动 StateFlow**（`_playerState.update`），不碰 ExoPlayer |
+| `PlayerViewModel:221`（IO 线程 `enrichAndPersistEverywhere`） | IO | ✅ 不碰 player |
+| `NasMusicApp.applicationScope`（`Dispatchers.IO`）的 8 个使用点 | IO | ✅ 全是 DataStore / 下载恢复 / 后端断开 / 洛雪运行时，不碰 player |
+
+⇒ **全仓只有 1 处违规**（其余 `serviceScope.launch` 都是 `Dispatchers.Main`）。
+
+#### 四、修正
+
+| # | 改动 | 理由 |
+|---|---|---|
+| 1 | IO 只负责把图拉下来；**校验 + 写入全部 `withContext(Dispatchers.Main)`** | Media3 断言：player 只能在主线程访问 |
+| 2 | `toBitmap()` 后**再 `copy()` 一份**再持有 | `toBitmap()` 对 `BitmapDrawable` 返回的是 **Coil 内存缓存里的那张 bitmap 本体**（不是副本）⇒ 直接持有它，下面 `previous.recycle()` 回收掉的就是**缓存里**的位图 ⇒ 同名单曲再播时 Coil 命中缓存会拿到**已回收**的 bitmap |
+| 3 | 切歌竞态下丢弃的那张**不 recycle** | 与既有行为一致（自有副本，随 GC 回收）；不引入新的回收路径 |
+
+#### 五、门禁
+
+| 门禁 | 覆盖 |
+|---|---|
+| `PlayerThreadAccessGateTest`（新，**3 例**） | ① **持有 player 引用的文件**里，任何 `launch(Dispatchers.IO)` / `withContext(Dispatchers.IO)` 块内**不许访问 player**（块内若显式 `withContext(Dispatchers.Main)` 则先剥掉那部分再判定）；② **`PlayerManager` 内不许出现后台调度器**（它的 player 访问必须留在调用线程 ⇒ 判据 ① 覆盖不到的情形）；③ **负向自证**：IO 块里访问 player 的样例必须判正，已切回主线程的样例必须判负 |
+
+⚠️ **判据 ① 的扫描范围为什么不是全仓**：源码里 `player` 这个词本身是**普通名词**（"播放器"）——
+全仓 48 个文件、243 处命中（`playerListener` / `playerManager` / `player` 形参 / 注释…）。
+全仓扫会被淹在误报里 ⇒ 门禁被稀释、真正的违规反而看不见。
+⇒ 收窄为「**确实持有 player 引用**」：文件里出现 `ExoPlayer` / `MediaController` / `mediaLibrarySession` 三者之一
+（能触发 `Player is accessed on the wrong thread` 的代码，必然持有这三者之一 ⇒ **不漏**）。
+
+⚠️ **扫描必须剔除注释**：门禁自己在源码里写了「player 只能在主线程访问」这类说明，
+不剔注释就会**自己告自己**（第一版真跑就是这样红的：49 例里唯一 1 例失败，命中的是注释行）。
 
 #### 六、⛔ 仍未验证
 
-- 尚未装机：需用本批改动重建 release 包再装电视复测
-  （判据：照片墙设置页「照片数量」那行的值**一行**显示、不再折三行）。
+- 尚未装机：本条与 §10.397 的死代码收尾一并待重建包复测。
+- 验收判据：切歌若干次 ⇒ **日志页不再出现** `loadArtwork failed: Player is accessed on the wrong thread`。
+
+### 10.399 已定位未修：**这台电视上天气功能不可用 —— 系统 CA 库缺 Let's Encrypt 根证书**（2026-11-12）
+
+> **性质**：**只定位，未改代码**（独立子系统，独立一轮做）。**版本号不变**。
+> 触发来源：复测 §10.395 日志页时把整页日志摸了一遍（**整类排查**）⇒ 发现除线程违规外还有一条 W 级错误。
+
+#### 一、现象（真机日志页正文实录）
+
+```
+11-12 21:09:35  W  WeatherApi
+Open-Meteo failed: java.security.cert.CertPathValidatorException:
+Trust anchor for certification path not found.
+
+11-12 21:09:35  W  WeatherApi
+Open-Meteo failed and no OpenWeatherMap API key configured
+```
+
+⇒ 天气取不到 ⇒ **天气电台/天气相关功能在这台电视上不可用**（不影响音乐、照片墙、歌词）。
+
+#### 二、根因（已实证）
+
+| 项 | 结论 |
+|---|---|
+| 服务端证书 | `CN=*.open-meteo.com`，**Issuer: `CN=YE1, O=Let's Encrypt`**（主机侧实测） |
+| 信任链 | YE1 由 **ISRG Root X1** 签发 ⇒ 验证最终要落到 ISRG Root X1 |
+| 电视系统 | Skyworth 9R54_G8S，**Android 5.1 / API 22** ⇒ 系统 CA 库是 2015 年的 |
+| ⛔ 缺口 | **ISRG Root X1 是 2021 年才进入主流系统信任库的**（Android 7+ 才实际内置）⇒ API 22 的库里没有 ⇒ `Trust anchor ... not found` |
+
+⇒ 与网络、与 DNS、与应用证书绑定**都无关**；是**设备系统太老**。
+
+#### 三、为什么本轮不修
+
+拟修法是「**追加**自定义信任锚」：把 ISRG Root X1 的公钥内嵌进应用，
+与系统 CA **并集**构成信任锚集合（**只增加信任、不放宽校验**；⛔ 不做「信任所有证书」那种降级做法）。
+
+但它属于**安全敏感**改动（证书信任链），且与本轮四条主线（照片墙 / 歌词 / 排版 / 日志页）**完全无关**
+⇒ 值得**单独一轮 + 单独门禁**（门禁至少要有：信任锚只增不减、且不得出现 `TrustAllCerts`/`HostnameVerifier` 放行）。
+
+#### 四、⛔ 影响面
+
+| 功能 | 影响 |
+|---|---|
+| 天气 / 天气电台 | ❌ 这台电视上取不到天气 |
+| 音乐播放、照片墙、歌词、设置页 | ✅ 不受影响 |
+| 其他 HTTPS 站点（Jellyfin / Meting / 网易云等） | ✅ 不受影响（各自证书链在系统库内） |
+
+⇒ **用户可感知的只有天气**；等单独一轮修。
+
+
 
 
 

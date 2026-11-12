@@ -184,8 +184,10 @@
   3. 新增门禁 2 例（`LogsTabWiringGateTest`）：「日志列表不得是独立滚动容器」+ 负向自证
   —— 组合开销靠三条既有约束兜底：最多渲染 100 条、单条只放 3 行正文 + 堆栈首行、单行仅 3 个 Text
   —— 验证：testDebugUnitTest 全绿 / lintDebug 0 errors（230 warnings，与基线一致）/ assembleRelease 通过
-  —— ⛔ **电视复测未做成**：装机时电视已离线（`192.168.0.114:5555` 连不上，扫全网段无设备开 5555
-  ⇒ 关机/掉线），待恢复后装包复测「滚日志时上方信息跟着向上滚」
+  —— ✅ **电视复测已通过**（21:1x，18:06 的 release 包）：滚动内容区后
+     上方「重新读取本地日志文件 / 删除全部已记录的日志」说明从 y=744..779 移到 **y=183..217**，
+     日志行从 y=869 移到 y=307 ⇒ **整页一起滚**，日志区不再是独立滚动容器
+     （原 §10.395 装机时电视曾离线，故当时记为「复测未做成」）
 - ⭐ **同版本第九轮之四：逐行模式歌词不跳行 —— `derivedStateOf` 捕获了普通参数**（2026-11-12 电视实测）
   —— 所有者反馈「歌词系统出问题了：① 所有展示歌词的页面上 ② 逐字模式歌词能正确走
   ③ 逐行模式下，歌词不动，不会自动跳当前行」
@@ -224,6 +226,51 @@
   因为 `measure()` 的 `density` **默认是 `Density(1f)`**（电视 240dpi ⇒ 差 1.5 倍），
   补上后仍差几个百分点（letterSpacing / 字体度量）⇒ **比例分配不依赖字体度量**，才稳定
   新增门禁：`SettingsValueWidthGateTest`（3 例，含 2 条负向自证）
+  —— ✅ **电视复测已通过**（21:1x，18:06 的 release 包）：「照片数量」那行的值列
+     从 **x=1575..1821（246px，折 3 行）** 变成 **x=1049..1821（772px，单行）**；
+     标签列恒为 x=495..1025（40%）⇒ 长句一行显示、标签不被挤没
+  —— ✅ **电视全分区排版复扫**：用 `uiautomator dump` 把设置页 **12 个分区**逐个走一遍
+     （每个分区翻 3 屏），自动化判据「文本高 ≥66px（折了两行以上）且宽 ≤600px
+     （挤在窄条里、同一行前面还空着）」⇒ **各分区命中 0 处**
+     ⇒ **全设置页无同类问题**，值列封顶是唯一成因 ⇒ 一处改动全页面受益
+  —— 死代码收尾（同批）：比例分配落地后 `valueMaxWidth` 入参已空转、`SettingsTokens.infoValueWidth`
+     成了死常量、注释仍写「封顶」⇒ 三处一并删除（留着就是「顺手把封顶加回去」的把手）
+  —— 门禁扩到 **5 例**：新增「封顶的入参与令牌名字不许再出现在设置页代码里」
+     （扫描**剔除注释**——KDoc 里恰恰要写明「这两个名字已删除」，不剔注释会自己告自己）
+- ⭐ **同版本第九轮之六：Media3 线程违规 —— 在 IO 线程读 `player.currentMediaItem`**（2026-11-12 电视实测发现）
+  —— 触发来源：复测「日志页」时在**页面正文里**直接看到这条 W 级错误（真机日志页是自证现场）：
+     `loadArtwork failed: Player is accessed on the wrong thread.
+      Current thread: 'DefaultDispatcher-worker-4'  Expected thread: 'main'`（21:17 连续 3 次）
+  —— 根因：`PlaybackService.loadArtworkForCurrentItem()` 的封面加载跑在 `Dispatchers.IO`，
+     而「校验当前播放的是不是发起时那一首」这一步直接读了 player ⇒ Media3 的线程归属断言直接抛异常
+     ⇒ 整个封面加载失败 ⇒ 通知拿不到新封面
+  —— **整类排查**：全仓跨线程访问 player **只有这一处**
+     （`updateNotification`/`buildNotification`/`onTaskRemoved`/MediaNotification.Provider 回调都在主线程；
+     `PlayerManager` 零调度；`MainViewModel` IO 线程调的 `replaceSongInQueue` 只动 StateFlow 不碰 ExoPlayer；
+     `applicationScope`（IO）的 8 个使用点全是 DataStore/下载恢复/后端断开，不碰 player）
+  修正：
+  1. IO 只负责把图拉下来；**校验 + 写入全部 `withContext(Dispatchers.Main)`**
+  2. `toBitmap()` 后**再 copy 一份**再持有：`toBitmap()` 对 `BitmapDrawable` 返回的是
+     **Coil 内存缓存里的那张 bitmap 本体**（不是副本）⇒ 直接持有它，
+     下面 `previous.recycle()` 回收掉的就是缓存里的位图 ⇒ 同名单曲再播时 Coil 命中缓存
+     会拿到**已回收**的 bitmap
+  3. 切歌竞态下丢弃的那张不 recycle（与既有行为一致，自有副本随 GC 回收）
+  新增门禁：`PlayerThreadAccessGateTest`（3 例）—— ① **持有 player 引用**的文件里，任何 IO 协程块内
+     不许访问 player（块内显式 `withContext(Dispatchers.Main)` 的部分先剥掉再判定）
+     ② `PlayerManager` 内不许出现后台调度器 ③ 负向自证
+     —— ⚠️ 扫描范围收窄的理由：源码里 `player` 是**普通名词**（"播放器"），全仓 48 文件 243 处命中
+     （`playerListener`/`playerManager`/形参/注释）⇒ 全仓扫会淹在误报里 ⇒ 门禁被稀释
+     ⇒ 改为「确实持有 player 引用」（文件里出现 `ExoPlayer`/`MediaController`/`mediaLibrarySession`）
+     ⇒ 能触发 Media3 线程断言的代码必然持有这三者之一 ⇒ 不漏
+     —— ⚠️ 扫描**剔除注释**：门禁自己在源码里写了「player 只能在主线程访问」这类说明，
+     不剔注释会自己告自己（第一版实跑 49 例里唯一 1 例失败，命中的是注释行）
+  —— ⚠️ **顺带定位（未修）**：摸整页日志时发现 `WeatherApi` W 级错误
+     `CertPathValidatorException: Trust anchor for certification path not found`
+     ⇒ 根因：`api.open-meteo.com` 证书由 Let's Encrypt **YE1** 签发（根 = ISRG Root X1），
+     而这台电视是 **Android 5.1 / API 22**，系统 CA 库里没有 2021 年才进入信任库的 ISRG Root X1
+     ⇒ **这台电视上天气功能不可用**（音乐/照片墙/歌词不受影响）
+     ⇒ 拟修法「追加自定义信任锚（只增信任、不放宽校验）」属**安全敏感**改动，
+     与本轮四条主线无关 ⇒ **单独一轮 + 单独门禁**再做（详见技术文档 §10.399）
 
 ### Removed
 
