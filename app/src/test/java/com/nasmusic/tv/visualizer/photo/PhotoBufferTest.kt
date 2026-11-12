@@ -307,7 +307,44 @@ class PhotoBufferTest {
         assertTrue("空缓存时实际占用为 0", buf.cachedBytes == 0L)
     }
 
-    // ────────────────────── ⑤ 负向自证 ──────────────────────
+    // ────────────────────── ⑤ 解码取消后的可用性 ──────────────────────
+
+    /**
+     * `close()` 的 `shutdownNow()` 会中断在途解码 ⇒ `runBlocking` 抛 `InterruptedException`
+     * （真机日志里即 "decode failed for xxx.jpg: null"）。这条路径**不能**把该 id 永久
+     * 留在 `pending` 里，否则下次进入照片墙时这张图会被幂等去重挡住、再也不解码
+     * （真机表现为某张照片长期黑底）。
+     */
+    @Test
+    fun `decode interrupted by shutdown leaves no cache and releases pending`() {
+        val src = FakeSource(PhotoSourceKind.GALLERY)
+        var fail = true
+        val buf = newBuffer(
+            mapOf(PhotoSourceKind.GALLERY to src),
+            decoder = { _, _ ->
+                if (fail) {
+                    throw InterruptedException()
+                } else {
+                    Bitmap.createBitmap(4, 4, Bitmap.Config.ARGB_8888)
+                }
+            },
+        )
+        val r = ref(1)
+
+        buf.request(r)
+        assertTrue("被中断的解码不得写入缓存", buf.cachedCount == 0)
+        assertTrue("被中断的解码不得命中 peek", buf.peek(r) == null)
+
+        fail = false
+        buf.request(r)
+        assertTrue(
+            "pending 必须已释放，否则这张照片再也解不出来（实际开流 ${src.openCount} 次）",
+            src.openCount == 2,
+        )
+        assertTrue("重试成功后应正常缓存", buf.peek(r) != null)
+    }
+
+    // ────────────────────── ⑥ 负向自证 ──────────────────────
 
     /**
      * **负向自证**：`openCount` 必须是**活的**计数器。

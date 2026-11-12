@@ -10,6 +10,7 @@ import com.nasmusic.tv.backend.photo.PhotoRef
 import com.nasmusic.tv.backend.photo.PhotoSource
 import com.nasmusic.tv.backend.photo.PhotoSourceKind
 import com.nasmusic.tv.util.AppLog
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.runBlocking
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
@@ -220,7 +221,17 @@ class PhotoBuffer(
         val entry = try {
             decodeEntry(ref)
         } catch (t: Throwable) {
-            AppLog.e(TAG, "decode failed for ${ref.displayName}: ${t.message}", t)
+            if (isDecodeCancelled(t, gen)) {
+                // close() 用 shutdownNow() 停解码线程（页面销毁 / 画质档变化导致 buffer 重建），
+                // 在途的 runBlocking / 读流会被 InterruptedException 打断，message 通常为 null
+                // ⇒ 真机日志里就是 "decode failed for xxx.jpg: null"。这是**预期取消**，
+                // 结果本来也会在下面按 closed / 世代丢弃，不是照片解码失败。
+                // ⛔ 别打成 E：release 日志页只应出现真正要处理的问题（AppLog 分级准则），
+                // 而日志保留窗口仅约 2 分钟（§10.401），假错误会把真错误挤掉。
+                AppLog.d(TAG, "decode cancelled for ${ref.displayName}: ${t.javaClass.simpleName}")
+            } else {
+                AppLog.e(TAG, "decode failed for ${ref.displayName}: ${t.message}", t)
+            }
             null
         }
         onMain {
@@ -232,6 +243,27 @@ class PhotoBuffer(
             }
             if (entry != null) cache[ref.id] = entry
         }
+    }
+
+    /**
+     * 解码抛异常时，判断这是不是「生命周期取消」而不是真失败。
+     *
+     * ① `close()` / `PhotoWallController` 重建 buffer 时 `shutdownNow()` ⇒ 中断在途解码线程；
+     * ② `clear()` / `invalidateSource()` 抬高世代号 ⇒ 本次结果无论如何都会作废。
+     *
+     * ⚠️ 沿 cause 链判定：`runBlocking` 有时把 `InterruptedException` 包一层抛出。
+     * ⚠️ 不恢复中断标志：解码线程池此时已 shutdownNow，恢复反而会污染单测里的直通 Executor。
+     */
+    private fun isDecodeCancelled(t: Throwable, gen: Int): Boolean {
+        if (closed.get() || generation.get() != gen) return true
+        var cur: Throwable? = t
+        var depth = 0
+        while (cur != null && depth++ < 8) {
+            if (cur is InterruptedException || cur is CancellationException) return true
+            if (cur === cur.cause) break
+            cur = cur.cause
+        }
+        return false
     }
 
     /**

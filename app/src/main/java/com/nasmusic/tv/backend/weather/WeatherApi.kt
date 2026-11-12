@@ -35,6 +35,24 @@ class WeatherApi(private val context: android.content.Context) {
 
     private val gson = Gson()
 
+    /**
+     * IP 定位专用短超时客户端（复用主 client 的连接池 / Dispatcher）。
+     *
+     * `ip-api.com` 免费版只提供 HTTP(80)，国内网络常年连不上；它是**可选增强**，
+     * 失败已有「回退北京坐标」兜底 ⇒ 不值得让每次天气刷新先白等 10 秒。
+     */
+    private val ipLocationClient = client.newBuilder()
+        .connectTimeout(IP_CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        .readTimeout(IP_CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        .build()
+
+    // IP 定位结果缓存 + 失败冷却：成功缓存 30 分钟，失败冷却 10 分钟。
+    // 避免 fetchCurrentWeather / fetchForecast 各自发一次必然超时的请求、并刷两条长堆栈。
+    private val locationLock = Any()
+    private var locationCached: IpLocation? = null
+    private var locationCachedAt = 0L
+    private var locationFailedAt = 0L
+
     companion object {
         private const val TAG = "WeatherApi"
         // Open-Meteo API 端点（免费，无需 Key）
@@ -44,26 +62,68 @@ class WeatherApi(private val context: android.content.Context) {
         private const val OPEN_WEATHER_MAP_FORECAST_BASE = "https://api.openweathermap.org/data/2.5/forecast"
         // IP 定位端点（免费版，不支持 HTTPS）
         private const val IP_API_BASE = "http://ip-api.com/json/"
+        // IP 定位是可选增强：3 秒连不上就走兜底坐标，不再等主 client 的 10 秒
+        private const val IP_CONNECT_TIMEOUT_SECONDS = 3L
+        private const val IP_LOCATION_TTL_MS = 30 * 60 * 1000L
+        private const val IP_LOCATION_COOLDOWN_MS = 10 * 60 * 1000L
     }
 
     /**
-     * 获取当前 IP 的地理位置
+     * 获取当前 IP 的地理位置（带结果缓存 / 失败冷却）。
+     *
+     * ⚠️ 定位失败**不是错误**：上层 `fetchCurrentWeather` / `fetchForecast` 会回退到北京坐标，
+     * 天气仍然能取到（只是城市不准）。国内网络下 ip-api.com 的 HTTP(80) 常年不可达，
+     * 因此这里要同时做到「快失败」与「不重复重试」，见各常量注释。
      */
     suspend fun getIpLocation(): IpLocation = withContext(Dispatchers.IO) {
-        try {
+        val now = System.currentTimeMillis()
+        val cached: IpLocation? = synchronized(locationLock) {
+            val hit = locationCached
+            when {
+                hit != null && now - locationCachedAt < IP_LOCATION_TTL_MS -> hit
+                hit == null && locationFailedAt > 0L &&
+                    now - locationFailedAt < IP_LOCATION_COOLDOWN_MS -> IpLocation()
+                else -> null
+            }
+        }
+        if (cached != null) return@withContext cached
+
+        val result = requestIpLocation()
+        synchronized(locationLock) {
+            if (result.success) {
+                locationCached = result
+                locationCachedAt = System.currentTimeMillis()
+                locationFailedAt = 0L
+            } else {
+                locationCached = null
+                locationFailedAt = System.currentTimeMillis()
+            }
+        }
+        result
+    }
+
+    /**
+     * 真正发一次 IP 定位请求（在 `Dispatchers.IO` 上调用）。
+     *
+     * ⚠️ 失败按 AppLog 分级准则记 **W**，且**不带 throwable**：
+     * `SocketTimeoutException` 的 20 行堆栈在手机上既不是崩溃也不是数据丢失，
+     * 却会占掉日志页那 400 条窗口里真错误的位置（§10.401）。
+     * M9 修复（2026-10-06）的 `isSuccessful` 检查与 `use{}` 关流在此保留。
+     */
+    private fun requestIpLocation(): IpLocation {
+        return try {
             val request = Request.Builder()
                 .url(IP_API_BASE)
                 .header("User-Agent", "NASMusicTV/2.6")
                 .build()
             // 必须 use{} 关闭 Response，否则连接/连接池资源泄漏
-            // M9 修复（2026-10-06）：先查 isSuccessful 再读 body，失败时记录 HTTP code
-            val body = client.newCall(request).execute().use { response ->
+            val body = ipLocationClient.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) {
                     AppLog.w(TAG, "getIpLocation: HTTP ${response.code}")
-                    return@withContext IpLocation()
+                    return IpLocation()
                 }
                 response.body?.string()
-            } ?: return@withContext IpLocation()
+            } ?: return IpLocation()
             val json = gson.fromJson(body, JsonObject::class.java)
             if (json.get("status")?.asString == "success") {
                 IpLocation(
@@ -77,7 +137,11 @@ class WeatherApi(private val context: android.content.Context) {
                 IpLocation()
             }
         } catch (e: Exception) {
-            AppLog.e(TAG, "getIpLocation failed: ${e.message}", e)
+            AppLog.w(
+                TAG,
+                "getIpLocation unavailable: ${e.javaClass.simpleName} " +
+                    "(${e.message?.take(80) ?: "no message"}); using fallback location",
+            )
             IpLocation()
         }
     }

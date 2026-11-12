@@ -28109,9 +28109,69 @@ JS[ERROR] Uncaught ReferenceError: WorldGlobe is not defined @:1
 | 开发者自己复现后立刻看日志 | ✅ 还能看到（几十秒内） |
 | 本次排查 §10.400 的 WorldGlobe | ✅ 侥幸在 22:16 读到；换个时间点就看不到了 |
 
+### 10.402 手机实测：两类 E 级「假错误」—— 照片解码取消 / IP 定位不可达（2026-11-13）
 
+> **性质**：**已改代码**。**版本号不变**（v2.39.18 内合并，按所有者「同一轮修复不单独升号」口径）。
+> 触发来源：所有者在手机上回看日志页，贴出 2026-11-09 / 11-12 的三条 E 级记录。
+> ⚠️ 与 §10.399（这台电视 CA 库缺 Let's Encrypt 根证书）**不是同一件事**：那是 HTTPS 信任链，这是 HTTP(80) 连不上。
 
+#### 一、现象（真机日志实录）
 
+```
+E 2026-11-12 09:43:15 PhotoBuffer
+decode failed for IMG_20190729_175731.jpg: null
+java.lang.InterruptedException ...
 
+E 2026-11-09 17:33:27 WeatherApi
+getIpLocation failed: failed to connect to ip-api.com/208.95.112.1 (port 80)
+from /192.168.110.89 after 10000ms
+java.net.SocketTimeoutException ...
+```
 
+⚠️ 三条都是 `AppLog.e` ⇒ 手机上「错误」筛选里能看到；天气那条还带约 20 行堆栈。
 
+#### 二、根因
+
+| # | 结论 | 证据 |
+|---|---|---|
+| ① | `PhotoBuffer` 的 `InterruptedException` 来自 `close()` 的 `executor.shutdownNow()`：中断在途解码线程，打断 `decodeEntry` 里的 `runBlocking { openStream...readBytes() }` | `InterruptedException` 的 `message` 恒为 `null` ⇒ 日志里正是 `: null`；堆栈止于 `decodeEntry`，没有 `BitmapFactory` / IO 帧 |
+| ② | 触发点是**正常的生命周期事件**：页面销毁 `PhotoWallController.close()`，或画质档 / 画布尺寸变化时 `buffer?.close()` 重建缓冲（`PhotoWallController.kt:742`） | 两条路径都会 `shutdownNow()` |
+| ③ | 结果本来就会被丢弃：`decodeAndPublish` 的 `onMain` 已按 `closed.get()` / 世代不符 `recycle()` 并 `return` ⇒ **不是解码失败、不是数据丢失、用户无感** | `PhotoBuffer.kt` |
+| ④ | `WeatherApi.IP_API_BASE = "http://ip-api.com/json/"` —— 免费版只有 HTTP(80)，国内网络常年不可达；主 client 的 `connectTimeout(10s)` 让每次刷新先白等 10 秒 | 两条日志都是 `port 80 ... after 10000ms` |
+| ⑤ | `fetchCurrentWeather()` / `fetchForecast()` **各自**调一次 `getIpLocation()` ⇒ 一轮刷新最多两次超时；两者都有「回退北京坐标 (39.9042, 116.4074)」兜底，天气仍能取到 | `WeatherApi.kt` |
+
+⇒ 二者都不满足 `AppLog` 的 E 级准则（崩溃 / 数据丢失 / 用户操作失败）。
+叠加 §10.401（日志窗口约 2 分钟、约 180 条一分钟），**假错误会把用户报障时真正该看的那条错误挤掉** ⇒ 必须从源头掐掉，而不只是调整日志页。
+
+#### 三、改动（4 个文件，均为局部）
+
+| 文件 | 改动 |
+|---|---|
+| `visualizer/photo/PhotoBuffer.kt` | `decodeAndPublish` 的 `catch (t: Throwable)` 先用 `isDecodeCancelled(t, gen)` 分流：取消走 `AppLog.d`（Debug 级，release 完全不产生）；**真解码失败仍记 `AppLog.e`**，不一刀切降级。判定沿 cause 链覆盖 `InterruptedException` / `CancellationException`，并兼顾 `closed` 与世代作废 |
+| `backend/weather/WeatherApi.kt` | ① `getIpLocation` 拆出 `requestIpLocation()`，失败改记 `AppLog.w` 且**不传 throwable**（不再有 20 行堆栈）；② 新增 `ipLocationClient`（复用主 client 连接池，`connect/readTimeout = 3s`）；③ 结果缓存 30 分钟 + 失败冷却 10 分钟（`synchronized(locationLock)`），天气与预报不再各自重试 |
+| `test/.../util/ExpectedFailureLogLevelGateTest.kt` | 新增源码门禁（5 例）：函数体级断言两处日志级别、短超时与冷却常量、负向自证；⛔ 不用全文否定（注释会自伤） |
+| `test/.../visualizer/photo/PhotoBufferTest.kt` | 新增 1 例：解码被 `InterruptedException` 中断时不得写缓存，且 `pending` 必须释放（否则该图会被幂等去重永久挡住、真机上变成长期黑底） |
+
+#### 四、⛔ 本轮刻意**不做**
+
+| 项 | 理由 |
+|---|---|
+| 把 `ip-api.com` 换成国内可达的定位服务 / 支持手动设经纬度 | 属产品决策，需所有者裁定；当前保持「失败 ⇒ 北京坐标」的既有行为不变 |
+| 改 `Open-Meteo` 的 HTTPS 信任链 | §10.399 已定位为电视 CA 库缺 ISRG Root X1，安全敏感，单独一轮做 |
+| 改 `LogStore` 保留策略 / `MetingDiag` 限流 | §10.401 的两个拟修方向，属独立一轮 |
+| 升版本号 | 同一轮日志降噪修复，合并进 v2.39.18 |
+
+#### 五、影响面
+
+| 场景 | 修复前 | 修复后 |
+|---|---|---|
+| 退出照片墙 / 切换画质档 | E 级 `decode failed ...: null` + 堆栈 | Debug 级一行（release 不产生）；真照片损坏仍报 E |
+| 国内网络下刷新天气 | 每次白等 10 秒、最多两次；两条 E + 长堆栈 | 首次 3 秒后降级，10 分钟冷却内不再重试；一条 W 无堆栈 |
+| 城市准确性 | 失败 ⇒ 北京坐标 | **不变**（仍回退北京）；成功结果 30 分钟内复用，换网后最多滞后 30 分钟 |
+| 真错误的可读性 | 被假错误挤占 400 条窗口 | 「错误」筛选里只剩真正需要处理的问题 |
+
+#### 六、验证
+
+`./gradlew.bat :app:testDebugUnitTest --tests "*ExpectedFailureLogLevelGateTest" --tests "*PhotoBufferTest" --no-daemon -Pkotlin.compiler.execution.strategy=in-process` ⇒ **BUILD SUCCESSFUL**；门禁 5/5、PhotoBuffer 18/18 全绿。
+
+⚠️ 真机复测需出包：本轮版本号与包名未变 ⇒ 交付须给**包指纹**并提醒先卸载旧版或 `adb install -r`（见版本升号口径）。本轮未出包、未操作任何设备。
