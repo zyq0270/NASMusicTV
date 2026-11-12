@@ -277,22 +277,28 @@
      ⇒ **这台电视上天气功能不可用**（音乐/照片墙/歌词不受影响）
      ⇒ 拟修法「追加自定义信任锚（只增信任、不放宽校验）」属**安全敏感**改动，
      与本轮四条主线无关 ⇒ **单独一轮 + 单独门禁**再做（详见技术文档 §10.399）
-  —— ⚠️ **顺带定位（未修）**：**3D 地球（WORLD 主题）与生态球（EcoGlobe）在这台 Android 5.1 电视上必然黑屏**
+  —— ⚠️ **顺带定位（未修）**：**3D 地球（WORLD）与生态球（EcoGlobe）在这台 Android 5.1 电视上黑屏**
+     ⛔ **本条已被技术文档 §10.215 的既有结论更正**：「电视端黑屏」早已定位、并由所有者
+     **2026-10-07 裁决「不修」**（真正的墙 = Compose `AndroidView` 承载的 WebView **只画首帧**，
+     连普通 2D canvas 都不上屏 ⇒ 页面内任何改动都救不了）⇒ 本条是那条结论的**续集**，不是新缺陷
      真机日志（新包 22:16 复现）：
      `JS[ERROR] Uncaught SyntaxError: In strict mode code, functions can only be declared
       at top level or immediately within another function. @…/globe/three.es5.js:2715`
-     ⇒ 根因：ES5 降级产物（TypeScript downlevel）里保留了**块内函数声明**，
+     ⇒ 产物层根因：ES5 降级产物（TypeScript downlevel）里保留了**块内函数声明**，
      而 UMD 产物带 `"use strict"` ⇒ ES5 strict 下这是**语法错误** ⇒ 整个文件不执行
-     ⇒ `window.THREE` / `window.ThreeGlobe` 永不定义 ⇒ `globe.js` 的 IIFE 抛错
-     ⇒ `window.WorldGlobe` 从未定义 ⇒ Kotlin 侧 `evaluateJavascript("WorldGlobe.xxx(...)")`
-     ⇒ `ReferenceError: WorldGlobe is not defined`
-     ⇒ **为什么会漏**：`downlevel_libs.mjs` 的语法校验只按 **sloppy mode** 解析
-     （`acornParse(code, { ecmaVersion: 5, sourceType: "script" })`，不带 strict 上下文）
-     ⇒ 块内函数声明在 sloppy 下合法 ⇒ 校验放行；同一份脚本第 51-53 行已写着
-     「**产物能被 ES5 解析器解析 ≠ 产物能正确运行**……必须配 vm 加载测试」—— 那一步没落地
-     ⇒ 拟修法三步：① 校验改成 strict（包一层 `'use strict'` 再解析）
-     ② 产物后处理：块内 `FunctionDeclaration` 改写成 `var f = function(){…}`
-     ③ **vm 加载测试落地成产物的一部分**（详见技术文档 §10.400）
+     ⇒ `THREE`/`ThreeGlobe`/`WorldGlobe` 全未定义；生态球**共享同一份坏库** ⇒ 同一个报错
+     ⇒ **为什么会漏**：`downlevel_libs.mjs` 的 acorn 校验只按 sloppy mode 解析；脚本自己写过的教训被第二次踩中
+     ⭐ **本条真正新增、且更可操作的一条**：**§10.215 的门控没挡住老电视** ——
+     `WORLD`/`ECO_GLOBE` 都归 `Tier.ULTRA`，而 ULTRA 的门槛 `allowFramebuffer` **只有 HIGH 档为 true**
+     ⇒ 门控维度是「**画质档**」而不是「**设备能不能跑**」⇒ 这台电视恰好是 **HIGH 档**
+     ⇒ 实测**按方向键确实切到了 EcoGlobe** ⇒ 「切过去就黑屏」这个用户可感知故障仍在
+     ⇒ 拟修法**分三层**（⛔ 只做第①层解决不了黑屏）：
+     ① 产物层：校验改 strict + 块内函数声明后处理 + vm 加载测试落地成产物的一部分
+     （能消掉报错、杜绝带病出厂，但**电视上照样黑屏** ⇒ 对用户无区别）
+     ② **门控层（推荐，代价小）**：可用性判定从「画质档」改成「**设备能力**」
+     ⇒ 这台电视上**根本看不到**这两个选项 ⇒ 真正消除用户可感知故障
+     ③ 宿主层：换掉 `AndroidView` / 走原生 OpenGL ES ⇒ 大工程且已裁决不修 ⇒ 维持不修
+     ⇒ 详见技术文档 §10.400
   —— ⚠️ **顺带定位（未修）**：**日志保留窗口只有约 2 分钟 ⇒ 真错误会被高频噪音挤没**
      现象：22:16 复现的 `E WorldGlobe JS[ERROR] …` 到 22:5x 在「错误」筛选下**已消失**
      （「显示 0 / 400 条」）⇒ 不是筛选坏了（筛选在 400 条窗口内做）⇒ 是**被挤出窗口**了

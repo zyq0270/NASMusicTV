@@ -27961,12 +27961,18 @@ Open-Meteo failed and no OpenWeatherMap API key configured
 
 ⇒ **用户可感知的只有天气**；等单独一轮修。
 
-### 10.400 已定位未修：**3D 地球（WORLD 主题）在这台 Android 5.1 电视上必然黑屏** —— ES5 降级产物在 strict mode 下非法（2026-11-12）
+### 10.400 电视实测：**3D 地球（WORLD）与生态球（EcoGlobe）在这台 Android 5.1 电视上黑屏** —— 产物层报错 + **门控没挡住**（2026-11-12）
 
 > **性质**：**只定位，未改代码**（独立子系统，独立一轮做）。**版本号不变**。
 > 触发来源：把电视日志页「错误」筛选**整页读完**（**整类排查**）⇒ 撞见两条 JS 错误。
 
-#### 一、现象（真机日志页正文实录，20:15:30）
+> ⛔ **本节结论已被 §10.215 的既有结论更正（2026-11-12）**：
+> 「电视端黑屏」这件事**早已定位、并由所有者 2026-10-07 裁决「不修」**（§10.215）。
+> 本节**不是**一条独立的新缺陷，而是那条既有结论的**续集**，
+> 并**补上了一个 §10.215 之后才暴露、且更可操作的事实**（门控维度错了 ⇒ 老电视照样能看到这两个效果）。
+> 哪些是旧的、哪些是新的，见下面「三、哪些是新的」。
+
+#### 一、现象（真机日志页正文实录，20:15:30 与 22:16:50 —— 新包上复现）
 
 ```
 E 11-12 20:15:30  WorldGlobe
@@ -27991,44 +27997,55 @@ JS[ERROR] Uncaught ReferenceError: WorldGlobe is not defined @:1
 | ② | ES5 **strict mode** 下块内函数声明是**语法错误** ⇒ 整个文件**不执行** | UMD 产物带 `"use strict"` ⇒ 抛上面那条 SyntaxError ⇒ `window.THREE` / `window.ThreeGlobe` **永不定义** |
 | ③ | `globe.js` 的 IIFE 随之抛错 ⇒ `window.WorldGlobe`（`globe.js:705` 赋值）**从未定义** ⇒ Kotlin 侧 `evaluateJavascript("WorldGlobe.initCities(...)")` ⇒ **ReferenceError** | `WorldGlobeRenderer.kt:593/604/634` 三处 `evalJs("WorldGlobe.xxx(...)")`；`onPageFinished` 的注释「页面脚本已执行 ⇒ WorldGlobe 必然已定义」在 ② 发生时不成立 |
 
-⇒ **3D 地球在这台电视上完全黑屏**（不是「偶尔黑」，是**必然**）。
-⚠️ 产物 `app/src/main/assets/globe/three.es5.js`（2026-10-07 生成）**已入库** ⇒ 缺陷自那一刻起就在包里。
+⇒ **产物层**：三个 JS 文件（`three.es5.js` / `three-globe.es5.js` / `eco-globe/loaders.es5.js`）
+在这台电视的 **Chrome 39** 上**连加载都过不去** ⇒ 页面里根本没有 `THREE`。
 
-#### 三、为什么会漏掉（脚本**自己写了教训**，这次是第二次踩同一个坑）
+⚠️ `EcoGlobeRenderer.kt:38-39` 写明：生态球**共享（不复制）** `/globe/polyfill.es5.js`、`/globe/three.es5.js`、`/globe/three-globe.es5.js`
+⇒ **两个效果命中同一份坏库** ⇒ 同一个报错（新包 22:16:50 的 EcoGlobe 那条即此）。
 
-`app/src/globe-upstream/downlevel_libs.mjs` 的语法校验只按 **sloppy mode** 解析：
+#### 三、哪些是新的（⛔ 与 §10.215 的既有结论对照）
 
-```js
-acornParse(code, { ecmaVersion: 5, sourceType: "script" });   // ⛔ 不带 strict 上下文
-```
-
-⇒ sloppy mode 下块内函数声明**合法** ⇒ 校验通过 ⇒ 产物带着 strict 下才炸的语法错误出厂。
-
-而同一份脚本第 51-53 行已经写着：
-
-> ⚠️ 教训：「产物能被 ES5 解析器解析」**不等于**「产物能正确运行」……
-> **必须配 vm 加载测试**（见文件末尾说明）
-
-⇒ 当年只做了语法校验就汇报「验证通过」（第一次踩）；
-⇒ 这次产物**仍未通过 vm 加载测试**（第二次踩）。
-⚠️ 脚本末尾第 203 行还在提醒「下一步必须跑 vm 加载测试」—— 那一步**没有落地成产物的一部分**。
-
-#### 四、拟修法（三步，缺一不可）
-
-| # | 改动 | 说明 |
+| 项 | §10.215（2026-10-06，旧结论） | 本节（2026-11-12） |
 |---|---|---|
-| 1 | **校验改成 strict**：把代码包进 `(function(){'use strict'; … })()` 再用 acorn `ecmaVersion=5` 解析 | 这样**块内函数声明必报错** ⇒ 校验不再漏 |
-| 2 | **产物后处理**：用 TypeScript AST 找出所有 `Block` 内的 `FunctionDeclaration`，改写成 `var f = function(){…}`（保持「使用点在赋值之后」的语义） | 改掉根因，不只是绕过 |
-| 3 | **vm 加载测试落地成产物的一部分**（Node vm 沙箱里删掉 Chrome 39 缺失的 API，按 `polyfill → three → three-globe → globe.js` 顺序加载，断言 `THREE` / `ThreeGlobe` / `WorldGlobe` 均已定义） | 脚本注释点名要配的那一步，这次补上并**随产物一起入库/执行** |
+| 电视端黑屏 | ✅ 已定位 | ⇒ **同一件事**，不是新缺陷 |
+| 真正的墙 | **阻断点 2**：该 WebView 被 Compose `AndroidView` 承载时**只画第一帧、之后永不更新**（普通 2D canvas 红方块同样不上屏）⇒ **宿主合成层特性，任何页面内改动都救不了** | ⇒ **仍然成立** |
+| 阻断点 1（页面内） | 记的是 `TypeError: undefined is not a function` @ `three-globe.es5.js:10976`（`new Proxy` ⇒ Chrome 39 无 Proxy ⇒ ES5 垫片原理上做不到） | ⇒ **报错点比它更早**：当前入库产物是 **`SyntaxError`**（块内函数声明）⇒ **整个文件不执行**，根本走不到 Proxy 那步 ⇒ 说明**当前产物与 §10.215 取证时那份不是同一份** |
+| 所有者裁决 | **2026-10-07 裁决「不修」**：曾把地球重写为原生 three.js 并**真机验证画面正确可用**，随后**全部回退**；观感最好的一版保留（手机上完美显示），**老电视黑屏接受** | ⇒ 裁决**继续有效** |
 
-⚠️ 第 2 步会改动 **入库的 3 MB 产物**（`three.es5.js` / `three-globe.es5.js`）⇒ 必须**逐字节 diff 回上游**确认差异只来自降级，
-且真机复测「切到 WORLD 主题 ⇒ 画面有地球、logcat 无 JS 错误」。
+⭐ **本节真正新增、可操作的一条**：**§10.215 的门控没挡住这类老电视**。
+
+| 事实 | 位置 |
+|---|---|
+| `WORLD` 与 `ECO_GLOBE` 都归 `Tier.ULTRA`；`supports()` 的 ULTRA 分支是 `allowFramebuffer`，而 `allowFramebuffer` **只有 `VisualQuality.HIGH` 为 true** | `AppSettings.kt` |
+| ⇒ 门控的维度是「**画质档**」，**不是「设备能不能跑」** | 同上 |
+| ⚠️ 这台电视的画质档恰好是 **HIGH**（设置页「▶ 高」为选中态）⇒ **两个效果在这台电视上可见** | 真机实测：按方向键**确实切到了 EcoGlobe**（22:16:50 触发其报错） |
+| ⇒ §10.215 想达到的「让能显示它的设备与该用最高档的设备重合」**没有实现** —— HIGH 档的老电视照样中招 | ⇒ 用户可感知故障仍存在：**切过去就黑屏** |
+
+⇒ 这一点**不在** §10.215 的结论覆盖范围内（那节只谈 E41 与宿主，从未核对「门控维度」是否真的挡住了老电视），
+且它比「修降级产物」**更可操作、代价小得多**。
+
+#### 四、拟修法（三层，⛔ **第 ① 层解决不了黑屏** ⇒ 不要再混为一谈**）
+
+| 层 | 改动 | 能解决什么 | 代价 |
+|---|---|---|---|
+| **① 产物层** | ① 校验改成 strict（把代码包进 `(function(){'use strict'; … })()` 再用 acorn `ecmaVersion=5` 解析）② 产物后处理：块内 `FunctionDeclaration` 改写成 `var f = function(){…}` ③ **vm 加载测试落地成产物的一部分**（脚本第 203 行点名要配的那一步） | ✅ 消掉真实报错、让产物在 Chrome 39 上**能加载**；✅ 杜绝「带病出厂」再次发生 | 中：重生成并入库约 3 MB 产物 + 逐字节 diff 回上游 |
+| **② 门控层** ⭐ | 把 `WORLD` / `ECO_GLOBE` 的可用性判定从「**画质档**」改成「**设备能力**」（WebView 版本 / WebGL 可用性 / 或对已知问题机型直接不提供） | ✅ **真正消除「切过去黑屏」这个用户可感知故障** —— 这台电视上**根本看不到**这两个选项 | **小**：枚举 + `supports()` + 门禁测试 |
+| **③ 宿主层** | 换掉 Compose `AndroidView`（独立 Activity + TextureView/SurfaceView），或走原生 OpenGL ES 路线（`docs/archive/e41-globe-opengl-plan.md` 已评估） | ✅ 电视上真能用 | **大**：且**所有者 2026-10-07 已裁决「不修」** ⇒ 维持不修 |
+
+⚠️ **为什么会漏掉**（脚本**自己写了教训**，这次是第二次踩同一个坑）：
+`downlevel_libs.mjs` 的语法校验只按 **sloppy mode** 解析
+（`acornParse(code, { ecmaVersion: 5, sourceType: "script" })`，不带 strict 上下文）
+⇒ sloppy 下块内函数声明**合法** ⇒ 校验放行 ⇒ 产物带着 strict 下才炸的语法错误出厂；
+而同一份脚本第 51-53 行已写着「**产物能被 ES5 解析器解析 ≠ 产物能正确运行**……**必须配 vm 加载测试**」。
+
+⛔ **明确否掉一条路**：只做第 ① 层 ⇒ 页面能加载了，但宿主仍只画首帧 ⇒ **电视上照样黑屏**，
+只是从「连加载都不行」变成「加载了但不更新」⇒ **对用户毫无区别**。
 
 #### 五、影响面
 
 | 功能 | 影响 |
 |---|---|
-| 3D 地球（`VisualizerTheme.WORLD`）、依赖同链路的 `EcoGlobeRenderer` | ❌ 这台电视上必然黑屏 |
+| 3D 地球（`VisualizerTheme.WORLD`）、生态球（`ECO_GLOBE`） | ❌ 这台电视上黑屏（**已由所有者裁决接受**；门控层可让这台电视上**根本看不到**） |
 | 其余可视化效果（频谱、粒子、歌词主题…） | ✅ 不受影响（纯 Kotlin 渲染，不经 WebView） |
 | 音乐 / 照片墙 / 歌词 / 设置 | ✅ 不受影响 |
 
