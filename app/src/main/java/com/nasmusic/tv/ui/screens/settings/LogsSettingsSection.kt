@@ -11,8 +11,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -201,22 +199,23 @@ internal fun LogsSettingsSection(
                         modifier = Modifier.padding(start = 4.dp, top = 4.dp)
                     )
                 }
-                // M44：最多 100 条日志原先是 forEach 一次性铺进非 lazy 的 Column ——
-                // 整个分区是外层 LazyColumn 里的**一个** item、行内也没有 key，
-                // 100 条多行 Text 全部实时布局，筛选/刷新一次就要全量重排。
-                // 改成有界高度的 LazyColumn：只组合可见项，key 用「时间戳 + 序号」。
-                // ⚠️ 高度必须有界：本分区外层是 verticalScroll 的 Column，
-                //    给 LazyColumn 无限高约束会直接崩（measured with infinity maximum height）。
-                else -> LazyColumn(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = LOG_LIST_MAX_HEIGHT),
-                    verticalArrangement = Arrangement.spacedBy(2.dp),
-                ) {
-                    itemsIndexed(
-                        items = visibleEntries,
-                        key = { index, entry -> "${entry.timestamp}_$index" },
-                    ) { _, entry ->
+                // ⚠️ **日志行直接铺进本分区的 Column**（2026-11-12 电视实测后回退 M44 的写法）
+                //
+                // M44 曾把它改成「有界高度（360dp）的嵌套 LazyColumn」以省组合开销，
+                // 但那让日志列表成了**独立滚动容器**：焦点进到日志行后，上下键被内层吃掉，
+                // 外层设置页不再滚 ⇒ **上方的摘要 / 级别芯片 / 刷新清空永远钉在屏幕上**，
+                // 而日志区只露 360dp（≈6~7 条）⇒ 「看到的信息太少了」。
+                //
+                // ⇒ 回退到「日志行随页面一起滚」：滚日志时上方的信息**一起向上滚走**，
+                // 日志占满整屏（也就是本页**原来的布局**，真机一直按它用）。
+                // ⇒ 组合开销的兜底靠三条既有约束：
+                //    ① 最多渲染 [LogStore.READ_LIMIT]（100）条；
+                //    ② 单条只放 3 行正文 + 堆栈首行（全文在详情弹窗里看）；
+                //    ③ 单行布局很轻（3 个 Text）。
+                // ⛔ **不要**再把这里改回嵌套 LazyColumn：见 `LogsTabWiringGateTest`
+                //    的「日志列表不得是独立滚动容器」一例。
+                else -> {
+                    visibleEntries.forEach { entry ->
                         LogEntryRow(entry = entry, onOpen = { selectedEntry = entry })
                     }
                 }
@@ -272,15 +271,6 @@ private data class LogsAction(
  * （设备侧读数，不参与阶梯），选中它时只显示 X 自身；放在 D 旁边会被读成
  * 「比全部更低一档」，而实际上「全部」里已经含 X。
  */
-/**
- * M44：日志列表的最大可视高度。
- *
- * 取一个有界值而不是 `fillMaxHeight()`，是因为本分区最终嵌在**可垂直滚动**的设置页里，
- * 无界高度约束会让 LazyColumn 直接抛 `measured with infinity maximum height constraints`。
- * 360dp ≈ 6~7 条（单行条目）+ 滚动查看其余。
- */
-private val LOG_LIST_MAX_HEIGHT = 360.dp
-
 private data class LogLevelFilter(val level: String, @StringRes val labelRes: Int)
 
 private val LOG_LEVEL_FILTERS = listOf(

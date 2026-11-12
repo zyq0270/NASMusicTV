@@ -576,6 +576,60 @@ class LogsTabWiringGateTest {
         assertTrue("护栏空转：缺 appendBlocking 的样例被误判通过", !sample.contains("LogStore.appendBlocking("))
     }
 
+    // ─────────────────── 6. 日志列表不得是独立滚动容器（2026-11-12 电视实测） ───────────────────
+
+    /**
+     * **日志列表必须随整页一起滚**（回退 M44 的写法）。
+     *
+     * ## 它防的是什么
+     *
+     * 2026-11-12 电视实测：M44 把日志列表改成「**有界高度（360dp）的嵌套 LazyColumn**」
+     * 以省组合开销 ⇒ 日志区成了**独立滚动容器**：
+     * - 焦点进到日志行后，上下键被内层吃掉 ⇒ **外层设置页不再滚**；
+     * - 上方的摘要 / 级别芯片 / 刷新清空**永远钉在屏幕上**；
+     * - 日志区只露 360dp（≈6~7 条）⇒ 真机反馈「**看到的信息太少了**」。
+     *
+     * ⇒ 回退到本页**原来的布局**：日志行直接铺进分区 Column ⇒ 滚日志时**上方的信息一起向上滚走**，
+     * 日志占满整屏。
+     */
+    @Test
+    fun `日志列表不得是独立滚动容器`() {
+        val section = stripComments(mainSource("ui/screens/settings/LogsSettingsSection.kt"))
+        val body = bodyOf(section, "internal fun LogsSettingsSection(") ?: ""
+        assertTrue("取不到 LogsSettingsSection 方法体", body.isNotEmpty())
+        assertTrue(
+            "日志列表里不许有 LazyColumn —— 它会成为独立滚动容器，把上方的信息钉在屏幕上" +
+                "（2026-11-12 电视实测：日志只露 360dp，上方芯片永远挡着）",
+            !isNestedScrollLogList(body),
+        )
+        assertTrue(
+            "日志行必须直接铺进分区（visibleEntries.forEach）⇒ 随整页一起滚",
+            body.contains("visibleEntries.forEach"),
+        )
+    }
+
+    /** 负向自证：嵌套 LazyColumn 的写法必须被判负（防止门禁空转）。 */
+    @Test
+    fun `负向自证 嵌套 LazyColumn 的日志列表必须判负`() {
+        val sample = """
+            else -> LazyColumn(modifier = Modifier.heightIn(max = 360.dp)) {
+                itemsIndexed(items = visibleEntries) { _, entry -> LogEntryRow(entry = entry, onOpen = {}) }
+            }
+        """.trimIndent()
+        assertTrue(
+            "护栏空转：嵌套 LazyColumn 的样例被误判通过",
+            isNestedScrollLogList(sample),
+        )
+    }
+
+    /**
+     * 判定「日志列表是不是被做成了独立滚动容器」。
+     *
+     * 只认**分区方法体**里的 `LazyColumn`：详情弹窗（[LogDetailDialog]）是另一个函数，
+     * 它内部用 `verticalScroll` 是**必须的**（长堆栈要能滚到底），不该被这条谓词误伤。
+     */
+    private fun isNestedScrollLogList(body: String): Boolean = body.contains("LazyColumn")
+
     // ─────────────────── 工具 ───────────────────
 
     /**
