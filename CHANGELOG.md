@@ -183,6 +183,9 @@
   2. 删掉 `LOG_LIST_MAX_HEIGHT`（360dp）与嵌套 `LazyColumn`
   3. 新增门禁 2 例（`LogsTabWiringGateTest`）：「日志列表不得是独立滚动容器」+ 负向自证
   —— 组合开销靠三条既有约束兜底：最多渲染 100 条、单条只放 3 行正文 + 堆栈首行、单行仅 3 个 Text
+  —— 验证：testDebugUnitTest 全绿 / lintDebug 0 errors（230 warnings，与基线一致）/ assembleRelease 通过
+  —— ⛔ **电视复测未做成**：装机时电视已离线（`192.168.0.114:5555` 连不上，扫全网段无设备开 5555
+  ⇒ 关机/掉线），待恢复后装包复测「滚日志时上方信息跟着向上滚」
 
 ### Removed
 
