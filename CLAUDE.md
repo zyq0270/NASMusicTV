@@ -183,6 +183,16 @@ Update **both** files in sync:
 
 Update `CHANGELOG.md` (Added/Changed/Fixed/Removed) and `docs/technical-overview.md` for architectural changes.
 
+### CHANGELOG 写法（所有者规则，2026-11-12）
+**只写「做了什么」，格式参照 `v2.39.16` 段**：
+
+- **一行一条、不分层** —— 无 `——` 子项、无数字小项、无 ⭐ 标记、无「同版本第X轮」小标题
+- 条目写成「**问题：结果**」；必要的代码标识可保留（如 `clipPath`、`arcade.enabled`）
+- ⛔ 不写根因链推导、取证过程（坐标/抽样/直连数据）、拟修法方案
+- 逐条根因 / 证据 / 指路**统一放到段首 `>` 引言**；条目里**不**挂「详见 §X.Y」
+- 细节（为什么 / 怎么做的）放 `docs/technical-overview.md`，CHANGELOG 面向读者
+- 写完自检：条目是否一行一条、有无分层、有无 ⭐/轮次小标题、根因有没有漏进条目
+
 ### CI Pipeline (`.github/workflows/build.yml`)
 - **build** job: Release APK, upload artifact, create GitHub Release on tag push
 - **test** job: Unit tests with Gradle/Robolectric caching, failure messages dumped + XML artifact on failure
