@@ -79,6 +79,13 @@ class PhotoSourceAggregator(
                 continue
             }
 
+            // ⛔ **扫描前先作废来源缓存的可用性判定**（2026-11-12 电视实测修复）：
+            //    Jellyfin 来源把「上次扫到 0 张」缓存成 NO_PHOTO_LIBRARY
+            //    ⇒ status() 直接把本轮扫描挡掉（连 listPhotos 都不调用）
+            //    ⇒ **「重新扫描」永远扫不出东西**（且一次网络抖动就足以触发）。
+            //    ⇒ 每轮扫描都重新向来源要事实，缓存只用于「两次扫描之间」的显示。
+            source.invalidateStatus()
+
             val status = runCatching { source.status() }
                 .getOrDefault(PhotoSourceStatus.UNAVAILABLE)
             statuses[kind] = status

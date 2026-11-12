@@ -84,6 +84,26 @@
   脉动溶解无音频时也能走到 100%）、`DeviceAudioCapsTest`（FLAC 崩溃判定口径 + 无损档降级）、
   `PhotoTransitionCompletionGateTest`（每个效果逐个定位到实现 / 遮罩型必须有末段补画 /
   `CLIP_BASED` 与真实 `clipPath` 实现**双向**核对 / 三类完成机制合计 = 可用效果数）
+- ⭐ **同版本第八轮：照片墙 NAS 来源「重新扫描」扫不到照片（扫描状态自锁）+ 连接成功后自动扫描**
+  （2026-11-11 电视实测 + 所有者裁定）
+  —— 用户反馈「NAS已连接的状态下，照片墙中 重新扫描，无法找到NAS中的照片」，
+  随后裁定「**应该增加自动扫描的功能，无需手动，也可以强制手动重新扫描。
+  只要连接了 NAS Jellyfin 服务器，并且照片墙中 Jellyfin 的开关打开的情况下，
+  连接 NAS 成功后，应该自动扫描**」
+  —— 根因（Jellyfin 来源独有）：它把「上次扫到 0 张」缓存成 `NO_PHOTO_LIBRARY`，
+  而聚合器是**先问 status、再决定要不要扫** ⇒ **每轮扫描都被缓存挡掉**
+  ⇒ 「重新扫描」永远扫不出东西；且**一次网络抖动就足以触发**（查询失败时 `total` 停在 -1 被当成 0）
+  ⇒ 来源被**永久判死**。修正：
+  1. 新增 `PhotoScanVerdict`（纯逻辑判定器）：**查询失败 ≠ 0 张**；只有确实扫到 0 张才判「无照片库」
+  2. `PhotoSource` 新增 `invalidateStatus()` 钩子 + 聚合器**每轮扫描前**作废缓存
+     ⇒ 状态重新由「当前事实」推导 ⇒ 「重新扫描」真的会去问服务器
+  3. **自动扫描**：新增 `PhotoAutoScanPolicy`（纯逻辑）+ `VisualizerViewModel.onNasConnected()`
+     ⇒ NAS（Jellyfin）连接成功后**自动扫**照片墙（开关关着 / 非 Jellyfin 后端 ⇒ 不产生任何网络请求）
+  4. 手动「重新扫描」保留（强制重扫：取消正在跑的扫描并立刻重来）
+  5. **照片墙设置页显示 NAS 来源的状态**（只在状态不是 OK 时多显示一行）⇒ 用户能直接看出
+     卡在哪一环（未连接 / 后端不支持照片通道 / 已连但服务器上没有照片库 / 开关关着）
+  新增门禁：`PhotoScanVerdictTest`（7 例）、`PhotoAutoScanPolicyTest`（4 例）、
+  `PhotoSourceAggregatorTest` 增 1 例（缓存判定不得挡住下一次扫描）
 
 ### Removed
 

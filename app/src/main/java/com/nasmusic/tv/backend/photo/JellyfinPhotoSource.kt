@@ -55,13 +55,12 @@ class JellyfinPhotoSource(
     override val kind: PhotoSourceKind = PhotoSourceKind.JELLYFIN
 
     /**
-     * 上次扫描得到的条目总数；`-1` = 尚未扫描过。
+     * 「上次扫描结果」的缓存与判定（**显示用**）。
      *
-     * 用途：让 [status] 保持**轻量**（设置页会高频调用，不能每次发网络请求）。
-     * 扫描过一次之后就能准确区分「已连但无照片库」与「可用」。
+     * ⚠️ 它**不能**用来挡住扫描 ⇒ 每轮扫描前会先调用 [invalidateStatus] 清空
+     * （否则「重新扫描」永远扫不出东西，见 [PhotoScanVerdict] 的说明）。
      */
-    @Volatile
-    private var lastKnownTotal: Int = UNKNOWN_TOTAL
+    private val verdict = PhotoScanVerdict()
 
     override suspend fun status(): PhotoSourceStatus = withContext(Dispatchers.IO) {
         val adapter = adapterProvider() ?: return@withContext PhotoSourceStatus.NOT_CONNECTED
@@ -69,12 +68,23 @@ class JellyfinPhotoSource(
         if (adapter.buildAuthenticatedUrl(PATH_ITEMS) == null) {
             return@withContext PhotoSourceStatus.UNAVAILABLE
         }
-        if (lastKnownTotal == 0) PhotoSourceStatus.NO_PHOTO_LIBRARY else PhotoSourceStatus.OK
+        verdict.statusWhenConnected()
+    }
+
+    /**
+     * 作废「上次扫到 0 张」的缓存判定 ⇒ 让下一轮扫描**真的**去问服务器。
+     *
+     * ⛔ 不做这一步的话：一旦某轮扫到 0 张（哪怕只是因为网络抖了一下），
+     * [status] 会一直返回 [PhotoSourceStatus.NO_PHOTO_LIBRARY]
+     * ⇒ 聚合器直接跳过 [listPhotos] ⇒ **「重新扫描」永远扫不出东西**。
+     */
+    override fun invalidateStatus() {
+        verdict.invalidate()
     }
 
     override suspend fun listPhotos(): List<PhotoRef> = withContext(Dispatchers.IO) {
         val adapter = adapterProvider() ?: run {
-            lastKnownTotal = UNKNOWN_TOTAL
+            verdict.onScanFailed()
             return@withContext emptyList()
         }
 
@@ -82,9 +92,16 @@ class JellyfinPhotoSource(
         var startIndex = 0
         var total = -1
         var pages = 0
+        var queryFailed = false
 
         while (pages < MAX_PAGES && out.size < MAX_PHOTOS) {
-            val page = fetchPage(adapter, startIndex, pageSize) ?: break
+            val page = fetchPage(adapter, startIndex, pageSize)
+            if (page == null) {
+                // ⛔ 查询失败 ≠「没有照片」：两种情况必须分开记，否则一次网络抖动
+                //    就会把来源永久判成「无照片库」（见 PhotoScanVerdict 的说明）
+                queryFailed = true
+                break
+            }
             if (total < 0) total = page.total
             if (page.items.isEmpty()) break
             out.addAll(page.items)
@@ -94,8 +111,12 @@ class JellyfinPhotoSource(
             if (startIndex >= total) break
         }
 
-        lastKnownTotal = total.coerceAtLeast(0)
-        AppLog.d(TAG, "Scanned ${out.size} photos via Jellyfin (total=$total)")
+        if (queryFailed) {
+            verdict.onScanFailed()
+        } else {
+            verdict.onScanSucceeded(total)
+        }
+        AppLog.d(TAG, "Scanned ${out.size} photos via Jellyfin (total=$total failed=$queryFailed)")
         out
     }
 
@@ -193,7 +214,7 @@ class JellyfinPhotoSource(
         const val DEFAULT_PAGE_SIZE = 500
         const val MAX_PAGES = 40
         const val MAX_PHOTOS = 20000
-        const val UNKNOWN_TOTAL = -1
+        // 「未知总数」常量已移到 [PhotoScanVerdict]（判定器与来源共用同一份口径）
 
         fun defaultClient(): OkHttpClient = OkHttpClient.Builder()
             .connectTimeout(10, TimeUnit.SECONDS)

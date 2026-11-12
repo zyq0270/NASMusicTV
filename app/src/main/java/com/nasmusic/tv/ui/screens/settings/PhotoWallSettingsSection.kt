@@ -24,6 +24,7 @@ import androidx.tv.material3.Text
 import com.nasmusic.tv.R
 import com.nasmusic.tv.backend.photo.FaceScanManager
 import com.nasmusic.tv.backend.photo.PhotoScaleMode
+import com.nasmusic.tv.backend.photo.PhotoSourceStatus
 import com.nasmusic.tv.backend.photo.PhotoWallAccessPolicy
 import com.nasmusic.tv.backend.photo.SafDirectoryPolicy
 import com.nasmusic.tv.data.model.AppSettings
@@ -92,6 +93,15 @@ data class PhotoWallRuntimeState(
     val galleryCount: Int = 0,
     val externalCount: Int = 0,
     val jellyfinCount: Int = 0,
+    /**
+     * **NAS（Jellyfin）来源的当前状态**（`null` = 还没扫过 / 没连上）。
+     *
+     * ⚠️ 2026-11-12 电视实测后新增：用户报「NAS 已连接、点重新扫描、找不到 NAS 里的照片」，
+     * 而**照片墙设置页此前完全不显示任何来源状态** ⇒ 用户无法判断到底是
+     * 「NAS 没连上 / 后端不支持照片通道 / 已连但服务器里没有照片库 / 开关关着」。
+     * ⇒ 把聚合器的状态显示出来（只在**不是 OK** 时显示一行 ⇒ 正常时不占地方）。
+     */
+    val jellyfinStatus: PhotoSourceStatus? = null,
     /** 合并去重后的总数（阶段 10 填）—— 与三个分来源计数**同口径**（都不过人脸过滤） */
     val mergedCount: Int = 0,
     /**
@@ -281,6 +291,21 @@ internal fun PhotoWallSettingsSection(
                 enabled = state.nasConnected,
                 onClick = { actions.onToggleJellyfin?.invoke(!s.photoWallJellyfinEnabled) }
             )
+
+            // ⚠️ **来源状态**（2026-11-12 电视实测新增）：NAS 已连接却扫不到照片时，
+            //    用户必须能一眼看出**卡在哪一环**（没连上 / 后端不支持照片通道 /
+            //    已连但服务器里没有照片库 / 开关关着）。
+            //    ⇒ 只在「状态不是 OK」时显示一行（正常时不占地方）。
+            runtime.jellyfinStatus
+                ?.takeIf { it != PhotoSourceStatus.OK }
+                ?.let { st ->
+                    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
+                        SettingsInfoRow(
+                            stringResource(R.string.settings_photo_wall_jellyfin),
+                            stringResource(jellyfinStatusTextRes(st))
+                        )
+                    }
+                }
 
             // 运行时可派生信息（阶段 9/10 才会有真实数字）
             Spacer(modifier = Modifier.height(8.dp))
@@ -507,6 +532,26 @@ private fun rejectTextRes(reason: SafDirectoryPolicy.RejectReason): Int = when (
     SafDirectoryPolicy.RejectReason.EMPTY -> R.string.photo_wall_notice_dir_empty
     SafDirectoryPolicy.RejectReason.MALFORMED -> R.string.photo_wall_notice_dir_malformed
     SafDirectoryPolicy.RejectReason.INTERNAL_STORAGE -> R.string.photo_wall_notice_dir_internal
+}
+
+/**
+ * NAS（Jellyfin）来源状态 → 文案（2026-11-12 电视实测新增）
+ *
+ * ⚠️ 同上：数据层只给枚举（`PhotoSourceStatus`），文案在这里映射。
+ *
+ * ⛔ **穷举 `when`**（不是「排除法」）：新增状态时编译器会强制这里表态，
+ * 避免新状态被静默当成「正常」。
+ */
+@StringRes
+private fun jellyfinStatusTextRes(status: PhotoSourceStatus): Int = when (status) {
+    PhotoSourceStatus.OK -> R.string.settings_photo_wall_status_ok
+    PhotoSourceStatus.DISABLED -> R.string.settings_photo_wall_status_disabled
+    PhotoSourceStatus.PERMISSION_DENIED -> R.string.settings_photo_wall_status_permission_denied
+    PhotoSourceStatus.PARTIAL_PERMISSION -> R.string.settings_photo_wall_status_partial_permission
+    PhotoSourceStatus.NO_DIRECTORY -> R.string.settings_photo_wall_status_no_directory
+    PhotoSourceStatus.NOT_CONNECTED -> R.string.settings_photo_wall_status_not_connected
+    PhotoSourceStatus.NO_PHOTO_LIBRARY -> R.string.settings_photo_wall_status_no_photo_library
+    PhotoSourceStatus.UNAVAILABLE -> R.string.settings_photo_wall_status_unavailable
 }
 
 /** 「已启用」文案：开着的来源用 ` + ` 连接；一个都没开时显示「未启用任何来源」（§7.2） */

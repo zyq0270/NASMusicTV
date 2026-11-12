@@ -4826,6 +4826,9 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
             // 导航到首页
             navVM.navigateTo(Screen.Home)
             loadHomeDashboard()
+            // 2026-11-12：NAS 连上后**自动扫**照片墙（Jellyfin 来源开着才扫）
+            // ⛔ 连接成功这条路不碰照片墙设置 ⇒ 编排器不会自己判出「要重扫」⇒ 必须显式补
+            visualizerVM.onNasConnected()
         }
         serverVM.onDisconnected = {
             _albums.value = UiState.Loading

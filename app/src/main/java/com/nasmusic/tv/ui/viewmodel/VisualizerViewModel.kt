@@ -15,6 +15,7 @@ import com.nasmusic.tv.backend.photo.ExternalFilePhotoSource
 import com.nasmusic.tv.backend.photo.FaceScanManager
 import com.nasmusic.tv.backend.photo.JellyfinPhotoSource
 import com.nasmusic.tv.backend.photo.MediaStorePhotoSource
+import com.nasmusic.tv.backend.photo.PhotoAutoScanPolicy
 import com.nasmusic.tv.backend.photo.PhotoSource
 import com.nasmusic.tv.backend.photo.PhotoSourceKind
 import com.nasmusic.tv.backend.photo.PhotoThumbnailProvider
@@ -327,6 +328,37 @@ class VisualizerViewModel(
 
     /** 最近一次发射的 `AppSettings`（供 `onResume` 同步读取，避免再挂一个订阅） */
     @Volatile private var latestSettings: AppSettings = AppSettings()
+
+    /**
+     * **NAS 连接成功后自动扫描照片墙**（2026-11-12 用户裁定）。
+     *
+     * > 「应该增加自动扫描的功能，无需手动，也可以强制手动重新扫描。
+     * > 只要连接了 NAS Jellyfin 服务器，并且照片墙中 Jellyfin 的开关打开的情况下，
+     * > 连接 NAS 成功后，应该自动扫描」
+     *
+     * ## 为什么必须在这里补一刀
+     *
+     * 连接成功这条路**不碰照片墙的设置** ⇒ 编排器的「要不要重扫」判断看不到任何变化
+     * ⇒ **不会触发扫描** ⇒ NAS 刚连上时照片墙仍是空的（用户报「NAS 已连接却找不到照片」）。
+     * ⇒ 而「重新扫描」又被来源的**状态缓存**挡掉（见 [com.nasmusic.tv.backend.photo.PhotoScanVerdict]）
+     * ⇒ 两条路都断 ⇒ 必须在这里显式补一次扫描。
+     *
+     * ## 手动「重新扫描」仍然保留
+     *
+     * 自动扫描只是**省一次手动操作**：用户在设置页点「重新扫描」依然是强制重扫
+     * （会取消正在跑的扫描并立刻重来）。
+     *
+     * ⛔ **开关关着就不扫**（不产生任何网络请求）⇒ 判据见 [PhotoAutoScanPolicy]。
+     */
+    fun onNasConnected() {
+        val backendType = (app as NasMusicApp).backendRegistry.getAdapter()?.backendType
+        if (!PhotoAutoScanPolicy.shouldAutoScan(backendType, latestSettings.photoWallJellyfinEnabled)) {
+            AppLog.d(TAG, "onNasConnected: 不自动扫（后端=$backendType 开关=${latestSettings.photoWallJellyfinEnabled}）")
+            return
+        }
+        AppLog.w(TAG, "onNasConnected: NAS 已连上 ⇒ 自动扫描照片墙")
+        photoWall.rescan()
+    }
 
     /** 回弹写入尚未落盘时的去重标志，避免同一轮里重复提示 */
     private var galleryRollbackPending = false

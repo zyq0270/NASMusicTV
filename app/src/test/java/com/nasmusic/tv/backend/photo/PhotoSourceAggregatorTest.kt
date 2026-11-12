@@ -89,6 +89,59 @@ class PhotoSourceAggregatorTest {
         assertTrue("计数应为 0", result.perSource[PhotoSourceKind.GALLERY] == 0)
     }
 
+    // ────────────────────── ①b 缓存判定不得挡住扫描（2026-11-12 电视实测修复）──────────────────────
+
+    /**
+     * **「重新扫描」必须真的重新去问服务器** —— 来源缓存的「无照片库」判定不得挡住扫描。
+     *
+     * ## 复现的真事故
+     *
+     * 2026-11-11 电视实测：NAS 已连接，照片墙点「重新扫描」⇒ **找不到 NAS 里的照片**。
+     * ⇒ 根因：`JellyfinPhotoSource` 把「上次扫到 0 张」缓存成 `NO_PHOTO_LIBRARY`，
+     * 而聚合器**先问 status、再决定要不要 listPhotos** ⇒
+     * 缓存一旦成「无照片库」，之后每轮扫描都被挡掉（连 `listPhotos()` 都不调用）
+     * ⇒ 且**一次网络抖动就足以触发**（查询失败时 `total` 停在 -1，被当成 0）。
+     *
+     * ⇒ 修法：每轮扫描前先 `invalidateStatus()`（见 `PhotoSource.invalidateStatus`）。
+     *
+     * ⚠️ 这条用例里的替身**照抄真实来源的缓存行为**：作废前返回 `NO_PHOTO_LIBRARY`、
+     * 作废后返回 `OK` ⇒ 只要聚合器忘了作废，扫描就扫不出东西。
+     */
+    @Test
+    fun `cached unavailable verdict must not block the next scan`() = runBlocking {
+        var cachedVerdict = true
+        var listCalls = 0
+        var invalidateCalls = 0
+        val source = object : PhotoSource {
+            override val kind: PhotoSourceKind = PhotoSourceKind.JELLYFIN
+
+            override suspend fun status(): PhotoSourceStatus =
+                if (cachedVerdict) PhotoSourceStatus.NO_PHOTO_LIBRARY else PhotoSourceStatus.OK
+
+            override fun invalidateStatus() {
+                invalidateCalls++
+                cachedVerdict = false
+            }
+
+            override suspend fun listPhotos(): List<PhotoRef> {
+                listCalls++
+                return refs(PhotoSourceKind.JELLYFIN, 2)
+            }
+
+            override suspend fun openStream(ref: PhotoRef): InputStream? = null
+        }
+        val agg = PhotoSourceAggregator(mapOf(PhotoSourceKind.JELLYFIN to source))
+
+        val result = agg.collect(enabled = setOf(PhotoSourceKind.JELLYFIN))
+
+        assertTrue("每轮扫描前必须作废来源缓存的判定，实际 $invalidateCalls 次", invalidateCalls == 1)
+        assertTrue("作废后必须真的去扫，实际 listPhotos 调用 $listCalls 次", listCalls == 1)
+        assertTrue(
+            "扫描结果应有 2 张（NAS 里的照片），实际 ${result.photos.size}",
+            result.photos.size == 2,
+        )
+    }
+
     @Test
     fun `absent source is omitted from statuses`() = runBlocking {
         // 电视上不存在「图库」来源：它不该出现在 statuses / perSource 里（区别于 DISABLED）
