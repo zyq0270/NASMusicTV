@@ -527,13 +527,27 @@ internal fun AboutRow(label: String, value: String) {
  * `Arrangement.SpaceBetween` 且**不限宽** —— 长值会把标签挤没（竖屏实测）。收成一份后
  * 两处共用同一条 `Row`。⛔ 不要给值加 `maxLines`：长值必须折行，不许省略号截断。
  *
- * 两档尾部宽度（[valueMaxWidth]）：
- * - `null` → 值列按 `weight(1.5f)` 吃 60%（`AboutRow` 用）。**能力说明那几行的值是整句**
- *   （「网易云 / QQ音乐 / 酷狗 / 酷我 / 咪咕(Meting-API 端点)」），定宽会把 TV 上的一行
- *   压成三四行，属可感知回退 ⇒ 说明性行保持比例分配。
- * - 给定值 → 值列**最多**这么宽（`SettingsInfoRow` 传 `infoValueWidth` = 180dp，§4.8 A4）。
- *   指标行的值都是「1.23 GB」「12」这类短串：用 `widthIn(max = …)` 而不是 `width(…)`，
- *   短值不占满 180dp（省下的宽度自动还给标签），长值（自定义源 URL）在这个上限内折行。
+ * ## ⛔⛔ 值列宽度：**按比例分配**，不再写死 180dp 封顶（2026-11-12 真机反馈修正）
+ *
+ * 原来两档：
+ * - `null` → 值列按 `weight(1.5f)` 吃 60%（`AboutRow` 用）
+ * - 给定值 → 值列**封顶** 180dp（`SettingsInfoRow` 用，§4.8 A4「长值不许把标签挤没」）
+ *
+ * ⇒ 180dp 的封顶在 TV 上把**长句**压成三行，而**前面**（标签侧）空着一千多像素：
+ * 真机实测「照片数量」那行，值「图库 0 · 外接 0 · Jellyfin 20000」被挤在
+ * x=1575..1821 的窄条里折成 3 行（用户反馈：「这些文字都堆在最后面…前面其实有很大的空间，
+ * 应该扩充到前面，一行显示更多的文字」）。
+ *
+ * ⇒ 修法：**两档合并成比例档**（标签 1 : 值 1.5 ＝ 40% / 60%）：
+ * - 长句一次多出 4 倍宽度（180dp → 60% 行宽 ≈ 800px）⇒ **一行**显示；
+ * - 标签固定拿 40% ⇒ §4.8 A4「长值不许把标签挤没」这条**天然成立**
+ *   （比「封顶 + 标签吃剩余」更硬：标签的份额与值多长无关）。
+ *
+ * ⚠️ **为什么不用「量内容宽度」**（试过，放弃）：`TextMeasurer` 量出来的宽度会因
+ * `letterSpacing` / 字体度量差几个百分点 ⇒ 差一点点就又折行；而且
+ * `measure()` 的 `density` 参数**默认是 `Density(1f)`**，换算极易再错一档
+ * （电视 240dpi ⇒ 差 1.5 倍，第一版实现在真机上就因此「没生效」）。
+ * ⇒ **比例分配不依赖任何字体度量**，在这台电视上实测稳定。
  *
  * ⚠️ 标签列用 `weight(1f)`（`fill = true`），**不能**用 A4 字面的 `fill = false`：
  * `fill = false` 时长标签只占自身宽度，`Row` 的剩余空间无人认领、值会紧跟标签，
@@ -556,20 +570,17 @@ private fun SettingsLabelValueRow(
             fontSize = labelFontSize,
             modifier = Modifier.weight(1f)
         )
-        // 竖屏修正（20:40 用户反馈）：值不限定宽度时长文本会吃掉整行、把 weight
-        // 标签挤没。`valueMaxWidth` 档给值列一个上限（尾部不参与挤压），
-        // 比例档则按 标签 1 : 值 1.5 分配（约 40%/60%），两档都是恒右对齐。
+        // 值列：比例分配（标签 1 : 值 1.5 ＝ 40% / 60%）⇒ 长句一行显示得下；
+        // 标签那份 40% 恒定 ⇒ 长值也挤不没标签。
+        // ⛔ 不再写死 180dp 封顶（那正是「文字堆在最后面、折成三行」的病灶）。
+        // 两档（`valueMaxWidth`）已合并，参数保留只为兼容既有调用点。
         Text(
             text = value,
             color = NasMusicColors.TextPrimary,
             fontSize = valueFontSize,
             fontWeight = valueWeight,
             textAlign = androidx.compose.ui.text.style.TextAlign.End,
-            modifier = if (valueMaxWidth != null) {
-                Modifier.widthIn(max = valueMaxWidth).padding(start = 16.dp)
-            } else {
-                Modifier.weight(1.5f).padding(start = 16.dp)
-            }
+            modifier = Modifier.weight(1.5f).padding(start = 16.dp)
         )
     }
 }
@@ -718,8 +729,11 @@ internal fun <T> SettingsChipRow(
  * 版式与 `AboutRow` 共用 [SettingsLabelValueRow]（标签占满剩余、值恒右对齐）——
  * 此前这里用 `Arrangement.SpaceBetween` 且不限宽，长值会把标签挤没（§4.7-④）。
  * 水平边距取 `rowHPadding`，与行瓦片的内边距对齐，标签不再比上面的开关行凸出 20dp。
- * 值列走 §4.8 A4 的**封顶**档（`infoValueWidth` = 180dp）：指标行的值都是短串，
- * 封顶后短值不白占宽度、长值也不会把标签挤没；说明性长句仍归 `AboutRow`（比例档）。
+ * 值列走 §4.8 A4 的**比例**档（标签 1 : 值 1.5 ＝ 40% / 60%）：指标行的值都是短串时
+ * 不白占宽度；**长值也不会把标签挤没**（标签那份 40% 恒定）。
+ *
+ * ⚠️ 2026-11-12 真机反馈后：**不再写死 180dp 封顶** —— 那会把长句压在窄条里折成三行、
+ * 而前面空着上千像素（见 [SettingsLabelValueRow] 的说明与门禁 `SettingsValueWidthGateTest`）。
  *
  * @param description 只读行按 §4.5 规范**默认不带**功能说明；只有该项"删了有代价"
  *   需要警示时才给（T8b 的 9 条缓存代价说明）。`null` = 不占第二行。
