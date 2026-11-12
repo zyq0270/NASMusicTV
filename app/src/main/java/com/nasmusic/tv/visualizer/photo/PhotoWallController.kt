@@ -1,6 +1,7 @@
 package com.nasmusic.tv.visualizer.photo
 
 import android.os.Build
+import android.os.SystemClock
 import com.nasmusic.tv.backend.photo.AggregateResult
 import com.nasmusic.tv.backend.photo.PhotoRef
 import com.nasmusic.tv.backend.photo.PhotoScaleMode
@@ -126,6 +127,28 @@ class PhotoWallController(
      * `null`（默认）= 本平台没有人脸检测，`photoWallFacesOnly` 形同虚设。
      */
     private val faceKeysProvider: (suspend () -> Set<String>)? = null,
+    /**
+     * 照片墙**时钟的时间源**（毫秒，单调）。
+     *
+     * ## ⛔ 为什么不能直接用 `frame.timeMs`（2026-11-12 电视实测）
+     *
+     * `frame.timeMs` 是**音频帧**里的时间戳，由 [SpectrumRepository.onFrame] 写入 ——
+     * 而它**只在音频回调真的跑的时候**才更新。于是：
+     *
+     * | 场景 | 音频回调 | `frame.timeMs` | 照片墙 |
+     * |---|---|---|---|
+     * | 正在放歌 | 在跑 | 推进 | 正常换图 |
+     * | **暂停 / 没播 / 电台无输出** | **不跑** | **冻结** | **整面墙停在第一张** |
+     *
+     * ⇒ 实测：电视上音乐暂停时进全屏照片墙 ⇒ 照片停住不动（56 秒仍是同一张），
+     * 一放歌立刻开始换图 ⇒ **「照片没出来全就停着」的真正原因**。
+     *
+     * ⇒ 照片墙是**幻灯片**，不是频谱 ⇒ 它的时钟必须走**墙钟**
+     * （[SystemClock.elapsedRealtime]，单调、含睡眠、API 1 就有）。
+     *
+     * @param nowMsProvider 注入点：单测用假时钟驱动，不依赖真实时间。
+     */
+    private val nowMsProvider: () -> Long = { SystemClock.elapsedRealtime() },
     private val bufferFactory: (targetWidth: Int, targetHeight: Int, allowRgb565: Boolean) -> PhotoBuffer? =
         { w, h, rgb ->
             PhotoBuffer(
@@ -191,6 +214,29 @@ class PhotoWallController(
     /** 各来源状态（设置页「为什么不可用」） */
     val statuses: StateFlow<Map<PhotoSourceKind, PhotoSourceStatus>> = _statuses.asStateFlow()
 
+    private val _scanning = MutableStateFlow(false)
+    /**
+     * 「正在扫描」（设置页显示「扫描中…」）。
+     *
+     * ⛔ **必须有这个状态位**：NAS 来源走**相册级回退**时要连发几百个请求
+     * （实测 414 个相册容器、8 路并发，电视上约 30～60 s）
+     * ⇒ 没有进度提示的话，用户看到的是「照片数一直是 0」⇒ **判定为「点了没反应」**
+     * （违反交互可发现性）。
+     */
+    val scanning: StateFlow<Boolean> = _scanning.asStateFlow()
+
+    /**
+     * 扫描世代号（主线程）
+     *
+     * ⛔ 用来防「旧扫描把新扫描的『扫描中』标志清掉」：
+     * `rescan()` 会**取消**正在跑的扫描再立刻开新一轮 ⇒ 被取消的那一轮的 `catch`
+     * 会在**之后**才跑到（取消是异步投递的）⇒ 若它无条件写 `_scanning = false`，
+     * 就会把新一轮的「扫描中」误清 ⇒ 用户看到「扫描中」闪一下就没了。
+     *
+     * ⇒ 与 [PhotoBuffer] 的世代号同一套思路：**只有最新一代能写状态**。
+     */
+    private var scanGeneration = 0
+
     // ────────────────────────── 可变字段（全部主线程） ──────────────────────────
 
     private var settings: AppSettings = AppSettings()
@@ -249,13 +295,16 @@ class PhotoWallController(
         if (!active) return
 
         audioBoost = computeAudioBoost(frame)
-        clock.advance(frame.timeMs)
+        // ⛔ 时钟走**墙钟**，不走 `frame.timeMs`（见 [nowMsProvider] 的说明）：
+        //    音频回调停 ⇒ `frame.timeMs` 冻结 ⇒ HOLD 永远走不完 ⇒ 整面墙停在第一张。
+        val nowMs = nowMsProvider()
+        clock.advance(nowMs)
 
         when {
             // 尚未起第一张（刚进入 / 刚扫完 / 缓冲刚重建）⇒ 立即尝试
-            clock.transitionId == null -> tryStartSwap(frame.timeMs)
+            clock.transitionId == null -> tryStartSwap(nowMs)
             // HOLD 走完 ⇒ 换下一张。⚠️ 失败时 `finished` 保持 true，下一帧自动重试
-            clock.finished -> tryStartSwap(frame.timeMs)
+            clock.finished -> tryStartSwap(nowMs)
         }
     }
 
@@ -413,6 +462,9 @@ class PhotoWallController(
             return
         }
         needScan = false
+        scanGeneration++
+        val gen = scanGeneration
+        _scanning.value = true
         scanJob = scope.launch {
             // L33：扫描链（聚合 → 人脸过滤 → 建池）任何一处抛出都会走协程的默认 handler；
             // 在 `scope` 是外部 ViewModel 作用域时那是「未捕获异常 ⇒ 进程崩溃」。
@@ -428,6 +480,7 @@ class PhotoWallController(
                     _mergedCount.value = 0
                     _displayCount.value = 0
                     _statuses.value = emptyMap()
+                    if (scanGeneration == gen) _scanning.value = false
                     return@launch
                 }
                 val result: AggregateResult = aggregator.collect(
@@ -451,6 +504,8 @@ class PhotoWallController(
                 if (result.photos.isEmpty()) {
                     AppLog.w(TAG, "scan produced an empty pool: ${result.statuses}")
                 }
+                // ⛔ 只有最新一代能清「扫描中」标志（见 [scanGeneration]）
+                if (scanGeneration == gen) _scanning.value = false
                 // C48：本轮扫描期间设置又变了 ⇒ 立刻补扫下一轮。
                 // 先摘掉自身引用，否则 startScan() 会被 `scanJob?.isActive` 挡住、
                 // 只是把 needScan 再置一次，新设置永远落不了地。
@@ -459,10 +514,13 @@ class PhotoWallController(
                     startScan()
                 }
             } catch (e: kotlinx.coroutines.CancellationException) {
+                // ⛔ 取消也是「本轮结束」⇒ 同样要清标志（但只能清**自己那一代**的）
+                if (scanGeneration == gen) _scanning.value = false
                 throw e
             } catch (t: Throwable) {
                 AppLog.e(TAG, "scan failed, marked for retry", t)
                 needScan = true
+                if (scanGeneration == gen) _scanning.value = false
             }
         }
     }

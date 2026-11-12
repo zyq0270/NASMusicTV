@@ -104,6 +104,71 @@
      卡在哪一环（未连接 / 后端不支持照片通道 / 已连但服务器上没有照片库 / 开关关着）
   新增门禁：`PhotoScanVerdictTest`（7 例）、`PhotoAutoScanPolicyTest`（4 例）、
   `PhotoSourceAggregatorTest` 增 1 例（缓存判定不得挡住下一次扫描）
+- ⭐ **同版本第八轮之二：自动扫描的二次电视复核修正**（2026-11-11 下午）
+  —— 用 `uiautomator dump` 读电视界面复核，发现**自动扫描确实没跑**（照片数全 0、状态行没出现）：
+  1. **自造 bug**：自动扫描读的是 `latestSettings` 内存镜像，而**连接成功可能早于 DataStore 首次发射**
+     ⇒ 此刻读到的还是默认值（开关 false）⇒ 自动扫描被**静默跳过** ⇒ 改读**持久化**值
+     （`prefs.appSettings.first()`），并加结构门禁钉死「不许再读内存镜像」
+  2. **补「开关刚打开 ⇒ 立刻扫」**：原先扫描被推迟到「下次进照片墙」⇒ 用户在设置页打开开关、
+     照片数还是 0 ⇒「点了没反应」⇒ 现在 NAS 已连着就立刻扫
+  3. **服务端实测结论**：用同一账号直连 Jellyfin 复核 ⇒ 整库 51592 个条目里**没有任何图片条目**
+     （Type 只有 Audio/MusicAlbum/MusicVideo/Movie/Folder；扩展名只有 .mp3/.mp4/.avi/.mkv），
+     「家庭视频和照片」库指向 `G:\photo\照片` 但**索引到 0 个条目**
+     ⇒ 应用那条 `IncludeItemTypes=Photo` 查询**必然返回 0** ⇒「找不到 NAS 照片」的真正原因在
+     **服务端**（Jellyfin 没把那些图片索引成条目）⇒ 应用侧已用状态行把这一环显式告诉用户
+  4. ⛔ **上面第 3 条已被「同版本第九轮」推翻**（2026-11-12）：那是**误判** ——
+     服务器上**有**约 1.6 万张照片，是应用那条**全局递归**查询摸不到它们（见下条）
+
+- ⭐ **同版本第九轮：照片墙 NAS 来源「扫不到照片」的真正根因 —— 查询形状摸不到 `homevideos` 库的照片**（2026-11-12）
+  —— 所有者追问「**之前有能够查询到 jellyfin 照片的，你查查你改哪里了？**」
+  ⇒ 复核发现**上一轮的「服务端没有照片」是误判**：那是用**应用自己那条查询**给服务器下的结论。
+  直连 Jellyfin 10.11.5 逐项取证（详见 technical-overview §10.393）：
+  - `/Items?IncludeItemTypes=Photo&Recursive=true`（**应用原样**）⇒ **0**
+  - `/Items?IncludeItemTypes=Photo&ParentId=<相册 id>&Recursive=true` ⇒ **27**（单个相册）
+  - 全局递归集合 **51592 条按类型求和 = 51590**（Audio 31389 / MusicAlbum 13354 /
+    MusicArtist 4462 / MusicVideo 1041 / Episode 811 / Movie 305 / Folder 168 / Series+Season 60）
+    ⇒ **Photo = 0、PhotoAlbum = 0** ⇒ 照片**根本不在全局递归索引里**
+  - 照片**确实在**：媒体库「家庭视频和照片」指向 `G:\photo\照片`，库根下 **388 个 `PhotoAlbum`
+    + 12 个 `Folder`**，抽样估算**约 1.67 万张**
+  ⇒ **根因（机制级）**：Jellyfin 的 `homevideos` 库把照片建成一层 `PhotoAlbum`，
+    而**全局递归查询不下钻到相册** ⇒ 应用那条查询**必然**返回 0
+    ⇒ 与上一轮修的「扫描状态自锁」是**两个独立故障**，两个都得修
+  **修正**：
+  1. 新增 `backend/photo/JellyfinPhotoLibrary`（纯逻辑）：顶层只认 `CollectionFolder`；
+     根下只认 `PhotoAlbum` **和** `Folder`（⚠️ 实测普通文件夹里也有照片：`宠物` 92 张）
+  2. `JellyfinPhotoSource.listPhotos()` 改「**先全局、拿不到再逐相册**」
+     ⇒ 全局有照片仍走原路径（`photos` / `mixed` 库**不回归**）；拿不到才走相册级回退
+  3. 回退路径**全程只用 `/Items`**（⛔ `/Library/MediaFolders` 是 `RequiresElevation`，
+     **要管理员** ⇒ 普通用户会 403 ⇒ 照片墙不能依赖它）
+  4. 相册 8 路并发抓取（单页 500 / 探测上限 600 容器 / 总照片上限 20000）
+  5. 回退**自限**：列媒体库根失败就立刻收手 ⇒ 服务器不可达时最多 2 个请求
+  6. ⛔ **失败 ≠ 0 张**：部分相册失败时已有照片照常返回，只有「全军覆没」才记为失败
+  新增门禁：`JellyfinPhotoLibraryTest`（纯逻辑）、
+  `JellyfinPhotoSourceAlbumFallbackTest`（MockWebServer + Robolectric，含「服务器不可达 ⇒
+  `/Items` 请求 ≤ 2 次」的自限断言）
+  **电视实测（同日）**：照片墙设置页显示 `Jellyfin 20000` / `合并后 20000 张`；
+  全屏照片墙渲染出 NAS 的真实照片 ⇒ **相册级回退在真机上生效**
+  （真实服务器上共 **31 558 张**，扩展名白名单全部通过；应用侧 `MAX_PHOTOS = 20000` 封顶）
+- ⭐ **同版本第九轮之二：照片墙「停在第一张不动」——时钟被「音频帧时间」绑住 ⇒ 改走墙钟**（2026-11-12）
+  —— 第九轮的包装到电视上后：照片**能出来了**（NAS 真实照片全屏渲染，50 fps），
+  但**停住不动**：连拍 5 张截图（间隔 14 秒、共 56 秒）全是同一张，
+  而设置里「停留时长」是 **8.0 秒** ⇒ 与观察直接矛盾
+  ⇒ 根因：`frame.timeMs` 是**音频帧**里的时间戳，只在**音频回调真的跑**时更新
+  ⇒ **音乐暂停**时它**冻结** ⇒ 照片墙的 HOLD 永远走不完 ⇒ `tryStartSwap()` 永远不被调用
+  ⇒ 这正是用户**第一轮**报的「**照片没出来全就停着**」的真正机制
+  ⇒ 实测闭环：暂停时不动 → 一放歌**立刻开始换图**
+  修正：
+  1. `PhotoWallController` 新增 `nowMsProvider: () -> Long`（默认 `SystemClock.elapsedRealtime()`）
+     ⇒ 照片墙时钟走**墙钟**，与「音频是否在放」解耦
+  2. `onFrame` 的 `clock.advance` / `tryStartSwap` 全部改用墙钟
+  3. `PhotoTransitionClock.start` 的 KDoc 改口径（明确「不能用 `frame.timeMs`」）
+  新增门禁：`PhotoWallClockSourceTest`（喂**恒定不变**的 `frame.timeMs` + 正常推进的墙钟
+  ⇒ 断言照片墙照样换图）；`PhotoWallControllerTest` 改注入假时钟
+  **电视实测（同日）**：`dumpsys media_session` 确认 `state=2 (PAUSED)`、`position` 冻结、
+  `speed=0.0` 的前提下连拍 4 张（间隔 12 秒）**四张全不同** ⇒ 照片墙已与音频解耦
+  —— 附带（第九轮）：照片墙设置页新增「**扫描状态 / 正在扫描…**」行
+  （相册级回退要发 400+ 个请求，电视上约 30～60 s ⇒ 没有它用户看到的就是「照片数一直是 0」
+  ⇒ 判定为「点了没反应」）
 
 ### Removed
 

@@ -5,6 +5,9 @@ import com.google.gson.JsonParser
 import com.nasmusic.tv.backend.BackendAdapter
 import com.nasmusic.tv.util.AppLog
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -19,10 +22,22 @@ import java.util.concurrent.TimeUnit
  *
  * ## 接口
  *
- * - 列表：`/Items?IncludeItemTypes=Photo&Recursive=true&fields=Width,Height,Path&UserId=…`
+ * - 全局列表：`/Items?IncludeItemTypes=Photo&Recursive=true&fields=Width,Height,Path&UserId=…`
+ * - **相册级列表**：`/Items?IncludeItemTypes=Photo&ParentId=<相册 id>&Recursive=true&…`（§10.393）
+ * - 媒体库根：`/Items?Recursive=false&UserId=…`
  * - 取图：`/Items/{id}/Images/Primary?maxWidth=1920&quality=90`
  *
  * ⚠️ `maxWidth=1920` 是刻意的 —— 音频封面用的是 512，照片放大到全屏会糊。
+ *
+ * ## ⛔ 为什么必须有「相册级回退」（2026-11-12 电视实测 + 服务器直查）
+ *
+ * 应用原来只用**全局递归查询**取照片。实测（Jellyfin 10.11.5）：
+ * 全局递归集合 51592 条里按类型求和后 **Photo = 0、PhotoAlbum = 0**
+ * ⇒ `homevideos` 库的照片挂在 `PhotoAlbum` 下，而**全局递归查询不下钻到相册**
+ * ⇒ 全局查询恒为 0 张 ⇒ 照片墙的 NAS 来源永远空。
+ *
+ * ⇒ 现在：**先试全局查询（`photos` / `mixed` 库走这条），拿不到照片再逐相册查**。
+ * 详细取证与策略见 [JellyfinPhotoLibrary]。
  *
  * ## 认证
  *
@@ -43,6 +58,8 @@ import java.util.concurrent.TimeUnit
  * - 时间：`DateCreated` 是 ISO 8601 ⇒ 必须自己转成**秒**
  *   ⛔ 不能用 `java.time`（需要 API 26，本项目 `minSdk = 22`）
  *   ⇒ 用 `SimpleDateFormat` 手工归一化（见 [isoToEpochSeconds]）
+ *   ⚠️ 实测 Jellyfin 的**照片条目 `DateCreated` 常为空** ⇒ 归一化后是 0，
+ *   不影响展示（池是打乱的）；JELLYFIN 项在 [PhotoDedup] 里整体豁免，也不会误杀。
  * - `size`：需要 `MediaSources` 才有，而 **JELLYFIN 项不参与跨来源去重**（§6.8）
  *   ⇒ 不为此多请求字段，填 `0`
  */
@@ -88,36 +105,36 @@ class JellyfinPhotoSource(
             return@withContext emptyList()
         }
 
-        val out = ArrayList<PhotoRef>(256)
-        var startIndex = 0
-        var total = -1
-        var pages = 0
-        var queryFailed = false
-
-        while (pages < MAX_PAGES && out.size < MAX_PHOTOS) {
-            val page = fetchPage(adapter, startIndex, pageSize)
-            if (page == null) {
-                // ⛔ 查询失败 ≠「没有照片」：两种情况必须分开记，否则一次网络抖动
-                //    就会把来源永久判成「无照片库」（见 PhotoScanVerdict 的说明）
-                queryFailed = true
-                break
-            }
-            if (total < 0) total = page.total
-            if (page.items.isEmpty()) break
-            out.addAll(page.items)
-            startIndex += pageSize
-            pages++
-            // 已经取完
-            if (startIndex >= total) break
+        // ── 路径 1：全局递归查询（photos / mixed 库走这条，一次请求拿全）──
+        val global = fetchAllItems(adapter, GLOBAL_QUERY, MAX_PHOTOS)
+        val globalPhotos = global.items.mapNotNull { elementToRef(it) }
+        if (globalPhotos.isNotEmpty()) {
+            verdict.onScanSucceeded(globalPhotos.size)
+            AppLog.w(TAG, "全局递归查询拿到 ${globalPhotos.size} 张照片")
+            return@withContext globalPhotos
         }
 
-        if (queryFailed) {
+        // ── 路径 2：相册级回退（homevideos 库走这条，§10.393）──
+        if (!JellyfinPhotoLibrary.shouldFallbackToAlbums(globalPhotos.size)) {
             verdict.onScanFailed()
-        } else {
-            verdict.onScanSucceeded(total)
+            return@withContext emptyList()
         }
-        AppLog.d(TAG, "Scanned ${out.size} photos via Jellyfin (total=$total failed=$queryFailed)")
-        out
+        val byAlbum = queryByAlbum(adapter)
+        // ⛔ **有照片就是有照片** —— 部分相册失败不影响已有结果（只有全军覆没才算失败）
+        if (byAlbum.photos.isNotEmpty()) {
+            verdict.onScanSucceeded(byAlbum.photos.size)
+            AppLog.w(TAG, "相册级回退拿到 ${byAlbum.photos.size} 张照片")
+            return@withContext byAlbum.photos
+        }
+        if (byAlbum.failed) {
+            // ⛔ 失败 ≠ 0 张（见 [PhotoScanVerdict] 铁律 1）
+            verdict.onScanFailed()
+            return@withContext emptyList()
+        }
+        // 服务器确实一张都没有
+        verdict.onScanSucceeded(0)
+        AppLog.w(TAG, "相册级回退：服务器上确实没有照片")
+        emptyList()
     }
 
     override suspend fun openStream(ref: PhotoRef): InputStream? = withContext(Dispatchers.IO) {
@@ -140,22 +157,152 @@ class JellyfinPhotoSource(
         }.getOrNull()
     }
 
+    // ────────────────────────── 相册级回退 ──────────────────────────
+
+    /**
+     * 相册级回退（§10.393）
+     *
+     * ```
+     * /Items?Recursive=false                      → 顶层媒体库根（CollectionFolder）
+     *   └─ /Items?ParentId=<根 id>&Recursive=false → 根下的相册（PhotoAlbum / Folder）
+     *        └─ /Items?IncludeItemTypes=Photo&ParentId=<相册 id>&Recursive=true → 照片
+     * ```
+     *
+     * ⛔ **自限**：第一步（列媒体库根）拿不到东西就**立刻收手** ⇒
+     * 服务器不可达时不会打出几百个请求。
+     */
+    private suspend fun queryByAlbum(adapter: BackendAdapter): AlbumScan {
+        val roots = fetchLibraryRoots(adapter)
+        if (roots.isEmpty()) {
+            AppLog.w(TAG, "相册级回退：没列到媒体库根（服务器不可达或没有媒体库）")
+            return AlbumScan(emptyList(), failed = true)
+        }
+
+        val containers = ArrayList<String>(512)
+        for (root in roots) {
+            if (containers.size >= JellyfinPhotoLibrary.MAX_ALBUM_QUERIES) {
+                AppLog.w(TAG, "相册级回退：相册数超过上限 ${JellyfinPhotoLibrary.MAX_ALBUM_QUERIES}，截断")
+                break
+            }
+            containers += fetchAlbumContainers(adapter, root)
+        }
+        if (containers.isEmpty()) {
+            // 有媒体库根但一个相册/文件夹都没有 ⇒ 服务器上确实没有照片（**不是失败**）
+            AppLog.w(TAG, "相册级回退：媒体库根下没有相册/文件夹")
+            return AlbumScan(emptyList(), failed = false)
+        }
+        AppLog.w(TAG, "相册级回退：共 ${containers.size} 个相册容器，开始逐个抓取")
+
+        val out = ArrayList<PhotoRef>(1024)
+        var anyFailed = false
+        for (chunk in containers.chunked(JellyfinPhotoLibrary.ALBUM_CONCURRENCY)) {
+            val batch = coroutineScope {
+                chunk.map { id ->
+                    async(Dispatchers.IO) { fetchAlbumPhotos(adapter, id) }
+                }.awaitAll()
+            }
+            for (result in batch) {
+                if (result.failed) {
+                    anyFailed = true
+                    continue
+                }
+                for (photo in result.photos) {
+                    if (out.size >= MAX_PHOTOS) return AlbumScan(out, failed = false)
+                    out.add(photo)
+                }
+            }
+            if (out.size >= MAX_PHOTOS) break
+        }
+        // ⛔ 全军覆没才算失败；部分相册失败仍算成功（有照片就是有照片）
+        return AlbumScan(out, failed = anyFailed && out.isEmpty())
+    }
+
+    /** 顶层媒体库根的 id 列表（`/Items?Recursive=false` ⇒ 只返回 CollectionFolder） */
+    private fun fetchLibraryRoots(adapter: BackendAdapter): List<String> {
+        val res = fetchAllItems(adapter, ROOT_QUERY, MAX_ROOT_ITEMS)
+        if (res.failed) return emptyList()
+        return res.items
+            .filter { JellyfinPhotoLibrary.isLibraryRoot(it.stringOr("Type", null)) }
+            .mapNotNull { it.stringOr("Id", null) }
+    }
+
+    /** 某个媒体库根下的相册 / 文件夹 id 列表 */
+    private fun fetchAlbumContainers(adapter: BackendAdapter, rootId: String): List<String> {
+        val res = fetchAllItems(
+            adapter,
+            "$ALBUM_CONTAINER_QUERY&ParentId=$rootId",
+            JellyfinPhotoLibrary.MAX_ALBUM_QUERIES,
+        )
+        if (res.failed) return emptyList()
+        return res.items
+            .filter { JellyfinPhotoLibrary.isAlbumContainer(it.stringOr("Type", null)) }
+            .mapNotNull { it.stringOr("Id", null) }
+    }
+
+    /** 某个相册 / 文件夹里的照片 */
+    private fun fetchAlbumPhotos(adapter: BackendAdapter, containerId: String): AlbumScan {
+        val query = "$ALBUM_PHOTO_QUERY&ParentId=$containerId"
+        val res = fetchAllItems(adapter, query, MAX_PHOTOS)
+        if (res.failed) return AlbumScan(emptyList(), failed = true)
+        return AlbumScan(res.items.mapNotNull { elementToRef(it) }, failed = false)
+    }
+
     // ────────────────────────── 内部实现 ──────────────────────────
 
-    private class Page(val items: List<PhotoRef>, val total: Int)
+    /** 一次 `/Items` 查询的原始结果（**未**映射成 [PhotoRef]） */
+    private class ItemsPage(val items: List<JsonObject>, val total: Int)
 
-    private fun fetchPage(adapter: BackendAdapter, startIndex: Int, limit: Int): Page? {
-        val query = buildString {
-            append("IncludeItemTypes=Photo")
-            append("&Recursive=true")
-            append("&fields=Width,Height,Path")
-            append("&SortBy=SortName&SortOrder=Ascending")
+    /** 一次拉取的结果：[failed] = 查询**失败**（不是「查到 0 条」） */
+    private class ItemsFetch(val items: List<JsonObject>, val failed: Boolean)
+
+    /** 一次「按相册」的扫描结果 */
+    private class AlbumScan(val photos: List<PhotoRef>, val failed: Boolean)
+
+    /**
+     * 分页拉取 `/Items`。
+     *
+     * @param query **不含** `StartIndex` / `Limit` / `UserId` 的查询串
+     * @param maxItems 最多收集多少条
+     * @return [ItemsFetch]；`failed = true` 表示**查询失败**（网络 / HTTP / 解析），
+     *   与「查到 0 条」严格区分（[PhotoScanVerdict] 铁律 1）
+     */
+    private fun fetchAllItems(
+        adapter: BackendAdapter,
+        query: String,
+        maxItems: Int,
+    ): ItemsFetch {
+        val out = ArrayList<JsonObject>()
+        var startIndex = 0
+        var total = -1
+        var pages = 0
+        while (pages < MAX_PAGES && out.size < maxItems) {
+            val page = fetchOnePage(adapter, query, startIndex, pageSize) ?: return ItemsFetch(out, failed = true)
+            if (total < 0) total = page.total
+            if (page.items.isEmpty()) break
+            out.addAll(page.items)
+            startIndex += pageSize
+            pages++
+            // 已经取完
+            if (total >= 0 && startIndex >= total) break
+        }
+        return ItemsFetch(out, failed = false)
+    }
+
+    /** 单页查询；返回 `null` = 查询失败 */
+    private fun fetchOnePage(
+        adapter: BackendAdapter,
+        query: String,
+        startIndex: Int,
+        limit: Int,
+    ): ItemsPage? {
+        val full = buildString {
+            append(query)
             append("&StartIndex=$startIndex")
             append("&Limit=$limit")
             val uid = adapter.currentUserId
             if (uid.isNotEmpty()) append("&UserId=$uid")
         }
-        val url = adapter.buildAuthenticatedUrl(PATH_ITEMS, query) ?: return null
+        val url = adapter.buildAuthenticatedUrl(PATH_ITEMS, full) ?: return null
         return runCatching {
             val response = client.newCall(Request.Builder().url(url).build()).execute()
             response.use { resp ->
@@ -167,16 +314,14 @@ class JellyfinPhotoSource(
                 val root = JsonParser.parseString(body).asJsonObject
                 val total = root.intOr("TotalRecordCount", 0)
                 val arr = root.getAsJsonArray("Items")
-                if (arr == null) {
-                    Page(emptyList(), total)
+                val items = if (arr == null) {
+                    emptyList()
                 } else {
-                    val items = ArrayList<PhotoRef>(arr.size())
-                    for (el in arr) {
-                        val ref = elementToRef(el.asJsonObject)
-                        if (ref != null) items.add(ref)
-                    }
-                    Page(items, total)
+                    val list = ArrayList<JsonObject>(arr.size())
+                    for (el in arr) list.add(el.asJsonObject)
+                    list
                 }
+                ItemsPage(items, total)
             }
         }.getOrElse {
             AppLog.e(TAG, "photo query failed: ${it.message}", it)
@@ -214,6 +359,26 @@ class JellyfinPhotoSource(
         const val DEFAULT_PAGE_SIZE = 500
         const val MAX_PAGES = 40
         const val MAX_PHOTOS = 20000
+
+        /** 顶层媒体库根（`/Items?Recursive=false` ⇒ 只返回 CollectionFolder） */
+        const val MAX_ROOT_ITEMS = 200
+
+        /** 全局递归查询（`photos` / `mixed` 库走这条） */
+        const val GLOBAL_QUERY =
+            "IncludeItemTypes=Photo&Recursive=true&fields=Width,Height,Path" +
+                "&SortBy=SortName&SortOrder=Ascending"
+
+        /** 顶层媒体库根查询 */
+        const val ROOT_QUERY = "Recursive=false"
+
+        /** 媒体库根下的相册 / 文件夹查询 */
+        const val ALBUM_CONTAINER_QUERY = "Recursive=false"
+
+        /** 相册内的照片查询（**必须带 `ParentId`**，否则摸不到 homevideos 库的照片） */
+        const val ALBUM_PHOTO_QUERY =
+            "IncludeItemTypes=Photo&Recursive=true&fields=Width,Height,Path" +
+                "&SortBy=SortName&SortOrder=Ascending"
+
         // 「未知总数」常量已移到 [PhotoScanVerdict]（判定器与来源共用同一份口径）
 
         fun defaultClient(): OkHttpClient = OkHttpClient.Builder()

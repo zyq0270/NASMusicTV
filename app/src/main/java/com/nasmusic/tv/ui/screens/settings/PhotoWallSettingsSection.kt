@@ -102,6 +102,15 @@ data class PhotoWallRuntimeState(
      * ⇒ 把聚合器的状态显示出来（只在**不是 OK** 时显示一行 ⇒ 正常时不占地方）。
      */
     val jellyfinStatus: PhotoSourceStatus? = null,
+    /**
+     * 「正在扫描」（`true` = 扫描进行中）
+     *
+     * ⚠️ 2026-11-12 新增：NAS 来源走**相册级回退**时要连发几百个请求
+     * （实测 414 个相册容器，8 路并发，电视上约 30～60 s）
+     * ⇒ 没有这个标志，用户看到的是「照片数一直是 0」⇒ **判定为「点了没反应」**
+     * （违反交互可发现性）。
+     */
+    val scanning: Boolean = false,
     /** 合并去重后的总数（阶段 10 填）—— 与三个分来源计数**同口径**（都不过人脸过滤） */
     val mergedCount: Int = 0,
     /**
@@ -310,6 +319,15 @@ internal fun PhotoWallSettingsSection(
             // 运行时可派生信息（阶段 9/10 才会有真实数字）
             Spacer(modifier = Modifier.height(8.dp))
             Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
+                // ⚠️ **「正在扫描」行**（2026-11-12）：NAS 来源走相册级回退要连发几百个请求
+                //    （实测 414 个容器，电视上约 30～60 s）⇒ 没有它，用户看到的是
+                //    「照片数一直是 0」⇒ **判定为「点了没反应」**（违反交互可发现性）。
+                if (runtime.scanning) {
+                    SettingsInfoRow(
+                        stringResource(R.string.settings_photo_wall_scanning),
+                        stringResource(R.string.settings_photo_wall_scanning_desc)
+                    )
+                }
                 SettingsInfoRow(
                     stringResource(R.string.settings_photo_wall_enabled_sources),
                     enabledSourcesText(s)

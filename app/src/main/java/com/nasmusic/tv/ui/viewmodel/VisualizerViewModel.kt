@@ -348,12 +348,22 @@ class VisualizerViewModel(
      * 自动扫描只是**省一次手动操作**：用户在设置页点「重新扫描」依然是强制重扫
      * （会取消正在跑的扫描并立刻重来）。
      *
-     * ⛔ **开关关着就不扫**（不产生任何网络请求）⇒ 判据见 [PhotoAutoScanPolicy]。
+     * ## ⛔ 开关必须读**持久化**的值，不能读 [latestSettings]
+     *
+     * 2026-11-12 实测踩坑：连接成功**可能早于 DataStore 的首次发射**
+     * ⇒ `latestSettings` 此刻还是默认的 [AppSettings]（Jellyfin 开关默认 false）
+     * ⇒ 判据读到 false ⇒ **自动扫描被静默跳过**（设置页既没有照片数、也没有状态行）。
+     * ⇒ 这里改读 `prefs.appSettings.first()`（DataStore 缓存值，**不产生 IO**）。
      */
-    fun onNasConnected() {
+    suspend fun onNasConnected() {
+        // ⛔ 读持久化值（见 KDoc）：`latestSettings` 此刻可能还没更新
+        val persisted = prefs.appSettings.first()
         val backendType = (app as NasMusicApp).backendRegistry.getAdapter()?.backendType
-        if (!PhotoAutoScanPolicy.shouldAutoScan(backendType, latestSettings.photoWallJellyfinEnabled)) {
-            AppLog.d(TAG, "onNasConnected: 不自动扫（后端=$backendType 开关=${latestSettings.photoWallJellyfinEnabled}）")
+        if (!PhotoAutoScanPolicy.shouldAutoScan(backendType, persisted.photoWallJellyfinEnabled)) {
+            AppLog.w(
+                TAG,
+                "onNasConnected: 不自动扫（后端=$backendType 开关=${persisted.photoWallJellyfinEnabled}）",
+            )
             return
         }
         AppLog.w(TAG, "onNasConnected: NAS 已连上 ⇒ 自动扫描照片墙")
@@ -362,6 +372,9 @@ class VisualizerViewModel(
 
     /** 回弹写入尚未落盘时的去重标志，避免同一轮里重复提示 */
     private var galleryRollbackPending = false
+
+    /** 上一次看到的「照片墙 Jellyfin 开关」值（用于识别「刚被打开」这个动作） */
+    private var lastJellyfinSourceEnabled = false
 
     /** 音频帧（来自 SpectrumRepository 单例） */
     val frame: AudioFrame get() = playerManager.spectrumRepository.frame
@@ -458,6 +471,21 @@ class VisualizerViewModel(
                     quality = s.visualizerQuality,
                     sdkInt = Build.VERSION.SDK_INT,
                 )
+
+                // ⚠️ **「刚打开 Jellyfin 来源开关」 ⇒ 立刻扫一次**（2026-11-12 用户裁定）
+                //   ⛔ `onSettingsChanged` 只会置 `needScan` ⇒ **不在照片墙上时扫描被推迟**到
+                //      「下次进照片墙」⇒ 用户在设置页打开开关，照片数还是 0
+                //      ⇒ 「点了没反应」（违反交互可发现性）。
+                //   ⇒ 这里显式补一次：NAS 已连着（Jellyfin 后端）⇒ 立刻扫。
+                val jellyfinJustEnabled = s.photoWallJellyfinEnabled && !lastJellyfinSourceEnabled
+                lastJellyfinSourceEnabled = s.photoWallJellyfinEnabled
+                if (jellyfinJustEnabled) {
+                    val backendType = (app as NasMusicApp).backendRegistry.getAdapter()?.backendType
+                    if (backendType == PhotoAutoScanPolicy.JELLYFIN_BACKEND_TYPE) {
+                        AppLog.w(TAG, "照片墙的 Jellyfin 来源刚被打开 ⇒ 立刻扫描")
+                        photoWall.rescan()
+                    }
+                }
             }
         }
 

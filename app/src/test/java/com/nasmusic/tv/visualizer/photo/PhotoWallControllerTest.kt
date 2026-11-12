@@ -398,6 +398,10 @@ class PhotoWallControllerTest {
             sources = sources,
             random = VisualizerRandom(1u),
             externalScope = scope,
+            // ⛔ 时间源注入：照片墙时钟走**墙钟**，不走 `frame.timeMs`
+            //    （音频回调停 ⇒ frame.timeMs 冻结 ⇒ 整面墙停在第一张，见控制器 KDoc）
+            //    ⇒ 单测用假时钟驱动，语义与改动前完全一致（`frameTime` 就是原来的 `frame.timeMs`）。
+            nowMsProvider = { frameTime },
             bufferFactory = { w, h, rgb ->
                 PhotoBuffer(
                     sourceProvider = { sources[it] },

@@ -320,6 +320,8 @@
     <string name="settings_photo_wall_enabled_sources">Enabled</string>
     <string name="settings_photo_wall_no_source">No source enabled</string>
     <string name="settings_photo_wall_counts">Photo counts</string>
+    <string name="settings_photo_wall_scanning">Scan status</string>
+    <string name="settings_photo_wall_scanning_desc">Scanning… (a large NAS library takes tens of seconds)</string>
     <string name="settings_photo_wall_counts_value">Gallery %1$d · External %2$d · Jellyfin %3$d</string>
     <string name="settings_photo_wall_merged">Merged (deduplicated)</string>
     <string name="settings_photo_wall_faces_only_count">Faces only (shown)</string>

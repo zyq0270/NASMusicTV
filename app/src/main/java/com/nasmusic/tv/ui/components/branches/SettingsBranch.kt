@@ -212,6 +212,10 @@ internal fun SettingsBranch(
                     // 2026-11-12 电视实测新增：NAS 来源的**状态**（为什么扫不到照片）
                     // ⚠️ 同样是运行时事实（不落盘、不进备份）⇒ 走 `PhotoWallRuntimeState`。
                     val photoWallStatuses by viewModel.visualizerVM.photoWall.statuses.collectAsState()
+                    // 2026-11-12：「正在扫描」标志
+                    // ⛔ NAS 来源走相册级回退时要连发几百个请求（实测 414 个容器，电视上约 30～60 s）
+                    //    ⇒ 没有这个标志，用户看到的是「照片数一直是 0」⇒ 判定为「点了没反应」。
+                    val photoWallScanning by viewModel.visualizerVM.photoWall.scanning.collectAsState()
                     // 阶段 11 追加：人脸过滤后的**实际展示**张数（与 mergedCount 口径不同，见 §10.183）
                     val photoWallDisplay by viewModel.visualizerVM.photoWall.displayCount.collectAsState()
                     // 阶段 11（§10）：人脸扫描进度 / 可用性 —— 同样是运行时事实。
@@ -445,6 +449,7 @@ internal fun SettingsBranch(
                         externalCount = photoWallPerSource[PhotoSourceKind.EXTERNAL] ?: 0,
                         jellyfinCount = photoWallPerSource[PhotoSourceKind.JELLYFIN] ?: 0,
                         jellyfinStatus = photoWallStatuses[PhotoSourceKind.JELLYFIN],
+                        scanning = photoWallScanning,
                         mergedCount = photoWallMerged,
                         displayCount = photoWallDisplay,
                         faceScanDone = photoWallFaceScan.done,

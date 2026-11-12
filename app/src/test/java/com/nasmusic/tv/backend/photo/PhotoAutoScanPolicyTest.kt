@@ -1,8 +1,10 @@
 package com.nasmusic.tv.backend.photo
 
+import com.nasmusic.tv.visualizer.photo.SourceScan
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.File
 
 /**
  * **门禁：NAS 连上后自动扫照片墙的判定**（2026-11-12 用户裁定）
@@ -59,6 +61,44 @@ class PhotoAutoScanPolicyTest {
                 backendType = null,
                 jellyfinSourceEnabled = true,
             ),
+        )
+    }
+
+    // ────────────────────── 结构门禁：读**持久化**值，不是内存镜像 ──────────────────────
+
+    /**
+     * **自动扫描必须读持久化的开关值**，不能读 `latestSettings` 内存镜像。
+     *
+     * ## 踩坑实录（2026-11-12 电视实测）
+     *
+     * 连接成功**可能早于 DataStore 的首次发射** ⇒ `latestSettings` 此刻还是默认的
+     * `AppSettings()`（Jellyfin 开关默认 `false`）⇒ 判据读到 false
+     * ⇒ **自动扫描被静默跳过**（设置页既没有照片数、也没有状态行 ⇒ 用户完全看不出发生了什么）。
+     *
+     * ⇒ 这条门禁直接扫源码：函数体里**不许**出现 `latestSettings`。
+     */
+    @Test
+    fun `onNasConnected 必须读持久化的开关值而不是内存镜像`() {
+        val file = File(
+            SourceScan.mainSourceRoot(),
+            "com/nasmusic/tv/ui/viewmodel/VisualizerViewModel.kt",
+        )
+        assertTrue("找不到 VisualizerViewModel.kt：${file.absolutePath}", file.isFile)
+        val code = SourceScan.stripComments(file.readText())
+
+        val start = code.indexOf("suspend fun onNasConnected(")
+        assertTrue("找不到 onNasConnected()", start >= 0)
+        val end = code.indexOf("\n    }", start).let { if (it < 0) code.length else it }
+        val body = code.substring(start, end)
+
+        assertTrue(
+            "onNasConnected() 必须读**持久化**的设置（prefs.appSettings.first()）—— " +
+                "读 latestSettings 内存镜像会在「连接早于 DataStore 首次发射」时读到默认 false ⇒ 自动扫描被静默跳过",
+            body.contains("prefs.appSettings.first()"),
+        )
+        assertTrue(
+            "onNasConnected() 里不许再读 latestSettings（内存镜像可能还没更新）",
+            !body.contains("latestSettings"),
         )
     }
 }

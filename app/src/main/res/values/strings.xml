@@ -324,6 +324,8 @@
     <string name="settings_photo_wall_enabled_sources">已启用</string>
     <string name="settings_photo_wall_no_source">未启用任何来源</string>
     <string name="settings_photo_wall_counts">照片数量</string>
+    <string name="settings_photo_wall_scanning">扫描状态</string>
+    <string name="settings_photo_wall_scanning_desc">正在扫描（NAS 照片多时需数十秒）…</string>
     <string name="settings_photo_wall_counts_value">图库 %1$d · 外接 %2$d · Jellyfin %3$d</string>
     <string name="settings_photo_wall_merged">合并后（去重）</string>
     <string name="settings_photo_wall_faces_only_count">仅含人像（实际展示）</string>

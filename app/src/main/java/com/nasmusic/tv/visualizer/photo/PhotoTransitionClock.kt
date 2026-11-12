@@ -129,7 +129,8 @@ class PhotoTransitionClock(
      * ⚠️ **不要在窗口进行中重复调用**：那会把 `elapsedMs` 归零 = 从 0 重启，
      * 画面跳变（§5.8「转场打断」）。控制器应把「手动切图」请求排队到本次窗口结束。
      *
-     * @param nowMs 当前时间戳（`frame.timeMs`）
+     * @param nowMs 当前时间戳（**墙钟**，见 `PhotoWallController.nowMsProvider`）
+     *   —— ⛔ 不能用 `frame.timeMs`：那在「没有声音在放」时会冻结 ⇒ HOLD 走不完 ⇒ 整面墙停住
      * @param id 本次切换的转场
      * @param enterMs 转场窗口时长；`0` = 硬切（§5.8 `BEAT_CUT`）
      * @param holdMs 停留时长；`0` = 不停留
