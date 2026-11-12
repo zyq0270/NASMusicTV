@@ -27565,6 +27565,20 @@ Jellyfin 的 `homevideos`（家庭视频和照片）库把照片建成**一层 `
 
 ⇒ **§10.394 在真机上通过**：照片墙的时钟已与「音频是否在放」完全解耦。
 
+##### 补充复测（2026-11-12 22:4x，新包 + NAS 恢复后）
+
+期间 NAS 的 **Jellyfin 服务**曾整段下线（主机在线、445 通，但 **8096 不通** ⇒ 是服务本身没起），
+照片墙一度显示 `图库 0 · 外接 0 · Jellyfin 0`。**Jellyfin 服务恢复后**：
+
+| 项 | 结果 |
+|---|---|
+| 应用重连 | 重启应用 ⇒ 重连 NAS ⇒ **连接成功后自动扫描**（§10.392）自动触发 |
+| 照片读取 | ✅ **所有者确认「已经正确读取了照片了」** ⇒ 相册级回退在真实服务上再次通过 |
+| 设置页排版 | ✅ 仍是**单行**（值列 x=1049..1821，y=861..901）⇒ §10.397 的比例分配未被本轮改动破坏 |
+
+⇒ **这条链路的完整闭环**：NAS 服务不可用 ⇒ 计数为 0（**不是**代码坏了）⇒ 服务恢复 ⇒ 自动重连 ⇒ 自动扫描 ⇒ 照片读回来。
+⇒ 由此也确认：此前看到的「Jellyfin 0」是**环境问题**，不是回归。
+
 ⚠️ 附带一条**方法论**记录：第一次复测时用 `adb shell input keyevent 127`（KEYCODE_MEDIA_PAUSE）
 **没让播放停下**（`state` 仍是 3、`position` 在推进）⇒ 那次观察**不算数**；
 改用界面上的播放/暂停按钮 + `dumpsys media_session` 复核 `state=2` 且 `position` 冻结后，
@@ -27946,6 +27960,78 @@ Open-Meteo failed and no OpenWeatherMap API key configured
 | 其他 HTTPS 站点（Jellyfin / Meting / 网易云等） | ✅ 不受影响（各自证书链在系统库内） |
 
 ⇒ **用户可感知的只有天气**；等单独一轮修。
+
+### 10.400 已定位未修：**3D 地球（WORLD 主题）在这台 Android 5.1 电视上必然黑屏** —— ES5 降级产物在 strict mode 下非法（2026-11-12）
+
+> **性质**：**只定位，未改代码**（独立子系统，独立一轮做）。**版本号不变**。
+> 触发来源：把电视日志页「错误」筛选**整页读完**（**整类排查**）⇒ 撞见两条 JS 错误。
+
+#### 一、现象（真机日志页正文实录，20:15:30）
+
+```
+E 11-12 20:15:30  WorldGlobe
+JS[ERROR] Uncaught SyntaxError: In strict mode code, functions can only be declared
+at top level or immediately within another function.
+@https://appassets.androidplatform.net/globe/three-globe.es5.js:12579
+
+E 11-12 20:15:30  WorldGlobe
+JS[ERROR] Uncaught SyntaxError: In strict mode code, functions can only be declared
+at top level or immediately within another function.
+@https://appassets.androidplatform.net/globe/three.es5.js:2715
+
+E 11-12 20:15:30  WorldGlobe
+JS[ERROR] Uncaught ReferenceError: WorldGlobe is not defined @:1
+```
+
+#### 二、根因链（三步，每步都已实证）
+
+| 步 | 事实 | 证据 |
+|---|---|---|
+| ① | 降级产物里有**块内函数声明** | `three.es5.js:2715`：`function C() { A_1.dispose(), s.delete(c), c.removeEventListener("dispose", C); }` —— 缩进在 `if` 块内；`three-globe.es5.js:12579` 同型（`function g() {...}`） |
+| ② | ES5 **strict mode** 下块内函数声明是**语法错误** ⇒ 整个文件**不执行** | UMD 产物带 `"use strict"` ⇒ 抛上面那条 SyntaxError ⇒ `window.THREE` / `window.ThreeGlobe` **永不定义** |
+| ③ | `globe.js` 的 IIFE 随之抛错 ⇒ `window.WorldGlobe`（`globe.js:705` 赋值）**从未定义** ⇒ Kotlin 侧 `evaluateJavascript("WorldGlobe.initCities(...)")` ⇒ **ReferenceError** | `WorldGlobeRenderer.kt:593/604/634` 三处 `evalJs("WorldGlobe.xxx(...)")`；`onPageFinished` 的注释「页面脚本已执行 ⇒ WorldGlobe 必然已定义」在 ② 发生时不成立 |
+
+⇒ **3D 地球在这台电视上完全黑屏**（不是「偶尔黑」，是**必然**）。
+⚠️ 产物 `app/src/main/assets/globe/three.es5.js`（2026-10-07 生成）**已入库** ⇒ 缺陷自那一刻起就在包里。
+
+#### 三、为什么会漏掉（脚本**自己写了教训**，这次是第二次踩同一个坑）
+
+`app/src/globe-upstream/downlevel_libs.mjs` 的语法校验只按 **sloppy mode** 解析：
+
+```js
+acornParse(code, { ecmaVersion: 5, sourceType: "script" });   // ⛔ 不带 strict 上下文
+```
+
+⇒ sloppy mode 下块内函数声明**合法** ⇒ 校验通过 ⇒ 产物带着 strict 下才炸的语法错误出厂。
+
+而同一份脚本第 51-53 行已经写着：
+
+> ⚠️ 教训：「产物能被 ES5 解析器解析」**不等于**「产物能正确运行」……
+> **必须配 vm 加载测试**（见文件末尾说明）
+
+⇒ 当年只做了语法校验就汇报「验证通过」（第一次踩）；
+⇒ 这次产物**仍未通过 vm 加载测试**（第二次踩）。
+⚠️ 脚本末尾第 203 行还在提醒「下一步必须跑 vm 加载测试」—— 那一步**没有落地成产物的一部分**。
+
+#### 四、拟修法（三步，缺一不可）
+
+| # | 改动 | 说明 |
+|---|---|---|
+| 1 | **校验改成 strict**：把代码包进 `(function(){'use strict'; … })()` 再用 acorn `ecmaVersion=5` 解析 | 这样**块内函数声明必报错** ⇒ 校验不再漏 |
+| 2 | **产物后处理**：用 TypeScript AST 找出所有 `Block` 内的 `FunctionDeclaration`，改写成 `var f = function(){…}`（保持「使用点在赋值之后」的语义） | 改掉根因，不只是绕过 |
+| 3 | **vm 加载测试落地成产物的一部分**（Node vm 沙箱里删掉 Chrome 39 缺失的 API，按 `polyfill → three → three-globe → globe.js` 顺序加载，断言 `THREE` / `ThreeGlobe` / `WorldGlobe` 均已定义） | 脚本注释点名要配的那一步，这次补上并**随产物一起入库/执行** |
+
+⚠️ 第 2 步会改动 **入库的 3 MB 产物**（`three.es5.js` / `three-globe.es5.js`）⇒ 必须**逐字节 diff 回上游**确认差异只来自降级，
+且真机复测「切到 WORLD 主题 ⇒ 画面有地球、logcat 无 JS 错误」。
+
+#### 五、影响面
+
+| 功能 | 影响 |
+|---|---|
+| 3D 地球（`VisualizerTheme.WORLD`）、依赖同链路的 `EcoGlobeRenderer` | ❌ 这台电视上必然黑屏 |
+| 其余可视化效果（频谱、粒子、歌词主题…） | ✅ 不受影响（纯 Kotlin 渲染，不经 WebView） |
+| 音乐 / 照片墙 / 歌词 / 设置 | ✅ 不受影响 |
+
 
 
 

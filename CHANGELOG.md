@@ -187,6 +187,12 @@
   —— ✅ **电视复测已通过**（21:1x，18:06 的 release 包）：滚动内容区后
      上方「重新读取本地日志文件 / 删除全部已记录的日志」说明从 y=744..779 移到 **y=183..217**，
      日志行从 y=869 移到 y=307 ⇒ **整页一起滚**，日志区不再是独立滚动容器
+  —— ✅ **线程违规修复真机复测通过**（22:1x，21:55 的 release 包）：新包装机后切歌 4 次，
+     日志页「警告」里**不再有新的** `loadArtwork failed: Player is accessed on the wrong thread`
+     （最后一条是旧包留下的 21:40:54）
+  —— ✅ **照片墙在 NAS 恢复后再次读通**（22:4x）：期间 Jellyfin **服务**整段下线（主机在线、
+     445 通、8096 不通）⇒ 计数一度为 0；服务恢复后重启应用即自动重连 + 自动扫描 ⇒
+     所有者确认「已经正确读取了照片了」⇒ 确认「Jellyfin 0」是**环境问题**、不是回归
      （原 §10.395 装机时电视曾离线，故当时记为「复测未做成」）
 - ⭐ **同版本第九轮之四：逐行模式歌词不跳行 —— `derivedStateOf` 捕获了普通参数**（2026-11-12 电视实测）
   —— 所有者反馈「歌词系统出问题了：① 所有展示歌词的页面上 ② 逐字模式歌词能正确走
@@ -271,6 +277,22 @@
      ⇒ **这台电视上天气功能不可用**（音乐/照片墙/歌词不受影响）
      ⇒ 拟修法「追加自定义信任锚（只增信任、不放宽校验）」属**安全敏感**改动，
      与本轮四条主线无关 ⇒ **单独一轮 + 单独门禁**再做（详见技术文档 §10.399）
+  —— ⚠️ **顺带定位（未修）**：**3D 地球（WORLD 主题）与生态球（EcoGlobe）在这台 Android 5.1 电视上必然黑屏**
+     真机日志（新包 22:16 复现）：
+     `JS[ERROR] Uncaught SyntaxError: In strict mode code, functions can only be declared
+      at top level or immediately within another function. @…/globe/three.es5.js:2715`
+     ⇒ 根因：ES5 降级产物（TypeScript downlevel）里保留了**块内函数声明**，
+     而 UMD 产物带 `"use strict"` ⇒ ES5 strict 下这是**语法错误** ⇒ 整个文件不执行
+     ⇒ `window.THREE` / `window.ThreeGlobe` 永不定义 ⇒ `globe.js` 的 IIFE 抛错
+     ⇒ `window.WorldGlobe` 从未定义 ⇒ Kotlin 侧 `evaluateJavascript("WorldGlobe.xxx(...)")`
+     ⇒ `ReferenceError: WorldGlobe is not defined`
+     ⇒ **为什么会漏**：`downlevel_libs.mjs` 的语法校验只按 **sloppy mode** 解析
+     （`acornParse(code, { ecmaVersion: 5, sourceType: "script" })`，不带 strict 上下文）
+     ⇒ 块内函数声明在 sloppy 下合法 ⇒ 校验放行；同一份脚本第 51-53 行已写着
+     「**产物能被 ES5 解析器解析 ≠ 产物能正确运行**……必须配 vm 加载测试」—— 那一步没落地
+     ⇒ 拟修法三步：① 校验改成 strict（包一层 `'use strict'` 再解析）
+     ② 产物后处理：块内 `FunctionDeclaration` 改写成 `var f = function(){…}`
+     ③ **vm 加载测试落地成产物的一部分**（详见技术文档 §10.400）
 
 ### Removed
 
