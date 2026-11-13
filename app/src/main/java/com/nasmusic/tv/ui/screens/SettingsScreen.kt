@@ -106,6 +106,7 @@ import com.nasmusic.tv.ui.screens.settings.VisualEffectsSettingsSection
 import com.nasmusic.tv.ui.screens.settings.VisualEffectsSettingsState
 import com.nasmusic.tv.ui.theme.FontSize
 import com.nasmusic.tv.ui.theme.LocalUiMode
+import com.nasmusic.tv.ui.theme.pagePadding
 import com.nasmusic.tv.ui.theme.NasMusicColors
 import com.nasmusic.tv.ui.theme.UiMode
 
@@ -498,13 +499,7 @@ var activeSection by remember { mutableStateOf(SettingsSection.GENERAL) }
     // Composable 上下文，不能调 stringResource）
 
     Row(
-        modifier = modifier.fillMaxSize().padding(
-            when {
-                isPortraitPhone -> 16.dp
-                LocalUiMode.current == UiMode.PhoneLandscape -> 16.dp
-                else -> 32.dp
-            }
-        )
+        modifier = modifier.fillMaxSize().padding(pagePadding(uniform = true))
     ) {
         // --- 左侧：侧边导航栏（bg2 Surface 背景）---
         // v2.36.0：竖屏两级页不显示侧栏（改为分区列表 → 二级全屏内容）

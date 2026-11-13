@@ -36,6 +36,7 @@ import com.nasmusic.tv.data.model.Song
 import com.nasmusic.tv.ui.LocalListBackHandler
 import com.nasmusic.tv.ui.theme.FontSize
 import com.nasmusic.tv.ui.theme.LocalUiMode
+import com.nasmusic.tv.ui.theme.pagePadding
 import com.nasmusic.tv.ui.theme.NasMusicColors
 import com.nasmusic.tv.ui.theme.UiMode
 import com.nasmusic.tv.ui.components.BackButton
@@ -96,13 +97,9 @@ fun ArtistDetailScreen(
 
     // v2.36.0 竖屏（方案 §4.7 / P0-16、P0-24）：头部拆两行（标题行 / 操作行）+ 圆形头像置顶 + 歌曲单列
     val isPhonePortrait = LocalUiMode.current == UiMode.PhonePortrait
-    val isPhoneLandscape = LocalUiMode.current == UiMode.PhoneLandscape
 
     Column(
-        modifier = modifier.fillMaxSize().padding(
-            horizontal = if (isPhoneLandscape) 16.dp else if (isPhonePortrait) 16.dp else 32.dp,
-            vertical = if (isPhoneLandscape) 0.dp else if (isPhonePortrait) 12.dp else 20.dp
-        )
+        modifier = modifier.fillMaxSize().padding(pagePadding())
     ) {
         // 返回 + 标题行 + 操作按钮 + 歌曲数
         // ⚠️ 竖屏下「返回+标题+播放全部+加入队列+歌曲数」同一行必被裁切（方案 §2.4）→ 拆两行

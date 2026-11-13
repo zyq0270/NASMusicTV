@@ -2,6 +2,7 @@ package com.nasmusic.tv.ui.screens
 
 import com.nasmusic.tv.ui.theme.FontSize
 import com.nasmusic.tv.ui.theme.LocalUiMode
+import com.nasmusic.tv.ui.theme.pagePadding
 import com.nasmusic.tv.ui.theme.UiMode
 
 import androidx.compose.foundation.background
@@ -128,7 +129,11 @@ fun HomeScreen(
         modifier = modifier
             .fillMaxSize()
             // v2.36.0 竖屏（方案 §4.1）：页 padding 32→16，窄屏可用宽度 328dp
-            .padding(horizontal = if (isPhonePortrait) 16.dp else 32.dp),
+            // v2.39.18 对齐：原来只判 `isPhonePortrait`，导致手机横屏落进 else 取 32dp
+            // （其它 6 个页面横屏都是 16dp）⇒ 统一走 pagePadding 口径。
+            // ⚠️ 纵向显式 0：本页用 verticalArrangement.spacedBy(20.dp) 提供块间距，
+            //    再叠页面纵向 padding 会让首屏与顶栏之间凭空多 20dp。
+            .padding(pagePadding(vertical = 0.dp)),
         verticalArrangement = Arrangement.spacedBy(20.dp)
     ) {
         // 1. 欢迎 + 统计卡片

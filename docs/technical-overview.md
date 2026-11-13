@@ -28241,3 +28241,204 @@ java.net.SocketTimeoutException ...
 - `compileDebugKotlin`：**BUILD SUCCESSFUL**（6m39s，0 error / 233 warning，warning 为既有噪音）。
 - `testDebugUnitTest`：**311 类 / 3043 例**基线保持，新增 `ReviewFix20261113GateTest` 20 例。
 - ⚠️ 本轮**未出包、未操作任何设备**。真机复测需出包，且版本号未变 ⇒ 交付须给**包指纹**并提醒先卸载旧版或 `adb install -r`。
+
+---
+
+### 10.404 电视实测修正：**播放页顶部「导航行 ↔ 歌词来源按钮行」空挡是三段内边距叠加**（2026-11-13）
+
+> **性质**：**已改代码**。版本号不变（v2.39.18 / 203），按所有者「同一轮修复不单独升号」口径合并。
+> 触发来源：所有者真机截图 + 三条描述 ——「① 首页、正在播放 等系统主菜单，与歌曲名、内嵌、本地、在线 等歌词按钮，这两行之间有一个空挡；② 这个空挡应该减少，或者去掉；③ 这个空挡在电视上更加大，更加显眼，这些空间本来应该更多的显示歌词」。
+
+#### 一、现场测量（截图 1920×864，JPEG 原图）
+
+| 量 | 实测 | 换算 |
+|---|---|---|
+| 导航行文字 ink 带 | y=54~103（含选中胶囊 y=48~111，h=64px） | — |
+| 歌词来源按钮行 ink 带 | y=163~218（选中「在线」胶囊 y=164~218，h=55px） | — |
+| **两行之间净空白** | **y=104~162 ⇒ 59px** | ≈ **34dp**（density 1.75） |
+| logo 方块（代码硬编码 36dp） | 63px | ⇒ density = 63/36 = **1.75** |
+| 屏幕画幅 | 1920×864 = **20:9** | 手机画幅（TV 为 16:9） |
+
+左右两侧还各有一个独立的高亮块：左上为 `NAS Music` logo（青色圆角方块），右上最末一个图标是「方向切换」——该按钮在 `AppRoot` 里**只对 `UiMode.PhoneLandscape` 下发**（`showOrientationToggle = isPhoneLandscape`）。⇒ **这张截图是手机横屏**，不是 TV 自身。
+
+但这不削弱所有者第 ③ 条的结论，反而是它的证据：**同一套布局里 TV 的第③段取值更大**。
+
+#### 二、根因：三段内边距分处两个文件，单独看都不刺眼
+
+| # | 来源 | 位置 | 改前 |
+|---|---|---|---|
+| ① | 顶栏**下**内边距 | `AppRoot.TvTopNavBar` 的 `padding(vertical = 16.dp)` | 16dp（所有页面同一个值） |
+| ② | `NavItem` 内容内边距 | `AppRoot.NavItem` 的 `padding(vertical = 12.dp)` | 12dp（**D-Pad 按压热区**） |
+| ③ | 播放页顶部内边距 | `NowPlayingScreen` 主 `Column` 的 `top` | TV **40dp** / 手机横屏 0dp |
+
+| 形态 | ①+② | ③ | 合计 | 占视口 |
+|---|---|---|---|---|
+| 手机横屏（截图） | 16 | 0 | **28dp** | 864px/1.75=494dp ⇒ 5.7% |
+| **TV 改前** | 28 | **40** | **68dp** | 1080p/2.0=540dp ⇒ **12.6%** |
+| TV 改后 | 16 | 8 | **24dp** | 4.4% |
+| 手机横屏改后 | 16 | 4 | **20dp** | 4.0% |
+
+⭐ 所有者说「这个空挡在电视上更加大，更加显眼」是**字面成立的**：两形态的 ①② 完全相同，唯一差别就是第③段（40 vs 0）。这也解释了为什么历史上两轮「空白带修复」（2026-09-22）只动 ③ 的横屏分支 —— 它从未解决 TV 上 40dp 这一半。
+
+#### 三、改法（只收空挡，不动导航行自身位置、不动 D-Pad 热区）
+
+1. **`NowPlayingScreen` 第③段**：`top` 由常量改为三档
+   ```kotlin
+   val nowPlayingTopPadding = when {
+       isPhoneLandscape -> 4.dp    // 顶栏下内边距已收到 4dp，补 4dp 给 SourceTag 的 1.1x 聚焦放大
+       isImmersiveMode -> 40.dp    // 沉浸模式无顶栏，这段是唯一顶部留白 ⇒ 保持原值
+       else -> 8.dp                // TV 普通：40 → 8
+   }
+   ```
+2. **`AppRoot.TvTopNavBar` 第①段**：**只收下内边距，且只对播放页收**
+   ```kotlin
+   val bottomPadding = if (currentScreen == Screen.NowPlaying) 4.dp else 16.dp
+   .padding(start = 24.dp, end = 24.dp, top = 16.dp, bottom = bottomPadding)
+   ```
+   ⛔ `top` 恒 16dp —— 否则 6 个页面的导航行会一起上跳，超出本次反馈范围。
+3. **`NavItem` 第②段不动**：12dp 是遥控器按压热区，缩它等于让 TV 更难选中。
+
+省下的高度去向：`NowPlayingScreen` 右侧歌词区是 `Column` 里的 `weight(1f)`，**自动吃满**多出的 44dp（TV）/ 8dp（横屏）。按普通歌词行高（22sp×1.15 + 28dp ≈ 53dp）折算，TV 约多露 **0.8 行**，足够让下一句提前进入视野 —— 这正是所有者要的「这些空间本来应该更多的显示歌词」。歌词区内部没有额外顶部 spacer 需要同步改（`LyricsView` 的 `edgeSpacer` 只作用于首尾行，TV 120dp / 横屏 16dp，与本次空挡无关）。
+
+#### 四、门禁
+
+新增 `app/src/test/java/com/nasmusic/tv/ui/screens/NowPlayingTopGapGateTest.kt`（4 例，源码扫描，Robolectric 不验 Compose 布局 ⇒ 沿用 `KaraokeFullscreenGateTest` 同路径）：
+
+| 用例 | 锁住 |
+|---|---|
+| `播放页顶部内边距必须按形态分三档且 TV 不超过 8dp` | ③ 三档结构 + TV 分支 ≤ 8dp |
+| `顶栏下内边距在播放页必须收紧` | ① `Screen.NowPlaying) 4.dp else 16.dp` 存在，且 `top = 16.dp` 未被改 |
+| `NavItem 内容内边距不许为这条空挡缩小` | ② `vertical = 12.dp` 仍在 |
+| `沉浸模式必须保留原有顶部留白` | 沉浸分支仍为 `40.dp` |
+
+⚠️ 写门禁用例时踩过一次坑：`sliceBetween(source, "private fun NavItem(", "FocusableSurface(")` 把 `vertical = 12.dp` 切在块外 ⇒ 门禁**假红**。终点改取下一个 composable 的 KDoc 标题（`全屏可视化舞台覆盖层`）后通过。⇒ 源码切片型门禁的终点必须落在**目标文本之后**，否则断言恒为假。
+
+#### 五、验证
+
+```powershell
+./gradlew.bat :app:compileDebugKotlin --no-daemon -Pkotlin.compiler.execution.strategy=in-process   # BUILD SUCCESSFUL (5m41s)
+./gradlew.bat :app:testDebugUnitTest --tests "*NowPlayingTopGapGateTest" --no-daemon -Pkotlin.compiler.execution.strategy=in-process
+./gradlew.bat :app:testDebugUnitTest --tests "*KaraokeFullscreenGateTest" --no-daemon -Pkotlin.compiler.execution.strategy=in-process
+```
+
+- `compileDebugKotlin`：**BUILD SUCCESSFUL**，0 error。
+- 新增门禁 4/4 通过；`KaraokeFullscreenGateTest` 3/3 通过（顶栏条件被本轮改动触及，作回归）。
+- ⚠️ **未出包、未操作任何设备**（含电视与手机）。真机复测需出包；版本号未变 ⇒ 交付须给**包指纹**并提醒先卸载旧版或 `adb install -r`。
+- ⚠️ **未取电视实拍证据**：第③条的「电视上更大」由 §三的数值链（68dp vs 28dp）推出，不是电视截图实测。若电视上仍觉得空挡偏大，下一档可把 TV 的 8dp 直接归零（`NavigationBar` 与歌词行之间已无其它间距）。
+
+---
+
+### 10.405 页面内边距统一：`pagePadding()` 单一口径 + Android dp ≠ Compose dp 写进约定（2026-11-13）
+
+> **性质**：**已改代码 + 已改文档**。版本号不变（v2.39.18 / 203）。
+> 前置：§10.404 修掉了播放页那条空挡后，所有者要求「完整对比 TV 与手机横屏的 UI 排布差异」并「ABC 全做，通过规则和文档统一」。
+
+#### 一、排查结论：差异不来自两套布局，来自**分散的判据**
+
+`AppRoot` 里真正的形态分叉只有一处（`isPhonePortrait` → `PhoneTopBar` vs `TvTopNavBar`），
+TV 与手机横屏**共用 `else` 分支**（v1.4 B1 硬规则）。两者差异全部来自下游三类判据：
+
+| 判据 | 影响面 |
+|---|---|
+| `LocalUiMode == PhoneLandscape` | 页 padding、播放页左列宽/间距/对齐、歌词首尾 spacer |
+| `isTVDevice()` / `isTV` | 方向按钮、返回键拦截、字号档、歌词拖动、主题默认、二维码、频谱退出键、照片墙图库源、A-Z 尺寸、拼音搜索 |
+| `LocalPhoneCompact`（= `!isTVDevice`） | 全局 `LocalDensity × 0.82`、字号档、歌词密度恢复 |
+
+#### 二、本轮改掉的三件事（A/B/C）
+
+**A. 首页横屏内边距与其余 6 页不一致（唯一真实 bug）**
+
+`HomeScreen` 只判了 `isPhonePortrait`：
+
+```kotlin
+.padding(horizontal = if (isPhonePortrait) 16.dp else 32.dp)   // 横屏落进 else ⇒ 32dp
+```
+
+其余 6 页横屏都是 16dp ⇒ 同一台手机横过来，首页左右各比曲库多 16dp。
+
+**B. 抽 `pagePadding()`，把 6 份副本收成 1 份**
+
+`Theme.kt` 新增（与 `LocalUiMode` / `CompactSizes` 同文件，形态与尺寸口径归同一入口）：
+
+```kotlin
+@Composable
+fun pagePadding(
+    horizontalScale: Float = 1f,
+    vertical: Dp? = null,
+    uniform: Boolean = false,
+): PaddingValues
+```
+
+| 形态 | 横向 | 纵向 |
+|---|---|---|
+| TV | 32dp | 20dp |
+| 手机横屏 | 16dp | 0dp |
+| 手机竖屏 | 16dp | 12dp |
+
+迁移的 8 个页面与各自参数（**逐页核对过原值，纵向行为不变**）：
+
+| 页面 | 原写法 | 新写法 | 纵向是否变化 |
+|---|---|---|---|
+| 曲库 | `16/16/32` 横纵分离 | `pagePadding()` | 不变（0/12/20） |
+| 专辑详情 | 同上 | `pagePadding()` | 不变 |
+| 艺术家详情 | 同上 | `pagePadding()` | 不变 |
+| 均衡器 | 同上 | `pagePadding()` | 不变 |
+| 首页 | 仅横向 `16 : 32` | `pagePadding(vertical = 0.dp)` | 不变（本来纵向 0） |
+| 队列 | 四边统一 `16 : 32` | `pagePadding(uniform = true)` | 不变（四边等距） |
+| 设置 | 四边统一 `16/16/32` | `pagePadding(uniform = true)` | 不变 |
+| 我的 | 四边统一 `16/16/32` | `pagePadding(uniform = true)` | 不变 |
+
+⚠️ 迁移中删掉了 4 个已无引用的局部变量（`AlbumDetail` / `ArtistDetail` / `Mine` 的 `isPhoneLandscape`，`Equalizer` 的 `isPhonePortrait` + `isPhoneLandscape`）—— 留着会变成「看似在用、实则无人读」的假状态。
+
+**C. Android dp ≠ Compose dp 写进约定（原有隐患，不是新 bug）**
+
+600 / 1000 阈值是 **Android dp**（`Configuration.screenWidthDp`，未缩放），而页面尺寸是 **Compose dp**
+（`LocalDensity` 已 ×0.82）。换算方向是**变大**，容易被直觉搞反：
+
+```
+Compose dp = Android dp / 0.82
+360dp 竖屏手机 → 439 Compose dp ；1080p 横屏 916dp → ~1117 Compose dp
+```
+
+`adaptiveColumns` 里「竖屏直接短路返回 phonePortrait」正是为此（439 会跨过 600 阈值）。
+本轮**没有改行为**，只把口径写进 `conventions-adaptive-ui.md` §3.1 + `adaptiveColumns` 的 KDoc。
+曾写过 `composeDpFromAndroidDp()` 想把它做成 API，但全库没有安全的调用点
+（唯一一处 px/dp 混用是 `VisualizerStage:700` 的全屏舞台，属另一域）⇒ **删除该函数**，
+避免留一个零调用方的「装饰性 API」。
+
+#### 三、规则化：文档 + 门禁
+
+**文档** `docs/conventions-adaptive-ui.md`：
+- 新增 §3.1 单位口径（Android dp / Compose dp 对照表 + 两条规则）
+- 新增 §3.2 页面内边距（`pagePadding()` 三档表 + 三个参数用法 + 禁止手抄）
+- §7 检查清单里过期的那条（「非竖屏保持原值（当前基线是 32dp）」）已替换 —— 它与代码事实不符
+  （6 个页面横屏早就 16dp 了），正是「文档没跟上代码」导致首页被抄错的间接原因
+
+**门禁** `app/src/test/java/com/nasmusic/tv/ui/theme/PagePaddingContractTest.kt`（6 例）：
+
+| 用例 | 锁住 |
+|---|---|
+| `三档横向值必须是指定基线` | 32 / 16 / 16 |
+| `三档纵向值必须是指定基线` | 20 / **0** / 12（0 是刻意，不是漏写） |
+| `uniform 时纵向必须与横向同值` | 四边等距语义 |
+| `页面文件不许内联形态判断式 padding` | 8 个页面里不许再出现含 `UiMode.*` / `isPhone*` 的 `padding(...)` |
+| `pagePadding 必须是公开 API 且八个页面都在用` | 接入完整性 |
+| `文档必须记录页面内边距基线` | §3.2 + 单位口径存在，且过期基线文案已消失 |
+
+⚠️ 取值用例**扫源码**而不是调用函数：`pagePadding` 是 `@Composable`，JVM 单测调不到；
+而把三档值抽成纯函数又会造出「纯函数 + Composable 各存一份」的新副本 ——
+与本门禁要防的问题同型。这是此处唯一自洽的选择。
+
+#### 四、验证
+
+```powershell
+./gradlew.bat :app:testDebugUnitTest --tests "*PagePaddingContractTest" ``
+  --tests "*NowPlayingTopGapGateTest" --tests "*KaraokeFullscreenGateTest" ``
+  --tests "*UiModeTest" --tests "*ScreenUiModeCoverageTest" ``
+  --no-daemon -Pkotlin.compiler.execution.strategy=in-process
+```
+
+- `compileDebugKotlin`：**BUILD SUCCESSFUL**（4m05s）。
+- 门禁结果见本轮交付说明。
+- ⚠️ **未出包、未操作任何设备**。视觉变化仅「首页横屏左右各 -16dp」一处（其余 7 页逐值核对为不变）；
+  该变化按 A 项的本意生效，但仍需真机确认首页在手机横屏下的观感。

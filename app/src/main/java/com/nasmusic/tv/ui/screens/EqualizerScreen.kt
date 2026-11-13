@@ -42,6 +42,7 @@ import androidx.tv.material3.Text
 import com.nasmusic.tv.R
 import com.nasmusic.tv.data.model.EqualizerPreset
 import com.nasmusic.tv.ui.theme.LocalUiMode
+import com.nasmusic.tv.ui.theme.pagePadding
 import com.nasmusic.tv.ui.theme.NasMusicColors
 import com.nasmusic.tv.ui.theme.UiMode
 import com.nasmusic.tv.ui.components.BackButton
@@ -67,14 +68,9 @@ fun EqualizerScreen(
     visualizerTheme: VisualizerTheme = VisualizerTheme.Default,
     modifier: Modifier = Modifier
 ) {
-    // v2.36.0 竖屏：页 padding 32→16
-    val isPhonePortrait = LocalUiMode.current == UiMode.PhonePortrait
-    val isPhoneLandscape = LocalUiMode.current == UiMode.PhoneLandscape
+    // v2.36.0 竖屏：页 padding 32→16（v2.39.18 起统一由 pagePadding() 给出）
     Column(
-        modifier = modifier.fillMaxSize().padding(
-            horizontal = if (isPhoneLandscape) 16.dp else if (isPhonePortrait) 16.dp else 32.dp,
-            vertical = if (isPhoneLandscape) 0.dp else if (isPhonePortrait) 12.dp else 20.dp
-        )
+        modifier = modifier.fillMaxSize().padding(pagePadding())
     ) {
         // 返回 + 标题
         Row(

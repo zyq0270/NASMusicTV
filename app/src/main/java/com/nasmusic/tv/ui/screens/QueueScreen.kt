@@ -69,6 +69,7 @@ import com.nasmusic.tv.ui.components.LocalFocusableContentColor
 import com.nasmusic.tv.ui.components.PHONE_TOUCH_TARGET
 import com.nasmusic.tv.ui.components.portraitTouchTarget
 import com.nasmusic.tv.ui.theme.LocalUiMode
+import com.nasmusic.tv.ui.theme.pagePadding
 import com.nasmusic.tv.ui.theme.NasMusicBrushes
 import com.nasmusic.tv.ui.theme.NasMusicColors
 import com.nasmusic.tv.ui.theme.UiMode
@@ -150,9 +151,7 @@ fun QueueScreen(
     }
 
     Row(
-        modifier = modifier.fillMaxSize().padding(
-            if (LocalUiMode.current == UiMode.PhoneLandscape) 16.dp else 32.dp
-        )
+        modifier = modifier.fillMaxSize().padding(pagePadding(uniform = true))
     ) {
         // --- 左侧：当前播放卡片（bg2 = 深紫）---
         Column(

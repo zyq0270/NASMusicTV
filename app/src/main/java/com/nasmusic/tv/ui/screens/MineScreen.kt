@@ -65,6 +65,7 @@ import com.nasmusic.tv.ui.components.song.UnifiedSongRow
 import com.nasmusic.tv.ui.components.song.UrlStatus
 import com.nasmusic.tv.ui.theme.LocalPhoneCompact
 import com.nasmusic.tv.ui.theme.LocalUiMode
+import com.nasmusic.tv.ui.theme.pagePadding
 import com.nasmusic.tv.ui.theme.UiMode
 import com.nasmusic.tv.ui.theme.NasMusicColors
 import com.nasmusic.tv.ui.viewmodel.EnrichProgress
@@ -138,17 +139,10 @@ fun MineScreen(
     var deleteTarget by remember { mutableStateOf<LocalPlaylist?>(null) }
 
     // 外层容器：手机上下排布（单列）、TV 左右排布（双列）
-    // v2.36.0 竖屏（方案 §4.4 / P0-15）：页 padding 32→16
+    // v2.36.0 竖屏（方案 §4.4 / P0-15）：页 padding 32→16（v2.39.18 起统一由 pagePadding() 给出）
     val isPhonePortrait = LocalUiMode.current == UiMode.PhonePortrait
-    val isPhoneLandscape = LocalUiMode.current == UiMode.PhoneLandscape
     Column(
-        modifier = Modifier.fillMaxSize().padding(
-            when {
-                isPhoneLandscape -> 16.dp
-                isPhonePortrait -> 16.dp
-                else -> 32.dp
-            }
-        )
+        modifier = Modifier.fillMaxSize().padding(pagePadding(uniform = true))
     ) {
     val isPhone = LocalPhoneCompact.current
     if (isPhone) {

@@ -584,6 +584,58 @@ object CompactSizes {
 val LocalPhoneCompact = androidx.compose.runtime.staticCompositionLocalOf { false }
 
 /**
+ * 页面级内边距（**唯一口径**，`docs/conventions-adaptive-ui.md` §3.1）。
+ *
+ * ⛔ 新增/改造页面**一律**走本函数，不要在自己文件里再抄一遍
+ * `if (isPhoneLandscape) 16.dp else if (isPhonePortrait) 16.dp else 32.dp`
+ * —— 这个三元表达式在 v2.39.18 前被手抄了 6 遍，Play 页与首页各漏改一次，
+ * 是「同一页面在不同形态下边距不一致」的机制性来源。
+ *
+ * | 形态 | 横向 | 纵向 | 依据 |
+ * |---|---|---|---|
+ * | [UiMode.TV] | 32dp | 20dp | 大屏留白，1080p 下占屏高 ~4% |
+ * | [UiMode.PhoneLandscape] | 16dp | 0dp | 可用高仅约 338 Compose dp，纵向不再吃 |
+ * | [UiMode.PhonePortrait] | 16dp | 12dp | 窄屏 439 Compose dp，竖向靠滚动 |
+ *
+ * ⚠️ 纵向 0dp 是**刻意**的（2026-09-22 `d0d732b` 两轮真机反馈的结论：12dp 无感，
+ * 要求干脆去掉），不是漏写。播放页是唯一例外（纵向 4/8dp），见 `NowPlayingScreen`。
+ *
+ * ⚠️ 返回 [PaddingValues] 而非 `Modifier`：调用方需要能对单边再叠加（如 `Row`
+ * 里左卡片自己再 `.padding(end = 24.dp)`），包成 Modifier 会挡住后续 `.padding(...)`。
+ *
+ * @param horizontalScale 横向缩放（默认 1）；需要「比页面基线更宽/更窄」的页面传入
+ * @param vertical 纵向覆盖（`null` = 按形态表取默认）；播放页那种定制纵向的页面用
+ * @param uniform `true` = 纵向跟横向取同一个值（四边等距）。用于**整页就是一个带背景卡片行**
+ *        的页面（队列 / 设置 / 我的）—— 它们的设计本就是四边等距，套用上下不同值的
+ *        基线会让卡片贴顶。⛔ 只为兼容既有观感而留，新页面不要用。
+ */
+@Composable
+fun pagePadding(
+    horizontalScale: Float = 1f,
+    vertical: androidx.compose.ui.unit.Dp? = null,
+    uniform: Boolean = false,
+): androidx.compose.foundation.layout.PaddingValues {
+    val mode = LocalUiMode.current
+    val base = when (mode) {
+        UiMode.TV -> 32.dp
+        UiMode.PhoneLandscape -> 16.dp
+        UiMode.PhonePortrait -> 16.dp
+    }
+    val v = vertical ?: when {
+        uniform -> base
+        mode == UiMode.TV -> 20.dp
+        mode == UiMode.PhoneLandscape -> 0.dp
+        else -> 12.dp
+    }
+    return androidx.compose.foundation.layout.PaddingValues(
+        start = base * horizontalScale,
+        end = base * horizontalScale,
+        top = v,
+        bottom = v,
+    )
+}
+
+/**
  * Task 12: 高对比度模式
  *
  * 读取 Settings.Secure.high_text_contrast_enabled（L15 修复，2026-10-06：

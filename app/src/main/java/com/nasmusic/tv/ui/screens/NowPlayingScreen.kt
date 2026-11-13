@@ -323,13 +323,38 @@ fun NowPlayingScreen(
     ) {
         // 空白带修复二轮（2026-09-22 用户反馈 12dp 仍无感，要求干脆去掉）：
         // 手机横屏 padding 全部归零（TV 保持 40/24 不变）。
+        //
+        // 空白带修复三轮（2026-11-13 用户真机反馈）：**「首页 / 正在播放…」菜单行与
+        // 「歌曲名 + 内嵌 / 本地 / 在线」按钮行之间的空挡在电视上特别大**，这些空间本应留给歌词。
+        //
+        // 空挡由**三段**内边距叠成（详见 `AppRoot.TvTopNavBar` 的「顶部空挡」表）：
+        //   ① 顶栏下内边距：播放页 4dp（其余页 16dp，在 AppRoot 里按页面收）
+        //   ② `NavItem` 自身内容内边距：12dp（D-Pad 热区，不动）
+        //   ③ 本页 top padding
+        //
+        //             ①+②   ③     合计
+        //   手机横屏   16     0     16dp（改前 28dp）
+        //   TV 改前    28    40     68dp ≈ 1080p 屏高 12.6%  ← 用户说的「电视上更大」
+        //   TV 改后    16     8     24dp
+        //
+        // TV 保留的 8dp 只够 [SourceTag] 聚焦放大（1.1x）的呼吸位。省下的 44dp 全部
+        // 加给右侧歌词区（`weight(1f)` 自动吃满）⇒ 歌词视口高 44dp，按普通行
+        // （22sp×1.15 + 28dp ≈ 53dp）算约多露 **0.8 行**，足够让下一句提前进入视野。
+        // ⛔ 沉浸模式不在此列：`AppRoot` 在该模式下隐藏顶栏，40dp 是**唯一**的顶部留白，保持原值。
         val isPhoneLandscape = com.nasmusic.tv.ui.theme.LocalUiMode.current ==
             com.nasmusic.tv.ui.theme.UiMode.PhoneLandscape
+        val nowPlayingTopPadding = when {
+            // 手机横屏：顶栏下内边距已收到 4dp，这里补 4dp 让 [SourceTag] 的
+            // 1.1x 聚焦放大不被上一行裁掉（原 0dp 时该行贴得死死的）
+            isPhoneLandscape -> 4.dp
+            isImmersiveMode -> 40.dp    // 沉浸：无顶栏，保留原留白
+            else -> 8.dp                // TV 普通：40 → 8，空挡还给歌词
+        }
         Column(
             modifier = Modifier.fillMaxSize().padding(
                 start = if (isPhoneLandscape) 16.dp else 24.dp,
                 end = if (isPhoneLandscape) 16.dp else 24.dp,
-                top = if (isPhoneLandscape) 0.dp else 40.dp,
+                top = nowPlayingTopPadding,
                 bottom = if (isPhoneLandscape) 0.dp else 24.dp
             )
         ) {

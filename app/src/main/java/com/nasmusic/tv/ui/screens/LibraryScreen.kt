@@ -79,6 +79,7 @@ import com.nasmusic.tv.ui.screens.library.browse.SongsTab
 import com.nasmusic.tv.ui.screens.library.browse.YearsTab
 import com.nasmusic.tv.ui.theme.NasMusicColors
 import com.nasmusic.tv.ui.theme.LocalUiMode
+import com.nasmusic.tv.ui.theme.pagePadding
 import com.nasmusic.tv.ui.theme.UiMode
 import com.nasmusic.tv.util.ArtistSplitter
 import com.nasmusic.tv.util.PinyinUtils
@@ -496,8 +497,7 @@ fun LibraryScreen(
         val isPhonePortrait = uiMode == UiMode.PhonePortrait
         Column(
             modifier = Modifier.fillMaxSize().padding(
-                horizontal = if (uiMode == UiMode.PhoneLandscape) 16.dp else if (isPhonePortrait) 16.dp else 32.dp,
-                vertical = if (uiMode == UiMode.PhoneLandscape) 0.dp else if (isPhonePortrait) 12.dp else 20.dp
+                pagePadding()
             )
         ) {
             // 顶部标题 + TAB + 播放全部

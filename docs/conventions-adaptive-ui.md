@@ -93,6 +93,66 @@ Android dp（竖屏手机 ≈ 360），而竖屏布局宽度是 **Compose dp**�
 | `library/RadioTab.kt` | 3 | 1 | 2 |
 | `components/Shimmer.kt`（骨架） | 6 | 3 | 6 |
 
+### 3.1 ⛔ 单位口径：Android dp ≠ Compose dp（差 1/0.82）
+
+600 / 1000 两个阈值是 **Android dp** 口径（`Configuration.screenWidthDp`，未缩放），
+而页面里 `24.dp` 这类**布局尺寸是 Compose dp**（`LocalDensity` 已被 `PHONE_UI_SCALE = 0.82` 缩放）。
+
+```
+Compose dp = Android dp / 0.82   （手机端变大，不是变小）
+```
+
+| 设备 | Android dp | Compose dp |
+|---|---|---|
+| 360dp 竖屏手机 | 360 | **439** |
+| 1080p 横屏手机 | ~916 | **~1117** |
+| 1080p TV（density 2.0） | 960 | 960（TV 不缩放） |
+
+**规则**：
+
+- 判「这台设备属于哪一档」→ 用 `adaptiveColumns(...)`（Android dp 口径，**不要**先换算）
+- 算「这一格还剩多少宽度 / 一行能放几个字 / 会不会溢出」→ **必须**先换算成 Compose dp
+
+⛔ 不要拿 `screenWidthDp` 直接和 Compose dp 常量比大小 —— 差 22%，在阈值附近会翻档。
+`adaptiveColumns` 里竖屏**直接短路**返回 `phonePortrait` 就是为此（439 Compose dp 会跨过 600）。
+
+---
+
+### 3.2 ⛔ 页面内边距：一律走 `pagePadding()`
+
+```kotlin
+import com.nasmusic.tv.ui.theme.pagePadding
+
+Column(modifier = Modifier.fillMaxSize().padding(pagePadding())) { … }
+```
+
+| 形态 | 横向 | 纵向 |
+|---|---|---|
+| `UiMode.TV` | 32dp | 20dp |
+| `UiMode.PhoneLandscape` | 16dp | 0dp |
+| `UiMode.PhonePortrait` | 16dp | 12dp |
+
+⛔ **禁止**在页面文件里再手抄一遍 `if (isPhoneLandscape) 16.dp else if (isPhonePortrait) 16.dp else 32.dp`。
+这个三元表达式在 v2.39.18 前被手抄了 **6 遍**，其中首页只抄了一半（漏了横屏分支，
+导致手机横屏取 32dp、其它 6 页取 16dp）—— 同一页面在不同形态下边距不一致的机制性来源
+就是「同一个判断有多份副本」。
+
+**三个参数的用法**：
+
+| 参数 | 用途 | 例子 |
+|---|---|---|
+| 默认 | 标准页面 | 曲库 / 专辑详情 / 艺术家详情 / 均衡器 |
+| `vertical = 0.dp` | 页面自己用 `spacedBy` 提供块间距，纵向不能再叠 | 首页 |
+| `uniform = true` | 整页是一个四边等距的卡片行 | 队列 / 设置 / 我的 |
+
+⚠️ **纵向 0dp（横屏）是刻意的**，不是漏写：手机横屏 Compose 可用高仅约 338dp，
+2026-09-22 `d0d732b` 两轮真机反馈的结论是「12dp 无感，要求干脆去掉」。
+播放页是唯一例外（纵向 4/8dp），见 `NowPlayingScreen` 的内联三档。
+
+**新增页面检查项**：页面根容器的 `padding(...)`
+- ✅ `padding(pagePadding())` / `padding(pagePadding(uniform = true))`
+- ❌ 任何含 `UiMode.TV` / `PhoneLandscape` 的 `padding` 内联条件
+
 ---
 
 ## 4. 二分支包装：`AdaptiveLayout`
@@ -275,7 +335,9 @@ Box(
 ## 7. 新增 Screen / 组件的检查清单
 
 - [ ] 顶层容器宽度不再写死（`width(760.dp)` 之类）→ 改 `fillMaxWidth()` / `widthIn(max = …)`
-- [ ] 页 padding 竖屏用 `16.dp`，非竖屏保持原值（当前基线是 `32.dp`）
+- [ ] **页 padding 一律走 `pagePadding()`**（§3.2），⛔ 不许在自己的页面文件里内联
+      `if (isPhoneLandscape) … else if (isPhonePortrait) … else 32.dp`
+      （TV 32/20 · 横屏 16/0 · 竖屏 16/12；例外只允许 `vertical =` 或 `uniform = true` 两种参数）
 - [ ] 一行放不下的「返回 + 标题 + N 个操作」→ 竖屏**拆两行**，操作行加 `horizontalScroll`
 - [ ] 多列网格走 `adaptiveColumns(...)`，不写 `GridCells.Fixed(常量)`
 - [ ] 对话框走 `responsiveDialogSize(...)`

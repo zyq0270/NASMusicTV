@@ -125,7 +125,7 @@ fun songGridColumns(): GridCells = GridCells.Fixed(1)
 /**
  * 响应式网格列数 —— **纯函数**（可 JVM 单测，不依赖 Compose 运行时）。
  *
- * 阈值口径沿用项目既有约定：
+ * 阈值口径沿用项目既有约定，**单位是「未缩放的 Android dp」**（即 `Configuration.screenWidthDp`）：
  * - `>= 1000dp`：TV / 大屏 → [tv]
  * - `600..999dp`：手机横屏 / 小平板（`medium`）→ [medium]
  * - `< 600dp`：手机竖屏 → [phonePortrait]
@@ -143,10 +143,20 @@ fun adaptiveColumnsOf(widthDp: Int, tv: Int, phonePortrait: Int, medium: Int): I
  * 响应式网格列数（v2.36.0 由 `ui/screens/library/browse/BrowseComponents.kt` 上移，
  * 供全项目复用；与 [songGridColumns] 并列）。
  *
- * ⚠️ 双输入（方案 §2.7 第 3 条）：`LocalConfiguration.screenWidthDp` 是**未缩放**的
- * Android dp（竖屏手机 ≈ 360），而竖屏布局宽度是 **Compose dp**（`PHONE_UI_SCALE = 0.82`
- * 缩放后 ≈ 439）—— 只用宽度会在 600/1000 阈值附近出现"列数按横屏算、宽度按竖屏算"的错配。
- * 因此这里先看 [LocalUiMode]：竖屏手机**直接**取 [phonePortrait]，不再心算宽度。
+ * ⚠️ **单位口径（2026-11-13 明确）**：本函数喂给 [adaptiveColumnsOf] 的
+ * `screenWidthDp` 是**未缩放的 Android dp**，而 600 / 1000 这两个阈值也是 Android dp
+ * 口径 —— 两者同口径，所以档位判定本身是自洽的。
+ *
+ * 混淆点在别处：手机端 `LocalDensity` 被乘了 `PHONE_UI_SCALE`(0.82)，
+ * 页面里 `24.dp` 这类**布局尺寸是 Compose dp**，与 Android dp 差 `1/0.82 ≈ 1.22` 倍
+ * （360dp 竖屏手机 ≈ 439 Compose dp；1080p 横屏 916dp ≈ 1117 Compose dp）。
+ * ⇒ **不要在阈值判断里混用两种 dp**：
+ * - 判「这台设备属于哪一档」→ 直接用本函数（Android dp 口径）
+ * - 算「这一格还剩多少宽度、能放几个字」→ 必须换算成 Compose dp 再算
+ *   （`Compose dp = Android dp / 0.82`，`CompactSizes.PHONE_UI_SCALE`）
+ *
+ * 因此这里先看 [LocalUiMode]：竖屏手机**直接**取 [phonePortrait]，不心算宽度
+ * （竖屏 439 Compose dp 会跨过 600 阈值，按宽度判会错进 medium 档）。
  */
 @Composable
 fun adaptiveColumns(tv: Int, phonePortrait: Int, medium: Int = phonePortrait): Int {

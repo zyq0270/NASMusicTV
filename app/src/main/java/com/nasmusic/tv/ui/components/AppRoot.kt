@@ -473,6 +473,25 @@ fun AppRoot(
  * ⛔ 判据必须是 `uiMode == UiMode.PhoneLandscape`，**不能写成 `!= UiMode.PhonePortrait`**
  * —— 后者会把按钮一并发给 TV，破坏「TV 端零变化」。`showOrientationToggle = false` 时
  * **不产生任何 Spacer / padding**，TV 布局与改动前逐字一致（B1）。
+ *
+ * ## 顶部空挡（2026-11-13）
+ *
+ * 「首页 / 正在播放 / 曲库…」菜单行与播放页的「歌曲名 + 内嵌 / 本地 / 在线」按钮行之间
+ * 的空挡，由**三段**独立内边距叠成，任一段单看都不刺眼：
+ *
+ * | 来源 | 值 | 说明 |
+ * |---|---|---|
+ * | 本栏下内边距 | 16dp → 播放页 **4dp** | 本文件 |
+ * | `NavItem` 内容内边距 | 12dp | 按钮自身的按压/Focus 热区，**不能缩**（缩了就削 D-Pad 热区） |
+ * | 播放页顶部内边距 | TV 40dp → **8dp** / 横屏 0dp | `NowPlayingScreen` |
+ *
+ * 改前 TV 合计 68dp（≈1080p 屏高的 12.6%），横屏 28dp ⇒ 用户「电视上更大更显眼」的
+ * 观感差异其实就是**同一个公式里第三段取值不同**。改后 TV 24dp、横屏 20dp；
+ * 省下的 44dp（TV）全部交给播放页右侧歌词区（`weight(1f)` 自动吃满）⇒ 约多露 0.8 行歌词。
+ *
+ * ⚠️ 只对 `Screen.NowPlaying` 收窄：其余页面正文有自己的标题行/卡片间距，
+ * 一起收会让首页/曲库/我的全部上挤，超出本次反馈范围。
+ * 本栏下内边距收紧**不会移动导航行自身**（上内边距不变），只会把下方内容拉近。
  */
 @OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
@@ -484,10 +503,14 @@ private fun TvTopNavBar(
     orientationPref: String = ScreenOrientationPref.AUTO,
     onToggleOrientation: () -> Unit = {},
 ) {
+    // 播放页把**下**内边距收窄到 4dp：见上方「顶部空挡」表 —— 该页正文紧贴导航行，
+    // 其余页面保持 16dp（它们头部自带标题行，不需要贴这么近）。
+    // ⚠️ 上内边距恒为 16dp：导航行自身的纵向位置因此不变，收紧的只是它下方的空档。
+    val bottomPadding = if (currentScreen == Screen.NowPlaying) 4.dp else 16.dp
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 24.dp, vertical = 16.dp),
+            .padding(start = 24.dp, end = 24.dp, top = 16.dp, bottom = bottomPadding),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Row(
