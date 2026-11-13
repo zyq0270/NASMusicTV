@@ -13,7 +13,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -741,9 +740,11 @@ class HqSeparationOrchestrator(
         separationJob = null
         _separating.value = false
         demucsSeparator?.release()
-        // L7 修复（2026-09-13）：release 末尾补 scope.cancel()，清理本编排器 scope 内的协程。
-        // release() 由 PlayerManager.release() 调用,而 PlayerManager 为 app 级单例,
-        // 实际影响有限,但补齐后保证 release 路径不留悬挂 scope。
-        scope.cancel()
+        // S02-01：⛔ 不能 cancel 这个 app 级单例持有的 [scope]。
+        // PlayerManager 只构造一次 HqSeparationOrchestrator（NasMusicApp 全局），
+        // 而 release() 在 PlaybackService.onDestroy / MainActivity 退出等多处真实调用；
+        // 一旦 cancel，进程未死而界面/服务重建后 scope.launch 立即取消，协程体连同
+        // finally 都不执行 ⇒ UI「分离中」永久转圈、HQ 请求被单飞守卫永久忽略。
+        // 只取消进行中的 separationJob（见上），保留 scope 供后续复用。
     }
 }

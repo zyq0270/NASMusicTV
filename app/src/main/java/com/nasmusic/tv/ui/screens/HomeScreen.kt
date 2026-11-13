@@ -207,7 +207,7 @@ fun HomeScreen(
             }
             item(key = "recent_played") {
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    items(recentSongs.take(20), key = { it.id }) { song ->
+                    itemsIndexed(recentSongs.take(20), key = { index, song -> "${index}_${song.id}" }) { _, song ->
                         HomeSongCard(
                             song = song,
                             onClick = { onPlaySong(song) }

@@ -300,10 +300,20 @@ class SongExporter(
                             return@withContext false
                         }
                     targetCopyStarted = true
-                    targetOut.use { out ->
-                        context.contentResolver.openInputStream(part.uri)?.use { input ->
-                            copyStream(input, out)
-                        }
+                    val written = targetOut.use { out ->
+                        // S04-02：目标已被 "wt" 截断，openInputStream 返回 null 不能静默跳过，
+                        // 否则会删掉唯一完整 .part 副本却返回成功。此处保留副本并记失败。
+                        val input = context.contentResolver.openInputStream(part.uri)
+                            ?: run {
+                                AppLog.e(TAG, "export(SAF): openInputStream(part) null after target truncated; keep ${part.name}")
+                                return@withContext false
+                            }
+                        input.use { copyStream(it, out) }
+                    }
+                    // S04-02：覆盖后校验实际写入字节数，不一致则保留 .part 副本并返回失败
+                    if (written != task.src.length()) {
+                        AppLog.e(TAG, "export(SAF): copied $written != src ${task.src.length()}; keep ${part.name}")
+                        return@withContext false
                     }
                     runCatching { part.delete() }
                     true
@@ -328,9 +338,16 @@ class SongExporter(
                         task.src.inputStream().use { input -> copyStream(input, out) }
                     }
                     if (!tmp.renameTo(target)) {
-                        // rename 失败：复制兜底
-                        tmp.copyTo(target, overwrite = true)
-                        tmp.delete()
+                        // rename 失败：复制到同目录 .part2 再 rename 原子替换。
+                        // S04-01：绝不 tmp.copyTo(target, overwrite=true) 非原子直写，
+                        // 否则中途失败会截断用户原有文件且留下半截。
+                        val part2 = File(target.parentFile, "${target.name}.part2")
+                        try {
+                            tmp.copyTo(part2, overwrite = true)
+                            if (!part2.renameTo(target)) error("rename part2 to target failed")
+                        } finally {
+                            runCatching { part2.delete() }
+                        }
                     }
                     true
                 } catch (e: Exception) {
@@ -342,13 +359,17 @@ class SongExporter(
         }
     }
 
-    private fun copyStream(input: InputStream, output: OutputStream) {
+    /** @return 实际写入的字节数（S04-02：供 SAF 覆盖后做完整性校验） */
+    private fun copyStream(input: InputStream, output: OutputStream): Long {
         val buf = ByteArray(BUFFER)
+        var total = 0L
         while (true) {
             val n = input.read(buf)
             if (n < 0) break
             output.write(buf, 0, n)
+            total += n
         }
+        return total
     }
 
 /** SAF 嵌套目录解析：逐级 findFile/createDirectory 定位到叶子目录，再 createFile 文件名 */

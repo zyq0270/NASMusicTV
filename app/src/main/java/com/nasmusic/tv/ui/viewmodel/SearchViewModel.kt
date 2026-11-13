@@ -372,6 +372,10 @@ class SearchViewModel(
         AppLog.d("MetingDiag", "=== SearchViewModel.searchNetworkSongs === keyword='$keyword'")
         if (keyword.isBlank()) {
             AppLog.d("MetingDiag", "searchNetworkSongs: keyword blank")
+            // V5-N02：与 clearNetworkSearch() 一致，作废在途网络搜索，避免慢请求回来把清空结果写回
+            networkSearchGeneration++
+            networkSearchJob?.cancel()
+            networkSearchJob = null
             _networkSearchResults.value = UiState.Success(emptyList())
             _networkSearchKeyword.value = ""
             networkSearchBaseKeyword = ""
@@ -436,6 +440,7 @@ class SearchViewModel(
         return try {
             nasMusicApp.networkMusicManager.search(keyword)
         } catch (e: Exception) {
+            e.rethrowIfCancellation()
             AppLog.e("MetingDiag", "doNetworkSearch failed: ${e.message}", e)
             _networkSearchResults.value = UiState.Error(
                 message = getApplication<Application>().getString(R.string.network_search_failed, e.message?.take(50))

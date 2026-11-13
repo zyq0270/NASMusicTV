@@ -34,6 +34,9 @@ class ModelTransferServer(
         private const val MIN_SIZE_BYTES = 50L * 1024 * 1024 // 50MB 最低阈值
         private const val MODEL_FILENAME = "htdemucs_ft_vocals.onnx"
 
+        /** S01-02：上传体量上限（模型约 166MB，留足量级余量），防止畸形流无限写入撑爆应用存储 */
+        private const val MAX_UPLOAD_BYTES = 1L * 1024 * 1024 * 1024 // 1GB
+
         /**
          * P2-11（2026-09-16）：part headers 总量上限。
          * 正常上传只有一行 `Content-Disposition: form-data; name="file"; filename="..."`（<1KB）；
@@ -123,6 +126,17 @@ class ModelTransferServer(
      * 直接从 InputStream 读取 boundary，将文件内容流式写入目标文件。
      */
     private fun handleUpload(session: IHTTPSession): Response {
+        // S01-02：按 Content-Length 做量级预检，超限立即断连；真正的硬上限由
+        // streamToFile → MultipartBoundaryStreamer.stream(maxBytes) 兜底（chunked 可不带 Content-Length）。
+        val contentLength = session.headers["content-length"]?.toLongOrNull() ?: -1L
+        if (contentLength > MAX_UPLOAD_BYTES) {
+            AppLog.w(TAG, "handleUpload: reject oversized upload, content-length=$contentLength")
+            return newFixedLengthResponse(
+                Response.Status.BAD_REQUEST,
+                "application/json; charset=UTF-8",
+                """{"ok":false,"message":"${context.getString(R.string.model_msg_upload_failed, "Content-Length", "request too large")}"}"""
+            ).noKeepAlive()
+        }
         // 1. 从 Content-Type 提取 boundary
         val contentType = session.headers["content-type"] ?: ""
         AppLog.d(TAG, "handleUpload: content-type=$contentType, headers=${session.headers.keys}")
@@ -132,7 +146,7 @@ class ModelTransferServer(
                 Response.Status.BAD_REQUEST,
                 "application/json; charset=UTF-8",
                 """{"ok":false,"message":"${context.getString(R.string.model_msg_boundary_missing, contentType)}"}"""
-            )
+            ).noKeepAlive()
         }
         val boundaryStr = boundaryMatch.groupValues[1].trim().trim('"')
         // body 格式：--boundary\r\n<headers>\r\n\r\n<file content>\r\n--boundary--
@@ -141,10 +155,11 @@ class ModelTransferServer(
         val firstBoundary = "--$boundaryStr\r\n".toByteArray()
         AppLog.d(TAG, "handleUpload: boundary=$boundaryStr, endMarker size=${endMarker.size}, firstBoundary size=${firstBoundary.size}")
 
-        // 2. 流式解析
-        val target = modelFile
+        // 2. 流式解析：S01-01 全程写临时文件，校验通过后才原子替换正式模型。
+        // 绝不直接写 / 删 modelFile（它可能是用户已装好的几百 MB 模型）。
+        val target = File(modelFile.parentFile, "$MODEL_FILENAME.tmp")
         target.parentFile?.mkdirs()
-        if (target.exists()) target.delete()
+        if (target.exists()) target.delete() // 仅清理残留的临时文件
 
         try {
             val inputStream = BufferedInputStream(session.inputStream, 256 * 1024)
@@ -157,8 +172,8 @@ class ModelTransferServer(
             val partHeaders = readPartHeaders(inputStream)
             AppLog.d(TAG, "handleUpload: part headers = $partHeaders")
 
-            // 3. 流式写入文件直到遇到 endMarker
-            val fileSize = streamToFile(inputStream, target, endMarker)
+            // 3. 流式写入临时文件直到遇到 endMarker（S01-02：传入体量上限）
+            val fileSize = streamToFile(inputStream, target, endMarker, MAX_UPLOAD_BYTES)
             AppLog.d(TAG, "handleUpload: file written, size=${fileSize / (1024 * 1024)}MB, target.exists=${target.exists()}, target.size=${target.length()}")
 
             if (fileSize < MIN_SIZE_BYTES) {
@@ -167,10 +182,10 @@ class ModelTransferServer(
                     Response.Status.BAD_REQUEST,
                     "application/json; charset=UTF-8",
                     """{"ok":false,"message":"${context.getString(R.string.model_msg_file_too_small, fileSize / (1024 * 1024))}"}"""
-                )
+                ).noKeepAlive()
             }
 
-            AppLog.i(TAG, "Upload saved: ${target.absolutePath} (${fileSize / (1024 * 1024)}MB)")
+            AppLog.i(TAG, "Upload written to tmp: ${target.absolutePath} (${fileSize / (1024 * 1024)}MB)")
 
             // P2-11 修复（2026-09-16）：上传路径补 SHA-256 校验（下载路径一直有）。
             // 原实现只判「文件够大」，截断文件、传错模型都能落盘并调用 onModelUploaded
@@ -185,9 +200,16 @@ class ModelTransferServer(
                     Response.Status.BAD_REQUEST,
                     "application/json; charset=UTF-8",
                     """{"ok":false,"message":"${context.getString(R.string.model_msg_sha_mismatch, ModelDownloadManager.EXPECTED_SHA256.take(16), actualSha.take(16))}"}"""
-                )
+                ).noKeepAlive()
             }
             AppLog.i(TAG, "handleUpload: SHA-256 verified ($actualSha)")
+
+            // S01-01：MIN_SIZE 与 SHA-256 全部通过后，才用临时文件原子替换正式模型文件。
+            // rename 失败抛错交给 catch（只删 tmp），正式文件在替换前绝不 delete。
+            if (!target.renameTo(modelFile)) {
+                throw IOException("rename tmp to model file failed")
+            }
+            AppLog.i(TAG, "handleUpload: model file replaced atomically: ${modelFile.absolutePath}")
 
             onModelUploaded.invoke()
             return newFixedLengthResponse(
@@ -197,12 +219,12 @@ class ModelTransferServer(
             )
         } catch (e: Exception) {
             AppLog.e(TAG, "handleUpload failed", e)
-            target.delete()
+            target.delete() // 仅删临时文件，正式模型文件保持原样
             return newFixedLengthResponse(
                 Response.Status.INTERNAL_ERROR,
                 "application/json; charset=UTF-8",
                 """{"ok":false,"message":"${context.getString(R.string.model_msg_upload_failed, e.javaClass.simpleName, e.message?.take(200) ?: context.getString(R.string.model_msg_unknown_error))}"}"""
-            )
+            ).noKeepAlive()
         }
     }
 
@@ -270,10 +292,10 @@ class ModelTransferServer(
      * 正确处理自重叠 boundary（朴素匹配在失配回退时会漏判一次起点）；
      * 写入按 64KB 批量 flush，减少系统调用。
      */
-    private fun streamToFile(input: BufferedInputStream, target: File, boundary: ByteArray): Long {
+    private fun streamToFile(input: BufferedInputStream, target: File, boundary: ByteArray, maxBytes: Long): Long {
         FileOutputStream(target).use { output ->
             val streamer = MultipartBoundaryStreamer(boundary)
-            val written = streamer.stream(input, output)
+            val written = streamer.stream(input, output, maxBytes)
             if (!streamer.boundaryFound) {
                 AppLog.w(TAG, "streamToFile: EOF before boundary, written=$written")
             } else {

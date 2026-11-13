@@ -7554,7 +7554,7 @@ const val FOAM_TILE_OFF_DISTURB = 1
                 SAND_LINE_A * SAND_LINE_TIER_K[b] *
                     (SAND_LINE_ALPHA_K + SAND_LINE_ALPHA_SPAN * hi)
             )
-            drawLinesBatch(sandGrainPts, dst0, dst, paint)
+            drawLinesBatch(sandGrainPts, dst0, dst - dst0, paint)
             b++
         }
     }

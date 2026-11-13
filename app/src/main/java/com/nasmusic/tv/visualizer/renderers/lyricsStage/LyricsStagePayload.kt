@@ -141,8 +141,10 @@ object LyricsStageBridge {
         // 无逐词时间戳 ⇒ 行级兜底：把行切成词，在行内均分
         if (text.isBlank()) return emptyList()
 
-        // 词切分：连续的非空白字符算一个词（中日韩逐字、拉丁按词）
-        val tokens = TOKEN_REGEX.findAll(text).map { it.value }.toList()
+        // 词切分：中日韩逐字（保留既有逐字行为），其余连续的非空白 codepoint 聚合成一个词。
+        // 逐 codepoint 而非逐 char ⇒ emoji 代理对、组合标记、俄/泰/希腊等文字都不丢，
+        // words 文本拼接与 fullText 一致（见 [tokenize]）。
+        val tokens = tokenize(text)
         if (tokens.isEmpty()) return emptyList()
 
         val lineDuration = maxOf(lineEnd - lineStart, 0.05)
@@ -207,8 +209,34 @@ object LyricsStageBridge {
         return words
     }
 
-    /** 词切分正则：中日韩逐字、拉丁按连续字母数字 */
-    private val TOKEN_REGEX = Regex("[\\u4e00-\\u9fff\\u3040-\\u30ff\\uac00-\\ud7af]|[A-Za-z0-9']+")
+    /**
+     * 兜底词切分（无逐词时间戳时用）：中日韩逐字，其余连续的非空白 codepoint 聚合成词。
+     * 只用 java.lang.Character（minSdk 22，不引入 java.time / android.icu）⇒ emoji 等
+     * 增补平面字符按完整 codepoint 处理，不会被拆成两个 char 或丢弃；组合标记与
+     * 俄/泰/希腊等文字也一并保留。
+     */
+    private fun tokenize(text: String): List<String> {
+        val tokens = ArrayList<String>()
+        var wordStart = -1
+        var i = 0
+        while (i < text.length) {
+            val cp = text.codePointAt(i)
+            val width = Character.charCount(cp)
+            val cjk = (cp in 0x4E00..0x9FFF) || (cp in 0x3040..0x30FF) || (cp in 0xAC00..0xD7AF)
+            if (Character.isWhitespace(cp) || cjk) {
+                if (wordStart >= 0) {
+                    tokens.add(text.substring(wordStart, i))
+                    wordStart = -1
+                }
+                if (cjk) tokens.add(text.substring(i, i + width))
+            } else if (wordStart < 0) {
+                wordStart = i
+            }
+            i += width
+        }
+        if (wordStart >= 0) tokens.add(text.substring(wordStart))
+        return tokens
+    }
 
     private const val DEFAULT_LINE_DURATION_MS = 3000L
 

@@ -92,6 +92,12 @@ internal class PerspectivePushTransition : TransformP2Transition() {
     override val id: PhotoTransitionId = PhotoTransitionId.PERSPECTIVE_PUSH
 
     override fun DrawScope.render(a: ImageBitmap, b: ImageBitmap, p: Float, geom: PhotoGeometry) {
+        // 终态（HOLD 期 p 恒为 1f）：灭点固定 0.58h 会让新图上移 8% 露出暗底，
+        // 故 p=1 直接按 dstB 画新图（scale 归 1、位置归位、铺满画布）。p<1 保持原灭点。
+        if (p >= 1f) {
+            drawPhoto(b, geom.srcB, geom.dstB)
+            return
+        }
         val cy = geom.canvasH * 0.5f + geom.canvasH * 0.08f
 
         // 旧图后退：1.00 → 0.55

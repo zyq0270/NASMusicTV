@@ -594,25 +594,32 @@ class MainActivity : ComponentActivity() {
         val app = (application as NasMusicApp)
         // 2026-09-25 审查修复（#10）：launcher 闭包捕获 Activity，真退出时置空断开引用
         //（配置重建 isFinishing=false 走不到这里，onCreate 会重新注入，不影响功能）
-        runCatching {
-            viewModel.visualizerVM.photoPermissionLauncher = null
-            viewModel.visualizerVM.photoDirectoryLauncher = null
-            viewModel.localMusicPermissionLauncher = null
-            // 2026-09-26 审查补修（#5 遗留）：ExportCoordinator 由 Application 持有、跨 Activity
-            // 存活，其 treePickLauncher 闭包同样捕获本 Activity ⇒ 真退出时对称置空断开引用
-            //（配置重建 isFinishing=false 走不到这里，onCreate 会重新注入）
-            app.exportCoordinator.treePickLauncher = null
-        }
+        // S06-02：拆成互不牵连的独立块，任一赋值失败不影响其余置空，且每条都有 WARN 留痕
+        runCatching { viewModel.visualizerVM.photoPermissionLauncher = null }
+            .onFailure { AppLog.w("MainActivity", "onDestroy: clear photoPermissionLauncher failed: ${it.javaClass.simpleName}: ${it.message}") }
+        runCatching { viewModel.visualizerVM.photoDirectoryLauncher = null }
+            .onFailure { AppLog.w("MainActivity", "onDestroy: clear photoDirectoryLauncher failed: ${it.javaClass.simpleName}: ${it.message}") }
+        runCatching { viewModel.localMusicPermissionLauncher = null }
+            .onFailure { AppLog.w("MainActivity", "onDestroy: clear localMusicPermissionLauncher failed: ${it.javaClass.simpleName}: ${it.message}") }
+        // 2026-09-26 审查补修（#5 遗留）：ExportCoordinator 由 Application 持有、跨 Activity
+        // 存活，其 treePickLauncher 闭包同样捕获本 Activity ⇒ 真退出时对称置空断开引用
+        //（配置重建 isFinishing=false 走不到这里，onCreate 会重新注入）
+        runCatching { app.exportCoordinator.treePickLauncher = null }
+            .onFailure { AppLog.w("MainActivity", "onDestroy: clear treePickLauncher failed: ${it.javaClass.simpleName}: ${it.message}") }
         // L3：此处**不再**需要手动解绑播放模式回调——订阅跑在 lifecycleScope 中，
         // onDestroy 时作用域自动取消、SharedFlow 自动退订，时序窗口与残留引用一并消失
         // 停止播放服务（如果仍在运行）
         try {
             stopService(Intent(this, PlaybackService::class.java))
-        } catch (_: Exception) {}
+        } catch (e: Exception) {
+            AppLog.w("MainActivity", "onDestroy: stopService failed: ${e.javaClass.simpleName}: ${e.message}")
+        }
         // 释放播放器资源（Handler、listener）
         try {
             app.playerManager.release()
-        } catch (_: Exception) {}
+        } catch (e: Exception) {
+            AppLog.w("MainActivity", "onDestroy: playerManager.release failed: ${e.javaClass.simpleName}: ${e.message}")
+        }
         // 应用退出时断开后端连接，释放 OkHttp 连接池，防止连接泄漏
         // 使用 applicationScope 确保断开操作在 Activity 销毁后仍能执行
         app.applicationScope.launch {

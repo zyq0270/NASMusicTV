@@ -8,6 +8,7 @@ import com.nasmusic.tv.data.model.BaiduThumbs
 import android.content.Context
 import com.nasmusic.tv.R
 import com.nasmusic.tv.util.AppLog
+import com.nasmusic.tv.util.rethrowIfCancellation
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl.Companion.toHttpUrl
@@ -41,7 +42,9 @@ class BaiduPanApi(
         /** 顶层 has_more：=1 时继续翻页 */
         val hasMore: Boolean,
         /** API 返回的 errno（0=成功，非0=失败，-6=token失效） */
-        val errno: Int = 0
+        val errno: Int = 0,
+        /** V5-N03：true=本次请求未获得有效响应（网络/IO 失败），区别于「合法的空目录」。 */
+        val ioError: Boolean = false
     )
 
     /** 列出目录 */
@@ -339,6 +342,18 @@ class BaiduPanApi(
         return result
     }
 
+    /**
+     * V5-N03：显式「未获得有效响应」错误态 —— 绝不再映射成「空目录 errno=-1」。
+     * 后者会被 BFS 当成「这个目录没文件」继续遍历，最终返回半截列表。
+     */
+    private fun networkFailure(): BaiduListResult =
+        BaiduListResult(
+            emptyList(),
+            false,
+            errno = BaiduNetdiskConfig.LOCAL_ERRNO_NETWORK,
+            ioError = true,
+        )
+
     /** listDir 专用单次执行（返回含 errno 的结果） */
     private fun executeWithErrnoOnce(url: String, parser: (JsonObject) -> BaiduListResult): BaiduListResult {
         return try {
@@ -346,14 +361,14 @@ class BaiduPanApi(
                 .header("User-Agent", BaiduNetdiskConfig.BAIDU_UA)
                 .build()
             client.newCall(req).execute().use { resp ->
-                val body = resp.body?.string() ?: return BaiduListResult(emptyList(), false, errno = -1)
+                val body = resp.body?.string() ?: return networkFailure()
                 if (!resp.isSuccessful) {
                     // N05：与 executeOnce 同口径 —— 只截 200 字。
                     // 百度网盘的错误响应体可能很长（含整页 HTML），原样写进日志会灌满 LogStore。
                     AppLog.w(TAG, "request failed url=${sanitizeUrl(url)} code=${resp.code} body=${body.take(200)}")
-                    return BaiduListResult(emptyList(), false, errno = -1)
+                    return networkFailure()
                 }
-                val json = gson.fromJson(body, JsonObject::class.java) ?: return BaiduListResult(emptyList(), false, errno = -1)
+                val json = gson.fromJson(body, JsonObject::class.java) ?: return networkFailure()
                 val errno = json.get("errno")?.asInt ?: 0
                 if (errno != 0) {
                     val desc = BaiduNetdiskConfig.describeErrno(context, errno)
@@ -367,21 +382,30 @@ class BaiduPanApi(
                 parser(json).copy(errno = errno)
             }
         } catch (e: Exception) {
+            e.rethrowIfCancellation()
             AppLog.e(TAG, "executeWithErrno error url=${sanitizeUrl(url)}", e)
-            BaiduListResult(emptyList(), false, errno = -1)
+            networkFailure()
         }
     }
 
     /** listDir 专用：token 失效自动刷新重试一次（M4 修复） */
     private suspend fun executeWithErrno(url: String, parser: (JsonObject) -> BaiduListResult): BaiduListResult {
-        val res = executeWithErrnoOnce(url, parser)
+        var res = executeWithErrnoOnce(url, parser)
         if (res.errno in tokenExpiredErrnos) {
             val newToken = oauth.forceRefreshAccessToken()
             if (!newToken.isNullOrBlank()) {
                 AppLog.w(TAG, "executeWithErrno: token expired (errno=${res.errno}), force refresh + retry once")
-                return executeWithErrnoOnce(withToken(url, newToken), parser)
+                res = executeWithErrnoOnce(withToken(url, newToken), parser)
+            } else {
+                AppLog.w(TAG, "executeWithErrno: token expired (errno=${res.errno}) but refresh returned null")
             }
-            AppLog.w(TAG, "executeWithErrno: token expired (errno=${res.errno}) but refresh returned null")
+        }
+        // V5-N03：网络/响应失败不得再以「空目录」返回给 BFS（会继续遍历并返回半截列表）。
+        // 返回显式错误态后在这里抛出，让上层扫描循环中断；上层多处已有 network error 兜底
+        // （verifyBaiduTokenAsync / listBaiduDir / fullScan）。tokenExpired 重试逻辑不受影响：
+        // ioError 态 errno=LOCAL_ERRNO_NETWORK 不在 tokenExpiredErrnos，且重试结果同样在此判定。
+        if (res.ioError) {
+            throw java.io.IOException("baidu listDir network failure (errno=${res.errno})")
         }
         return res
     }

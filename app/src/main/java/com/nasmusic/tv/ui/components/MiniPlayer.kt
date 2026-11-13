@@ -23,6 +23,7 @@ import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -124,11 +125,13 @@ fun MiniPlayer(
                     .clip(RoundedCornerShape(8.dp))
                     .background(NasMusicColors.SurfaceVariant)
             ) {
-                CoverCarousel(
-                    coverCandidates = coverCandidates,
-                    isPlaying = isPlaying,
-                    modifier = Modifier.fillMaxSize()
-                )
+                key(coverCandidates) {
+                    CoverCarousel(
+                        coverCandidates = coverCandidates,
+                        isPlaying = isPlaying,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
             }
             Spacer(modifier = Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {

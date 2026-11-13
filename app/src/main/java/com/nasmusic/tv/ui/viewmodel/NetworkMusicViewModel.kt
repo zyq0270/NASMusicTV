@@ -715,7 +715,8 @@ class NetworkMusicViewModel(app: Application) : AndroidViewModel(app) {
                 }
             }
         } catch (e: Exception) {
-            AppLog.e("NetworkMusicViewModel", "collectAudioInDir error", e)
+            e.rethrowIfCancellation()
+            AppLog.w("NetworkMusicViewModel", "collectAudioInDir error", e)
         }
         return songs
     }

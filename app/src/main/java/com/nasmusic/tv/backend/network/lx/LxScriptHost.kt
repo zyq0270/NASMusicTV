@@ -66,6 +66,21 @@ internal class LxScriptHost(
     override var info: LxScriptInfo? = null
         private set
 
+    /**
+     * S05-02：注入的 [httpClient] 默认 `followRedirects(true)` 且没有 network interceptor，
+     * 脚本拼出的公网 URL 一旦 302 到内网/回环/云元数据，OkHttp 会自动跟过去，
+     * 响应体还会经 [postResponse] 原样回传脚本（SSRF + 内网/云元数据内容外带）。
+     * 派生一个逐跳复核的 client，与初始 URL 校验同口径用 [NetAddressGuard.rejectReason]。
+     */
+    private val guardedHttpClient: OkHttpClient = httpClient.newBuilder()
+        .addNetworkInterceptor { chain ->
+            val target = chain.request().url
+            val reason = NetAddressGuard.rejectReason(target.toString())
+            if (reason != null) throw IOException("blocked redirect hop: $reason")
+            chain.proceed(chain.request())
+        }
+        .build()
+
     private val calls = ConcurrentHashMap<Int, Call>()
     private val results = ConcurrentHashMap<Int, CompletableDeferred<String?>>()
     private val timers = ConcurrentHashMap<Int, TimerEntry>()
@@ -353,7 +368,7 @@ internal class LxScriptHost(
             builder.method(method, null)
         }
 
-        val call = httpClient.newCall(builder.build())
+        val call = guardedHttpClient.newCall(builder.build())
         calls[id] = call
         call.enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
@@ -363,6 +378,14 @@ internal class LxScriptHost(
 
             override fun onResponse(call: Call, response: Response) {
                 response.use {
+                    // S05-02：回传脚本前再校验最终 URL（纵深防御）—— 即便注入的 client
+                    // 未来换了重定向策略，也不能把内网/元数据响应体经 __lxOnResponse 回传脚本。
+                    val reject = NetAddressGuard.rejectReason(it.request.url.toString())
+                    if (reject != null) {
+                        AppLog.w(DIAG, "[$scriptId] 拒绝回传最终响应：$reject")
+                        postResponse(id, false, 0, "{}", reject)
+                        return@use
+                    }
                     val body = try {
                         it.body?.string().orEmpty()
                     } catch (e: IOException) {

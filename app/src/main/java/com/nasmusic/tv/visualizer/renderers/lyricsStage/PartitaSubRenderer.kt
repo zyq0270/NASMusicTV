@@ -221,11 +221,23 @@ class PartitaSubRenderer : LyricsSubRenderer {
     private var activeLineIndex = -1
     private var activeLineStart = Double.NaN
 
+    /** 上次建版面时的整曲代数（C50：lines 换新实例必须重建版面） */
+    private var lastLinesGeneration = -1
+
+    /** 上次建版面时的画布尺寸 / density（M54：视口变化必须重排） */
+    private var lastCanvasWidth = -1f
+    private var lastCanvasHeight = -1f
+    private var lastDensity = -1f
+
     override fun onEnter(ctx: RenderContext, lyrics: LyricsStagePayload) {
         activeState = null
         exitingState = null
         activeLineIndex = -1
         activeLineStart = Double.NaN
+        lastLinesGeneration = -1
+        lastCanvasWidth = -1f
+        lastCanvasHeight = -1f
+        lastDensity = -1f
     }
 
     /**
@@ -242,6 +254,21 @@ class PartitaSubRenderer : LyricsSubRenderer {
 
     override fun DrawScope.draw(frame: AudioFrame, ctx: RenderContext, lyrics: LyricsStagePayload) {
         val timeSec = lyrics.timeSec
+        // C50/M54：整曲代数 / 画布尺寸 / density 任一变化 ⇒ 版面按旧视口烘死，必须清掉重建；
+        // 换曲时旧曲的离场动画也没有意义，一并清（口径同 GlowLineSubRenderer:1343）。
+        // 清 activeState 后 syncLine 的 changed 判据会因 activeState == null 触发重建。
+        if (lastLinesGeneration != lyrics.linesGeneration ||
+            lastCanvasWidth != ctx.canvasSize.width ||
+            lastCanvasHeight != ctx.canvasSize.height ||
+            lastDensity != density
+        ) {
+            activeState = null
+            exitingState = null
+            lastLinesGeneration = lyrics.linesGeneration
+            lastCanvasWidth = ctx.canvasSize.width
+            lastCanvasHeight = ctx.canvasSize.height
+            lastDensity = density
+        }
         syncLine(lyrics, ctx, timeSec)
 
         val active = activeState
@@ -269,6 +296,10 @@ class PartitaSubRenderer : LyricsSubRenderer {
         exitingState = null
         activeLineIndex = -1
         activeLineStart = Double.NaN
+        lastLinesGeneration = -1
+        lastCanvasWidth = -1f
+        lastCanvasHeight = -1f
+        lastDensity = -1f
         // ⛔ **这里不得清辉光缓存**（`GlowWordHalo` 的 `clear()`）：
         //    子模式切换会走这个 `onExit` ⇒ 清掉缓存 ⇒ 切换后的首行要把每个字形
         //    重新模糊一遍（10–15 字形 × 2 次真实高斯模糊，**主线程**）⇒ 硬卡顿。

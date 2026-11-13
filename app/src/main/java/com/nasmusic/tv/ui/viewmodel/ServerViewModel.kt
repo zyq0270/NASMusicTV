@@ -119,11 +119,9 @@ class ServerViewModel(
             }
             success
         } catch (e: Exception) {
-            _connectMessage.value = getApplication<Application>().getString(R.string.connect_failed_with_msg, e.message?.take(50))
-            viewModelScope.launch {
-                delay(3000)
-                _connectMessage.value = null
-            }
+            e.rethrowIfCancellation()
+            // 统一走 postConnectMessage（单调版本号），避免旧定时器清掉后一条消息
+            postConnectMessage(getApplication<Application>().getString(R.string.connect_failed_with_msg, e.message?.take(50)))
             false
         } finally {
             _isLoading.value = false

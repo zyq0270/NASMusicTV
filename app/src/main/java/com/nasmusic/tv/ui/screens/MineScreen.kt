@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
@@ -185,7 +186,7 @@ fun MineScreen(
                     }
                 }
             } else {
-                items(mergedFavorites, key = { "fav_${it.id}" }) { song ->
+                itemsIndexed(mergedFavorites, key = { index, song -> "fav_${index}_${song.id}" }) { _, song ->
                     UnifiedSongRow(
                         song = song,
                         onClick = { onPlaySong(song) },
@@ -283,7 +284,7 @@ fun MineScreen(
                                 }
                             }
                         } else {
-                            items(playlist.songs, key = { "pl_song_${playlist.id}_${it.id}" }) { song ->
+                            itemsIndexed(playlist.songs, key = { index, song -> "pl_song_${playlist.id}_${index}_${song.id}" }) { _, song ->
                                 UnifiedSongRow(
                                     song = song,
                                     mode = SongRowMode.MODE_ROW,
@@ -472,7 +473,7 @@ private fun FavoritesPane(
                 modifier = Modifier.fillMaxSize(),
                 verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                items(songs, key = { it.id }) { song ->
+                itemsIndexed(songs, key = { index, song -> "${index}_${song.id}" }) { _, song ->
                     UnifiedSongRow(
                         song = song,
                         mode = SongRowMode.MODE_ROW,
@@ -540,7 +541,7 @@ private fun RecentPane(
                 modifier = Modifier.fillMaxSize(),
                 verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                items(songs, key = { "recent_${it.id}" }) { song ->
+                itemsIndexed(songs, key = { index, song -> "recent_${index}_${song.id}" }) { _, song ->
                     UnifiedSongRow(
                         song = song,
                         mode = SongRowMode.MODE_ROW,
@@ -663,7 +664,7 @@ private fun PlaylistsPane(
                                 }
                             }
                         } else {
-                            items(playlist.songs, key = { "playlist_song_${playlist.id}_${it.id}" }) { song ->
+                            itemsIndexed(playlist.songs, key = { index, song -> "playlist_song_${playlist.id}_${index}_${song.id}" }) { _, song ->
                                 UnifiedSongRow(
                                     song = song,
                                     mode = SongRowMode.MODE_ROW,

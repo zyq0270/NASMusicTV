@@ -165,7 +165,7 @@ class CoverUrlPersistentCache(context: Context) {
             if (json.isBlank()) return
             val type = object : TypeToken<Map<String, String>>() {}.type
             val loaded = gson.fromJson<Map<String, String>>(json, type) ?: return
-            // P3-3：文件里的顺序就是写入顺序（save() 按 toMap() 稳定写出），
+            // S04-03：save() 已按 writtenAt 升序写出，文件顺序即真实写入顺序，
             // 按序赋递增时间戳，使「加载后立即超限淘汰」也按真实新旧顺序淘汰。
             // 注：Map 没有 forEachIndexed，必须走 entries。
             val base = System.currentTimeMillis()
@@ -183,7 +183,15 @@ class CoverUrlPersistentCache(context: Context) {
         synchronized(saveLock) {
             val tmpFile = File(file.path + ".tmp")
             try {
-                val json = gson.toJson(cache.toMap())
+                // S04-03：ConcurrentHashMap.toMap() 是哈希桶序、不是写入时间序；
+                // 按 writtenAt 升序写成 LinkedHashMap，让文件顺序 == 写入顺序。
+                // 文件格式仍是 Map<String,String>，旧缓存文件可正常读取（Gson 反序列化为
+                // LinkedHashMap，保插入序），无需迁移。
+                val ordered = LinkedHashMap<String, String>(cache.size)
+                cache.entries
+                    .sortedBy { writtenAt[it.key] ?: 0L }
+                    .forEach { ordered[it.key] = it.value }
+                val json = gson.toJson(ordered)
                 tmpFile.writeText(json)
                 // 原子 rename：避免写文件中途崩溃导致缓存损坏
                 if (!tmpFile.renameTo(file)) {

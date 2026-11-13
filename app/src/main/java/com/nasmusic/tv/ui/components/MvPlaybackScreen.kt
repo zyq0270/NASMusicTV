@@ -510,7 +510,7 @@ private fun MvLyricsOverlay(
     ) {
         KaraokeLyricsView(
             lyrics = lyrics,
-            progressMs = positionMs.value,
+            progressMs = positionMs,
             isPlaying = isPlaying,
             modifier = Modifier
                 .fillMaxWidth()

@@ -190,6 +190,16 @@ internal class LxScriptRepo(
             .connectTimeout(20, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
             .followRedirects(true)
+            // S05-01：C21 只守了安装入口的初始 URL，但 download 用的 client 会自动跟随 3xx ——
+            // 公网脚本 URL 302 到内网/回环/云元数据即可绕过，响应体还会被当脚本正文写盘执行。
+            // 复用 UrlReachabilityChecker.defaultClient 的 network interceptor 逐跳口径；
+            // ⚠️ 与初始校验同口径用 rejectReason（严格，私网也拦），不放宽到 ForPlayback。
+            .addNetworkInterceptor { chain ->
+                val target = chain.request().url
+                val reason = NetAddressGuard.rejectReason(target.toString())
+                if (reason != null) throw IOException("blocked redirect hop: $reason")
+                chain.proceed(chain.request())
+            }
             .build()
     }
 }

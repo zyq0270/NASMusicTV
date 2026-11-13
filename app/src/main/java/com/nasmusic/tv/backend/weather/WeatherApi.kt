@@ -9,6 +9,8 @@ import com.nasmusic.tv.data.model.WeatherData
 import com.nasmusic.tv.data.model.WeatherForecast
 import com.nasmusic.tv.util.AppLog
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -48,7 +50,8 @@ class WeatherApi(private val context: android.content.Context) {
 
     // IP 定位结果缓存 + 失败冷却：成功缓存 30 分钟，失败冷却 10 分钟。
     // 避免 fetchCurrentWeather / fetchForecast 各自发一次必然超时的请求、并刷两条长堆栈。
-    private val locationLock = Any()
+    // Mutex 把「读缓存 → 请求 → 写回」整段串行化实现单飞（锁内二次判缓存）。
+    private val locationLock = Mutex()
     private var locationCached: IpLocation? = null
     private var locationCachedAt = 0L
     private var locationFailedAt = 0L
@@ -76,20 +79,21 @@ class WeatherApi(private val context: android.content.Context) {
      * 因此这里要同时做到「快失败」与「不重复重试」，见各常量注释。
      */
     suspend fun getIpLocation(): IpLocation = withContext(Dispatchers.IO) {
-        val now = System.currentTimeMillis()
-        val cached: IpLocation? = synchronized(locationLock) {
+        // 整段「读缓存 → 请求 → 写回」用同一把 Mutex 串行化：并发调用只有第一个真正发请求，
+        // 其余拿锁后二次判缓存直接命中，避免 fetchCurrentWeather / fetchForecast 各发一次 3s 请求。
+        locationLock.withLock {
+            val now = System.currentTimeMillis()
+            // 锁内二次判缓存：等待锁期间若已有协程写回，这里直接命中，不再请求
             val hit = locationCached
-            when {
+            val cached: IpLocation? = when {
                 hit != null && now - locationCachedAt < IP_LOCATION_TTL_MS -> hit
                 hit == null && locationFailedAt > 0L &&
                     now - locationFailedAt < IP_LOCATION_COOLDOWN_MS -> IpLocation()
                 else -> null
             }
-        }
-        if (cached != null) return@withContext cached
+            if (cached != null) return@withLock cached
 
-        val result = requestIpLocation()
-        synchronized(locationLock) {
+            val result = requestIpLocation()
             if (result.success) {
                 locationCached = result
                 locationCachedAt = System.currentTimeMillis()
@@ -98,8 +102,8 @@ class WeatherApi(private val context: android.content.Context) {
                 locationCached = null
                 locationFailedAt = System.currentTimeMillis()
             }
+            result
         }
-        result
     }
 
     /**
@@ -158,8 +162,28 @@ class WeatherApi(private val context: android.content.Context) {
      * @param openWeatherMapApiKey 可选 OpenWeatherMap API Key
      */
     suspend fun getWeather(lat: Double, lon: Double, openWeatherMapApiKey: String? = null): WeatherData? = withContext(Dispatchers.IO) {
-        // 1. 先试 Open-Meteo
-        val openMeteo = try {
+        // 1. 先试 Open-Meteo（失败只折算为 null，继续走第 2 步 fallback）
+        val openMeteo = getWeatherOpenMeteo(lat, lon)
+        if (openMeteo != null) return@withContext openMeteo
+
+        // 2. Open-Meteo 不可用，尝试 OpenWeatherMap（需要 API Key）
+        if (openWeatherMapApiKey.isNullOrBlank()) {
+            AppLog.w(TAG, "Open-Meteo failed and no OpenWeatherMap API key configured")
+            return@withContext null
+        }
+        return@withContext getWeatherOpenWeatherMap(lat, lon, openWeatherMapApiKey)
+    }
+
+    /**
+     * Open-Meteo 单次请求 + 解析（独立私有函数，内部用普通 `return null`）。
+     *
+     * ⚠️ 必须抽成独立函数：原实现把失败分支写成 `return@withContext null`，而
+     * `withContext` 是 inline ⇒ 标签返回会**直接结束整个 getWeather**，跳过
+     * OpenWeatherMap fallback（S05-04）。这里对齐 getWeatherOpenWeatherMap 的写法，
+     * 任何失败都只折算为 `openMeteo = null`，由 getWeather 继续兜底。
+     */
+    private fun getWeatherOpenMeteo(lat: Double, lon: Double): WeatherData? {
+        return try {
             val url = buildString {
                 append("$OPEN_METEO_BASE?latitude=$lat&longitude=$lon")
                 append("&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m,is_day")
@@ -174,12 +198,12 @@ class WeatherApi(private val context: android.content.Context) {
             val body = client.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) {
                     AppLog.w(TAG, "Open-Meteo: HTTP ${response.code}")
-                    return@withContext null
+                    return null
                 }
                 response.body?.string()
-            } ?: return@withContext null
+            } ?: return null
             val json = gson.fromJson(body, JsonObject::class.java)
-            val current = json.getAsJsonObject("current") ?: return@withContext null
+            val current = json.getAsJsonObject("current") ?: return null
 
             WeatherData(
                 temperature = current.get("temperature_2m")?.asDouble ?: 0.0,
@@ -194,14 +218,6 @@ class WeatherApi(private val context: android.content.Context) {
             AppLog.w(TAG, "Open-Meteo failed: ${e.message}")
             null
         }
-        if (openMeteo != null) return@withContext openMeteo
-
-        // 2. Open-Meteo 不可用，尝试 OpenWeatherMap（需要 API Key）
-        if (openWeatherMapApiKey.isNullOrBlank()) {
-            AppLog.w(TAG, "Open-Meteo failed and no OpenWeatherMap API key configured")
-            return@withContext null
-        }
-        return@withContext getWeatherOpenWeatherMap(lat, lon, openWeatherMapApiKey)
     }
 
     /**

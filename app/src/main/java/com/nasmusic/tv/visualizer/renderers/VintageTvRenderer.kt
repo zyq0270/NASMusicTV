@@ -302,7 +302,10 @@ class VintageTvRenderer : VisualizerRenderer {
     }
 
     override fun onExit() {
-        // ImageBitmap 由 Compose 管理，此处仅断引用供 GC
+        // 底层 android.graphics.Bitmap 的像素在 native 内存里（见 :635-639 / :896-897），
+        // 退出主题时最后一张也要显式 recycle，不能只断 ImageBitmap 引用等 GC。
+        lyricBitmap?.let { old -> runCatching { old.asAndroidBitmap().recycle() } }
+        osdBitmap?.let { old -> runCatching { old.asAndroidBitmap().recycle() } }
         lyricBitmap = null
         noiseBuffer = null
         tintRed = null

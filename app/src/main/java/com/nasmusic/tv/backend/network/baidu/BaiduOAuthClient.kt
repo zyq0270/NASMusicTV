@@ -271,11 +271,21 @@ class BaiduOAuthClient(
                         if (!grantedScope.contains("netdisk")) {
                             AppLog.w(TAG, "refreshAccessToken: scope 缺少 netdisk! granted='$grantedScope', 文件 API 将返回百度 errno=-6")
                         }
+                        // S05-03：对齐 pollDeviceToken 的安全解析 + 钳制。缺字段 / JsonNull /
+                        // 空串不再因 .asString 抛异常被外层 catch 吞掉（那会连刚拿到的新
+                        // access_token 一起丢，叠加 refresh_token 单次有效 ⇒ 静默要求重授权）。
+                        val expiresInSec = (json.get("expires_in")
+                            ?.takeIf { it.isJsonPrimitive }?.asLong ?: 2592000L)
+                            .coerceIn(60L, 365L * 24 * 3600)
+                        val newRefreshToken = json.get("refresh_token")
+                            ?.takeIf { it.isJsonPrimitive }
+                            ?.asString
+                            ?.takeIf { it.isNotBlank() }
+                            ?: refreshToken   // 缺字段时保留本次请求用的旧值，别置空导致下次刷新必失败
                         val newTokens = BaiduTokens(
                             accessToken = json.get("access_token").asString,
-                            refreshToken = json.get("refresh_token").asString,
-                            expiresAt = System.currentTimeMillis() +
-                                (json.get("expires_in")?.asLong ?: 2592000L) * 1000,
+                            refreshToken = newRefreshToken,
+                            expiresAt = System.currentTimeMillis() + expiresInSec * 1000,
                             scope = grantedScope
                         )
                         prefs.baidu.saveBaiduTokens(newTokens)

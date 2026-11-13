@@ -1142,13 +1142,13 @@ class FeiniuAdapter(private val appContext: Context? = null) : BackendAdapter {
             }
             pagesFetched++
             if (singlePage || items.size() == 0) break
-            // total 缺失时用 -1 表示「未知」，退回 items.size() 判末页
-            val total = if (data.get("total") == null) -1 else intOf(data, "total")
-            val reachedEnd = if (total >= 0) {
+            // S03-04：total 缺失 / 脏值都不能折叠成 0（0 会让 >= total 恒真，第一页后立刻 break）
+            val total = totalOf(data)?.takeIf { it > 0 }
+            val reachedEnd = if (total != null) {
                 // 已请求 pagesFetched 页、每页 size 条，覆盖 total 即到末页
                 pagesFetched.toLong() * size >= total
             } else {
-                // 服务端未回 total 时退回旧判据，保持向后兼容
+                // 服务端未回 / 回了脏 total 时退回旧判据，保持向后兼容
                 items.size() < size
             }
             if (reachedEnd) break
@@ -1183,8 +1183,10 @@ class FeiniuAdapter(private val appContext: Context? = null) : BackendAdapter {
     private suspend fun fetchTotal(path: String, vararg extra: Pair<String, Any?>): Int = withAuthRetry {
         val url = FeiniuUrl.endpoint(apiBase, path, *extra, "page" to 1, "size" to 1)
         val data = dataOf(get(url), url) ?: return@withAuthRetry 0
-        if (data.get("total") != null) intOf(data, "total")
-        else data.get("list")?.takeIf { it.isJsonArray }?.asJsonArray?.size() ?: 0
+        // V3-N01：与 fetchAllPages 共用同一个安全解析；脏 total 不再让曲库显示「共 0 首」
+        totalOf(data)
+            ?: data.get("list")?.takeIf { it.isJsonArray }?.asJsonArray?.size()
+            ?: 0
     }
 
     /**
@@ -1395,6 +1397,26 @@ class FeiniuAdapter(private val appContext: Context? = null) : BackendAdapter {
             else prim.asString.trim().toIntOrNull() ?: 0
         } catch (e: Exception) {
             0
+        }
+    }
+
+    /**
+     * S03-04 / V3-N01：安全取 `data.total`。字段缺失、JSON null、对象 / 数组、非数字字符串
+     * 一律返回 `null`（未知），合法数值（含 0）钳制为非负后返回。
+     *
+     * ⚠️ 与 [intOf] 的区别：intOf 把脏值折叠成 0，而 0 在分页逻辑里是「有效总数 0」，
+     * 会让 `pagesFetched * size >= 0` 恒真 ⇒ 只拿第一页；统计侧则显示「共 0 首」。
+     * 飞牛 T1 已实证服务端存在字段类型不符的响应。
+     */
+    private fun totalOf(obj: JsonObject?): Int? {
+        val el = obj?.get("total") ?: return null
+        if (el.isJsonNull || !el.isJsonPrimitive) return null
+        return try {
+            val prim = el.asJsonPrimitive
+            val v = if (prim.isNumber) prim.asInt else prim.asString.trim().toIntOrNull()
+            v?.coerceAtLeast(0)
+        } catch (e: Exception) {
+            null
         }
     }
 

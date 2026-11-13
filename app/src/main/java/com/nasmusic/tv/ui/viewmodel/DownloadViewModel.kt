@@ -25,6 +25,8 @@ import com.nasmusic.tv.util.LocalFilePicker
 import com.nasmusic.tv.util.StorageUtils
 import com.nasmusic.tv.util.rethrowIfCancellation
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -90,6 +92,10 @@ class DownloadViewModel(
     private val _qualityPicker = MutableStateFlow<QualityPickerState?>(null)
     val qualityPicker: StateFlow<QualityPickerState?> = _qualityPicker.asStateFlow()
 
+    /** S07-06：质量探测在途 Job 与代数闸门，连点两首歌时旧探测不得覆盖新面板 */
+    private var qualityProbeJob: Job? = null
+    private var qualityProbeGeneration = 0
+
     /** 需要父级刷新合并数据时的回调（由 MainViewModel 注入，避免子 VM 间直连） */
     var onLocalSongsChanged: (() -> Unit)? = null
 
@@ -115,7 +121,10 @@ class DownloadViewModel(
 
     /** 手动下载单曲（歌曲行 ⬇ 按钮）。受总开关与空间限制，不受自动下载配额限制 */
     fun downloadSong(song: Song) {
-        viewModelScope.launch {
+        // S07-06：新请求先取消在途探测并取本地代数，写回前校验，避免旧歌结果覆盖新歌面板
+        qualityProbeJob?.cancel()
+        val generation = ++qualityProbeGeneration
+        qualityProbeJob = viewModelScope.launch {
             // P1-15: 补齐 downloadNow 中的安全检查（enqueue → executeDownload 会跳过这些）
             // 1. 总开关
             val settings = prefs.appSettings.first()
@@ -131,34 +140,50 @@ class DownloadViewModel(
 
             // 3. 探测可用档位（决定弹窗/直下/报错）
             _qualityPicker.value = QualityPickerState.Probing(song)
-            val available = QualityProbe.probeAvailableQualities(song, resolver)
-            if (available.isEmpty()) {
-                // 零档可用 → 错误提示，不入队
-                _qualityPicker.value = QualityPickerState.None(song)
-                return@launch
-            }
-            if (available.size == 1) {
-                // 仅一档 → 不弹窗，直接下载；但给一条轻提示（否则用户点完看不到任何变化）
-                _qualityPicker.value = null
-                val only = available.first()
-                val started = enqueueManual(song, only)
-                val label = getApplication<Application>().getString(
-                    com.nasmusic.tv.backend.network.QualityTiers.labelResOf(only)
-                )
-                showMessage(
-                    getApplication<Application>().getString(
-                        if (started) R.string.quality_download_started else R.string.quality_already_downloaded,
-                        label
+            try {
+                val available = QualityProbe.probeAvailableQualities(song, resolver)
+                if (generation != qualityProbeGeneration) return@launch
+                if (available.isEmpty()) {
+                    // 零档可用 → 错误提示，不入队
+                    _qualityPicker.value = QualityPickerState.None(song)
+                    return@launch
+                }
+                if (available.size == 1) {
+                    // 仅一档 → 不弹窗，直接下载；但给一条轻提示（否则用户点完看不到任何变化）
+                    _qualityPicker.value = null
+                    val only = available.first()
+                    val started = enqueueManual(song, only)
+                    val label = getApplication<Application>().getString(
+                        com.nasmusic.tv.backend.network.QualityTiers.labelResOf(only)
                     )
-                )
-                return@launch
+                    showMessage(
+                        getApplication<Application>().getString(
+                            if (started) R.string.quality_download_started else R.string.quality_already_downloaded,
+                            label
+                        )
+                    )
+                    return@launch
+                }
+                // 多档 → 弹码率选择面板（默认选中最高可用档）
+                val downloaded = repo.downloadedQualitiesOf(song.id)
+                    .filter { it.status == DownloadStatus.COMPLETED.name }
+                    .map { it.quality }
+                    .toSet()
+                if (generation != qualityProbeGeneration) return@launch
+                _qualityPicker.value = QualityPickerState.Pick(song, available, downloaded)
+            } catch (e: Exception) {
+                e.rethrowIfCancellation()
+                AppLog.e("DownloadViewModel", "downloadSong quality probe failed", e)
+                if (generation != qualityProbeGeneration) return@launch
+                _qualityPicker.value = QualityPickerState.None(song)
+            } finally {
+                // 异常 / 取消仍未落地终态时解除 Probing（仅当前代，避免覆盖新请求的状态）
+                if (generation == qualityProbeGeneration &&
+                    _qualityPicker.value is QualityPickerState.Probing
+                ) {
+                    _qualityPicker.value = QualityPickerState.None(song)
+                }
             }
-            // 多档 → 弹码率选择面板（默认选中最高可用档）
-            val downloaded = repo.downloadedQualitiesOf(song.id)
-                .filter { it.status == DownloadStatus.COMPLETED.name }
-                .map { it.quality }
-                .toSet()
-            _qualityPicker.value = QualityPickerState.Pick(song, available, downloaded)
         }
     }
 
@@ -318,10 +343,14 @@ class DownloadViewModel(
     private val _message = MutableStateFlow<String?>(null)
     val message: StateFlow<String?> = _message.asStateFlow()
 
+    /** S07-05：保存定时器 Job，新消息到来时取消上一个，避免旧 delay 清掉仍在显示期的新消息 */
+    private var messageJob: Job? = null
+
     private fun showMessage(msg: String) {
-        viewModelScope.launch {
-            _message.value = msg
-            kotlinx.coroutines.delay(2000)
+        messageJob?.cancel()
+        _message.value = msg
+        messageJob = viewModelScope.launch {
+            delay(2000)
             _message.value = null
         }
     }

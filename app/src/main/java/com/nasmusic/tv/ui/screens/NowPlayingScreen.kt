@@ -583,7 +583,7 @@ fun NowPlayingScreen(
                         } else {
                             LyricsView(
                                 lyrics = lyrics,
-                                currentTimeMs = progressMs.value,
+                                currentTimeMs = progressMs,
                                 highlightMode = highlightMode,
                                 isPlaying = isPlaying,
                                 fontSizeMultiplier = lyricsFontScale,
@@ -1850,7 +1850,7 @@ private fun NowPlayingPortrait(
                         } else {
                             LyricsView(
                                 lyrics = lyrics,
-                                currentTimeMs = progressMs.value,
+                                currentTimeMs = progressMs,
                                 highlightMode = highlightMode,
                                 isPlaying = isPlaying,
                                 fontSizeMultiplier = lyricsFontScale,
@@ -2162,7 +2162,7 @@ private fun PortraitImmersiveLyrics(
             } else {
                 LyricsView(
                     lyrics = lyrics,
-                    currentTimeMs = progressMs.value,
+                    currentTimeMs = progressMs,
                     highlightMode = highlightMode,
                     isPlaying = isPlaying,
                     fontSizeMultiplier = lyricsFontScale,

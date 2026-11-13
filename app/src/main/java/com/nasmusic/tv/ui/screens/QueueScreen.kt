@@ -38,6 +38,7 @@ import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -173,11 +174,13 @@ fun QueueScreen(
                     .clip(RoundedCornerShape(16.dp))
                     .background(NasMusicColors.SurfaceVariant)
             ) {
-                CoverCarousel(
-                    coverCandidates = coverCandidates,
-                    isPlaying = isPlaying,
-                    modifier = Modifier.fillMaxSize()
-                )
+                key(coverCandidates) {
+                    CoverCarousel(
+                        coverCandidates = coverCandidates,
+                        isPlaying = isPlaying,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
             }
             Spacer(modifier = Modifier.height(18.dp))
             // 标题/作者
@@ -528,11 +531,13 @@ private fun PortraitQueueHeader(
                 .clip(RoundedCornerShape(6.dp))
                 .background(NasMusicColors.SurfaceVariant)
         ) {
-            CoverCarousel(
-                coverCandidates = coverCandidates,
-                isPlaying = isPlaying,
-                modifier = Modifier.fillMaxSize()
-            )
+            key(coverCandidates) {
+                CoverCarousel(
+                    coverCandidates = coverCandidates,
+                    isPlaying = isPlaying,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
         }
         Spacer(modifier = Modifier.width(10.dp))
         Column(modifier = Modifier.weight(1f)) {

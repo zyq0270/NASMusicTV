@@ -302,6 +302,9 @@ object ProceduralTexture {
             rowFiller(row, y)
             bmp.setPixels(row, 0, w, 0, y, w, 1)
         }
+        // 尺寸变化重建时先回收旧槽位图（API 22–25 像素在 native 堆，不显式 recycle 不自愈；
+        // 覆盖后旧引用永久丢失，release() 只遍历当前 slots 再也回收不到）。
+        slots[idx]?.asAndroidBitmap()?.let { if (!it.isRecycled) it.recycle() }
         slots[idx] = bmp.asImageBitmap()
         keys[idx] = key
     }

@@ -385,9 +385,16 @@ class SongDownloadManager(
         //    不在 EMBEDDABLE 集合中，supportsEmbedding() 返回 false 导致永远不内嵌）
         checkCancelled()
         if (!p.tmpFile.renameTo(p.finalFile)) {
-            // 跨目录 rename 失败（极少数情况）：复制 + 删除
-            val copied = runCatching { p.tmpFile.copyTo(p.finalFile, overwrite = true) }.isSuccess
-            if (!copied) {
+            // 跨目录 rename 失败（极少数情况）：先把完整 tmp 复制到最终目录的 .part，
+            // 再 rename 原子替换。S04-01：绝不 copyTo(finalFile, overwrite=true) 非原子直写
+            // 最终目标，避免中途失败 / 崩溃在最终路径留下半截文件（见 V3-N02 反推护栏）。
+            val part = File(p.finalFile.parentFile, "${p.finalFile.name}.part")
+            val saved = runCatching {
+                p.tmpFile.copyTo(part, overwrite = true)
+                part.renameTo(p.finalFile)
+            }.getOrDefault(false)
+            runCatching { part.delete() }
+            if (!saved) {
                 p.tmpFile.delete()
                 return DownloadResult.Failure("文件保存失败")
             }
@@ -690,7 +697,10 @@ class SongDownloadManager(
                     // 被误标 COMPLETED 后 playableLocalUri 指向坏文件且永不重下。
                     // 追加两道校验：非空；DB 有 fileSize 记录时必须一致。
                     ?.filter { it.length() > 0L }
-                    ?.filter { entity.fileSize <= 0L || it.length() == entity.fileSize }
+                    // V3-N02：未完成任务（fileSize<=0）没有权威长度，绝不以「长度>0」放宽校验
+                    // 反推 COMPLETED——否则 copyTo 中途崩溃留下的半截文件会被标成已完成且永不重下。
+                    // 只有 DB 有有效 fileSize(>0) 且磁盘长度精确一致时才认定为完整的孤儿完成文件。
+                    ?.filter { entity.fileSize > 0L && it.length() == entity.fileSize }
                     ?.maxByOrNull { it.lastModified() }
                 if (hit != null) return hit.absolutePath
             }

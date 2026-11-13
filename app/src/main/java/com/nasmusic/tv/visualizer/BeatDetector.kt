@@ -14,10 +14,11 @@ import kotlin.math.sqrt
  */
 class BeatDetector {
 
-    data class BeatInfo(
-        val pulse: Float,      // 0..1 快起慢落脉冲
-        val isBeat: Boolean,   // 本帧是否命中节拍
-        val bpm: Float         // 估算 BPM，0 表示尚未稳定
+    /** 复用的结果实例（字段可变，[onFrame] 原地赋值 ⇒ 每帧零分配）。 */
+    class BeatInfo(
+        var pulse: Float,      // 0..1 快起慢落脉冲
+        var isBeat: Boolean,   // 本帧是否命中节拍
+        var bpm: Float         // 估算 BPM，0 表示尚未稳定
     )
 
     private val bassHistory = FloatArray(HISTORY)
@@ -26,10 +27,12 @@ class BeatDetector {
     private var lastBeatMs = 0L
     private var pulse = 0f
     private val intervals = FloatArray(8)
+    /** estimateBpm 的排序 scratch（构造期预分配，与 [intervals] 等长，稳态零分配）。 */
+    private val bpmScratch = FloatArray(8)
     private var iIdx = 0
     private var intervalCount = 0
 
-    private var result = BeatInfo(0f, false, 0f)
+    private val result = BeatInfo(0f, false, 0f)
 
     fun onFrame(bass: Float, nowMs: Long): BeatInfo {
         // ① 历史均值 + 方差 → 动态阈值系数
@@ -71,22 +74,32 @@ class BeatDetector {
         hIdx = (hIdx + 1) % HISTORY
         if (filled < HISTORY) filled++
 
-        result = BeatInfo(pulse, isBeat, estimateBpm())
+        result.pulse = pulse
+        result.isBeat = isBeat
+        result.bpm = estimateBpm()
         return result
     }
 
     /** 取最近间隔的中位数，抗单次误判 */
     private fun estimateBpm(): Float {
         if (intervalCount < 4) return 0f
-        val valid = FloatArray(intervalCount)
         var n = 0
         for (i in 0 until intervals.size) {
-            if (intervals[i] > 0f) valid[n++] = intervals[i]
+            if (intervals[i] > 0f) bpmScratch[n++] = intervals[i]
         }
         if (n < 4) return 0f
-        val slice = valid.copyOf(n)
-        slice.sort()
-        val median = slice[n / 2]
+        // 只对 [0, n) 做插入排序（替代 FloatArray + copyOf + 全量 sort）；
+        // 排序结果与 slice.sort() 一致 ⇒ 中位数与最终 BPM 不变。
+        for (i in 1 until n) {
+            val v = bpmScratch[i]
+            var j = i - 1
+            while (j >= 0 && bpmScratch[j] > v) {
+                bpmScratch[j + 1] = bpmScratch[j]
+                j--
+            }
+            bpmScratch[j + 1] = v
+        }
+        val median = bpmScratch[n / 2]
         return (60000f / median).coerceIn(60f, 200f)
     }
 
@@ -98,7 +111,9 @@ class BeatDetector {
         intervals.fill(0f)
         iIdx = 0
         intervalCount = 0
-        result = BeatInfo(0f, false, 0f)
+        result.pulse = 0f
+        result.isBeat = false
+        result.bpm = 0f
     }
 
     companion object {

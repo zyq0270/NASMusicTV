@@ -53,6 +53,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.flow.collect
 
 /**
  * 后台播放服务
@@ -72,7 +73,9 @@ class PlaybackService : MediaLibraryService() {
      * 直到进程结束（服务被反复重建还会叠加）。见 [onDestroy]。
      */
     private var servicePlayer: ExoPlayer? = null
-    private var lastNotificationState: Pair<String?, Boolean>? = null
+    /** 去重键：(title, isPlaying, 睡眠剩余分钟)。S02-02：睡眠分钟并入键，
+     *  定时启动/取消/逐分钟递减都会改变第三位，通知随之刷新。 */
+    private var lastNotificationState: Triple<String?, Boolean, Int>? = null
     private lateinit var mediaLibraryTree: MediaLibraryTree
     /**
      * Android Auto 浏览节点缓存（mediaId → Song）。
@@ -228,6 +231,19 @@ class PlaybackService : MediaLibraryService() {
             lastNotificationState = null
             stopSleepMinuteTick()
             updateNotification()
+        }
+
+        // S02-02：UI 侧（NowPlaying → PlayerViewModel.startSleepTimer/cancelSleepTimer）
+        // 直接操作 SleepTimerController，绕过本服务的 handleSleepTimerCycle。订阅其 state，
+        // 把「启动/取消/到期」统一收敛到这里：任一入口改变状态都强制刷新通知与系统媒体
+        // 卡片，并启停分钟轮询，避免 UI 侧操作后通知/卡片文案不刷新。
+        serviceScope.launch {
+            (application as NasMusicApp).playerManager.sleepTimer.state.collect {
+                lastNotificationState = null
+                updateNotification()
+                refreshSessionCustomLayout()
+                restartSleepMinuteTick()
+            }
         }
 
         // Create notification channel for Android 8+
@@ -1060,8 +1076,10 @@ class PlaybackService : MediaLibraryService() {
             ?: "NAS Music TV"
         val isPlaying = player.isPlaying
 
-        // 比较 (title, isPlaying) 元组，避免暂停/播放状态不刷新
-        val stateKey = title to isPlaying
+        // S02-02：比较 (title, isPlaying, 睡眠剩余分钟) 元组。睡眠分钟并入键后，
+        // 定时启动/取消/逐分钟递减都会改变第三位并触发刷新，不再只依赖轮询里手工置空。
+        val sleepMinutes = (application as NasMusicApp).playerManager.sleepTimer.remainingMinutes()
+        val stateKey = Triple(title, isPlaying, sleepMinutes)
         if (stateKey == lastNotificationState) return
         lastNotificationState = stateKey
 

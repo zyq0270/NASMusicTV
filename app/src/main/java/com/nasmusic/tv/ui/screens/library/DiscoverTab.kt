@@ -219,7 +219,7 @@ currentDimensionValues: Map<Int, Int> = emptyMap(),
                     }
 
                     // 歌曲
-                    items(filteredSongs.size, key = { filteredSongs[it].id }) { index ->
+                    items(filteredSongs.size, key = { "${it}_${filteredSongs[it].id}" }) { index ->
                         val song = filteredSongs[index]
                         UnifiedSongRow(
                             song = song,

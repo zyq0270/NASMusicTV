@@ -429,6 +429,22 @@ class MetingApiService(
     }
 
     /**
+     * S05-07 / V4-N01 / V4-N02：播放直链统一地址守卫（集中一处）。
+     *
+     * 三条放行路径 —— 200-JSON 的 `url`、洛雪增强返回的 [ResolveResult]、networkId 缺失时的
+     * `song.streamUrl` —— 在交给播放器前都必须经过这里。
+     * ⚠️ 用 [NetAddressGuard.rejectReasonForPlayback]：它放行 RFC1918 私网 / nas.local
+     * （用户自己的 NAS 是正当媒体源），只拦回环 / 链路本地 / 云元数据 / 组播 / 非 http(s)。
+     * 用严格版 rejectReason 会误杀 NAS 直链，破坏既有行为。命中即降级为解析失败，绝不放行。
+     */
+    private fun guardPlayUrl(result: ResolveResult, requestedQuality: Int): ResolveResult {
+        val url = result.url ?: return result
+        val reason = NetAddressGuard.rejectReasonForPlayback(url) ?: return result
+        AppLog.w(TAG, "resolvePlayUrl: 拒绝放行播放直链 ($reason)")
+        return ResolveResult.failure(requestedQuality)
+    }
+
+    /**
      * 解析播放链接（带降级信号）。
      *
      * 端点自动 fallback 策略：
@@ -458,9 +474,10 @@ class MetingApiService(
                     AppLog.w(TAG, "enhance: 增强层异常，回退原链路 —— ${t.javaClass.simpleName}")
                     null
                 }
-                if (enhanced != null) return@withContext enhanced
+                if (enhanced != null) return@withContext guardPlayUrl(enhanced, quality)
             }
-            val netId = song.networkId ?: return@withContext ResolveResult(song.streamUrl, quality)
+            val netId = song.networkId
+                ?: return@withContext guardPlayUrl(ResolveResult(song.streamUrl, quality), quality)
             val server = serverProvider()
             val endpoints = buildEndpointFallbackOrder(baseUrl)
             // 档位与降级链（999 → 320 → 192 → 128；AUTO 直接不传 br 走端点默认）
@@ -488,7 +505,7 @@ class MetingApiService(
                                     continue   // 只跳内层 for(br)：该端点×该档失败，继续降级链
                                 }
                                 AppLog.d(TAG, "resolvePlayUrl: resolved via '$endpoint' br=$br (actual=$actual) for netId=$netId")
-                                return@withContext ResolveResult(fetched.url, actual)
+                                return@withContext guardPlayUrl(ResolveResult(fetched.url, actual), quality)
                             }
                             is PlayUrlFetch.Miss -> {
                                 misses += "$endpoint br=$br → ${fetched.reason}"

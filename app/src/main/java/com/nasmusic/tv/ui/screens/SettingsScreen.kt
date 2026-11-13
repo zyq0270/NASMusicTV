@@ -472,14 +472,24 @@ var activeSection by remember { mutableStateOf(SettingsSection.GENERAL) }
         }
     }
 
-    // 歌单导入结果消息显示后自动消费（镜像 backupMessage 4s 消费）
+    // 歌单导入结果消息：与 backupMessage 同口径（v2.36.2）——
+    // 失败消息不自动消费，避免「导入失败静默无提示」；成功消息 4s 自动消失。
     LaunchedEffect(playlistImportMessage) {
         val msg = playlistImportMessage
         if (msg != null) {
             // 同 backupMessage：结果必须有一处不随列表滚动的落点
             Toast.makeText(toastContext, msg.text, Toast.LENGTH_LONG).show()
-            kotlinx.coroutines.delay(4000)
-            onConsumePlaylistImportMessage?.invoke()
+            if (!msg.isError) {
+                kotlinx.coroutines.delay(4000)
+                onConsumePlaylistImportMessage?.invoke()
+            }
+        }
+    }
+
+    // 歌单导入结果消息出现在分区顶部 → 滚回顶部（对齐 backupMessage）
+    LaunchedEffect(playlistImportMessage) {
+        if (playlistImportMessage != null) {
+            runCatching { sectionListState.animateScrollToItem(0) }
         }
     }
 

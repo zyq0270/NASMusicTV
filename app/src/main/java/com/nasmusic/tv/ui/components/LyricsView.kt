@@ -28,6 +28,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.State
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -71,7 +72,7 @@ private val INDICATOR_OFFSET_Y = 88.dp
 @Composable
 fun LyricsView(
     lyrics: Lyrics?,
-    currentTimeMs: Long,
+    currentTimeMs: State<Long>,
     modifier: Modifier = Modifier,
     highlightMode: LyricsHighlightMode = LyricsHighlightMode.LINE_BY_LINE,
     isPlaying: Boolean = true,
@@ -100,7 +101,7 @@ fun LyricsView(
 @Composable
 private fun LyricsViewInner(
     lyrics: Lyrics?,
-    currentTimeMs: Long,
+    currentTimeMsState: State<Long>,
     modifier: Modifier = Modifier,
     highlightMode: LyricsHighlightMode = LyricsHighlightMode.LINE_BY_LINE,
     isPlaying: Boolean = true,
@@ -109,6 +110,9 @@ private fun LyricsViewInner(
     onSeekToLine: ((Long) -> Unit)? = null,
     longPressSeekEnabled: Boolean = false
 ) {
+    // S06-01：进度以 State 下沉到叶子，只有本组件读 .value ⇒
+    // 父级（NowPlayingScreen 等）不再是订阅者，1Hz tick 不再整页重组。
+    val currentTimeMs = currentTimeMsState.value
     if (lyrics == null || lyrics.isEmpty) {
         Box(
             modifier = modifier.fillMaxSize(),

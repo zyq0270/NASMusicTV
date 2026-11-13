@@ -809,6 +809,16 @@ class SubsonicAdapter : BackendAdapter {
             password = ""
             apiToken = ""
             salt = ""
+            // S03-01：认证态是两处存的 —— initialize() 把本类 4 项同步给了 restClient
+            // （见 :101-104），close 只清本类字段会让 restClient 里的明文 password/salt
+            // 与旧 baseUrl 跨「断开连接」一直驻留到下一次 initialize；getSongsTotalCount()
+            // 直接委托 restClient，切换瞬间的在途分页请求仍会带旧凭据打旧服务器。
+            // 与 NavidromeAdapter:921-924 对齐。下一次 initialize 会重新写入这四项，
+            // 不影响后续重连。
+            restClient.baseUrl = ""
+            restClient.username = ""
+            restClient.password = ""
+            restClient.salt = ""
             AppLog.d("SubsonicAdapter", "close: auth state cleared (shared OkHttp pool retained)")
         } catch (e: Exception) {
             AppLog.w("SubsonicAdapter", "close failed", e)
@@ -817,19 +827,14 @@ class SubsonicAdapter : BackendAdapter {
 
     // --- 内部辅助方法 ---
 
-    // R-10：buildRestUrl 与 Navidrome 存在真实差异（无 .view 后缀、t=apiToken 而非现场
-    // md5 计算——Subsonic 部分服务端用 token 直传），保留自有实现；公共的
-    // executeRequest/md5 经 restClient 委托。
-    private fun buildRestUrl(method: String): String {
-        // 修复：用户名/令牌可能含需转义字符，未编码会破坏查询串导致鉴权失败。
-        return "$baseUrl/rest/$method?" +
-                "u=${java.net.URLEncoder.encode(username, "UTF-8")}&" +
-                "t=${java.net.URLEncoder.encode(apiToken, "UTF-8")}&" +
-                "s=${java.net.URLEncoder.encode(salt, "UTF-8")}&" +
-                "v=$API_VERSION&" +
-                "c=$CLIENT_NAME&" +
-                "f=json"
-    }
+    // S03-02：URL 构造统一复用 restClient（标准 Subsonic 端点为 /rest/<method>.view）。
+    // 原自有实现拼的是无 .view 的 /rest/<method>?，而 getSongsTotalCount() 委托的
+    // restClient.songsTotalCount() 走 .view —— 同一 getSongs 端点分走两套路由，
+    // 服务端只认其中一种时要么主列表 / testConnection 全部 404，要么总数恒为 0。
+    // restClient 的 t=md5(password+salt) 与本类原 t=apiToken 值等价（initialize 已把
+    // password/salt 同步给 restClient），仅补齐标准 .view 后缀并消除两套构造，
+    // 与 NavidromeAdapter:933 对齐；buildCoverUrl / getStreamUrl 也一并随之统一。
+    private fun buildRestUrl(method: String): String = restClient.buildRestUrl(method)
 
     private fun buildCoverUrl(coverArtId: String): String =
         buildRestUrl("getCoverArt") + "&id=$coverArtId&size=512"

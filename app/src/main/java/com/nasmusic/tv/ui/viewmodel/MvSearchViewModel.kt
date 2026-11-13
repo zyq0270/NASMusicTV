@@ -332,7 +332,9 @@ class MvSearchViewModel(
     /** 切换到候选列表中的下一个视频 */
     private fun switchToNextCandidate(ready: MvAvailability.Ready) {
         val targetBvid = ready.alternatives.firstOrNull()?.bvid ?: return
-        viewModelScope.launch {
+        // S07-07：与本类其它入口一致，新切换先取消在途 Job，避免两个 resolveMv 并行写回
+        mvSearchJob?.cancel()
+        mvSearchJob = viewModelScope.launch {
             AppLog.d("MvSearchViewModel", "switchToNextCandidate: bvid=$targetBvid")
             val newMv = mvSearchManager.resolveMv(targetBvid)
             if (newMv == null) {

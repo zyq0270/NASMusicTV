@@ -1,6 +1,7 @@
 package com.nasmusic.tv.backend.impl
 
 import com.google.gson.Gson
+import com.google.gson.JsonArray
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import com.nasmusic.tv.backend.BackendAdapter
@@ -1256,27 +1257,53 @@ class JellyfinAdapter : BackendAdapter {
         }
     }
 
-    private fun jsonObjectToSong(obj: JsonObject, albumIdOverride: String?): Song? {
-        val id = obj.get("Id")?.asString ?: return null
-        val rawTitle = obj.get("Name")?.asString
-        val rawAlbum = obj.get("Album")?.asString
-        val rawArtist = obj.getAsJsonArray("Artists")?.mapNotNull { it?.asString }?.joinToString(", ")
+    /**
+     * S03-05：第三方插件 / CUE 导入会让 /Items 响应里个别字段类型不符。
+     * 逐条 runCatching 隔离，单条脏数据只丢自己，不再让整批歌曲静默变空列表。
+     */
+    private fun jsonObjectToSong(obj: JsonObject, albumIdOverride: String?): Song? =
+        runCatching { parseSongUnsafe(obj, albumIdOverride) }
+            .onFailure { e ->
+                AppLog.w(
+                    "JellyfinAdapter",
+                    "jsonObjectToSong failed: ${e.javaClass.simpleName}: ${e.message?.take(120)}",
+                )
+            }
+            .getOrNull()
+
+    /** S03-05：Gson 强制访问器（asString/asInt/asJsonArray/asJsonObject）在类型不符时会抛异常。 */
+    private fun JsonObject.str(name: String): String? =
+        get(name)?.takeIf { it.isJsonPrimitive }?.asString
+    private fun JsonObject.numInt(name: String): Int? =
+        get(name)?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isNumber }?.asInt
+    private fun JsonObject.numLong(name: String): Long? =
+        get(name)?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isNumber }?.asLong
+    private fun JsonObject.arr(name: String): JsonArray? =
+        get(name)?.takeIf { it.isJsonArray }?.asJsonArray
+    private fun JsonObject.obj(name: String): JsonObject? =
+        get(name)?.takeIf { it.isJsonObject }?.asJsonObject
+
+    private fun parseSongUnsafe(obj: JsonObject, albumIdOverride: String?): Song? {
+        val id = obj.str("Id") ?: return null
+        val rawTitle = obj.str("Name")
+        val rawAlbum = obj.str("Album")
+        val rawArtist = obj.arr("Artists")?.mapNotNull { it?.takeIf { e -> e.isJsonPrimitive }?.asString }?.joinToString(", ")
                     ?.takeIf { it.isNotBlank() }
         val title = EncodingUtils.fixEncoding(rawTitle) ?: "Unknown"
-        val artist = EncodingUtils.fixEncoding(rawArtist) ?: EncodingUtils.fixEncoding(obj.get("AlbumArtist")?.asString) ?: ""
+        val artist = EncodingUtils.fixEncoding(rawArtist) ?: EncodingUtils.fixEncoding(obj.str("AlbumArtist")) ?: ""
         val album = EncodingUtils.fixEncoding(rawAlbum) ?: ""
-        val albumId = albumIdOverride ?: obj.get("AlbumId")?.asString ?: ""
-        val trackNumber = obj.get("IndexNumber")?.asInt ?: 0
-        val discNumber = obj.get("ParentIndexNumber")?.asInt ?: 1
-        val year = obj.get("ProductionYear")?.asInt
-        val runTimeTicks = obj.get("RunTimeTicks")?.asLong ?: 0L
+        val albumId = albumIdOverride ?: obj.str("AlbumId") ?: ""
+        val trackNumber = obj.numInt("IndexNumber") ?: 0
+        val discNumber = obj.numInt("ParentIndexNumber") ?: 1
+        val year = obj.numInt("ProductionYear")
+        val runTimeTicks = obj.numLong("RunTimeTicks") ?: 0L
         val durationMs = runTimeTicks / 10000
-        val imageTag = obj.get("ImageTags")?.asJsonObject?.get("Primary")?.asString
-        val genreArr = obj.getAsJsonArray("Genres")
-        val genre = EncodingUtils.fixEncoding(genreArr?.firstOrNull()?.asString)
+        val imageTag = obj.obj("ImageTags")?.str("Primary")
+        val genreArr = obj.arr("Genres")
+        val genre = EncodingUtils.fixEncoding(genreArr?.firstOrNull()?.takeIf { it.isJsonPrimitive }?.asString)
         // 解析 artistId（从 ArtistItems 数组取第一个），用于封面候选列表
-        val artistItems = obj.getAsJsonArray("ArtistItems")
-        val artistId = artistItems?.firstOrNull()?.asJsonObject?.get("Id")?.asString
+        val artistItems = obj.arr("ArtistItems")
+        val artistId = artistItems?.firstOrNull()?.takeIf { it.isJsonObject }?.asJsonObject?.str("Id")
 
         // 调试日志：检查原始数据和修复后的数据
         AppLog.d("JellyfinAdapter", "jsonObjectToSong: id=$id")

@@ -43,7 +43,7 @@ fun CoverCarousel(
     modifier: Modifier = Modifier,
     onAllFailed: () -> Unit = {}
 ) {
-    var permanentlyFailed by remember { mutableStateOf(false) }
+    var permanentlyFailed by remember(coverCandidates) { mutableStateOf(false) }
 
     if (coverCandidates.isEmpty()) {
         PlaceholderCover(modifier)
@@ -70,7 +70,7 @@ fun CoverCarousel(
 
     // 多张封面轮播
     var carouselIndex by remember(coverCandidates) { mutableIntStateOf(0) }
-    var fallbackOffset by remember { mutableIntStateOf(0) }
+    var fallbackOffset by remember(coverCandidates) { mutableIntStateOf(0) }
 
     // 播放时轮播（autoCycle=true 时始终轮播）
     LaunchedEffect(isPlaying, coverCandidates, autoCycle) {
@@ -80,6 +80,15 @@ fun CoverCarousel(
                 carouselIndex = (carouselIndex + 1) % coverCandidates.size
                 fallbackOffset = 0  // 重置内层 fallback
             }
+        }
+    }
+
+    // V6-N03：暂停且 autoCycle=false 时，上面轮播 LaunchedEffect 主体空转，
+    // `fallbackOffset = 0`（只在轮播 tick 内执行）永不执行 ⇒ 单独监听活跃状态，
+    // 变为非活跃时立即归零；活跃时什么都不做，不干扰既有轮播。
+    LaunchedEffect(isPlaying, autoCycle) {
+        if (!isPlaying && !autoCycle) {
+            fallbackOffset = 0
         }
     }
 

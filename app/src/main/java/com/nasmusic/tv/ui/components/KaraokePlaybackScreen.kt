@@ -372,7 +372,7 @@ fun KaraokePlaybackScreen(
             ) {
                 KaraokeLyricsView(
                     lyrics = lyrics,
-                    progressMs = progressMs.value,
+                    progressMs = progressMs,
                     isPlaying = isPlaying,
                     modifier = Modifier
                         .fillMaxWidth()

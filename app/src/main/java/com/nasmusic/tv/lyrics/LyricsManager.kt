@@ -355,10 +355,13 @@ class LyricsManager(
                     val newResults = fetchCandidatesSingleFlight("${song.id}|r$nextRound") {
                         networkProvider.fetchLyricsCandidates(keyword, song.artist)
                     }
+                    // S02-03：无论本轮是否拉到结果都推进轮次。空结果时若停在旧 round，
+                    // 下次点击仍用同一 suffix / 同一单飞 key 重发同一批无效请求，
+                    // 「换一批」会永远卡在第一个变异（cachedCandidates 空结果时保持不变）。
+                    candidateVariantRound[song.id] = nextRound
                     if (newResults.isNotEmpty()) {
                         val all = candidates + newResults
                         cachedCandidates[song.id] = all
-                        candidateVariantRound[song.id] = nextRound
                         // 边界守卫：candidateIndex 来自调用方（用户反复点“在线歌词”会递增），
                         // 可能超出合并后的候选数量，直接 all[candidateIndex] 会抛 IndexOutOfBoundsException。
                         val safeIndex = candidateIndex.coerceIn(0, all.lastIndex)
@@ -366,6 +369,11 @@ class LyricsManager(
                         pendingNetworkLyrics[song.id] = text
                         return@withContext LrcParser.parse(text, song.id).copy(source = LyricsSource.NETWORK)
                     }
+                } else {
+                    // S02-03：全轮次用尽 → 清空该 song 的候选/轮次，
+                    // 让下次点击可重新从首轮搜索，避免永久卡死返回 null。
+                    cachedCandidates.remove(song.id)
+                    candidateVariantRound.remove(song.id)
                 }
                 // 所有变异轮次用尽 → 返回 null
                 AppLog.w("LyricsManager", "NETWORK: all variants exhausted, no more candidates")

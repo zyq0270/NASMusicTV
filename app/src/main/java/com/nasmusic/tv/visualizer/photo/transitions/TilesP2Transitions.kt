@@ -416,6 +416,9 @@ internal class ComicPanelTransition : TileGridP2Transition() {
         }
 
         // 粗黑边框（压在最上层）
+        // 转场结束（HOLD 期 p 恒为 1f）后边框须归零，否则整个停留期新图上仍压着黑网格；
+        // p<1 的边框保持原样，仅终态跳过。
+        if (p >= 1f) return
         val bw = (area.width * 0.006f).coerceAtLeast(2f)
         var x = area.left + bw
         while (x < area.right - bw * 0.5f) {

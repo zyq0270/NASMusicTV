@@ -12,6 +12,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.State
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -54,7 +55,7 @@ import kotlin.math.pow
 @Composable
 fun KaraokeLyricsView(
     lyrics: Lyrics?,
-    progressMs: Long,
+    progressMs: State<Long>,
     isPlaying: Boolean = true,
     modifier: Modifier = Modifier
 ) {
@@ -78,10 +79,12 @@ fun KaraokeLyricsView(
 @Composable
 private fun KaraokeLyricsViewInner(
     lyrics: Lyrics?,
-    progressMs: Long,
+    progressMsState: State<Long>,
     isPlaying: Boolean = true,
     modifier: Modifier = Modifier
 ) {
+    // S06-01：进度以 State 下沉到叶子，只在本组件读 .value。
+    val progressMs = progressMsState.value
     if (lyrics == null || lyrics.isEmpty) {
         Column(
             modifier = modifier.fillMaxWidth().padding(24.dp),

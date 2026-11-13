@@ -129,7 +129,7 @@ internal fun SongsTab(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                itemsIndexed(songs, key = { _, it -> it.id }) { index, song ->
+                itemsIndexed(songs, key = { index, it -> "${index}_${it.id}" }) { index, song ->
                     UnifiedSongRow(
                         song = song,
                         onClick = { onPlaySong(song) },

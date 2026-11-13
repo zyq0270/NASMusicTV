@@ -221,7 +221,7 @@ class PhotoBuffer(
         val entry = try {
             decodeEntry(ref)
         } catch (t: Throwable) {
-            if (isDecodeCancelled(t, gen)) {
+            if (isDecodeCancelled(t)) {
                 // close() 用 shutdownNow() 停解码线程（页面销毁 / 画质档变化导致 buffer 重建），
                 // 在途的 runBlocking / 读流会被 InterruptedException 打断，message 通常为 null
                 // ⇒ 真机日志里就是 "decode failed for xxx.jpg: null"。这是**预期取消**，
@@ -246,16 +246,19 @@ class PhotoBuffer(
     }
 
     /**
-     * 解码抛异常时，判断这是不是「生命周期取消」而不是真失败。
+     * 解码抛异常时，判断「降为 `AppLog.d`」还是「记 `AppLog.e`」。
      *
-     * ① `close()` / `PhotoWallController` 重建 buffer 时 `shutdownNow()` ⇒ 中断在途解码线程；
-     * ② `clear()` / `invalidateSource()` 抬高世代号 ⇒ 本次结果无论如何都会作废。
+     * ⚠️ **结果作废与日志分级解耦**：`clear()` / `invalidateSource()` / `close()` 只让
+     * [decodeAndPublish] 在回写时丢弃结果，**不能**据此把异常降级 —— 世代作废期间抛出的
+     * OOM / 坏图 / IO 等真失败仍必须记 E，否则 release 日志里零痕迹（原实现把
+     * `closed || generation != gen` 当作取消的充分条件，会一并吞掉这些真失败）。
+     * ⇒ 只以异常链确为 `InterruptedException` / `CancellationException` 作为「预期取消」依据，
+     * `close()` 的 `shutdownNow()` 中断正落在这一支。
      *
      * ⚠️ 沿 cause 链判定：`runBlocking` 有时把 `InterruptedException` 包一层抛出。
      * ⚠️ 不恢复中断标志：解码线程池此时已 shutdownNow，恢复反而会污染单测里的直通 Executor。
      */
-    private fun isDecodeCancelled(t: Throwable, gen: Int): Boolean {
-        if (closed.get() || generation.get() != gen) return true
+    private fun isDecodeCancelled(t: Throwable): Boolean {
         var cur: Throwable? = t
         var depth = 0
         while (cur != null && depth++ < 8) {

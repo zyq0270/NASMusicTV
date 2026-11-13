@@ -59,6 +59,15 @@ class ExternalFilePhotoSource(
             if (docId == null || SafDirectoryPolicy.rejectReason(docId) != null) {
                 return@withContext PhotoSourceStatus.UNAVAILABLE
             }
+            // 目录 URI 有效性只能查系统持有的持久授权（§9.4，复用 PhotoWallAccessPolicy 口径）。
+            // 撤销授权后 docId 仍能解析、rejectReason 仍放行，但 query 会抛 SecurityException
+            // ⇒ 不在这里复核，设置页会一直显示「可用」而实际一张都读不到。
+            val persisted = runCatching {
+                context.contentResolver.persistedUriPermissions.map { it.uri.toString() }
+            }.getOrNull()
+            if (persisted != null && PhotoWallAccessPolicy.shouldClearDirectoryUri(saf, persisted)) {
+                return@withContext PhotoSourceStatus.UNAVAILABLE
+            }
             return@withContext PhotoSourceStatus.OK
         }
         val usableRoots = fileRootsProvider().filterNot { LegacyStorageProbe.isInternal(it) }
@@ -175,6 +184,15 @@ class ExternalFilePhotoSource(
                 DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, docId)
             val cursor = runCatching {
                 context.contentResolver.query(childrenUri, SAF_PROJECTION, null, null, null)
+            }.onFailure { e ->
+                // 授权撤销 / 目录不可达时 query 抛 SecurityException；旧实现 ?: continue 静默吞掉，
+                // 聚合器 runCatching 也看不到 ⇒ 来源静默显示 0 张、设置页仍显示「可用」。
+                // 按 W 落盘（只记异常类型 + 简短 message，不带堆栈），让日志页能看到需重选目录。
+                AppLog.w(
+                    TAG,
+                    "SAF query failed for $docId: ${e.javaClass.simpleName} " +
+                        "(${e.message?.take(80) ?: "no message"}); directory authorization may be revoked",
+                )
             }.getOrNull() ?: continue
 
             cursor.use { c ->

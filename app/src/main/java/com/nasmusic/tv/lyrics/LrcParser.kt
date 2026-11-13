@@ -20,9 +20,15 @@ object LrcParser {
         val cleanedText = lrcText.replace("\r\n", "\n").replace("\r", "\n")
 
         // Parse offset from header if present
-        var globalOffset = offset
+        // S02-04：先把外部 offset 与头部 offset 各钳到 ±24h 再相加，防超大脏值让
+        // Long 加法溢出；该上界对歌词偏移极宽松，不改变任何合理 LRC 的行为。
+        val maxAbsOffsetMs = 24L * 60 * 60 * 1000
+        var globalOffset = offset.coerceIn(-maxAbsOffsetMs, maxAbsOffsetMs)
         OFFSET_REGEX.find(cleanedText)?.let { match ->
-            globalOffset += match.groupValues[1].toLongOrNull() ?: 0L
+            val headerOffset = (match.groupValues[1].toLongOrNull() ?: 0L)
+                .coerceIn(-maxAbsOffsetMs, maxAbsOffsetMs)
+            globalOffset = (globalOffset + headerOffset)
+                .coerceIn(-maxAbsOffsetMs, maxAbsOffsetMs)
         }
 
         cleanedText.lines().forEach { line ->
@@ -41,7 +47,10 @@ object LrcParser {
                         val wMillis = wm.groupValues[3].let {
                             if (it.length == 2) it.toLong() * 10 else it.toLong()
                         }
-                        val wTimeMs = wMinutes * 60 * 1000 + wSeconds * 1000 + wMillis + globalOffset
+                        // S02-04：与行时间轴（下方 timeMs）一致，对负 globalOffset 做下界钳制，
+                        // 否则 [offset:-3000] 的增强 LRC 会解析出负 startMs，逐字时间轴错乱、
+                        // 且 toLrcText 写回含 '-' 的串无法回读。
+                        val wTimeMs = (wMinutes * 60 * 1000 + wSeconds * 1000 + wMillis + globalOffset).coerceAtLeast(0)
                         WordTimestamp(
                             word = wm.groupValues[4],
                             startMs = wTimeMs
@@ -102,9 +111,12 @@ object LrcParser {
             val millis = line.time % 1000
             val text = if (line.wordTimestamps.isNotEmpty()) {
                 line.wordTimestamps.joinToString("") { wt ->
-                    val wMin = wt.startMs / 60000
-                    val wSec = (wt.startMs % 60000) / 1000
-                    val wMs = wt.startMs % 1000
+                    // S02-04：写回前对 startMs 取 max(0)，负 startMs 会产出含 '-' 的串，
+                    // 而 WORD_TIMESTAMP_REGEX 要求分/秒/百分秒均为 \d，回读必然失败。
+                    val wStart = wt.startMs.coerceAtLeast(0)
+                    val wMin = wStart / 60000
+                    val wSec = (wStart % 60000) / 1000
+                    val wMs = wStart % 1000
                     // M20：⛔ 逐字时间戳也必须补零 —— `WORD_TIMESTAMP_REGEX` 要求
                     // 分/秒/百分秒都是两位，不补零写出的 `<0:5.3>` 连自己都回读不了，
                     // 卡拉 OK 逐字时间轴会在「写盘 → 重新加载」后静默丢失。

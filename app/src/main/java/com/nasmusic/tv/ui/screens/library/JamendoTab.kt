@@ -214,7 +214,7 @@ fun JamendoTab(
                         modifier = Modifier.fillMaxWidth(),
                         verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        itemsIndexed(songs, key = { _, s -> s.id }) { index, song ->
+                        itemsIndexed(songs, key = { index, s -> "${index}_${s.id}" }) { index, song ->
                             UnifiedSongRow(
                                 song = song,
                                 index = index,

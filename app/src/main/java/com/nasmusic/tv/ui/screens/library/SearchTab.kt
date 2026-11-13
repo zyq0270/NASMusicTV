@@ -209,7 +209,7 @@ fun SearchTab(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    items(searchResults.size, key = { searchResults[it].id }) { index ->
+                    items(searchResults.size, key = { "${it}_${searchResults[it].id}" }) { index ->
                         val song = searchResults[index]
                         UnifiedSongRow(
                             song = song,

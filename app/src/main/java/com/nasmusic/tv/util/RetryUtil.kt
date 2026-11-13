@@ -32,6 +32,7 @@ suspend fun <T> withRetry(
         try {
             return block()
         } catch (e: Exception) {
+            e.rethrowIfCancellation()
             lastException = e
             onError?.invoke(attempt, e)
             if (attempt < config.maxAttempts) {

@@ -50,6 +50,12 @@ internal abstract class ChannelGhostTransition : PhotoTransition {
     private val off = FloatArray(6)
 
     override fun DrawScope.render(a: ImageBitmap, b: ImageBitmap, p: Float, geom: PhotoGeometry) {
+        // 终态（HOLD 期 p 恒为 1f）：旧图打底 + BlendMode.Plus 三通道叠加在 p=1 会过曝
+        // 且旧图仍可见 ⇒ 直接画新图，保证画面完全等价于「只显示新图」。p<1 走原色散逻辑。
+        if (p >= 1f) {
+            drawPhoto(b, geom.srcB, geom.dstB)
+            return
+        }
         drawPhoto(a, geom.srcA, geom.dstA)
 
         offsets(p, geom, off)

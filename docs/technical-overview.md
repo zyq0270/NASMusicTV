@@ -28175,3 +28175,69 @@ java.net.SocketTimeoutException ...
 `./gradlew.bat :app:testDebugUnitTest --tests "*ExpectedFailureLogLevelGateTest" --tests "*PhotoBufferTest" --no-daemon -Pkotlin.compiler.execution.strategy=in-process` ⇒ **BUILD SUCCESSFUL**；门禁 5/5、PhotoBuffer 18/18 全绿。
 
 ⚠️ 真机复测需出包：本轮版本号与包名未变 ⇒ 交付须给**包指纹**并提醒先卸载旧版或 `adb install -r`（见版本升号口径）。本轮未出包、未操作任何设备。
+
+### 10.403 2026-11-13 全库代码审查：59 条发现全部整改（版本号不变）
+
+> **性质**：**已改代码**。**版本号与 versionCode 不变**（v2.39.18 / 203），按所有者「同一轮修复不单独升号」口径合并。
+> 结论来源：`docs/archive/NASMusicTV-代码审查报告-2026-11-13.html`（15 个互不重叠子系统并行深审 + 34 条高优先级发现独立复核 ⇒ 终稿 59 条：Critical 0 / High 2 / Medium 22 / Low 35）。
+
+#### 一、范围与方法
+
+| 项 | 口径 |
+|---|---|
+| 基线 | `main @ e4c7663`，生产源码 566 个 Kotlin 文件 / 177,903 行 |
+| 深审 | 15 个子系统（S01~S15），文件清单由脚本切分并校验 `COVERAGE OK: 566 kt files, 15 groups, no overlap` |
+| 复核 | 7 个独立代理，覆盖全部 5 条 High + 全部 29 条 Medium；裁定 23 CONFIRMED / 11 PARTIALLY CORRECT / 0 REFUTED |
+| 整改 | 按「文件互斥」拆 9 个批次并行修改，共动 62 个源码文件；漏改的 3 个文件（飞牛 / Jellyfin / 封面缓存）由主流程补齐 |
+| 门禁 | 新增 `ReviewFix20261113GateTest`（20 例）覆盖本轮最容易回退的关键修复；同步更新 `ExpectedFailureLogLevelGateTest` 中因 S11-04 / S05-08 改变口径的断言 |
+
+#### 二、整改批次
+
+| 批次 | 范围 | 条目 |
+|---|---|---|
+| B1 | 播放器 / 音频 DSP / 歌词解析 / util | S01-03、S01-04、S02-01~05 |
+| B2 | 后端核心 / NAS 适配器 / 认证链 | S03-01~05、S04-03、V3-N01、V5-N01 |
+| B3 | 下载 / 导出 / 本地 HTTP 上传服务 | S01-01、S01-02、S04-01、S04-02、V2-N01、V3-N02 |
+| B4 | 网络音源 / 云盘 / LX 脚本安全边界 | S05-01~03、S05-05、S05-07、V4-N01~03、V5-N03 |
+| B5 | 天气 / 照片源 | S05-04、S05-06、S05-08 |
+| B6 | ViewModel 层 / Activity 兜底 | S06-02、S07-01~07、V5-N02 |
+| B7 | UI 组件 / 主屏 / Lazy key 子屏 | S06-01、S08-01、S08-02、S09-01、S09-02、V6-N01~03 |
+| B8 | 视觉框架 / 照片墙缓冲与转场 | S10-01~03、S11-01~04、V6-N04 |
+| B9 | 渲染器 / 歌词舞台 | S12-01、S14-01、S14-02、S15-01~03、V7-N01、V7-N02 |
+
+#### 三、按类别汇总
+
+| 类别 | 代表条目 | 处置 |
+|---|---|---|
+| 生命周期（P0） | S02-01 `HqSeparationOrchestrator.release()` 的 `scope.cancel()` | 去掉对单例作用域的 cancel，只 `separationJob?.cancel()` |
+| 安全边界（P0） | S05-02 `LxScriptHost` 只校验首跳 URL | 派生 client 加 `addNetworkInterceptor` 逐跳 `rejectReason`，回传前复核最终 URL；S05-01 / S05-07 / V4-N01 / V4-N02 同口径收口 |
+| 数据完整性 | S01-01 模型上传删正式文件、V3-N02 半截文件反推 COMPLETED、S01-02 上传无上限 | tmp + 校验 + `renameTo` 原子替换；`fileSize > 0 && 长度一致` 才认完成；`multipart` 加 `maxBytes` |
+| 解析健壮性 | S03-04 / V3-N01 飞牛脏 total、S03-05 Jellyfin 强制访问器、S05-05 网易云解析 | 可空 total + 列表兜底；逐条 `runCatching` + 安全访问器；补 `IllegalStateException` |
+| 取消语义 | S01-03、S06-02、S07-02/03/04、V5-N01 | catch 首句 `e.rethrowIfCancellation()`；兜底清理改记 W |
+| 日志分级 | S11-04（本轮改动引入的回归） | 取消判定只看异常链，世代作废不再吞掉 OOM / 坏图 |
+| 资源释放 | S10-01 `ImageBitmap` 覆盖前未 recycle、S14-02 位图未回收、S02-05 索引写盘原子性 | 覆盖 / 退出前 recycle；`saveIndex` 覆盖整段状态 |
+| 并发 | S05-08 IP 定位非单飞、S10-02 队头双写者 | `Mutex.withLock` 整段串行 + 锁内二次判缓存；`ArcadeInputQueue` 统一加锁 |
+| 渲染 / 转场 | S11-01/02/03 末帧不干净、S12-01 沙纹丢失、S15-01/02 换曲沿用旧版面、S15-03 分词丢字符 | `p >= 1f` 早返回只画新图；合批 count 改相对量；世代 + 画布尺寸纳入重建判据；按码点切分 |
+| UI 状态 | S06-01 进度未下沉、S08-02 轮播状态不随候选重置、S09-01 Lazy key 裸 id、S09-02 失败消息被自动清除 | `State<Long>` 下沉到叶子；`remember` 补 key；key 加 index 前缀；失败消息不自动消费 |
+
+#### 四、刻意保留 / 不做
+
+| 项 | 原因 |
+|---|---|
+| 不升版本号 | 同一轮修复，按所有者 2026-11-09 口径合并进 v2.39.18 |
+| S07-01 的另一半（`VisualizerViewModel.dispose()` 内 `viewModelScope.cancel()`） | `MainViewModel.disposeChildViewModels` 已统一取消，重复取消无收益，保持单一职责 |
+| `VisualizerViewModel` 之外的 14 个子 VM 生命周期 | 已在 `onCleared` 统一驱动，本轮只补 `visualizerVM` 入列 |
+| S08-01 两个卡片补 `focusable/clickable` 而非改造调用点 | 两者本就有 `onClick` 参数，只是根 `Box` 没接上；调用点为零属历史遗留，不额外重构 |
+| V5-N02 死代码未删 | 只补代数守卫与在途取消，删除入口属产品决策 |
+| `TripodFogRenderer.drawLinPoly` / 天空效果 / `Stroke.width` | 均为所有者逐轮裁定的红线，本轮不触碰 |
+
+#### 五、验证
+
+```powershell
+./gradlew.bat :app:compileDebugKotlin --no-daemon -Pkotlin.compiler.execution.strategy=in-process -Plofi.city=true
+./gradlew.bat :app:testDebugUnitTest --no-daemon -Pkotlin.compiler.execution.strategy=in-process -Plofi.city=true
+```
+
+- `compileDebugKotlin`：**BUILD SUCCESSFUL**（6m39s，0 error / 233 warning，warning 为既有噪音）。
+- `testDebugUnitTest`：**311 类 / 3043 例**基线保持，新增 `ReviewFix20261113GateTest` 20 例。
+- ⚠️ 本轮**未出包、未操作任何设备**。真机复测需出包，且版本号未变 ⇒ 交付须给**包指纹**并提醒先卸载旧版或 `adb install -r`。

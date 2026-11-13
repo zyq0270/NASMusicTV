@@ -10,6 +10,7 @@ import com.nasmusic.tv.data.model.ServerConfig
 import com.nasmusic.tv.R
 import com.nasmusic.tv.util.AppLog
 import com.nasmusic.tv.util.UrlSanitizer
+import com.nasmusic.tv.util.rethrowIfCancellation
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.ConnectionPool
@@ -138,6 +139,7 @@ class BackendRegistry(private val appContext: Context? = null) {
             AppLog.d("BackendRegistry", "initialize: result=$ok")
             ok
         } catch (e: Exception) {
+            e.rethrowIfCancellation()
             AppLog.e("BackendRegistry", "initialize: exception during adapter.initialize()", e)
             // L1 修复（2026-10-06）：失败分支对称走 releaseAdapter（logout + close）——
             // 旧实现只 close 不 logout，与成功替换路径（releaseAdapter）不对称。
@@ -266,10 +268,14 @@ class BackendRegistry(private val appContext: Context? = null) {
             currentAdapter = null
             currentConfig = null
             serverDisplayName = ""
+            // 断开后必须清空认证头，否则旧令牌会继续注入到播放 / 封面请求。
+            // 与 initialize 的 BackendAuthHeaders.update 对称：clear 必须与
+            // initGeneration++ 放在同一临界区，否则会被并发新连接的 update 覆盖
+            // （或反过来覆盖新连接的 update → 刚连上却 401 放不了）。
+            // BackendAuthHeaders 内部用的是另一把锁，不会死锁。
+            BackendAuthHeaders.clear()
             a
         }
-        // 断开后必须清空认证头，否则旧令牌会继续注入到播放 / 封面请求
-        BackendAuthHeaders.clear()
         adapter?.let { releaseAdapter(it) }
     }
 

@@ -7,6 +7,7 @@ import java.util.Date
 import java.util.Locale
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * 一条持久化的运行日志。
@@ -171,6 +172,20 @@ object LogStore {
         Thread(r, "app-log-writer").apply { isDaemon = true }
     }
 
+    /**
+     * S01-04：已入队、尚未写盘的 append 任务数。[io] 默认使用**无界**队列，
+     * 若 release 下短时间涌出大量 W/E/X 日志、磁盘写又慢于产生速率，待写的
+     * line 字符串会无上界堆积直至 OOM。这里在 append 入口按深度做背压：
+     * 达到 [MAX_PENDING_APPENDS] 后丢弃 D/I/X（低价值高频噪音），W/E 为真错误保底放行。
+     */
+    private val pendingAppends = AtomicInteger(0)
+
+    /** 异步待写队列深度上限（约 1024 条，远大于正常日志量，仅挡异常风暴）。 */
+    private const val MAX_PENDING_APPENDS = 1024
+
+    /** 因背压被丢弃的低优先级日志条数（诊断用；⛔ 不接 AppLog，避免写入→打印→再写入递归）。 */
+    private val droppedAppends = AtomicInteger(0)
+
     /** 串行化「追加 / 轮转 / 删除」三种文件操作（异步线程与崩溃同步写共用） */
     private val lock = Any()
 
@@ -201,8 +216,22 @@ object LogStore {
      */
     fun append(level: String, tag: String, message: String, throwable: Throwable? = null) {
         if (logDir == null) return
+        // S01-04：背压。W/E 是真错误始终保底；其余（D/I/X）在待写队列过深时丢弃，
+        // 避免高频噪音把无界队列里的 line 字符串堆到 OOM。
+        val critical = level == LEVEL_WARN || level == LEVEL_ERROR
+        if (!critical && pendingAppends.get() >= MAX_PENDING_APPENDS) {
+            droppedAppends.incrementAndGet()
+            return
+        }
         val line = encode(level, tag, message, throwable?.stackTraceToString())
-        io.execute { runCatching { writeLine(line) } }
+        pendingAppends.incrementAndGet()
+        io.execute {
+            try {
+                runCatching { writeLine(line) }
+            } finally {
+                pendingAppends.decrementAndGet()
+            }
+        }
     }
 
     /**

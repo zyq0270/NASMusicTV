@@ -5,6 +5,7 @@ import com.nasmusic.tv.backend.network.PlayabilityProbe
 import com.nasmusic.tv.backend.network.ResolveResult
 import com.nasmusic.tv.data.model.Song
 import com.nasmusic.tv.util.AppLog
+import com.nasmusic.tv.util.NetAddressGuard
 
 /**
  * 洛雪增强层（方案 §5.4）。
@@ -79,6 +80,15 @@ internal class LxPlayUrlEnhancer(
     ): ResolveResult? {
         for (quality in plan) {
             val url = slot.host.getMusicUrl(source, musicInfo, quality) ?: continue
+            // V4-N01：洛雪脚本给的播放 URL 是远端不可信内容，必须先在出站守卫过一遍，
+            // 否则下面的 probe.probe(url) 会直接向 127.0.0.1 / 169.254.169.254 发请求
+            // （内网探测 / 云元数据）。⚠️ 用 rejectReasonForPlayback：放行 192.168.x /
+            // nas.local 这类用户自己的 NAS 直链，与 guardPlayUrl 同口径。
+            val reject = NetAddressGuard.rejectReasonForPlayback(url)
+            if (reject != null) {
+                AppLog.w(TAG, "enhance: ${slot.scriptId}/$source 拒绝播放直链：$reject")
+                continue
+            }
             // 保守判据：只有明确 DEAD 才弃用该档；UNKNOWN（网络抖动）照常放行
             if (probe.probe(url) == Playability.DEAD) {
                 AppLog.d(TAG, "enhance: ${slot.scriptId}/$source $quality 验活 DEAD")

@@ -43,7 +43,7 @@ class ExpectedFailureLogLevelGateTest {
         assertTrue("找不到 decodeAndPublish 方法体", body != null)
 
         val b = body!!
-        val branchAt = b.indexOf("if (isDecodeCancelled(t, gen))")
+        val branchAt = b.indexOf("if (isDecodeCancelled(t))")
         val debugAt = b.indexOf("AppLog.d(TAG, \"decode cancelled")
         val elseAt = b.indexOf("} else {")
         val errorAt = b.indexOf("AppLog.e(TAG, \"decode failed")
@@ -59,18 +59,20 @@ class ExpectedFailureLogLevelGateTest {
     }
 
     @Test
-    fun `取消判定覆盖关闭、世代作废与两类取消异常`() {
+    fun `取消判定只看异常链且世代作废不得吞掉真失败`() {
         val body = bodyOf(
             mainSource("visualizer/photo/PhotoBuffer.kt"),
-            "private fun isDecodeCancelled(t: Throwable, gen: Int)",
+            "private fun isDecodeCancelled(t: Throwable)",
         )
         assertTrue("找不到 isDecodeCancelled 方法体", body != null)
         val b = body!!
-        assertTrue("close() 后必须视为取消", b.contains("closed.get()"))
-        assertTrue("clear/invalidateSource 抬高世代后必须视为取消", b.contains("generation.get() != gen"))
         assertTrue("必须识别 shutdownNow 抛出的 InterruptedException", b.contains("InterruptedException"))
         assertTrue("必须识别协程取消", b.contains("CancellationException"))
         assertTrue("必须沿 cause 链判定（runBlocking 会包一层）", b.contains("cur = cur.cause"))
+        // S11-04：closed / generation 只用于丢弃结果，不得作为「降为 D」的充分条件，
+        // 否则世代作废期间抛出的 OOM / 坏图 / IO 真失败会在 release 里零痕迹。
+        assertFalse("取消判定不得读 closed 状态", b.contains("closed.get()"))
+        assertFalse("取消判定不得读世代状态", b.contains("generation.get()"))
     }
 
     // ────────────────── ② WeatherApi：IP 定位不可达 ──────────────────
@@ -109,13 +111,35 @@ class ExpectedFailureLogLevelGateTest {
 
         val getBody = bodyOf(src, "suspend fun getIpLocation(): IpLocation")
         assertTrue("找不到 getIpLocation 方法体", getBody != null)
-        assertTrue("缓存读写必须串行化", getBody!!.contains("synchronized(locationLock)"))
+        assertTrue(
+            "S05-08：缓存读/请求/写回必须用 Mutex 单飞串行化",
+            getBody!!.contains("locationLock.withLock {"),
+        )
+        assertTrue(
+            "拿到锁后必须二次判缓存，否则并发仍会各发一次 3s 请求",
+            getBody.contains("if (cached != null) return@withLock cached"),
+        )
         assertTrue("必须走真正发请求的方法", getBody.contains("requestIpLocation()"))
 
         val reqBody = bodyOf(src, "private fun requestIpLocation(): IpLocation")
         assertTrue("找不到 requestIpLocation 方法体", reqBody != null)
         assertTrue("请求必须走短超时 client，而不是主 client 的 10 秒", reqBody!!.contains("ipLocationClient.newCall(request)"))
         assertTrue("响应必须 use{} 关流（M9 修复不得回退）", reqBody.contains(".execute().use { response ->"))
+    }
+
+    @Test
+    fun `S05-04 Open-Meteo 失败不得跳过 OpenWeatherMap 兜底`() {
+        val src = mainSource("backend/weather/WeatherApi.kt")
+        val body = bodyOf(src, "suspend fun getWeather(lat: Double, lon: Double")
+        assertTrue("找不到 getWeather 方法体", body != null)
+        val b = body!!
+        assertTrue("Open-Meteo 必须抽成独立函数（失败只折算为 null）", b.contains("getWeatherOpenMeteo(lat, lon)"))
+        assertTrue("Open-Meteo 成功后可直接返回", b.contains("if (openMeteo != null) return@withContext openMeteo"))
+        assertTrue("失败路径必须继续走 OpenWeatherMap", b.contains("getWeatherOpenWeatherMap(lat, lon, openWeatherMapApiKey)"))
+        // 标签返回只能出现在 getWeather 自己的收尾分支，不能在抽出去的子函数里直接跳出整个 getWeather
+        val omBody = bodyOf(src, "private fun getWeatherOpenMeteo(")
+        assertTrue("找不到 getWeatherOpenMeteo 方法体", omBody != null)
+        assertFalse("子函数里不得出现 return@withContext null（会跳过 fallback）", omBody!!.contains("return@withContext null"))
     }
 
     // ────────────────── ③ 负向自证 ──────────────────

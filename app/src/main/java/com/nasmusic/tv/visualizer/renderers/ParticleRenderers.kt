@@ -246,7 +246,7 @@ class BeatFireworkRenderer : RendererFx() {
             flashX = ex
             flashY = ey
             burstArmed = true
-        } else if (frame.timeMs - lastBeatMs > 6000L && lastBeatMs > 0L) {
+        } else if (lastBeatMs <= 0L || frame.timeMs - lastBeatMs > 6000L) {
             // 无鼓点曲目兜底：避免长时间完全空屏
             idlePhase += 1f
             if (idlePhase >= 60f) {

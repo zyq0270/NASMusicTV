@@ -1,6 +1,7 @@
 package com.nasmusic.tv.net
 
 import java.io.ByteArrayOutputStream
+import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
 
@@ -41,9 +42,11 @@ internal class MultipartBoundaryStreamer(private val boundary: ByteArray) {
      * 从 [input] 读取直到遇到 [boundary]（边界本身被消费且不写入），
      * 其前的所有字节写入 [output]。
      *
+     * @param maxBytes 累计写入 [output] 的字节上限，超过即抛 [IOException]
+     *        （S01-02：防止不含结束 boundary 的畸形 multipart 流无限撑爆磁盘）。
      * @return 写入 [output] 的字节数
      */
-    fun stream(input: InputStream, output: OutputStream): Long {
+    fun stream(input: InputStream, output: OutputStream, maxBytes: Long = Long.MAX_VALUE): Long {
         val bLen = boundary.size
         // hold[0..matched) 恒等于 boundary[0..matched)
         val hold = ByteArray(bLen)
@@ -54,6 +57,9 @@ internal class MultipartBoundaryStreamer(private val boundary: ByteArray) {
 
         fun flushBuf() {
             if (writeBuf.size() > 0) {
+                if (totalWritten + writeBuf.size() > maxBytes) {
+                    throw IOException("multipart body exceeds limit: $maxBytes bytes")
+                }
                 writeBuf.writeTo(output)
                 totalWritten += writeBuf.size()
                 writeBuf.reset()

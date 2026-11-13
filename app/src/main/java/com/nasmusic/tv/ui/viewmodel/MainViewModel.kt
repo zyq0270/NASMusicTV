@@ -3697,6 +3697,7 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
         disposeChildViewModels(
             weatherRadioVM, serverVM, searchVM, netVM, navVM, playHistoryVM, playerVM,
             downloadVM, vocalVM, mvVM, playlistVM, backupVM, playlistImportVM,
+            visualizerVM, // S07-01：dispose() 未取消其 viewModelScope，在此兜底取消
         )
         super.onCleared()
     }
