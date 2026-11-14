@@ -6,12 +6,15 @@ import android.os.Handler
 import android.os.Looper
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.exifinterface.media.ExifInterface
+import com.nasmusic.tv.backend.photo.PhotoCaptureDate
 import com.nasmusic.tv.backend.photo.PhotoRef
 import com.nasmusic.tv.backend.photo.PhotoSource
 import com.nasmusic.tv.backend.photo.PhotoSourceKind
 import com.nasmusic.tv.util.AppLog
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.runBlocking
+import java.io.ByteArrayInputStream
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
@@ -71,10 +74,21 @@ class PhotoBuffer(
      * 采样率计算本身由 `PhotoBufferMath` 单独覆盖。
      */
     private val decoder: ((ref: PhotoRef, bytes: ByteArray) -> Bitmap?)? = null,
+    /**
+     * 「拍摄时间」读取函数（默认走 `ExifInterface`，见 [readExifCapturedAt]）。
+     *
+     * ⚠️ 同样只为单测存在：单测用的假字节没有 EXIF 段，也不该真去解一次 EXIF。
+     */
+    private val exifReader: ((ref: PhotoRef, bytes: ByteArray) -> Long)? = null,
 ) {
 
     /** 缓存条目：同时持有 `Bitmap`（供 `recycle`）与 `ImageBitmap`（供 draw 路径**零分配**读取） */
-    private class Entry(val bitmap: Bitmap, val image: ImageBitmap) {
+    private class Entry(
+        val bitmap: Bitmap,
+        val image: ImageBitmap,
+        /** 解码期定下的拍摄时间（epoch 秒，见 [PhotoRef.capturedAt]）；`0` = 未知 */
+        val capturedAt: Long,
+    ) {
         val bytes: Long get() = bitmap.byteCount.toLong()
     }
 
@@ -134,6 +148,30 @@ class PhotoBuffer(
 
     /** 已缓存张数（观察 / 单测用） */
     val cachedCount: Int get() = cache.size
+
+    /**
+     * 某张照片的**拍摄时间**（epoch 秒）。
+     *
+     * - 已解码 ⇒ 解码期定下的值（EXIF 优先，见 [decodeEntry]）
+     * - 未解码 / 已淘汰 ⇒ 回落来源给的近似值 [PhotoRef.capturedAt]（照片墙只画已解码的图，
+     *   这一步只是保险，避免「刚切到的那一帧恰好被 LRU 挤出」时水印闪空）
+     *
+     * ⚠️ 与 [peek] 一样**只读主线程缓存、绝不阻塞**；返回 `0` = 这张没有可用的日期（不显示水印）。
+     */
+    fun capturedAt(ref: PhotoRef): Long {
+        if (!closed.get()) {
+            val entry = cache[ref.id]
+            if (entry != null && !entry.bitmap.isRecycled && entry.capturedAt > 0L) {
+                return entry.capturedAt
+            }
+        }
+        return PhotoCaptureDate.resolve(
+            exif = 0L,
+            fromSource = ref.capturedAt,
+            lastModified = ref.lastModified,
+            dateAdded = ref.dateAdded,
+        )
+    }
 
     /** 已缓存位图的实际字节数（观察用；与 [estimatedBytes] 的**预算口径**不同） */
     val cachedBytes: Long get() = cache.values.sumOf { it.bytes }
@@ -274,6 +312,9 @@ class PhotoBuffer(
      *
      * ⛔ **只开一次流**（见 [decodeWithFactory] 的 KDoc）—— 这是本方法把「读字节」与
      * 「解码」分开写的原因：`BitmapFactory` 的流只能读一次，而拿宽高通常要读两次。
+     *
+     * 拍摄时间也在这里定：EXIF 从**同一份字节**里读（`ExifInterface(ByteArray)`），
+     * 不额外开流 ⇒ 对 Jellyfin 仍是**一次 HTTP**。
      */
     private fun decodeEntry(ref: PhotoRef): Entry? {
         val source = sourceProvider(ref.source) ?: return null
@@ -284,7 +325,39 @@ class PhotoBuffer(
         } ?: return null
 
         val bitmap = decoder?.invoke(ref, bytes) ?: decodeWithFactory(ref, bytes) ?: return null
-        return Entry(bitmap, bitmap.asImageBitmap())
+        val capturedAt = PhotoCaptureDate.resolve(
+            exif = readExifCapturedAt(ref, bytes),
+            fromSource = ref.capturedAt,
+            lastModified = ref.lastModified,
+            dateAdded = ref.dateAdded,
+        )
+        return Entry(bitmap, bitmap.asImageBitmap(), capturedAt)
+    }
+
+    /**
+     * 从图片字节里读 **EXIF 拍摄时间**（epoch 秒）；读不出返回 `0`。
+     *
+     * ⛔ **为什么不依赖 `ImageIO` / `android.media.ExifInterface` 的流版本**：
+     * 我们手里已经有完整的 `ByteArray`（为了「只开一次流」），用 `ByteArray` 构造最省事，
+     * 也不会有「流被 `BitmapFactory` 消费掉」的顺序问题。
+     *
+     * ⚠️ 只读头部：`ExifInterface` 自己会 `mark/reset` 读完所需段落后停下，
+     * 不会把整张图再扫一遍。
+     *
+     * ⚠️ 任何异常都吞掉（坏图 / 非 JPEG 的 PNG/BMP/WebP 没有 EXIF 段）——
+     * 日期是**装饰信息**，不能因为它让一张能显示的照片变成解码失败。
+     */
+    private fun readExifCapturedAt(ref: PhotoRef, bytes: ByteArray): Long {
+        // ⚠️ 单测注入假解码器时（bytes 只有几十字节）不必再费劲解析 —— 直接跳过
+        val reader = exifReader
+        if (reader != null) return runCatching { reader.invoke(ref, bytes) }.getOrDefault(0L)
+        return runCatching {
+            val exif = ExifInterface(ByteArrayInputStream(bytes))
+            val raw = exif.getAttribute(ExifInterface.TAG_DATETIME_ORIGINAL)
+                ?: exif.getAttribute(ExifInterface.TAG_DATETIME_DIGITIZED)
+                ?: exif.getAttribute(ExifInterface.TAG_DATETIME)
+            PhotoCaptureDate.parse(raw)
+        }.getOrDefault(0L)
     }
 
     /**

@@ -147,6 +147,9 @@ class ExternalFilePhotoSource(
                         // File 在 Android 上没有「创建时间」，用修改时间当代理
                         dateAdded = f.lastModified() / 1000L,
                         source = PhotoSourceKind.EXTERNAL,
+                        // 真实拍摄时间只有 EXIF 有 ⇒ 扫描期不读（否则每张一遍 openStream），
+                        // 留 0，由 `PhotoBuffer` 在解码那一刻补（见 PhotoRef.capturedAt）
+                        capturedAt = 0L,
                     )
                 }
         }
@@ -224,6 +227,8 @@ class ExternalFilePhotoSource(
                                     lastModified = modifiedMs / 1000L,
                                     dateAdded = modifiedMs / 1000L,
                                     source = PhotoSourceKind.EXTERNAL,
+                                    // 同文件遍历路线：EXIF 留到解码期补
+                                    capturedAt = 0L,
                                 )
                             }
                         }

@@ -74,6 +74,19 @@ class RenderContext {
     /** 音频反应强度 `0..1`（音频反应开关关闭时恒为 `0`，§5.5「不卡节拍」） */
     var photoAudioBoost: Float = 0f
 
+    // ── 照片墙 · 拍摄日期水印（2026-11-13）────────────────────────────────
+    //
+    // 与上面 7 个字段同一口径：**不进 `update(...)`**，由 `PhotoWallController.applyTo` 每帧直写。
+    // ⛔ 单位是 **epoch 秒**（不是毫秒）：`0` = 这张没有可用日期 ⇒ 不画水印。
+    // ⚠️ 两张各存一个：转场进行中两张都在画面上 ，各自显示各自的日期；
+    //    水印何时出现由 `PhotoRenderer` 按 `photoProgress` 判定（转场走完才显示）。
+
+    /** A（当前图）的拍摄时间（epoch 秒）；`0` = 未知 */
+    var photoACapturedAt: Long = 0L
+
+    /** B（正在入场的新图）的拍摄时间（epoch 秒）；`0` = 未知 */
+    var photoBCapturedAt: Long = 0L
+
     // ── E50「千里江山」三版设色（`QIANLI_SCROLL`）─────────────────────────────
     //
     // ⛔ 与照片墙同一口径：**不进 `update(...)`**（`update()` 有 16 个位置参数、3 个调用点，

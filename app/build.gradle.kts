@@ -430,6 +430,14 @@ dependencies {
     // Image loading
     implementation("io.coil-kt:coil-compose:2.5.0")
 
+    // 照片 EXIF（照片墙右下角的拍摄日期水印，2026-11-13）
+    // ⚠️ Coil 2.5.0 已经**传递**引入 1.3.6，这里显式钉 1.3.7 有两个理由：
+    //   ① 我们直接 `import androidx.exifinterface.media.ExifInterface` —— 直接依赖的库
+    //      必须显式声明，否则哪天 Coil 换了 EXIF 实现/版本，我们的代码会静默编不过（或行为变）；
+    //   ② 1.3.7 修了 1.3.6 在 `ByteArray` 构造 + 部分 BMP/PNG 上的解析边界。
+    // minSdk 14 ⇒ 对 API 22 无影响。
+    implementation("androidx.exifinterface:exifinterface:1.3.7")
+
     // 封面取色（可视化效果 T5）
     implementation("androidx.palette:palette-ktx:1.0.0")
 

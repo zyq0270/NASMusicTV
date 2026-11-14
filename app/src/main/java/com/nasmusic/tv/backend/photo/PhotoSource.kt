@@ -61,6 +61,13 @@ enum class PhotoSourceStatus {
  * ⛔ **时间契约**：`lastModified` / `dateAdded` 一律**秒**。
  * 归一化责任在**各 PhotoSource 实现内**（`MediaStore` 与 `File` 原生就是秒；
  * Jellyfin 返回 ISO 8601 或 tick，必须转换）—— 因为跨来源去重依赖它（§6.1）。
+ *
+ * ⛔ **`capturedAt` 与上面两个不是一回事**（2026-11-13 照片墙日期水印）：
+ * - `lastModified` / `dateAdded` 是**文件系统时间**（拷贝 / 重命名 / 同步都会改）
+ * - `capturedAt` 是**拍摄时间**（EXIF `DateTimeOriginal`，没有才回落到文件时间）
+ *
+ * 它**只用于展示**（照片墙右下角的日期水印），**绝不参与去重 / 排序 / 人脸键** ——
+ * 那些依赖的是稳定且各来源口径一致的字段，而 EXIF 只在解码那一刻才读得到。
  */
 data class PhotoRef(
     /** `"<kind>:<payload>"` —— 全局唯一（见 [PhotoIds]） */
@@ -76,7 +83,222 @@ data class PhotoRef(
     /** ⚠️ **秒** */
     val dateAdded: Long,
     val source: PhotoSourceKind,
+    /**
+     * **拍摄时间（epoch 秒，本地时区已折算）**；`0` = 未知（连回落的文件时间都没有）。
+     *
+     * 取值顺序（由 `PhotoBuffer` 在解码后用 [PhotoCaptureDate.resolve] 决定）：
+     * 1. EXIF `DateTimeOriginal`（相机原生记录；`DateTimeDigitized` / `DateTime` 兜底）
+     * 2. 来源给的近似值（`MediaStore.DATE_TAKEN`；Jellyfin `PremiereDate` / `DateCreated`）
+     * 3. `lastModified` → `dateAdded`（都没有就留 0 ⇒ 不显示水印）
+     *
+     * ⚠️ **默认 `0`**：单测 / 旧调用点不传也编得过，且语义是「不知道」而不是「1970 年」。
+     */
+    val capturedAt: Long = 0L,
 )
+
+/**
+ * EXIF / 拍摄日期字符串 → **epoch 秒**（纯函数，无 Android 依赖 ⇒ 可直接单测）
+ *
+ * ## 支持的写法
+ *
+ * | 来源 | 样例 |
+ * |---|---|
+ * | EXIF `DateTimeOriginal` / `DateTimeDigitized` / `DateTime` | `2021:09:13 12:26:40` |
+ * | EXIF（部分机型带毫秒 / 时区） | `2021:09:13 12:26:40.123`、`2021:09:13 12:26:40+08:00` |
+ * | ISO 8601（Jellyfin `PremiereDate`） | `2021-09-13T12:26:40.1234567Z` |
+ * | 纯数字 | `1631536000` |
+ *
+ * ## ⛔ 为什么手写而不用 `SimpleDateFormat`
+ *
+ * EXIF 的格式是**非标准**的（日期段用 `:` 而不是 `-`），而机型差异又多（毫秒 / 时区 / 末尾空格）
+ * ⇒ `SimpleDateFormat` 要么写一堆 `parse` 兜底、要么每张照片都抛异常（异常 = 分配 = 解码线程负担）。
+ * 这里直接按位解析：**零异常、零分配**（除了极少数需要拼串的分支）。
+ *
+ * ## ⚠️ 时区口径
+ *
+ * EXIF 记录的是**相机本地时间**、且**不带时区** ⇒ 按**系统当前时区**解释
+ * （相机与电视通常在同一时区，用户看到的日期才与「当时拍的那天」一致）。
+ * 带显式 `Z` / `±hh:mm` 的写法按给定时区解释。
+ */
+object PhotoCaptureDate {
+
+    /** 年份下限：早于它的值一律判为「脏数据」（相机没设时间时会写出 1970 / 1980 / 0000） */
+    const val MIN_VALID_YEAR = 1900
+
+    /** 年份上限：晚于它的值判为脏数据（时钟错乱） */
+    const val MAX_VALID_YEAR = 2200
+
+    /**
+     * 解析一个日期字符串。
+     *
+     * @param text 原始字符串；`null` / 空 ⇒ 返回 `0`
+     * @param zone 无时区信息时按哪个时区解释（单测注入固定时区 ⇒ 不随机器时区变化）
+     * @return epoch 秒；无法解析或落在 [MIN_VALID_YEAR]..[MAX_VALID_YEAR] 之外 ⇒ `0`
+     */
+    fun parse(text: String?, zoneIn: java.util.TimeZone = java.util.TimeZone.getDefault()): Long {
+        var zone = zoneIn
+        val s = text?.trim()?.takeIf { it.isNotEmpty() } ?: return 0L
+        // 纯数字 = 已经是 epoch 秒（Jellyfin 少数版本 / 部分机型会这么写）
+        if (s.all { it.isDigit() }) {
+            val v = s.toLongOrNull() ?: return 0L
+            return if (isPlausibleEpochSeconds(v)) v else 0L
+        }
+
+        var i = 0
+        // ⛔ 尾部带 `Z` ⇒ 整串按 **UTC** 解释（不能先按本地时区算完再减偏移：
+        //    那样 `Z` 会被重复补偿一次，东八区机器上整整差 8 小时 —— 单测抓到过）
+        val hasZuluSuffix = s.endsWith("Z", ignoreCase = true)
+        if (hasZuluSuffix) zone = java.util.TimeZone.getTimeZone("UTC")
+        val y = readNumber(s, i, 4) ?: return 0L
+        i = y.second
+        if (y.first < MIN_VALID_YEAR || y.first > MAX_VALID_YEAR) return 0L
+        i = skipSeparator(s, i) ?: return 0L
+        val mo = readNumber(s, i, 2) ?: return 0L
+        i = skipSeparator(s, mo.second) ?: return 0L
+        val d = readNumber(s, i, 2) ?: return 0L
+        i = d.second
+        // 日期后面允许直接结束（只给了日期），也允许接时间
+        if (i >= s.length) return toEpochSeconds(y.first, mo.first, d.first, 0, 0, 0, zone) ?: 0L
+        i = skipSeparator(s, i) ?: return 0L
+        val h = readNumber(s, i, 2) ?: return 0L
+        i = skipSeparator(s, h.second) ?: return 0L
+        val mi = readNumber(s, i, 2) ?: return 0L
+        i = mi.second
+        var sec = 0
+        if (i < s.length && s[i] == ':' && i + 1 < s.length && s[i + 1].isDigit()) {
+            val se = readNumber(s, i + 1, 2) ?: return 0L
+            sec = se.first
+            i = se.second
+        }
+
+        // ── 尾部：毫秒 / 时区 ──
+        var zoneOffsetSec: Int? = null
+        while (i < s.length) {
+            when (s[i]) {
+                '.', ',' -> {
+                    // 跳过小数部分（毫秒 / 亚秒，展示只用秒）
+                    i++
+                    while (i < s.length && s[i].isDigit()) i++
+                }
+                'Z', 'z' -> { zoneOffsetSec = 0; i = s.length }
+                '+', '-' -> {
+                    val off = readOffset(s, i)
+                    if (off != null) {
+                        zoneOffsetSec = off.first
+                        i = off.second
+                    } else {
+                        i = s.length
+                    }
+                }
+                ' ', '\t' -> i++
+                else -> i = s.length
+            }
+        }
+
+        // 带 `Z` 时 `zone` 已经是 UTC，`zoneOffsetSec` 就是 0 ⇒ 再减一次也无副作用
+        val local = toEpochSeconds(y.first, mo.first, d.first, h.first, mi.first, sec, zone) ?: return 0L
+        return local - (zoneOffsetSec ?: 0)
+    }
+
+    /**
+     * **拍摄时间的最终取值**（照片墙水印的唯一口径）。
+     *
+     * @param exif EXIF 解析结果（`0` = 该图没有 / 读不出）
+     * @param fromSource 来源给的近似拍摄时间（`MediaStore.DATE_TAKEN` 等；`0` = 未知）
+     * @param lastModified 文件修改时间（秒）
+     * @param dateAdded 入库时间（秒）
+     */
+    fun resolve(exif: Long, fromSource: Long, lastModified: Long, dateAdded: Long): Long = when {
+        exif > 0L -> exif
+        fromSource > 0L -> fromSource
+        lastModified > 0L -> lastModified
+        dateAdded > 0L -> dateAdded
+        else -> 0L
+    }
+
+    /** epoch 秒是否落在 **1980–2200** 区间（挡住 0 / 1 / 毫秒误传这类脏值） */
+    fun isPlausibleEpochSeconds(seconds: Long): Boolean =
+        seconds >= LOWER_EPOCH_SECONDS && seconds <= UPPER_EPOCH_SECONDS
+
+    /**
+     * 下限 = **1980-01-01T00:00:00Z**。
+     *
+     * ⚠️ 它**比 `MIN_VALID_YEAR`（1900）更严**，这是刻意的：
+     * 纯数字分支没有「年份」可看，只能靠区间挡脏值；而 1980 早于数字相机与手机的普及，
+     * 落在它之前的值必然是脏数据（相机断电后回到 1970 / 0 / 1 这类）。**两种上限**：
+     * `MIN_VALID_YEAR` 管带分隔符的日期串（1900–2200），本区间管纯数字与最终采用值。
+     */
+    private const val LOWER_EPOCH_SECONDS = 315_532_800L
+
+    /** 上限 = **2200-01-01T00:00:00Z** */
+    private const val UPPER_EPOCH_SECONDS = 7_258_118_400L
+
+    /** 读完 [count] 位数字；返回 (值, 结束下标) */
+    private fun readNumber(s: String, start: Int, count: Int): Pair<Int, Int>? {
+        var v = 0
+        var i = start
+        val end = minOf(start + count, s.length)
+        if (start >= end) return null
+        var digits = 0
+        while (i < end && s[i].isDigit()) {
+            v = v * 10 + (s[i] - '0')
+            digits++
+            i++
+        }
+        return if (digits == 0) null else v to i
+    }
+
+    /** 跳一个分隔符（`:` `-` `/` `.` `T` 空格均可），返回下一个位置；已到末尾返回 [Int.MAX_VALUE] */
+    private fun skipSeparator(s: String, i: Int): Int? {
+        if (i >= s.length) return Int.MAX_VALUE
+        val c = s[i]
+        if (c == ':' || c == '-' || c == '/' || c == 'T' || c == ' ' || c == '.') return i + 1
+        return null
+    }
+
+    /** 读 `±hh:mm` / `±hhmm` / `±hh`，返回 (偏移秒, 结束下标) */
+    private fun readOffset(s: String, start: Int): Pair<Int, Int>? {
+        val sign = if (s[start] == '-') -1 else 1
+        var i = start + 1
+        val hh = readNumber(s, i, 2) ?: return null
+        i = hh.second
+        var mm = 0
+        if (i < s.length && (s[i] == ':' || s[i].isDigit())) {
+            if (s[i] == ':') i++
+            val r = readNumber(s, i, 2)
+            if (r != null) {
+                mm = r.first
+                i = r.second
+            }
+        }
+        return sign * (hh.first * 3600 + mm * 60) to i
+    }
+
+    /**
+     * 本地时区的 `(y, mo, d, h, mi, s)` → epoch 秒。
+     *
+     * ⛔ 不用 `java.time`（需要 API 26，本项目 minSdk 22 / 电视是 5.1.1）
+     * ⇒ 走 `Calendar`，它会把不合法日期（如 `2021-02-30`）自动规范化 ——
+     * 相机写错的日子不会让整张图没有日期，只是显示成相邻的合法日。
+     */
+    private fun toEpochSeconds(
+        year: Int,
+        month: Int,
+        day: Int,
+        hour: Int,
+        minute: Int,
+        second: Int,
+        zone: java.util.TimeZone,
+    ): Long? {
+        if (month !in 1..12 || day !in 1..31 || hour !in 0..23 || minute !in 0..59 || second !in 0..60) {
+            return null
+        }
+        val cal = java.util.Calendar.getInstance(zone)
+        cal.clear()
+        cal.set(year, month - 1, day, hour, minute, second.coerceAtMost(59))
+        return cal.timeInMillis / 1000L
+    }
+}
 
 /**
  * 照片来源抽象

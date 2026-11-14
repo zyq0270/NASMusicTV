@@ -52,6 +52,7 @@ import java.util.concurrent.TimeUnit
  * ## 宽高 / 时间
  *
  * - 宽高：`fields=Width,Height` **免费**返回 ⇒ 填真实值（§14.2.1 宽高契约）
+ * - 拍摄时间：`fields=PremiereDate` ⇒ [PhotoRef.capturedAt]（`DateCreated` 是入库时间，兜底用）
  * - 扩展名：`fields=Path` 返回实际文件路径 ⇒ 从文件名判白名单（HEIC / RAW 过滤）。
  *   ⛔ Jellyfin 的 `Name` **不带扩展名**，不能拿它过滤 —— v2.37.4 之前正是这里
  *   把全部照片滤成 0 张（见 §10.188）
@@ -349,6 +350,12 @@ class JellyfinPhotoSource(
             lastModified = created,
             dateAdded = created,
             source = PhotoSourceKind.JELLYFIN,
+            // 拍摄时间：Jellyfin 的 `PremiereDate` 就是「拍摄/上映日期」，比 `DateCreated`
+            // （入库时间）更接近真实拍摄时刻 ⇒ 优先它；两者都没有就留 0，
+            // 由 `PhotoBuffer` 在解码期用 EXIF 补（NAS 上的原图通常带 DateTimeOriginal）。
+            capturedAt = isoToEpochSeconds(o.stringOr("PremiereDate", null))
+                .takeIf { it > 0L }
+                ?: created,
         )
     }
 
@@ -365,7 +372,7 @@ class JellyfinPhotoSource(
 
         /** 全局递归查询（`photos` / `mixed` 库走这条） */
         const val GLOBAL_QUERY =
-            "IncludeItemTypes=Photo&Recursive=true&fields=Width,Height,Path" +
+            "IncludeItemTypes=Photo&Recursive=true&fields=Width,Height,Path,PremiereDate" +
                 "&SortBy=SortName&SortOrder=Ascending"
 
         /** 顶层媒体库根查询 */
@@ -376,7 +383,7 @@ class JellyfinPhotoSource(
 
         /** 相册内的照片查询（**必须带 `ParentId`**，否则摸不到 homevideos 库的照片） */
         const val ALBUM_PHOTO_QUERY =
-            "IncludeItemTypes=Photo&Recursive=true&fields=Width,Height,Path" +
+            "IncludeItemTypes=Photo&Recursive=true&fields=Width,Height,Path,PremiereDate" +
                 "&SortBy=SortName&SortOrder=Ascending"
 
         // 「未知总数」常量已移到 [PhotoScanVerdict]（判定器与来源共用同一份口径）

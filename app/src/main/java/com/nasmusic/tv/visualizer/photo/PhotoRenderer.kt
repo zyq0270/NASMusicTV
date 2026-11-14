@@ -102,6 +102,12 @@ class PhotoRenderer : VisualizerRenderer {
     /** 上一帧的 progress（检测回落 = 新周期开始；⛔ 不能比 id —— 固定转场模式下 id 不变） */
     private var lastProgress = 0f
 
+    /** 拍摄日期水印（复用实例：`Paint` / `Calendar` 只建一次，见 [PhotoDateStamp]） */
+    private val dateStamp = PhotoDateStamp()
+
+    /** 水印的参考矩形（避免每帧新建 `PhotoRect`） */
+    private val stampRect = PhotoRect()
+
     override fun onEnter(ctx: RenderContext) {
         // 此刻还不知道照片尺寸（要等第一帧 `photoA`），所以几何留到 `draw` 里算。
         // 只把「上一次的残留」清掉，避免复用同一个实例时带着旧尺寸。
@@ -113,6 +119,9 @@ class PhotoRenderer : VisualizerRenderer {
         val a = ctx.photoA ?: return          // 无照片 ⇒ 直接返回（底层已是暗底）
         val id = ctx.photoTransition ?: return // 未在切换中（理论上不该发生，防御性返回）
         val b: ImageBitmap = ctx.photoB ?: a   // 单图退化（约束 3）
+        // 拍摄日期水印的两个来源：A = 当前图，B = 正在入场的新图（见 [drawDateStamp]）
+        val aCapturedAt = ctx.photoACapturedAt
+        val bCapturedAt = ctx.photoBCapturedAt
 
         // ⛔ 顺序：先算几何，再 prepare（约束 1）
         // ⛔ 必须传 **B 自己的尺寸**（约束 4）—— `bW`/`bH` 的默认值就是 A 的尺寸，
@@ -199,14 +208,63 @@ class PhotoRenderer : VisualizerRenderer {
                 )
                 if (shouldDrawOnlyNewPhoto(ctx.photoScaleMode, ctx.photoProgress)) {
                     drawPhoto(b, geom.srcB, geom.dstB)
+                    // 画面上只有新图 ⇒ 也只画新图的水印（A 的已经不可见了）
+                    drawDateStamp(ctx, bCapturedAt, atA = false)
                     return@clipRect
                 }
             }
+            // ── 拍摄日期水印（2026-11-13，见 [PhotoDateStamp]）──
+            // ⛔ 顺序不能改：必须在转场**之后**画（它是叠在最上层的信息，任何转场都盖不掉它）；
+            //    而且必须先画 A 再画转场 —— 见下一条。
+            //
+            // ⛔ **A 的水印只在转场窗口内（p < 1）显示**：进入 HOLD 后画面上只有 B
+            //   （这正是「切换完成、完整显示出来」的那一刻）⇒ A 的水印必须消失，
+            //   否则 HOLD 期两张的水印会在同一个右下角**重叠**（旧日期压着新日期）。
+            //   ⚠️ 不能让 `drawDateStamp` 自己判 —— 那个函数只看 `capturedAt` 与 `p`，
+            //   而这里额外需要「A 这一刻到底还在不在画面上」这个信息。
+            val inTransition = ctx.photoProgress < 1f
+            if (inTransition) drawDateStamp(ctx, aCapturedAt, atA = true)
             t.run { render(a, b, ctx.photoProgress, geom) }
+            drawDateStamp(ctx, bCapturedAt, atA = false)
         }
     }
 
+    /**
+     * 把某一格照片的拍摄日期画在它自己的右下角。
+     *
+     * ## 为什么 A / B 分开算矩形
+     *
+     * 转场进行中两张图可能各占一块（滑动 / 分块 / FIT 内接矩形各不相同），
+     * 所以 A 的日期必须贴 A 的矩形、B 的日期必须贴 B 的矩形 —— 不能共用一个「屏幕右下角」。
+     *
+     * ## 什么时候不画
+     *
+     * - 日期未知（`capturedAt <= 0`）
+     * - **转场还没走完**（`progress < 1`）—— 见 [shouldShowDateStamp]
+     * - `photoB == null`（单图退化 / 首图没有旧图 ⇒ `b === a`，只画一次）
+     *
+     * ⚠️ **A 的显示时机由调用点判定**（只在 `p < 1` 时画）：它在 HOLD 期已不在画面上，
+     * 由本函数自身看不到这件事。
+     *
+     * ⚠️ `p >= 1` 之后整个 HOLD 期都是 1 ⇒ 水印与照片一起定格，直到下一次切换把它换成 A。
+     */
+    private fun DrawScope.drawDateStamp(ctx: RenderContext, capturedAt: Long, atA: Boolean) {
+        if (!shouldShowDateStamp(capturedAt, ctx.photoProgress)) return
+        // 单图退化时 `photoB` 为 null / 与 A 是同一张 ⇒ 只画一次
+        if (!atA && ctx.photoB == null) return
+        val dst = if (atA) geom.dstA else geom.dstB
+        dateStampRect(dst, ctx.photoScaleMode, stampRect)
+        dateStamp.draw(
+            scope = this,
+            text = dateStamp.format(capturedAt),
+            dst = stampRect,
+            canvasW = geom.canvasW,
+            canvasH = geom.canvasH,
+        )
+    }
+
     override fun onExit() {
+        dateStamp.clear()
         // ⚠️ 只释放「本实例自己占的」——注册表里的实现是共享单例，
         // `release()` 只清它自己的缓冲引用；`MaskCache` 是 object，绝不能在这里回收
         bound?.release()

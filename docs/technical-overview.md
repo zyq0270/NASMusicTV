@@ -19963,6 +19963,118 @@ val furniture: State<EffectFurniture> get() = EffectFurniture.DEFAULT_STATE
 
 ---
 
+### 10.406 照片墙新增**拍摄日期水印**：切换完成后在照片右下角显示红色 `YYYY/MM/DD hh:mm:ss`（2026-11-13）
+
+> **性质**：**已改代码**。版本号不变（v2.39.18 / 203），按所有者「同一轮修复不单独升号」口径合并。
+> 触发来源：所有者需求 ——「① 在每一幅照片切换完成、完整显示出来后，在照片的右下角显示拍摄日期的年月日时分秒；② 格式为 `YYYY/MM/DD hh:mm:ss`；③ 用红色的文字显示」。
+
+#### 一、结论先行
+
+| 需求 | 落点 | 判据/门禁 |
+|---|---|---|
+| 切换**完成后**才出现 | `shouldShowDateStamp(capturedAt, progress)` ⇒ `progress >= 1f` | `PhotoDateStampTest` 两条（`p<1` 全部不显示 / `p=1` 显示） |
+| **照片**右下角 | `dateStampRect(dst, scaleMode, out)` ⇒ 用该图自己的 `dstA`/`dstB` | 门禁断言 `FIT` 下取内接矩形（贴屏幕右下角会落在黑边上） |
+| `YYYY/MM/DD hh:mm:ss` | `PhotoDateStamp.format(epochSeconds)`（`Calendar` + 手工补零） | 逐字符断言 `2021/09/03 07:05:09`、24 小时制、定长 19 |
+| **红色** | `PhotoDateStamp.TEXT_COLOR = #FF3B30` | 通道断言（R≥200、G/B≤80、R−max(G,B)≥150） |
+
+#### 二、拍摄时间从哪来（⚠️ 这一项决定了「会不会有日期显示」）
+
+**新增 `PhotoRef.capturedAt`（epoch 秒，默认 `0`）**，与既有的 `lastModified` / `dateAdded` **严格区分**：
+
+| 字段 | 含义 | 会不会被拷贝/同步改掉 |
+|---|---|---|
+| `lastModified` / `dateAdded` | 文件系统时间 | **会**（拷贝、重命名、NAS 同步都会） |
+| `capturedAt` | **拍摄时间** | 不会（来自 EXIF / 相机元数据） |
+
+⛔ `capturedAt` **只用于展示**，**不参与**去重（`PhotoDedup` 的指纹仍是 `size + lastModified + name`）、排序、人脸键 —— 那些依赖各来源口径一致的稳定字段，而 EXIF 只在解码那一刻才读得到。
+
+取值优先级（`PhotoCaptureDate.resolve`，唯一口径）：
+
+```
+EXIF DateTimeOriginal  >  来源给的近似值  >  lastModified  >  dateAdded  >  0（不显示）
+```
+
+各来源的落点：
+
+| 来源 | 扫描期给的值 | 解码期补充 |
+|---|---|---|
+| `MediaStorePhotoSource` | `datetaken` 列（列名用**字面量**，见下） | EXIF |
+| `ExternalFilePhotoSource`（File / SAF） | `0`（**刻意不读**：那要每张开一次流） | EXIF |
+| `JellyfinPhotoSource` | `fields=PremiereDate`（新增），缺则 `DateCreated` | EXIF |
+
+⚠️ `MediaStore` 的「拍摄时间」**用字符串 `"datetaken"` 而不是 `MediaStore.Images.Media.DATE_TAKEN`**：该常量是 API 29 才加入 `MediaColumns` 的成员，minSdk 22 上直接引用会触发 lint `NewApi`；底层列名自古就有，真正的保护是查询时 `getColumnIndex(...) < 0 ⇒ 视作未知`（用 `getColumnIndexOrThrow` 会让老系统上整轮扫描直接抛）。
+
+⛔ **EXIF 绝不额外开流**：`PhotoBuffer` 本来就为「只开一次流」把整张图读成 `ByteArray` 再解码，EXIF 从**同一份字节**里用 `ExifInterface(ByteArrayInputStream(bytes))` 读 ⇒ 对 Jellyfin 仍是**一次 HTTP**（这条是既有硬约束，见 `decodeWithFactory` 的 KDoc）。EXIF 解析的任何异常都被吞掉（PNG/BMP/WebP 没有 EXIF 段是正常的，不能因此让一张能显示的照片解码失败）。
+
+#### 三、时间解析：为什么手写（`PhotoCaptureDate`）
+
+原始字符串有三种以上写法，全部要认：
+
+| 写法 | 样例 |
+|---|---|
+| EXIF 原生 | `2021:09:13 12:26:40` |
+| EXIF 带毫秒 / 时区 | `2021:09:13 12:26:40.123`、`…+08:00` |
+| ISO 8601（Jellyfin） | `2026-09-23T10:11:12.3456789Z` |
+| 纯数字 | `1631536000` |
+
+⛔ 不用 `SimpleDateFormat`：EXIF 的日期段用 `:` 而非 `-`，机型差异又多 ⇒ 要么写一堆兜底 `parse`，要么**每张照片抛一次异常**（异常 = 分配 = 解码线程负担）。这里按位解析，零异常。
+⛔ 不用 `java.time`（需 API 26，电视是 5.1.1）⇒ 换算走 `Calendar`，非法日期（`02-30`）被自动规范化而不是整张图没日期。
+
+⚠️ **时区口径**：EXIF 记录的是**相机本地时间且不带时区** ⇒ 按系统当前时区解释（相机与电视通常同区）。带 `Z` / `±hh:mm` 的写法按给定时区解释 —— **首版在这里写错过**：`Z` 后缀先按本地时区算、再减偏移 ⇒ 东八区机器上整整差 8 小时，被 `PhotoCaptureDateTest` 的「带 Z 的写法不受注入时区影响」当场判红。
+
+⚠️ **脏值门槛**：合理区间是 **1980-01-01 ~ 2200-01-01**（`isPlausibleEpochSeconds`），比 `MIN_VALID_YEAR = 1900`（管带分隔符的日期串）**更严** —— 纯数字分支没有「年份」可看，只能靠区间挡 0 / 1 / 毫秒误传（4e11）这类值。**首版下限取 1900 时，`1` 秒也能通过**（1900 早于 1970 ⇒ 区间是负数起点，`1` 落在里面），门禁直接判红后收窄到 1980。
+
+#### 四、绘制：为什么不是 Compose 文本
+
+| 决定 | 为什么 |
+|---|---|
+| 用 `nativeCanvas.drawText`（`android.graphics.Paint`） | 一次绘制 + 一次 `measureText`，无布局树；`TextMeasurer` 每帧都会走文本布局（P2 档分块转场已有同款结论：「真字符逐字绘制 ⇒ 每帧几十次布局 ⇒ 真机上不可接受」） |
+| **秒级格式化缓存** | 文本每秒才变一次 ⇒ 以 `epochSeconds` 为键缓存，同一秒内不产生字符串；`Paint` / `Calendar` 是字段，只建一次 |
+| 黑描边（55% 透明度，1~2px） | 纯红字压在浅色照片（白墙 / 雪 / 天空）上会糊掉；描边只为「提底」，远看仍是红字 |
+| 字号 / 边距 = 画布短边 × 3% | 1080p ⇒ 约 32px / 32px；竖屏与电视自动一致 |
+| 矩形过窄/过矮**放弃绘制** | FIT 下的极扁长图 / 极窄竖图上，红字会糊成一团；宁可不显示 |
+
+⛔ **B（新图）的水印画在转场 `render(...)` 之后**：它是叠在最上层的信息，任何转场都不该盖掉它。门禁用**下标比较**钉住顺序（`lastIndexOf("drawDateStamp(ctx,") > indexOf("t.run { render(")`）。
+⛔ **A（旧图）的水印只在转场窗口内（`p < 1`）画**：进入 HOLD 后画面上只有 B，A 若不收起，两张的水印会在同一个右下角**重叠**（旧日期压在 7 月新日期上）。这条是**实现后自查发现的**，由门禁的 `inTransition` 断言钉住。
+⛔ **FIT 终帧「只画新图」的分支也必须画 B 的水印**：那条分支是照片墙在 FIT 下的稳态画面，漏掉的话 FIT 模式下水印只会在转场那一帧闪一下。
+
+⚠️ **水印不跟 Ken Burns 推近移动**：矩形取当前帧的 `dstA`/`dstB`（CROP 推近后略大于画布，由外层 `clipRect` 裁掉超出部分，水印仍落在可见范围内）；跟着放大会持续漂移。
+
+#### 五、接线（4 处）
+
+1. `RenderContext`：新增 `photoACapturedAt` / `photoBCapturedAt`（`Long`，epoch 秒，`0` = 未知）—— 与那 7 个 `photo*` 字段同一口径，**不进 `update(...)`**
+   ⚠️ **两份都要改**：本机私有覆盖层遮蔽了 `RenderContext.kt`（AGENTS.md「覆盖层会掩蔽仓库同名文件」）⇒ 仓库与 `app/src/e51-overlay/ovl/...` 各加一份，否则本地构建读不到新字段（**本轮实测**：只改仓库那份 ⇒ `Unresolved reference 'photoACapturedAt'`）
+   ⚠️ 而 `sync_private_overlay.py` 在 main 分支上取的是**分支 ref**（不含未提交改动）⇒ 本轮先改仓库、最后统一同步覆盖层，**中间不要跑 `--check`**（会判「已同步」并抹掉手改）
+2. `PhotoWallController.applyTo`：每帧写这两个字段（`buffer?.capturedAt(ref) ?: 0L`）
+3. `PhotoBuffer`：`Entry` 增加 `capturedAt`；新增 `capturedAt(ref)` 查询（已解码取解码期值，未命中回落 `PhotoRef` 的近似值）；新增 `exifReader` 注入点（仅单测用）
+4. `PhotoRenderer`：`drawDateStamp(...)` 在转场之后调用（A / B 各一次）
+
+#### 六、依赖
+
+`app/build.gradle.kts` 新增 **`androidx.exifinterface:exifinterface:1.3.7`**（显式声明）。
+理由：Coil 2.5.0 已**传递**引入 1.3.6，但 ① 我们直接 `import` 了 `ExifInterface` ⇒ 直接依赖的库必须显式声明，否则哪天 Coil 换实现/版本，我们的代码会静默编不过或行为变；② 1.3.7 修了 1.3.6 在 `ByteArray` 构造 + 部分 BMP/PNG 上的解析边界。`minSdk 14` ⇒ 对 API 22 无影响。
+
+#### 七、验证
+
+```powershell
+./gradlew.bat :app:compileDebugKotlin :app:compileReleaseKotlin --no-daemon -Pkotlin.compiler.execution.strategy=in-process
+./gradlew.bat :app:testDebugUnitTest --tests "*visualizer.photo.*" --tests "*backend.photo.*" `
+  --tests "*PrivateOverlayDriftGateTest" --no-daemon -Pkotlin.compiler.execution.strategy=in-process
+```
+
+- `compileDebugKotlin` / `compileReleaseKotlin`：**BUILD SUCCESSFUL**。
+- 照片墙相关 31 个测试类、**302 例全绿**（含新增 `PhotoCaptureDateTest`、`PhotoDateStampTest` 两个门禁类共 23 例）。
+- ⚠️ **未出包、未操作任何设备**。真机观感（字号 / 红色在浅色照片上的可读性 / 与右下角若有叠层的遮挡）需所有者确认。
+
+#### 八、已知边界
+
+| 情形 | 表现 | 说明 |
+|---|---|---|
+| PNG / BMP / WebP 截图 | 显示文件修改时间 | 这类格式通常没有 EXIF 拍摄时间；`resolve` 回落到 `lastModified` |
+| 社交软件转存过的照片 | 显示转存后的时间或原 EXIF | 转存流程可能剥掉/保留 EXIF，取决于来源 App |
+| NAS 上的原图 | 优先 EXIF ⇒ 通常正确 | Jellyfin 的 `PremiereDate` 常缺，靠 EXIF 补 |
+| 极扁长图（FIT） | 不显示 | 文本宽度超过矩形 90% 时放弃绘制 |
+
 ## 附录：E51「像素城市」/ E52「旷野公路」落地纪实（2026-10-23 – 2026-11-04）
 
 > ⚠️ **本附录引用的下列路径只存在于私有分支 `feat/e51-private`**（承载上游素材 / 移植件本体，不公开）：

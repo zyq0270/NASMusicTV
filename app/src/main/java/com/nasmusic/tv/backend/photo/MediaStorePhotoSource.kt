@@ -60,6 +60,7 @@ class MediaStorePhotoSource(private val context: Context) : PhotoSource {
             MediaStore.Images.Media.SIZE,
             MediaStore.Images.Media.DATE_MODIFIED,
             MediaStore.Images.Media.DATE_ADDED,
+            DATE_TAKEN_COLUMN,
         )
         try {
             context.contentResolver.query(
@@ -76,12 +77,21 @@ class MediaStorePhotoSource(private val context: Context) : PhotoSource {
                 val sizeCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.SIZE)
                 val modCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_MODIFIED)
                 val addedCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_ADDED)
+                // ⚠️ `getColumnIndexOrThrow` 会让老系统上的 DATE_TAKEN 缺失直接抛
+                // ⇒ 用 getColumnIndex（缺失 = -1 ⇒ 按「未知」处理，不影响整个扫描）
+                val takenCol = cursor.getColumnIndex(DATE_TAKEN_COLUMN)
 
                 while (cursor.moveToNext()) {
                     val id = cursor.getLong(idCol)
                     val name = cursor.getString(nameCol) ?: continue
                     // 图库里也可能有 HEIC 之类（系统能解、本应用解不了）⇒ 仍要过白名单
                     if (!isSupportedPhotoName(name)) continue
+                    // `DATE_TAKEN` 原生就是**秒**；缺失 / 脏值 ⇒ 0（由解码期 EXIF 兜底）
+                    val taken = if (takenCol >= 0 && !cursor.isNull(takenCol)) {
+                        cursor.getLong(takenCol).takeIf { PhotoCaptureDate.isPlausibleEpochSeconds(it) } ?: 0L
+                    } else {
+                        0L
+                    }
                     out.add(
                         PhotoRef(
                             id = PhotoIds.of(PhotoSourceKind.GALLERY, id.toString()),
@@ -93,6 +103,7 @@ class MediaStorePhotoSource(private val context: Context) : PhotoSource {
                             lastModified = cursor.getLong(modCol),
                             dateAdded = cursor.getLong(addedCol),
                             source = PhotoSourceKind.GALLERY,
+                            capturedAt = taken,
                         )
                     )
                 }
@@ -126,5 +137,15 @@ class MediaStorePhotoSource(private val context: Context) : PhotoSource {
 
     private companion object {
         const val TAG = "MediaStorePhotoSource"
+
+        /**
+         * 「拍摄时间」列名。
+         *
+         * ⛔ 用**字面量**而不是 `MediaStore.Images.Media.DATE_TAKEN`：
+         * 这个常量是 API 29 才加入的 `MediaColumns` 成员，minSdk 22 上直接引用会触发
+         * 编译期 API 检查（lint `NewApi`）。底层的列名自古就有（API 1 起），
+         * 真正的保护是查询时 `getColumnIndex(...) < 0 ⇒ 当作未知`。
+         */
+        const val DATE_TAKEN_COLUMN = "datetaken"
     }
 }

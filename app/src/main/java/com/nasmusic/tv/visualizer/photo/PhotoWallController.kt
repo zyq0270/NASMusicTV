@@ -309,10 +309,11 @@ class PhotoWallController(
     }
 
     /**
-     * 把本帧要画的东西写进 [RenderContext]（§14.2.4 的 7 个字段）。
+     * 把本帧要画的东西写进 [RenderContext]（§14.2.4 的 7 个字段 + 2 个拍摄时间）。
      *
      * ⛔ **零分配**：`?.let` / `?:` / `coerceIn` 全是 inline，`IntOffset` / `Size` 是 value class。
      * 唯一的「看起来像分配」是 `ctx.canvasSize.width.toInt()` —— 基本类型运算，不构造对象。
+     * 新增的两个 `Long` 字段也只是基本类型写入（日期水印，见 [RenderContext.photoACapturedAt]）。
      *
      * ⚠️ 无论是否 [active] 都写：切走效果时 `PhotoRenderer` 可能仍在交叉淡出层上读这些字段，
      * 写 `null` 会让它直接 `return`（画面瞬黑）。同时 `peek` 会挡掉已被 `recycle` 的位图，
@@ -325,6 +326,9 @@ class PhotoWallController(
 
         ctx.photoA = currentRef?.let { buffer?.peek(it) }
         ctx.photoB = incomingRef?.let { buffer?.peek(it) }
+        // 拍摄水印：**两张都写**（转场期两张都在画面上，各自显示各自的日期）
+        ctx.photoACapturedAt = currentRef?.let { buffer?.capturedAt(it) } ?: 0L
+        ctx.photoBCapturedAt = incomingRef?.let { buffer?.capturedAt(it) } ?: 0L
         ctx.photoProgress = clock.eased
         ctx.photoTransition = clock.transitionId
         // photoHoldT 语义 = 「停留期运动进度」（§5.6）：Ken Burns 关闭时恒 0，
