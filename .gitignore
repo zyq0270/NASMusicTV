@@ -90,6 +90,7 @@ image48294fcc-0da3-4613-8282-68ab5cc6e499.png
 .workbuddy-ai/
 .joycode/
 .box-agent/
+.box-agent-scratch/
 # 会话级工具状态目录（2026-10-16 追加）：由 agent 运行时在**项目根**自动创建，与上面同族。
 #   .dumate/ = 交付清单 + 收件箱 + 会话流（deliveries / inbox / ses_*）
 #   .tmp/    = 一次性渲染/运行临时文件（dv-render-* / dv-run）
