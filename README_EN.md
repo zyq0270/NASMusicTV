@@ -6,7 +6,7 @@ An open-source Android music player (works on TV / phone / tablet alike): aggreg
 
 [![Release](https://img.shields.io/github/v/release/hxzhang2000/NASMusicTV?color=blue&label=Release)](https://github.com/hxzhang2000/NASMusicTV/releases)
 
-Product homepage: https://hxzhang2000.github.io/NASMusicTV-Website/?lang=en
+Product homepage: https://zd7gxll02-nasmusictv-10j3m3sd.maozi.io/
 
 > ⚠️ **Baidu Netdisk directory restriction**: Per Baidu Open Platform's 2026 sandbox policy, third-party apps can only access the `/apps/NASMusicTV` directory and its subdirectories — **no files outside it can be read**. Please place your music files under `/apps/NASMusicTV/` in your Baidu Netdisk (e.g. `/apps/NASMusicTV/Music/`). The app creates this directory automatically on first use. Files outside `/apps/NASMusicTV/` are inaccessible to this app.
 
