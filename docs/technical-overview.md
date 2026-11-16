@@ -932,6 +932,7 @@ App 启动
 | T45 | 本地运行单元测试 | `./gradlew testDebugUnitTest` 全部通过（绿色） |
 | T46 | CI 构建 | push 到 main/develop 或 PR → GitHub Actions 自动构建 |
 | T47 | CI 产物 | Workflow 完成后 APK 可下载 |
+| T48 | Gitee 国内镜像 | 配好 Pull 方向镜像后，一条指令即可把 GitHub 的 main 与标签同步到 Gitee |
 
 ---
 
@@ -2623,6 +2624,8 @@ if (isLoading) {
 6. Upload APK artifact
 
 **验证状态**：✅ 工作流配置完成，🔶 未推送至 GitHub 触发验证。
+
+> 后续：Gitee 国内镜像另见 §10.407（`docs/gitee-mirror-setup.md` + `scripts/sync_gitee_mirror.ps1`）。
 
 ---
 
@@ -28554,3 +28557,52 @@ Compose dp = Android dp / 0.82
 - 门禁结果见本轮交付说明。
 - ⚠️ **未出包、未操作任何设备**。视觉变化仅「首页横屏左右各 -16dp」一处（其余 7 页逐值核对为不变）；
   该变化按 A 项的本意生效，但仍需真机确认首页在手机横屏下的观感。
+
+---
+
+### 10.407 Gitee 国内镜像：Gitee 官方「仓库镜像管理」（Pull 方向）+ 一条指令触发（2026-11-16）
+
+**背景**：仓库托管在 GitHub，国内克隆/拉取不稳定。Gitee 在国内访问快，需要一份与 GitHub 保持一致的镜像仓库供国内用户克隆。
+
+**方案选型**（三条路，采纳第 1 条）：
+
+| 方案 | 做法 | 取舍 |
+|------|------|------|
+| **Gitee 官方仓库镜像管理（Pull 方向）**（采纳） | Gitee 后台配 Pull 镜像，用一条 API 指令触发同步 | 平台原生：同步内容（分支/标签/提交记录）、失败重试、覆盖语义都由 Gitee 保证；**不勾「自动从 GitHub 同步仓库」**时，GitHub 侧只需 `repo` 权限的令牌 |
+| Gitee Go 定时流水线 | Gitee 侧 cron 主动 `git clone` GitHub 再 push 回 Gitee | 需开 Gitee Go（免费时长有限）、仓库不能为空、token 存 Gitee 凭证管理 |
+| GitHub Actions 单向推送 | push 到 `main` / 打 `v*` 标签时，CI 把 `main` + 标签推到 Gitee | 需在 GitHub 侧存 Gitee 令牌；曾作首选，后改走平台原生镜像（同步语义交给 Gitee，本仓库只负责"何时触发"） |
+
+**触发接口（2026-11-16 实测）**：
+- `POST https://gitee.com/api/v5/repos/:owner/:repo/remote_mirror/pull?access_token=:Gitee私人令牌` → 受理镜像更新请求；
+- 同一路径用 `GET` 返回 `404 Not Found Project` ⇒ **方法必须是 POST**；
+- `GET .../remote_mirror` → 查镜像配置与最近同步状态（无有效令牌返回 `401 登录失效，无权限访问该资源`）。
+
+**新增文件**：
+- `docs/gitee-mirror-setup.md` —— 后台配置步骤、触发指令、校验方式、定时挂载（Windows 任务计划）、故障速查表、边界说明。
+- `scripts/sync_gitee_mirror.ps1` —— 六个动作：`Trigger`（触发一次同步）/ `Status`（查镜像配置与最近状态）/ `Verify`（比对两端 `main` 的提交号，不需要令牌）/ `CreateMirror`（用 API 建 Pull 镜像配置）/ `CheckToken`（用 GitHub 用户名 + PAT 直连校验令牌）/ `Push`（推送式同步）。
+
+**踩到的拦路虎：GitHub 账号被 flagged（2026-11-16）**
+在 Gitee 后台「添加镜像」时 GitHub 弹出 `This account is flagged, and therefore cannot authorize a third party application.`：
+- 定性：**GitHub 侧**的账号级限制，只挡「授权第三方应用（OAuth）」这一步 —— 登录、PAT、推拉、GitHub Actions 全部照常（该仓 CI 一直在正常发 Release 即为证）；
+- GitHub 官方口径：出现这句 = 账号被标记 / 审查中，**重试无效**，只有 GitHub Support 能解除（1–3 个工作日）；
+- 由此确认：**镜像凭据用「GitHub 用户名 + PAT」（HTTP Basic）即可，完全不必绑定 GitHub 账号**；
+- 处置（按推荐顺序，详见 `docs/gitee-mirror-setup.md` §三点五）：① 仓库页「更新导入」按钮（该仓当初按 GitHub URL 导入，源地址已在 Gitee 侧存着）；② `CreateMirror` 走 API 建配置（`POST /api/v5/repos/:owner/:repo/remote_mirror` 路由开放，实测 401 而非 404；但该端点**未收录在 Gitee 公开 OpenAPI**，参数名靠脚本逐组试探）；③ `Push` 推送式同步（只要 Gitee 令牌，零 GitHub 授权）；④ GitHub Support 工单治本。
+
+**本机链路实测（2026-11-16）**：本机到 `github.com` 的 git 端点**间歇性被重置** —— DNS 只解析出 `20.205.243.166`，好的时候 0.7 秒通、坏的时候 21 秒 `Failed to connect`；而 `api.github.com` 一直正常。
+- ⇒ **凭据必须走 `Authorization` 头**（`http.https://github.com/.extraheader`）：拼进 URL 的形式在本机会被卡死 21 秒后超时，会把「链路问题」误报成「令牌无效」；脚本已全面改用请求头。
+- ⇒ 网络类命令一律 3 次重试（`Invoke-GitRetry`）。
+- ⇒ **平台原生镜像（Gitee 服务器去拉 GitHub）不受本机链路影响**，这正是路线 A 相对「本机推送」的结构性优势。
+
+**平台侧约束（Gitee 官方口径）**：最短更新间隔 5 分钟；更新请求一旦发出无法中断；镜像操作会**覆盖**目标仓库的分支、标签和提交记录；不支持 Git-LFS；单次同步超 30 分钟视为超时；连续 5 次失败会强制停止（5 分钟后可再发起）。
+
+**凭证与权限面**：
+- Gitee 侧：私人令牌需 `projects` 权限（仅用于调触发接口）。
+- GitHub 侧：配 Pull 镜像时填 classic PAT，**必须含 `repo`**；若改勾「自动从 GitHub 同步仓库」，还需 `admin:repo_hook`（Gitee 用它在 GitHub 侧建 webhook）。本方案**不勾自动同步** ⇒ 不交出 `admin:repo_hook`，同步时机由本仓库自己掌握。
+
+**私有分支边界**：镜像源是 GitHub 上的仓库，而 GitHub 上只有 `main` 一个分支，私有分支 `feat/e51-private`（E51/E52 上游移植源码）只在本地 ⇒ 镜像拉不到它。⛔ 任何情况下都不用 `git push --mirror` / `--all` 从本机直推 Gitee。
+
+**已知限制**：镜像只含代码，GitHub Release 的 APK 附件不随之同步；Gitee 侧仓库只作镜像用（在那边提交会被下次镜像覆盖）。
+
+**实测状态（2026-11-16）**：Gitee `hxzhang2000/NASMusicTV` 已存在且为公开仓库；`scripts/sync_gitee_mirror.ps1 -Action Verify` 输出「一致」，两端 `main` 同为 `f83df51`。触发接口用占位令牌实测返回 `401 Unauthorized: Access token does not exist`，脚本已把该错误映射为可操作的提示（检查令牌 `projects` 权限与有效期）。
+
+**影响面**：属仓库基建，不改 APK 行为，不改运行时逻辑。版本号按「上一版已 push + tag ⇒ 升版本」口径进 v2.39.19（versionCode 204）。

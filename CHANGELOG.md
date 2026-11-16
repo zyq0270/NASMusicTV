@@ -7,6 +7,18 @@
 >
 > 类型：`Added`（新增） | `Changed`（变更） | `Fixed`（修复） | `Removed`（移除）
 
+## [v2.39.19] - 2026-11-16
+
+> 新增 Gitee 国内镜像：用 Gitee 官方「仓库镜像管理」（Pull 方向）把 GitHub 仓库镜像到 Gitee，平时不自动同步，需要时用一条指令触发；另附本机一条命令的触发与校验脚本。
+> 配置阶段实测撞到 GitHub 账号被标记（提示无法授权第三方应用）：该限制只挡 OAuth 授权，不挡私人令牌、推拉与 Actions，故同步改走「用户名 + 令牌」凭据路径，并补齐建配置与推送式两条免 OAuth 通路。
+> Gitee 侧仓库只作镜像用，不要在 Gitee 上提交代码（会被下一次镜像覆盖）。
+
+### Added
+
+- 新增 Gitee 国内镜像配置指引（`docs/gitee-mirror-setup.md`）：后台配 Pull 方向镜像 + 一条 API 指令触发同步（`POST /api/v5/repos/:owner/:repo/remote_mirror/pull`）
+- 新增 `scripts/sync_gitee_mirror.ps1`：一条命令完成触发同步（`Trigger`）、查镜像状态（`Status`）、比对两端 main（`Verify`）、建镜像配置（`CreateMirror`）、校验 GitHub 令牌（`CheckToken`）、推送式同步（`Push`）
+- GitHub 账号被标记、无法授权第三方应用时：改用「GitHub 用户名 + 私人令牌」当镜像凭据，仍可用一条指令完成同步
+
 ## \[v2.39.18] - 2026-11-10
 
 > 电视实测驱动的连续修复（照片墙 / 歌词 / 设置页排版 / 日志页 / 播放服务）。
