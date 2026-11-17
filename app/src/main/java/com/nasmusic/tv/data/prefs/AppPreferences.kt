@@ -214,7 +214,11 @@ class AppPreferences internal constructor(private val context: Context) {
     @Volatile private var cachedLyricsNeteaseBaseUrl: String = com.nasmusic.tv.lyrics.LyricsNetworkProvider.DEFAULT_NETEASE_BASE_URL
     /** 日志页级别过滤（设备本地偏好，默认「全部」） */
     @Volatile private var cachedLogsMinLevel: String = LogStore.LEVEL_DEBUG
+    /** 下载位置镜像（INTERNAL/CUSTOM）：下载根解析在 IO 路径上同步读，不能 runBlocking */
+    @Volatile private var cachedDownloadLocation: String = "INTERNAL"
     @Volatile private var cachedWeatherApiKey: String = ""
+    /** 腾讯位置服务 WebService key（IP 定位首选链路，可留空） */
+    @Volatile private var cachedTencentMapKey: String = ""
 
     /** 屏幕方向镜像（v2.36.0：冷启动首帧方向，默认 auto） */
     @Volatile private var cachedScreenOrientation: String =
@@ -246,6 +250,18 @@ class AppPreferences internal constructor(private val context: Context) {
                     try { com.nasmusic.tv.util.CryptoUtils.decrypt(enc) } catch (e: Exception) { "" }
                 } else ""
             }.distinctUntilChanged().collect { cachedWeatherApiKey = it }
+        }
+        scope.launch {
+            dataStore.data.map { it[keyDownloadLocation] ?: "INTERNAL" }
+                .distinctUntilChanged().collect { cachedDownloadLocation = it }
+        }
+        scope.launch {
+            dataStore.data.map { prefs ->
+                val enc = prefs[keyTencentMapKeyEnc]
+                if (!enc.isNullOrBlank()) {
+                    try { com.nasmusic.tv.util.CryptoUtils.decrypt(enc) } catch (e: Exception) { "" }
+                } else ""
+            }.distinctUntilChanged().collect { cachedTencentMapKey = it }
         }
         scope.launch {
             dataStore.data.map { it[keyMusicSource] ?: com.nasmusic.tv.data.model.MusicSource.DEFAULT_API_KEY }
@@ -412,6 +428,8 @@ class AppPreferences internal constructor(private val context: Context) {
      * 与服务器密码/百度 token 一致走 CryptoUtils AES-GCM。旧明文键保留做一次性迁移读取）。
      */
     private val keyWeatherApiKeyEnc = stringPreferencesKey("weather_openweathermap_api_key_enc")
+    /** 腾讯位置服务 WebService key（同为付费资源凭证，走同一套 AES-GCM 加密存储） */
+    private val keyTencentMapKeyEnc = stringPreferencesKey("weather_tencent_map_key_enc")
 
     // --- 封面滤镜设置（Phase 5） ---
     private val keyCoverFilterEnabled = booleanPreferencesKey("cover_filter_enabled")
@@ -1021,6 +1039,9 @@ class AppPreferences internal constructor(private val context: Context) {
     suspend fun setAutoDownloadLimit(v: Int) = dataStore.edit { it[keyAutoDownloadLimit] = v.coerceIn(1, 5000) }
     suspend fun setDownloadLocation(v: String) = dataStore.edit { it[keyDownloadLocation] = v }
 
+    /** §10.411：下载根解析在 IO 路径上同步读；镜像由 startProviderMirrors 维护。 */
+    fun getDownloadLocationSync(): String = cachedDownloadLocation
+
     /**
      * 本地音乐总开关（§五）。
      *
@@ -1306,6 +1327,30 @@ class AppPreferences internal constructor(private val context: Context) {
         if (!legacy.isNullOrBlank() && prefs[keyWeatherApiKeyEnc].isNullOrBlank()) {
             setWeatherApiKey(legacy)
             AppLog.i(TAG, "weather API key migrated to encrypted storage")
+        }
+    }
+
+    // --- 腾讯位置服务 key（IP 定位，§10.409）---
+
+    val tencentMapKey: Flow<String> = dataStore.data.map { prefs ->
+        val enc = prefs[keyTencentMapKeyEnc]
+        if (!enc.isNullOrBlank()) {
+            try { com.nasmusic.tv.util.CryptoUtils.decrypt(enc) } catch (e: Exception) { "" }
+        } else ""
+    }
+
+    /** 与 [getWeatherApiKeySync] 同理：调用方在协程里同步读，不能 runBlocking。 */
+    fun getTencentMapKeySync(): String = cachedTencentMapKey
+
+    /** 留空即删除键：未配置时直接走 ip.sb，不发无效请求。 */
+    suspend fun setTencentMapKey(key: String) {
+        val trimmed = key.trim()
+        dataStore.edit { prefs ->
+            if (trimmed.isEmpty()) {
+                prefs.remove(keyTencentMapKeyEnc)
+            } else {
+                prefs[keyTencentMapKeyEnc] = com.nasmusic.tv.util.CryptoUtils.encrypt(trimmed)
+            }
         }
     }
 

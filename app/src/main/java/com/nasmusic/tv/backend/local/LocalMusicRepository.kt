@@ -29,17 +29,20 @@ class LocalMusicRepository(
     // P3（2026-09-22 审查）：attachDownloadSource 在主线程写、IO 协程读——
     // 补 @Volatile 对齐 S4 先例（Kotlin 允许构造属性标注字段级 @Volatile）。
     @Volatile private var downloadDao: com.nasmusic.tv.backend.download.db.DownloadSongDao? = null,
-    @Volatile private var downloadRootProvider: () -> java.io.File? = { context.getExternalFilesDir(android.os.Environment.DIRECTORY_MUSIC) }
+    // §10.411：可能同时存在内置 + CUSTOM 两个下载根；切换目录不搬迁旧文件，两个都要扫。
+    @Volatile private var downloadRootsProvider: () -> List<java.io.File> = {
+        listOf(com.nasmusic.tv.backend.download.DownloadRootResolver.internalRoot(context))
+    }
 ) {
     companion object { private const val TAG = "LocalMusicRepo" }
 
     /** 注入下载源（供增量扫描合并下载目录 + DOWNLOAD 删除判定分支；NasMusicApp 启动时调用） */
     fun attachDownloadSource(
         downloadDao: com.nasmusic.tv.backend.download.db.DownloadSongDao,
-        downloadRootProvider: () -> java.io.File?
+        downloadRootsProvider: () -> List<java.io.File>
     ) {
         this.downloadDao = downloadDao
-        this.downloadRootProvider = downloadRootProvider
+        this.downloadRootsProvider = downloadRootsProvider
     }
 
     /** 启动时：从缓存加载（毫秒级） */
@@ -101,9 +104,11 @@ class LocalMusicRepository(
     private suspend fun buildScannedList(): List<ScannedSong> {
         val scanned = mutableListOf<ScannedSong>()
         scanned += scanner.scanAllMusic()
-        // 下载目录：优先走 downloads.db 元数据（metadataResolver），跳过 MMR
-        val downloadRoot = downloadRootProvider()
-        if (downloadRoot != null && downloadRoot.exists()) {
+        // 下载目录：优先走 downloads.db 元数据（metadataResolver），跳过 MMR。
+        // §10.411：CUSTOM 生效时两个根都扫——切换前的文件仍在内置目录，不能从曲库消失。
+        val visitedPaths = HashSet<String>()
+        for (downloadRoot in downloadRootsProvider()) {
+            if (!downloadRoot.exists() || !visitedPaths.add(downloadRoot.absolutePath)) continue
             scanned += scanner.scanPath(
                 downloadRoot.absolutePath,
                 StorageType.DOWNLOAD,

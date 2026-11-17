@@ -63,7 +63,10 @@ internal fun SettingsBranch(
                     val appVolume by viewModel.playerVM.appVolume.collectAsState(initial = 1f)
                     // F2-6：音质档位
                     val qualityTier by viewModel.prefs.player.qualityTier.collectAsState(initial = 0)
+                    // §10.411：下载位置真实状态。懒计算 + 按设置值 remember，避免每次重组都做外置卷探测。
+                    val downloadRootInfo = remember(settings.downloadLocation) { viewModel.downloadRootInfo() }
                     val weatherApiKey by viewModel.prefs.weather.weatherApiKey.collectAsState(initial = "")
+                    val tencentMapKey by viewModel.prefs.weather.tencentMapKey.collectAsState(initial = "")
                     val baiduConnectionState by viewModel.netVM.baiduConnectionState.collectAsState(initial = com.nasmusic.tv.ui.viewmodel.NetworkMusicViewModel.BaiduConnectionState.Off)
                     val baiduDeviceCode by viewModel.baiduDeviceCode.collectAsState(initial = null)
                     val baiduIndexScanned by viewModel.baiduIndexScanned.collectAsState(initial = 0)
@@ -283,6 +286,8 @@ internal fun SettingsBranch(
                         onChangeJamendoClientId = { viewModel.updateJamendoClientId(it) },
                         weatherApiKey = weatherApiKey,
                         onChangeWeatherApiKey = { viewModel.updateWeatherApiKey(it) },
+                        tencentMapKey = tencentMapKey,
+                        onChangeTencentMapKey = { viewModel.updateTencentMapKey(it) },
                         // T16：网络探针（I/O 在 MainViewModel.runNetworkProbe，§5.4）
                         isNetworkTesting = networkProbeRunning,
                         networkTestStatus = networkProbeStatus,
@@ -420,6 +425,8 @@ internal fun SettingsBranch(
                     autoDownloadOnPlay = settings.autoDownloadOnPlay,
                     autoDownloadLimit = settings.autoDownloadLimit,
                     downloadLocation = settings.downloadLocation,
+                    downloadCustomAvailable = downloadRootInfo.first,
+                    downloadResolvedRootPath = downloadRootInfo.second,
                     onToggleDownloadEnabled = { viewModel.updateDownloadEnabled(it) },
                     onToggleAutoDownloadOnPlay = { viewModel.updateAutoDownloadOnPlay(it) },
                     onChangeAutoDownloadLimit = { viewModel.updateAutoDownloadLimit(it) },

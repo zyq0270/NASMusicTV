@@ -4,7 +4,7 @@ package com.nasmusic.tv.data.model
  * 天气数据模型
  *
  * 来源于 Open-Meteo API 的返回数据精简结构。
- * 位置信息通过 IP 定位（ip-api.com）获取。
+ * 位置信息通过 IP 定位（腾讯 → ip.sb → 北京兜底）获取。
  */
 data class WeatherData(
     val temperature: Double,           // 当前温度（°C）

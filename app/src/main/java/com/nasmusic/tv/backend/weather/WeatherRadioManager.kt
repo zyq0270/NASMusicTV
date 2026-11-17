@@ -34,6 +34,8 @@ class WeatherRadioManager(
         private const val NAS_PREFIX = "nas_"
         /** NAS 随机补齐歌曲的 id 前缀（与心情命中区分，避免被误判为命中） */
         private const val NAS_FILLER_PREFIX = "nasf_"
+        /** 命中不足时的补齐池大小：只拉第一页，不再为补齐分页拉满 5000 首 */
+        private const val NAS_FILLER_POOL_SIZE = 200
     }
 
     /** NAS 搜索结果：命中心情关键词的歌曲 + 随机补齐歌曲（分别标记，避免混淆） */
@@ -155,53 +157,49 @@ class WeatherRadioManager(
     }
 
     /**
-     * 从 NAS 后端搜索匹配 mood 的歌曲
+     * 从 NAS 后端搜索匹配 mood 的歌曲。
      *
-     * 使用 BackendAdapter.getSongs() 获取曲库，然后用关键词模糊匹配。
-     * TODO: 如果 BackendAdapter 未来支持 search() 方法，替换为正式搜索
+     * §10.410（2026-11-17）：改用 [BackendAdapter.searchSongs] 服务端搜索。
+     * 原实现分页拉满 5000 首再在内存里 `contains` 关键词，有两个硬伤：
+     * ① 曲库 > 5000 首时后面的歌永远命中不了；② 每次构建白拉 10 页全量。
+     * 五个适配器（Jellyfin / Navidrome / Subsonic / 飞牛 / 道理鱼）都已实现 searchSongs。
+     *
+     * 保留的客户端语义：关键词去重、随机补齐、结果打乱、`nas_` / `nasf_` 前缀分类。
+     * ⚠️ 遗留 P3：`copy(id = "nas_"+id)` 仍会让收藏/播放历史按合成 id 记账，
+     * 摘前缀要连带改 [mergeAndPack] 的命中/补齐分类，属独立专项。
      */
     private suspend fun searchNasSongs(queries: List<String>, maxCount: Int): NasSearchResult {
         // 无后端连接时跳过 NAS 搜索
         val adapter = backendAdapter ?: return NasSearchResult()
-        // P2 修复（2026-09-22 审查）：原 getSongs() 不传参 = 默认第一页 500 首，
-        // 大曲库的天气电台只在「字母序头部 500 首」里做心情匹配与补齐。
-        // 改分页拉全量；封顶 5000 首（采样场景，对齐 SmartRadioManager 硬上限取舍）。
-        // 另注（遗留 P3）：copy(id="nas_"+id) 的前缀篡改会让播放历史/收藏按合成 id
-        // 记账、与原 id 分裂——前缀同时被 buildRadioWithMood 用作命中/补齐分类标记
-        //（75/78 行），摘除需要连带改分类机制，待专项。
-        val allSongs = buildList {
-            val pageSize = 500
-            var offset = 0
-            while (offset < 5000) {
-                val batch = adapter.getSongs(pageSize, offset) ?: break
-                if (batch.isEmpty()) break
-                addAll(batch)
-                offset += pageSize
-                if (batch.size < pageSize) break
-            }
-        }
-        if (allSongs.isEmpty()) return NasSearchResult()
+        if (maxCount <= 0) return NasSearchResult()
 
         val matched = mutableSetOf<Song>()
-        // 逐个关键词匹配（跳过空关键词：空串 contains("") 恒真，会把整个曲库当作命中）
         for (query in queries) {
             if (matched.size >= maxCount) break
-            val q = query.trim().lowercase()
+            val q = query.trim()
             if (q.isEmpty()) continue
-            val results = allSongs.filter { song ->
-                song.title.lowercase().contains(q) ||
-                    song.artist.lowercase().contains(q) ||
-                    song.album.lowercase().contains(q)
+            try {
+                // 服务端已按自己的规则命中（标题/歌手/专辑），客户端只去重 + 限流，不再二次 contains
+                val results = adapter.searchSongs(q)
+                matched.addAll(results.take(maxCount - matched.size))
+            } catch (e: Exception) {
+                e.rethrowIfCancellation()
+                AppLog.w(TAG, "NAS search for '$q' failed: ${e.message}")
             }
-            matched.addAll(results.take(maxCount - matched.size))
         }
 
-        // 命中不足 → 随机补齐。补齐部分单独返回并打上 nasf_ 前缀，
-        // 不再与「心情命中」混为一谈（原实现二者统一加 nas_ 前缀，导致命中率虚高）。
+        // 命中不足 → 随机补齐。补齐池只取第一页（与旧实现的 10 页全量拉取相比是净减少）。
         val filler = if (matched.size < maxCount) {
-            allSongs.shuffled()
-                .filterNot { it in matched }
-                .take(maxCount - matched.size)
+            try {
+                adapter.getSongs(NAS_FILLER_POOL_SIZE, 0).orEmpty()
+                    .shuffled()
+                    .filterNot { it in matched }
+                    .take(maxCount - matched.size)
+            } catch (e: Exception) {
+                e.rethrowIfCancellation()
+                AppLog.w(TAG, "NAS filler fetch failed: ${e.message}")
+                emptyList()
+            }
         } else emptyList()
 
         // 打乱命中结果，让每次构建的电台基础集合不同（支持「换一批」跨构建去重）

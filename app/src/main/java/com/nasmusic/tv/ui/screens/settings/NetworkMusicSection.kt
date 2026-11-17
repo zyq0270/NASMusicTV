@@ -32,6 +32,8 @@ data class NetworkMusicSettingsState(
     val lyricsKugouBaseUrl: String,
     val lyricsNeteaseBaseUrl: String,
     val weatherApiKey: String,
+    /** 腾讯位置服务 WebService key（可选；留空则用 ip.sb 定位） */
+    val tencentMapKey: String,
     val isNetworkTesting: Boolean,
     val networkTestStatus: String,
 )
@@ -43,6 +45,7 @@ data class NetworkMusicSettingsActions(
     val onChangeLyricsKugouBaseUrl: ((String) -> Unit)?,
     val onChangeLyricsNeteaseBaseUrl: ((String) -> Unit)?,
     val onChangeWeatherApiKey: ((String) -> Unit)?,
+    val onChangeTencentMapKey: ((String) -> Unit)?,
     val onRunNetworkTest: () -> Unit,
 )
 
@@ -53,6 +56,7 @@ data class NetworkMusicDialogActions(
     val onShowLyricsKugouDialog: () -> Unit,
     val onShowLyricsNeteaseDialog: () -> Unit,
     val onShowWeatherApiKeyDialog: () -> Unit,
+    val onShowTencentMapKeyDialog: () -> Unit,
 )
 
 /**
@@ -273,6 +277,44 @@ internal fun NetworkMusicSection(
                                 text = if (state.weatherApiKey.isNotBlank()) "···${state.weatherApiKey.takeLast(6)}"
                                        else stringResource(R.string.common_not_set),
                                 color = if (state.weatherApiKey.isNotBlank()) NasMusicColors.TextPrimary
+                                        else NasMusicColors.TextSecondary,
+                                fontSize = FontSize.button()
+                            )
+                        }
+                        Text(
+                            text = stringResource(R.string.settings_weather_api_key_edit),
+                            color = NasMusicColors.Primary,
+                            fontSize = FontSize.button()
+                        )
+                    }
+                }
+                // 腾讯位置服务 key（§10.409）：可选，留空则 IP 定位直接走免 key 的 ip.sb。
+                Text(
+                    text = stringResource(R.string.settings_tencent_map_key_desc),
+                    color = NasMusicColors.TextSecondary,
+                    fontSize = FontSize.body(),
+                    modifier = Modifier.padding(top = 12.dp, bottom = 8.dp, start = 4.dp)
+                )
+                SettingsTile(
+                    onClick = { dialogs.onShowTencentMapKeyDialog() },
+                    modifier = androidx.compose.ui.Modifier.fillMaxWidth(),
+                ) {
+                    androidx.compose.foundation.layout.Row(
+                        modifier = androidx.compose.ui.Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = SettingsTokens.rowHPadding, vertical = SettingsTokens.rowVPadding),
+                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+                    ) {
+                        androidx.compose.foundation.layout.Column(modifier = androidx.compose.ui.Modifier.weight(1f)) {
+                            Text(
+                                text = stringResource(R.string.settings_tencent_map_key),
+                                color = NasMusicColors.TextSecondary,
+                                fontSize = FontSize.small()
+                            )
+                            Text(
+                                text = if (state.tencentMapKey.isNotBlank()) "···${state.tencentMapKey.takeLast(6)}"
+                                       else stringResource(R.string.common_not_set),
+                                color = if (state.tencentMapKey.isNotBlank()) NasMusicColors.TextPrimary
                                         else NasMusicColors.TextSecondary,
                                 fontSize = FontSize.button()
                             )

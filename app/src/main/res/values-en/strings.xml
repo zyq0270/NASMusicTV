@@ -75,6 +75,9 @@
     <string name="settings_weather_api_key_desc">Fallback API when Open-Meteo is unavailable (free registration at openweathermap.org)</string>
     <string name="settings_weather_api_key_hint">Enter API Key (leave empty = disable)</string>
     <string name="settings_weather_api_key_edit">Edit</string>
+    <string name="settings_tencent_map_key">Tencent Location Service Key (optional)</string>
+    <string name="settings_tencent_map_key_desc">Used to detect the city when set; otherwise a keyless ip.sb lookup is tried, then Beijing</string>
+    <string name="settings_tencent_map_key_hint">Enter WebService Key (leave empty = disable)</string>
 
     <!-- Player -->
     <string name="player_play">Play</string>
@@ -285,6 +288,8 @@
     <string name="settings_pw_scale_desc">Fill crops the edges; Fit leaves black bars</string>
     <string name="settings_netdisk_index_desc2">The index decides whether Baidu Netdisk music is searchable; cover extraction scales with song count</string>
     <string name="settings_download_location_hint">Changing folders does not move songs already downloaded</string>
+    <string name="settings_download_location_current">Writing to: %1$s</string>
+    <string name="settings_download_location_unavailable">No usable external storage on this device; still writing to internal storage</string>
     <string name="settings_group_endpoint_risk_desc">A custom endpoint replaces the official one; a typo breaks networking</string>
     <string name="settings_group_about_desc">Version and capability info only; nothing here is editable</string>
 

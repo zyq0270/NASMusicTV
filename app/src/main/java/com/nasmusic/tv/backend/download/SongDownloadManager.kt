@@ -48,6 +48,13 @@ class SongDownloadManager(
     private val repo: DownloadRepository,
     private val storage: StorageGuard,
     private val paths: DownloadPathBuilder,
+    /**
+     * §10.411：当前写入根。必须与 [paths] 的 rootProvider 是同一个来源，
+     * 否则 CUSTOM 下写文件去外置、清理/恢复却去看内置目录。
+     */
+    private val rootProvider: () -> File = { DownloadRootResolver.internalRoot(context) },
+    /** 清理与崩溃恢复要看的门路：CUSTOM 生效时包含内置旧根 + 外置新根 */
+    private val allRootsProvider: () -> List<File> = { listOf(DownloadRootResolver.internalRoot(context)) },
     private val resolver: StreamUrlResolver,
     private val tagWriter: MediaTagWriter,
     private val coverWriter: CoverFileWriter,
@@ -616,10 +623,10 @@ class SongDownloadManager(
             repo.delete(entity.songKey)
             _downloadStates.update { it - entity.songKey }
         }
-        // 回收空目录（从下载根目录向上遍历删除空目录，保留根）
+        // 回收空目录（从每个下载根目录向上遍历删除空目录，保留根）
         runCatching {
-            val root = context.getExternalFilesDir(android.os.Environment.DIRECTORY_MUSIC)
-            if (root != null && root.exists()) {
+            for (root in allRootsProvider()) {
+                if (!root.exists()) continue
                 root.walkTopDown().filter { it.isDirectory && it != root }
                     .sortedByDescending { it.absolutePath.length }
                     .forEach { dir -> if (dir.listFiles()?.isEmpty() == true) dir.delete() }
@@ -670,12 +677,13 @@ class SongDownloadManager(
      */
     private fun recoverFinalPathOrNull(entity: com.nasmusic.tv.backend.download.db.DownloadSongEntity): String? {
         return runCatching {
-            val root = context.getExternalFilesDir(android.os.Environment.DIRECTORY_MUSIC) ?: return null
             val artist = DownloadPathBuilder.sanitize(entity.artist.ifBlank { "未知歌手" }).ifBlank { "未知歌手" }
             val album = DownloadPathBuilder.sanitize(entity.album.ifBlank { DownloadPathBuilder.DEFAULT_ALBUM }).ifBlank { DownloadPathBuilder.DEFAULT_ALBUM }
             if (entity.title.isBlank()) return null
-            val albumDir = File(root, "$artist/$album")
-            if (!albumDir.exists()) return null
+            // §10.411：切换过下载位置后，旧文件可能仍在另一个根 —— 两个根都找。
+            val relativeAlbumDir = "$artist/$album"
+            val root = allRootsProvider().firstOrNull { File(it, relativeAlbumDir).exists() } ?: return null
+            val albumDir = File(root, relativeAlbumDir)
             // P2 修复（2026-09-22 审查）：原候选名只拼 "title.ext"，与实际命名规则
             // baseNameWithQuality（"%02d - "曲号前缀 + " (128/192/320)"档位后缀）+
             // uniqueFile（" (2)"去重序号）不符——曲号>0 或非 AUTO 档的孤儿文件恢复
@@ -710,11 +718,12 @@ class SongDownloadManager(
 
     suspend fun recoverAfterCrash() {
         withContext(Dispatchers.IO) {
-            // 1. 清理 .tmp 下所有 .part
-            val root = context.getExternalFilesDir(android.os.Environment.DIRECTORY_MUSIC)
-            val tmpDir = root?.let { File(it, DownloadPathBuilder.TMP_DIR) }
-            if (tmpDir != null && tmpDir.exists()) {
-                tmpDir.listFiles()?.filter { it.extension == "part" }?.forEach { it.delete() }
+            // 1. 清理每个下载根的 .tmp 下所有 .part（含切换位置前的旧根）
+            for (root in allRootsProvider()) {
+                val tmpDir = File(root, DownloadPathBuilder.TMP_DIR)
+                if (tmpDir.exists()) {
+                    tmpDir.listFiles()?.filter { it.extension == "part" }?.forEach { it.delete() }
+                }
             }
             // 2. 逐条恢复未完成任务：最终文件已存在 → COMPLETED，否则清理残留 + FAILED
             // P0-2 修复（2026-09-16）：原实现读 entity.audioPath，但 DOWNLOADING 记录创建时

@@ -11,4 +11,10 @@ class WeatherPrefs internal constructor(private val prefs: AppPreferences) {
 
     suspend fun setWeatherApiKey(key: String) = prefs.setWeatherApiKey(key)
     fun getWeatherApiKeySync(): String = prefs.getWeatherApiKeySync()
+
+    /** 腾讯位置服务 key（§10.409）：留空 ⇒ IP 定位直接走 ip.sb */
+    val tencentMapKey: Flow<String> = prefs.tencentMapKey
+
+    suspend fun setTencentMapKey(key: String) = prefs.setTencentMapKey(key)
+    fun getTencentMapKeySync(): String = prefs.getTencentMapKeySync()
 }

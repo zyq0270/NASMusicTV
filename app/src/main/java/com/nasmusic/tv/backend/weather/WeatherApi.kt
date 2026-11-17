@@ -29,11 +29,14 @@ import javax.net.ssl.X509TrustManager
  * 数据来源（自动 fallback）：
  * 1. Open-Meteo（免费公开天气 API，无需 API Key）
  * 2. OpenWeatherMap（需 API Key，国内网络更稳定，免费注册：https://openweathermap.org/api）
- * 3. ip-api.com（免费 IP 定位，无需 API Key）
+ *
+ * IP 定位链路（§10.409）：腾讯位置服务（可选 Key）→ ip.sb（免 Key、HTTPS）→ 北京兜底。
+ * 定位只用来猜城市，失败不影响天气主功能。
  *
  * Open-Meteo API 文档：https://open-meteo.com/
  * OpenWeatherMap 文档：https://openweathermap.org/current
- * ip-api.com 文档：https://ip-api.com/docs
+ * 腾讯位置服务 IP 定位：https://lbs.qq.com/service/webService/webServiceGuide/webServiceIp
+ * ip.sb GeoIP：https://api.ip.sb/docs
  */
 class WeatherApi(private val context: android.content.Context) {
 
@@ -63,8 +66,8 @@ class WeatherApi(private val context: android.content.Context) {
     /**
      * IP 定位专用短超时客户端（复用主 client 的连接池 / Dispatcher）。
      *
-     * `ip-api.com` 免费版只提供 HTTP(80)，国内网络常年连不上；它是**可选增强**，
-     * 失败已有「回退北京坐标」兜底 ⇒ 不值得让每次天气刷新先白等 10 秒。
+     * 定位是**可选增强**：3 秒连不上就走下一级/兜底坐标，
+     * 不值得让每次天气刷新先白等主 client 的 10 秒。
      */
     private val ipLocationClient: OkHttpClient by lazy {
         client.newBuilder()
@@ -149,9 +152,13 @@ class WeatherApi(private val context: android.content.Context) {
         // OpenWeatherMap API 端点（需 API Key，作 Open-Meteo 不可用时的备选）
         private const val OPEN_WEATHER_MAP_BASE = "https://api.openweathermap.org/data/2.5/weather"
         private const val OPEN_WEATHER_MAP_FORECAST_BASE = "https://api.openweathermap.org/data/2.5/forecast"
-        // IP 定位端点（免费版，不支持 HTTPS）
-        private const val IP_API_BASE = "http://ip-api.com/json/"
-        // IP 定位是可选增强：3 秒连不上就走兜底坐标，不再等主 client 的 10 秒
+        // 腾讯位置服务 IP 定位（HTTPS，需 WebService key；设置页可留空）
+        private const val TENCENT_IP_HOST = "apis.map.qq.com"
+        // 免 key 兜底：ip.sb（HTTPS，MaxMind 数据，100 次/分钟）
+        private const val IP_SB_GEOIP_URL = "https://api.ip.sb/geoip"
+        /** 边缘节点会拦默认 OkHttp UA，显式声明客户端身份 */
+        private const val IP_LOCATION_USER_AGENT = "NASMusicTV/2.6 (IP location; contact: local app)"
+        // IP 定位是可选增强：3 秒连不上就走下一级，不再等主 client 的 10 秒
         private const val IP_CONNECT_TIMEOUT_SECONDS = 3L
         private const val IP_LOCATION_TTL_MS = 30 * 60 * 1000L
         private const val IP_LOCATION_COOLDOWN_MS = 10 * 60 * 1000L
@@ -161,10 +168,13 @@ class WeatherApi(private val context: android.content.Context) {
      * 获取当前 IP 的地理位置（带结果缓存 / 失败冷却）。
      *
      * ⚠️ 定位失败**不是错误**：上层 `fetchCurrentWeather` / `fetchForecast` 会回退到北京坐标，
-     * 天气仍然能取到（只是城市不准）。国内网络下 ip-api.com 的 HTTP(80) 常年不可达，
-     * 因此这里要同时做到「快失败」与「不重复重试」，见各常量注释。
+     * 天气仍然能取到（只是城市不准）。国内网络下必须用 HTTPS 链路且「快失败」，
+     * 因此这里同时做到「3 秒超时」与「10 分钟内不重复重试」，见各常量注释。
+     *
+     * @param tencentMapKey 腾讯位置服务 WebService key；留空则直接走 ip.sb。
+     *   缓存与 key 无关（定位结果只取决于出口 IP），切换 key 不必清缓存。
      */
-    suspend fun getIpLocation(): IpLocation = withContext(Dispatchers.IO) {
+    suspend fun getIpLocation(tencentMapKey: String? = null): IpLocation = withContext(Dispatchers.IO) {
         // 整段「读缓存 → 请求 → 写回」用同一把 Mutex 串行化：并发调用只有第一个真正发请求，
         // 其余拿锁后二次判缓存直接命中，避免 fetchCurrentWeather / fetchForecast 各发一次 3s 请求。
         locationLock.withLock {
@@ -179,7 +189,7 @@ class WeatherApi(private val context: android.content.Context) {
             }
             if (cached != null) return@withLock cached
 
-            val result = requestIpLocation()
+            val result = requestIpLocation(tencentMapKey)
             if (result.success) {
                 locationCached = result
                 locationCachedAt = System.currentTimeMillis()
@@ -193,47 +203,111 @@ class WeatherApi(private val context: android.content.Context) {
     }
 
     /**
-     * 真正发一次 IP 定位请求（在 `Dispatchers.IO` 上调用）。
+     * 按顺序尝试两台定位服务，全部失败才返回 `IpLocation()`（上层回退北京）。
+     *
+     * 1. 腾讯位置服务（配置了 key 才试）：国内可达、直接给经纬度；GCJ-02 需转 WGS84。
+     * 2. ip.sb：免 key、HTTPS，国内连通率显著高于旧的 HTTP-only 免费服务。
+     */
+    private fun requestIpLocation(tencentMapKey: String?): IpLocation {
+        if (!tencentMapKey.isNullOrBlank()) {
+            val tencent = requestTencentIpLocation(tencentMapKey.trim())
+            if (tencent.success) return tencent
+            AppLog.w(TAG, "Tencent IP location unavailable, trying ip.sb")
+        }
+        return requestIpSbLocation()
+    }
+
+    /**
+     * 腾讯位置服务 IP 定位：`GET https://apis.map.qq.com/ws/location/v1/ip?key=…`
+     *
+     * 返回 `status == 0` 才算成功；`result.location.lat/lng` 是 GCJ-02，
+     * 必须转成 WGS84 才能喂给 Open-Meteo（[Gcj02Converter]）。
      *
      * ⚠️ 失败按 AppLog 分级准则记 **W**，且**不带 throwable**：
-     * `SocketTimeoutException` 的 20 行堆栈在手机上既不是崩溃也不是数据丢失，
-     * 却会占掉日志页那 400 条窗口里真错误的位置（§10.401）。
-     * M9 修复（2026-10-06）的 `isSuccessful` 检查与 `use{}` 关流在此保留。
+     * 超时堆栈会占掉日志页那 400 条窗口里真错误的位置（§10.401）。
      */
-    private fun requestIpLocation(): IpLocation {
+    private fun requestTencentIpLocation(key: String): IpLocation {
         return try {
-            val request = Request.Builder()
-                .url(IP_API_BASE)
-                .header("User-Agent", "NASMusicTV/2.6")
+            val url = okhttp3.HttpUrl.Builder()
+                .scheme("https")
+                .host(TENCENT_IP_HOST)
+                .addPathSegment("ws")
+                .addPathSegment("location")
+                .addPathSegment("v1")
+                .addPathSegment("ip")
+                .addQueryParameter("key", key)
                 .build()
+            val request = Request.Builder().url(url).header("User-Agent", IP_LOCATION_USER_AGENT).build()
             // 必须 use{} 关闭 Response，否则连接/连接池资源泄漏
             val body = ipLocationClient.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) {
-                    AppLog.w(TAG, "getIpLocation: HTTP ${response.code}")
+                    AppLog.w(TAG, "Tencent IP: HTTP ${response.code}")
                     return IpLocation()
                 }
                 response.body?.string()
             } ?: return IpLocation()
-            val json = gson.fromJson(body, JsonObject::class.java)
-            if (json.get("status")?.asString == "success") {
-                IpLocation(
-                    city = json.get("city")?.asString ?: "",
-                    lat = json.get("lat")?.asDouble ?: 0.0,
-                    lon = json.get("lon")?.asDouble ?: 0.0,
-                    success = true
-                )
-            } else {
-                AppLog.w(TAG, "IP location failed: ${json.get("message")?.asString ?: "unknown"}")
-                IpLocation()
+
+            val json = gson.fromJson(body, JsonObject::class.java) ?: return IpLocation()
+            if (json.get("status")?.asInt != 0) {
+                AppLog.w(TAG, "Tencent IP location rejected: ${json.get("message")?.asString ?: "unknown"}")
+                return IpLocation()
             }
+            val result = json.getAsJsonObject("result") ?: return IpLocation()
+            val location = result.getAsJsonObject("location") ?: return IpLocation()
+            val lat = location.doubleOrNull("lat") ?: return IpLocation()
+            val lon = location.doubleOrNull("lng") ?: return IpLocation()
+            if (lat == 0.0 && lon == 0.0) return IpLocation()
+            val city = result.getAsJsonObject("address_component")?.get("city")?.asString ?: ""
+            val wgs = Gcj02Converter.toWgs84(lat, lon)
+            IpLocation(city = city, lat = wgs.first, lon = wgs.second, success = true)
         } catch (e: Exception) {
-            AppLog.w(
-                TAG,
-                "getIpLocation unavailable: ${e.javaClass.simpleName} " +
-                    "(${e.message?.take(80) ?: "no message"}); using fallback location",
-            )
+            AppLog.w(TAG, "Tencent IP location unavailable: ${e.javaClass.simpleName} (${e.message?.take(80) ?: "no message"})")
             IpLocation()
         }
+    }
+
+    /**
+     * 免 key 兜底定位：`GET https://api.ip.sb/geoip`
+     *
+     * ip.sb 的 latitude/longitude 是 WGS84，**不做坐标转换**。
+     * 字段名兼容 number / string 两种返回（[JsonObject.doubleOrNull]）。
+     */
+    private fun requestIpSbLocation(): IpLocation {
+        return try {
+            val request = Request.Builder()
+                .url(IP_SB_GEOIP_URL)
+                .header("User-Agent", IP_LOCATION_USER_AGENT)
+                .header("Accept", "application/json")
+                .build()
+            val body = ipLocationClient.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    AppLog.w(TAG, "ip.sb: HTTP ${response.code}")
+                    return IpLocation()
+                }
+                response.body?.string()
+            } ?: return IpLocation()
+
+            val json = gson.fromJson(body, JsonObject::class.java) ?: return IpLocation()
+            val lat = json.doubleOrNull("latitude") ?: return IpLocation()
+            val lon = json.doubleOrNull("longitude") ?: return IpLocation()
+            if (lat == 0.0 && lon == 0.0) return IpLocation()
+            IpLocation(
+                city = json.get("city")?.asString ?: "",
+                lat = lat,
+                lon = lon,
+                success = true
+            )
+        } catch (e: Exception) {
+            AppLog.w(TAG, "ip.sb unavailable: ${e.javaClass.simpleName} (${e.message?.take(80) ?: "no message"}); using fallback location")
+            IpLocation()
+        }
+    }
+
+    /** Gson 的数字字段容错：有些服务把经纬度返回成字符串。 */
+    private fun JsonObject.doubleOrNull(name: String): Double? {
+        val element = get(name) ?: return null
+        if (!element.isJsonPrimitive) return null
+        return runCatching { element.asString.toDoubleOrNull() }.getOrNull()
     }
 
     /**
@@ -442,8 +516,12 @@ class WeatherApi(private val context: android.content.Context) {
     /**
      * 一键获取当前位置天气
      */
-    suspend fun fetchCurrentWeather(manualCity: String? = null, openWeatherMapApiKey: String? = null): WeatherData? {
-        var location = getIpLocation()
+    suspend fun fetchCurrentWeather(
+        manualCity: String? = null,
+        openWeatherMapApiKey: String? = null,
+        tencentMapKey: String? = null
+    ): WeatherData? {
+        var location = getIpLocation(tencentMapKey)
         if (!location.success) {
             AppLog.w(TAG, "IP location failed, falling back to Beijing (39.9042, 116.4074)")
             location = IpLocation(city = "北京", lat = 39.9042, lon = 116.4074, success = true)
@@ -458,10 +536,10 @@ class WeatherApi(private val context: android.content.Context) {
     /**
      * 获取当前位置的天气预报
      */
-    suspend fun fetchForecast(openWeatherMapApiKey: String?): List<WeatherForecast> {
+    suspend fun fetchForecast(openWeatherMapApiKey: String?, tencentMapKey: String? = null): List<WeatherForecast> {
         if (openWeatherMapApiKey.isNullOrBlank()) return emptyList()
 
-        var location = getIpLocation()
+        var location = getIpLocation(tencentMapKey)
         if (!location.success) {
             location = IpLocation(city = "北京", lat = 39.9042, lon = 116.4074, success = true)
         }

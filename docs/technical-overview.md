@@ -27752,14 +27752,11 @@ M44（`de2f233`，v2.39.16 代码审查）把日志行从 `forEach` 改成
 | `testDebugUnitTest` | 全绿 |
 | `lintDebug` | **0 errors** / 230 warnings（与基线一致） |
 | `assembleRelease` | 通过（v2.39.18 同版本，APK 14:02 重建） |
-| ⛔ 电视复测 | **未做成**：装机时电视已离线（`192.168.0.114:5555` 连不上；扫全网段无任何设备开 5555 ⇒ 电视关机/掉线），反复重连 10+ 次未恢复 |
+| ⛔ 电视复测 | **未做成（当时）**：装机时电视已离线（`192.168.0.114:5555` 连不上；扫全网段无任何设备开 5555 ⇒ 电视关机/掉线），反复重连 10+ 次未恢复；**2026-11-17 所有者确认已测试通过** |
 
-⇒ **待办**：电视恢复后装包复测，判据是
-「滚日志时上方的级别芯片 / 刷新清空**跟着向上滚走**，日志占满整屏」。
+✅ **复测已闭环（2026-11-17）**：所有者确认日志页滚动实测通过（判据成立：滚日志时上方级别芯片 / 刷新清空跟着向上滚走，日志占满整屏）。本节原「待办」作废。
 
-⚠️ 记录这一条是为了**别把它当成已验收**：代码与门禁都是绿的，但**「原版布局在真机上是什么样」**
-只有真机能回答。改动本身是**回退到本页原先就有的写法**（真机此前一直按它用），
-风险远低于新写一套布局，但这不等于已复测。
+⚠️ 保留当日的实测记录是为了说明**代码与门禁绿 ≠ 真机已验收**；2026-11-17 所有者复测通过后本条才真正闭合。改动本身是**回退到本页原先就有的写法**（真机此前一直按它用），风险远低于新写一套布局。
 
 ### 10.396 电视实测修正：**逐行模式歌词不跳行**（`derivedStateOf` 捕获了普通参数 ⇒ 派生值永不重算）（2026-11-12）
 
@@ -28673,3 +28670,74 @@ python scripts/gitee_release.py                      # 建 Release + 上传 APK�
 **刻意不做**：① 不向 GitHub 补推 6 个提交 / `v2.39.20` tag / Release；② 不拆 Gitee 上已存在的 Pull 镜像配置（只做脚本护栏 + 文档禁令）；③ 不改 APK 运行时代码，不升版本号；④ 私有分支 `feat/e51-private` 仍只在本地，永不 push。
 
 **验证**：PowerShell 语法解析 + `Trigger` 护栏拒绝执行 + `Verify` 只读三端比对；未执行任何写远端动作。
+
+### 10.409 IP 定位链路替换：腾讯位置服务 → ip.sb → 北京兜底（2026-11-17）
+
+> **性质**：**有代码变更**（生产 8 文件 + 测试 2 文件 + 中英 strings）。**版本号不变**，并入未发布版本。
+> 触发来源：所有者「IP 定位服务替换，找找更多国内的服务」。
+
+#### 一、为什么要换
+
+`WeatherApi.kt` 原来只走 `http://ip-api.com/json/`：免费版只提供 HTTP(80)，国内常年不可达。
+每次天气刷新先白等 3 秒，再回退北京坐标（39.9042, 116.4074），并在日志页刷 W 级错误（§10.402）。
+
+#### 二、新链路（按序、任一级成功即止）
+
+| 级 | 端点 | 凭据 | 坐标 | 备注 |
+|---|---|---|---|---|
+| 1 | `https://apis.map.qq.com/ws/location/v1/ip` | WebService key，设置页可留空 | GCJ-02 | 新 `Gcj02Converter` 近似逆变换成 WGS84 才喂 Open-Meteo；`status == 0` 才算成功 |
+| 2 | `https://api.ip.sb/geoip` | **免 key** | WGS84（直接可用） | 100 次/分钟；显式 User-Agent，避免边缘节点拦默认 OkHttp UA |
+| 3 | 旧行为 | — | 北京 | 上层兜底，不改 |
+
+- 保留原有 **30 分钟成功缓存 + 10 分钟失败冷却 + Mutex 单飞**，`getIpLocation(tencentMapKey)` 的 key 与缓存无关（结果只取决于出口 IP）。
+- 腾讯 key 与 OpenWeatherMap key 同规格：DataStore 里 **AES-GCM 加密**（新键 `weather_tencent_map_key_enc`），`@Volatile` 镜像同步读，设置页「网络 → 天气 API Key」卡新增一行（中英文案齐全）。留空即删键、直接走第 2 级。
+- Gson 数字字段用 `doubleOrNull` 兼容 number/string 两种返回；`0,0` 视作失败。
+
+#### 三、验证边界
+
+- `Gcj02ConverterTest`（4 例）：北京/上海/广州转换量、境外坐标原样返回、边界无 NaN。
+- `WeatherIpLocationGateTest`（7 例）：旧端点彻底消失、两级 HTTPS 端点、GCJ 必转换、缓存参数不变、设置链路贯穿、中英 strings、负向自证。
+- ⚠️ 本机无 JDK 17 ⇒ 本轮未跑 Gradle；门禁谓词已用离线脚本对真实文件逐条核对通过，需构建机复跑确认。
+
+### 10.410 天气电台改用服务端搜索（2026-11-17）
+
+> **性质**：**有代码变更**（1 个生产文件 + 1 个门禁）。**版本号不变**。
+
+`WeatherRadioManager.searchNasSongs` 的 TODO「等 BackendAdapter 支持 search()」已过期：
+`BackendAdapter.searchSongs(query)` 早已存在，Jellyfin / Navidrome / Subsonic / 飞牛 / 道理鱼 **5 个适配器全部实现**。
+
+- **删掉**：`getSongs(500, offset)` 循环拉满 5000 首 + 逐曲 `lowercase().contains(q)` 内存匹配。原实现下曲库超过 5000 首时尾部歌曲**永远命中不到**，且每次构建白拉 10 页。
+- **改为**：每个 mood 关键词直接 `adapter.searchSongs(q)`；客户端只做去重与限流。
+- **保留**：命中不足时的随机补齐（补齐池只取第一页 200 首，比原来 10 页更少）、结果打乱、`nas_` / `nasf_` 命中/补齐分类前缀、`moodMatchedCount` 口径。
+- ⚠️ 遗留 P3 未动：合成 id 前缀仍让收藏/播放历史与原曲 id 分裂；摘前缀要连带改分类机制，属独立专项。
+- 门禁 `WeatherRadioSearchGateTest`（4 例）锁住「用 searchSongs、无 5000 分页、无内存 contains、客户端语义不丢」。
+
+### 10.411 下载位置从假开关变成真开关（2026-11-17）
+
+> **性质**：**有代码变更**（生产 8 文件 + 1 门禁 + 中英 strings）。**版本号不变**。
+
+#### 一、根因
+
+设置页卡②有「内部 / 外部存储」两枚按钮，写 `INTERNAL`/`CUSTOM`、UI 标签也跟着变，
+`strings.xml` 还写着「换目录不会自动搬迁已下载的歌曲」——但**全仓没有任何一处读这个值决定落盘根目录**。
+四处注入（`LocalMusicRepository` 扫描、`StorageGuard` 空间判定、`DownloadPathBuilder` 落盘、`SongDownloadManager`）
+加三处硬读全部写死 `getExternalFilesDir(DIRECTORY_MUSIC)`：按「外部」只是换了标签和 DataStore 字符串。
+
+#### 二、修正
+
+- 新增唯一决策点 `DownloadRootResolver`：INTERNAL → 应用专属音乐目录；CUSTOM → 第二外置卷上的应用专属目录，
+  必须「路径不同于内置 + 已挂载 + 可写 + ≥512MB 可用」才生效，否则回落内置并节流记 W（5 分钟一条，防刷屏）。
+  空间门槛是针对创维 API 22 外置卷可能 RAM-backed 的教训。
+- `NasMusicApp` 构造一对 provider（`currentRoot` / `scanRoots`）注入全部四处；`AppPreferences` 新增 `getDownloadLocationSync()` 镜像，
+  设置改动即时生效，**不需要重建组件**。`SongDownloadManager` 的三处硬读改走 provider。
+- **切换不搬迁**：`audioPath` 是绝对路径仍可播放；`LocalMusicRepository` 同时扫内置 + 外置两个根，
+  旧下载不会从曲库消失。崩溃恢复与 `clearAll` 的空目录回收也遍历两个根。
+- UI 卡②新增「当前写入：<绝对路径>」和「这台设备没有可用的外置存储」提示，避免又变回静默假开关。
+- 门禁 `DownloadLocationGateTest`（6 例）锁住无硬读、四处共用 provider、双根扫描、同步镜像、UI 文案、负向自证。
+
+#### 三、刻意不做
+
+- 不引入 SAF `ACTION_OPEN_DOCUMENT_TREE`：外置卷用 `getExternalFilesDirs()[1]` 已是应用专属目录，
+  无需 DocumentFile 抽象；SAF 目录还需处理遥控器选目录与持久化授权，属另开一轮的产品决策。
+- 不改备份恢复口径：`downloadLocation` 本就不写回（换设备时外置卷不存在），维持原状。
+- 不自动搬迁已下载文件（现有文案已如此承诺）。

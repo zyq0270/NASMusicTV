@@ -78,6 +78,9 @@
     <string name="settings_weather_api_key_desc">当 Open-Meteo 不可用时自动切换到此 API（免费注册：openweathermap.org）</string>
     <string name="settings_weather_api_key_hint">请输入 API Key（留空=关闭）</string>
     <string name="settings_weather_api_key_edit">编辑</string>
+    <string name="settings_tencent_map_key">腾讯位置服务 Key（可选）</string>
+    <string name="settings_tencent_map_key_desc">填了就用它定位城市；留空则走免 Key 的 ip.sb，再失败回退北京</string>
+    <string name="settings_tencent_map_key_hint">请输入 WebService Key（留空=关闭）</string>
 
     <!-- Player -->
     <string name="player_play">播放</string>
@@ -289,6 +292,8 @@
     <string name="settings_pw_scale_desc">满屏会裁掉边缘，完整则上下留黑边</string>
     <string name="settings_netdisk_index_desc2">索引决定百度网盘里的音乐能否被搜到；封面提取耗时随曲数增长</string>
     <string name="settings_download_location_hint">换目录不会自动搬迁已下载的歌曲</string>
+    <string name="settings_download_location_current">当前写入：%1$s</string>
+    <string name="settings_download_location_unavailable">这台设备没有可用的外置存储，仍写入内置目录</string>
     <string name="settings_group_endpoint_risk_desc">自定义端点会直接替换官方地址，填错将无法联网</string>
     <string name="settings_group_about_desc">这里只是版本与能力信息，不可修改</string>
 

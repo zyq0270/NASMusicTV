@@ -33,6 +33,10 @@ data class DownloadSettingsState(
     val autoDownloadLimit: Int,
     val downloadLocation: String,
     val exportState: ExportState,
+    /** §10.411：当前设备上「外部存储」是否真的可用（第二挂载卷 + 可写 + 空间足够） */
+    val customAvailable: Boolean = true,
+    /** 当前实际写入根目录，让用户看到「内/外」按钮的真实结果 */
+    val resolvedRootPath: String = "",
 )
 
 /** 下载设置分区动作 */
@@ -109,6 +113,24 @@ internal fun DownloadSettingsSection(
                 // §4.5 DOWNLOAD ②：说明写"换了目录会怎样"。旧文案「外接设备导出功能可在
                 // 「我的 → 下载」中使用」已过时 —— 导出入口现在就在本页卡④里。
                 SettingsHint(stringResource(R.string.settings_download_location_hint))
+                // §10.411：把假开关变成真开关后，必须让用户看到当前真正写到哪里；
+                // 选了「外」但设备没有可用外置卷时明确告知已回落内置。
+                if (state.downloadLocation == "CUSTOM" && !state.customAvailable) {
+                    Text(
+                        text = stringResource(R.string.settings_download_location_unavailable),
+                        color = NasMusicColors.Warning,
+                        fontSize = FontSize.small(),
+                        modifier = Modifier.padding(bottom = 6.dp)
+                    )
+                }
+                if (state.resolvedRootPath.isNotBlank()) {
+                    Text(
+                        text = stringResource(R.string.settings_download_location_current, state.resolvedRootPath),
+                        color = NasMusicColors.TextSecondary,
+                        fontSize = FontSize.small(),
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+                }
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     AdjustButton(stringResource(R.string.settings_download_btn_internal), onClick = { actions.onChangeDownloadLocation?.invoke("INTERNAL") })
                     AdjustButton(stringResource(R.string.settings_download_btn_external), onClick = { actions.onChangeDownloadLocation?.invoke("CUSTOM") })

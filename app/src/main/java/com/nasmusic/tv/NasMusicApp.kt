@@ -615,15 +615,30 @@ val baiduOAuthClient: BaiduOAuthClient by lazy { BaiduOAuthClient(this, baiduOkH
         // 离线下载组件（需求 6/7/8/9/10）
         downloadRepository = com.nasmusic.tv.backend.download.DownloadRepository(this)
         val downloadDao = downloadRepository.getDao()
+
+        // §10.411：全应用唯一的下载根决策。四个注入点（曲库扫描 / 空间守护 / 落盘路径 /
+        // 崩溃恢复）共用同一对 provider；设置改动经 AppPreferences 的 @Volatile 镜像即时生效，
+        // 不需要重建组件。⛔ 不要再在下面任何一处写死 getExternalFilesDir。
+        val downloadRootProvider: () -> java.io.File = {
+            com.nasmusic.tv.backend.download.DownloadRootResolver.currentRoot(
+                this, appPreferences.getDownloadLocationSync()
+            )
+        }
+        val downloadRootsProvider: () -> List<java.io.File> = {
+            com.nasmusic.tv.backend.download.DownloadRootResolver.scanRoots(
+                this, appPreferences.getDownloadLocationSync()
+            )
+        }
+
         // 让本地曲库合并下载目录（扫描短路 MMR）与删除判定分支用
         localMusicRepository.attachDownloadSource(
             downloadDao,
-            downloadRootProvider = { getExternalFilesDir(android.os.Environment.DIRECTORY_MUSIC) }
+            downloadRootsProvider = downloadRootsProvider
         )
         storageGuard = com.nasmusic.tv.backend.download.StorageGuard(
             this,
-            // cache-inventory-exempt: 外部音乐目录的回落路径，已计入 CacheInventory 的 dir="" 条目
-            rootProvider = { getExternalFilesDir(android.os.Environment.DIRECTORY_MUSIC) ?: File(filesDir, "music") }
+            // cache-inventory-exempt: 下载根已计入 CacheInventory 的 dir="" 条目
+            rootProvider = downloadRootProvider
         )
         val downloadResolver = com.nasmusic.tv.backend.download.StreamUrlResolver(
             adapter = { backendRegistry.getAdapter() },
@@ -633,10 +648,7 @@ val baiduOAuthClient: BaiduOAuthClient by lazy { BaiduOAuthClient(this, baiduOkH
             networkDetailed = { song, q -> networkMusicManager.resolvePlayUrlDetailed(song, q) }
         )
         this.downloadResolver = downloadResolver
-        val pathBuilder = com.nasmusic.tv.backend.download.DownloadPathBuilder {
-            // cache-inventory-exempt: 外部音乐目录的回落路径，已计入 CacheInventory 的 dir="" 条目
-            getExternalFilesDir(android.os.Environment.DIRECTORY_MUSIC) ?: File(filesDir, "music")
-        }
+        val pathBuilder = com.nasmusic.tv.backend.download.DownloadPathBuilder(downloadRootProvider)
         val coverWriter = com.nasmusic.tv.backend.download.CoverFileWriter(
             baiduOkHttpClient,
             networkMusicManager,
@@ -649,6 +661,8 @@ val baiduOAuthClient: BaiduOAuthClient by lazy { BaiduOAuthClient(this, baiduOkH
             repo = downloadRepository,
             storage = storageGuard,
             paths = pathBuilder,
+            rootProvider = downloadRootProvider,
+            allRootsProvider = downloadRootsProvider,
             resolver = downloadResolver,
             tagWriter = com.nasmusic.tv.backend.download.MediaTagWriter,
             coverWriter = coverWriter,

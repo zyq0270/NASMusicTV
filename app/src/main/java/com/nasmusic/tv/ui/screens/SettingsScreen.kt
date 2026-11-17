@@ -183,6 +183,9 @@ internal fun SettingsScreen(
     // 天气 API Key 设置
     weatherApiKey: String = "",
     onChangeWeatherApiKey: ((String) -> Unit)? = null,
+    // 腾讯位置服务 key（IP 定位，可选）
+    tencentMapKey: String = "",
+    onChangeTencentMapKey: ((String) -> Unit)? = null,
     // ── T16（方案 §5.4）：网络探针状态由 MainViewModel 持有，UI 只渲染 + 发意图 ──
     isNetworkTesting: Boolean = false,
     networkTestStatus: String = "",
@@ -206,6 +209,9 @@ internal fun SettingsScreen(
     onToggleAutoDownloadOnPlay: ((Boolean) -> Unit)? = null,
     onChangeAutoDownloadLimit: ((Int) -> Unit)? = null,
     onChangeDownloadLocation: ((String) -> Unit)? = null,
+    // §10.411：下载位置真实状态（外部卷是否可用 + 当前实际写入根）
+    downloadCustomAvailable: Boolean = true,
+    downloadResolvedRootPath: String = "",
     onClearAllDownloads: (() -> Unit)? = null,
     // 下载统计信息
     downloadStats: com.nasmusic.tv.backend.download.DownloadStats = com.nasmusic.tv.backend.download.DownloadStats(),
@@ -860,6 +866,8 @@ var activeSection by remember { mutableStateOf(SettingsSection.GENERAL) }
                             autoDownloadLimit = autoDownloadLimit,
                             downloadLocation = downloadLocation,
                             exportState = exportState,
+                            customAvailable = downloadCustomAvailable,
+                            resolvedRootPath = downloadResolvedRootPath,
                         ),
                         actions = DownloadSettingsActions(
                             onToggleDownloadEnabled = onToggleDownloadEnabled,
@@ -910,6 +918,7 @@ var activeSection by remember { mutableStateOf(SettingsSection.GENERAL) }
                             lyricsKugouBaseUrl = lyricsKugouBaseUrl,
                             lyricsNeteaseBaseUrl = lyricsNeteaseBaseUrl,
                             weatherApiKey = weatherApiKey,
+                            tencentMapKey = tencentMapKey,
                             isNetworkTesting = isNetworkTesting,
                             networkTestStatus = networkTestStatus,
                         ),
@@ -919,6 +928,7 @@ var activeSection by remember { mutableStateOf(SettingsSection.GENERAL) }
                             onChangeLyricsKugouBaseUrl = onChangeLyricsKugouBaseUrl,
                             onChangeLyricsNeteaseBaseUrl = onChangeLyricsNeteaseBaseUrl,
                             onChangeWeatherApiKey = onChangeWeatherApiKey,
+                            onChangeTencentMapKey = onChangeTencentMapKey,
                             // T16：探针 I/O 已下沉 MainViewModel.runNetworkProbe()（§5.4），UI 只发意图
                             onRunNetworkTest = onRunNetworkProbe,
                         ),
@@ -1014,6 +1024,17 @@ var activeSection by remember { mutableStateOf(SettingsSection.GENERAL) }
                                     masked = true,
                                 ) { input ->
                                     onChangeWeatherApiKey?.invoke(input.trim())
+                                    endpointEditor = null
+                                }
+                            },
+                            onShowTencentMapKeyDialog = {
+                                endpointEditor = EndpointEditor(
+                                    titleRes = R.string.settings_tencent_map_key,
+                                    hintRes = R.string.settings_tencent_map_key_hint,
+                                    value = tencentMapKey,
+                                    masked = true,
+                                ) { input ->
+                                    onChangeTencentMapKey?.invoke(input.trim())
                                     endpointEditor = null
                                 }
                             },

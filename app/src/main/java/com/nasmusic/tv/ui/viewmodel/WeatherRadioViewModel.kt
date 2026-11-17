@@ -112,8 +112,10 @@ class WeatherRadioViewModel(
             _weatherError.value = null
             try {
                 val apiKey = prefs.weather.getWeatherApiKeySync()
+                val tencentKey = prefs.weather.getTencentMapKeySync().ifBlank { null }
                 val weather = weatherApi.fetchCurrentWeather(
-                    openWeatherMapApiKey = apiKey.ifBlank { null }
+                    openWeatherMapApiKey = apiKey.ifBlank { null },
+                    tencentMapKey = tencentKey
                 )
                 if (weather != null) {
                     _weatherData.value = weather
@@ -122,7 +124,7 @@ class WeatherRadioViewModel(
 
                     // 获取天气预报（需要 API Key）
                     if (apiKey.isNotBlank()) {
-                        val forecast = weatherApi.fetchForecast(apiKey.ifBlank { null })
+                        val forecast = weatherApi.fetchForecast(apiKey.ifBlank { null }, tencentKey)
                         _weatherForecast.value = forecast
                     }
 

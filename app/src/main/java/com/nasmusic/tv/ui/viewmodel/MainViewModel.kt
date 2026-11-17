@@ -4236,6 +4236,11 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
         prefs.weather.setWeatherApiKey(key.trim())
     }
 
+    /** 更新腾讯位置服务 key（§10.409）：留空 ⇒ 删除键，IP 定位走 ip.sb */
+    fun updateTencentMapKey(key: String) = viewModelScope.launch {
+        prefs.weather.setTencentMapKey(key.trim())
+    }
+
     // ===================== T16（方案 §5.4）：网络连通性探针 =====================
     // 从 SettingsScreen 的 onRunNetworkTest 内联 lambda 下沉（原为 UI 层持有
     // HttpURLConnection I/O，且 rememberCoroutineScope 会让离开设置页的探针被取消）。
@@ -4358,6 +4363,20 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
 
     fun updateDownloadLocation(location: String) = viewModelScope.launch {
         prefs.download.setDownloadLocation(location)
+    }
+
+    /**
+     * §10.411：设置页展示「外置卷是否可用 / 当前实际写入根」。
+     *
+     * 不用 DataStore Flow 直接算：外置卷挂载状态不是持久化设置，重组时现查即可；
+     * 调用方用 remember(settings.downloadLocation) 缓存，避免每次重组做 StatFs。
+     * @return Pair(外部存储可用, 当前根目录绝对路径)
+     */
+    fun downloadRootInfo(): Pair<Boolean, String> {
+        val app = getApplication<android.app.Application>()
+        val resolver = com.nasmusic.tv.backend.download.DownloadRootResolver
+        val location = prefs.getDownloadLocationSync()
+        return resolver.isCustomAvailable(app) to resolver.currentRoot(app, location).absolutePath
     }
 
     fun updateFontAdjustment(adjustment: Int) = viewModelScope.launch {
