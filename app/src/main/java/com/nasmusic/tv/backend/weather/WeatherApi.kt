@@ -14,7 +14,14 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import java.security.KeyStore
+import java.security.cert.CertificateException
+import java.security.cert.CertificateFactory
+import java.security.cert.X509Certificate
 import java.util.concurrent.TimeUnit
+import javax.net.ssl.SSLContext
+import javax.net.ssl.TrustManagerFactory
+import javax.net.ssl.X509TrustManager
 
 /**
  * 天气 API 封装
@@ -30,10 +37,26 @@ import java.util.concurrent.TimeUnit
  */
 class WeatherApi(private val context: android.content.Context) {
 
-    private val client = OkHttpClient.Builder()
-        .connectTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(10, TimeUnit.SECONDS)
-        .build()
+    /**
+     * §10.399：天气请求专用 OkHttpClient。
+     *
+     * 老电视（Android 5.1 / API 22）的系统 CA 库缺 ISRG Root X1（Let's Encrypt 根证书，
+     * 2021 年才进入主流系统信任库），Open-Meteo 的证书由 ISRG Root X1 签发 ⇒ 校验失败。
+     * 这里内嵌 ISRG Root X1 作为**附加**信任锚（与系统 CA 并集，只增不放宽）。
+     *
+     * ⚠️ 用 lazy：证书从 assets 读取，避免类初始化期做 I/O。
+     */
+    private val client: OkHttpClient by lazy {
+        val trustManager = createTrustManagerWithIsrgRootX1()
+        val sslContext = SSLContext.getInstance("TLS").apply {
+            init(null, arrayOf(trustManager), null)
+        }
+        OkHttpClient.Builder()
+            .connectTimeout(10, TimeUnit.SECONDS)
+            .readTimeout(10, TimeUnit.SECONDS)
+            .sslSocketFactory(sslContext.socketFactory, trustManager)
+            .build()
+    }
 
     private val gson = Gson()
 
@@ -43,10 +66,73 @@ class WeatherApi(private val context: android.content.Context) {
      * `ip-api.com` 免费版只提供 HTTP(80)，国内网络常年连不上；它是**可选增强**，
      * 失败已有「回退北京坐标」兜底 ⇒ 不值得让每次天气刷新先白等 10 秒。
      */
-    private val ipLocationClient = client.newBuilder()
-        .connectTimeout(IP_CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-        .readTimeout(IP_CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-        .build()
+    private val ipLocationClient: OkHttpClient by lazy {
+        client.newBuilder()
+            .connectTimeout(IP_CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            .readTimeout(IP_CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            .build()
+    }
+
+    /**
+     * 构造一个「系统默认 CA + 内嵌 ISRG Root X1」的**并集**信任管理器。
+     *
+     * 校验逻辑：先用系统默认 TrustManager 校验；失败时**追加**用 ISRG Root X1 再校验一次。
+     * ⛔ 绝不做「信任所有证书」：系统 CA 仍然参与校验，只是多了一个老系统缺的根证书。
+     * ⛔ 不放宽主机名校验（`sslSocketFactory` 不配 `hostnameVerifier`，OkHttp 默认严格校验）。
+     */
+    private fun createTrustManagerWithIsrgRootX1(): X509TrustManager {
+        // 1) 系统默认 TrustManager
+        val defaultFactory = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm())
+        defaultFactory.init(null as KeyStore?)
+        val defaultTm = defaultFactory.trustManagers
+            .filterIsInstance<X509TrustManager>()
+            .firstOrNull()
+            ?: throw IllegalStateException("no default X509TrustManager")
+
+        // 2) 只含 ISRG Root X1 的 TrustManager
+        val isrgCert = loadIsrgRootX1()
+        val isrgKeyStore = KeyStore.getInstance(KeyStore.getDefaultType()).apply {
+            load(null, null)
+            setCertificateEntry("isrg-root-x1", isrgCert)
+        }
+        val isrgFactory = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm())
+        isrgFactory.init(isrgKeyStore)
+        val isrgTm = isrgFactory.trustManagers
+            .filterIsInstance<X509TrustManager>()
+            .firstOrNull()
+            ?: throw IllegalStateException("no ISRG X509TrustManager")
+
+        return object : X509TrustManager {
+            override fun checkClientTrusted(chain: Array<out X509Certificate>?, authType: String?) {
+                defaultTm.checkClientTrusted(chain, authType)
+            }
+
+            override fun checkServerTrusted(chain: Array<out X509Certificate>?, authType: String?) {
+                try {
+                    // 先走系统默认校验：正常设备（Android 7+）第一条就通过，
+                    // 老电视（缺 ISRG Root X1）抛 CertificateException 后落入下面的追加校验。
+                    defaultTm.checkServerTrusted(chain, authType)
+                } catch (e: CertificateException) {
+                    isrgTm.checkServerTrusted(chain, authType)
+                }
+            }
+
+            override fun getAcceptedIssuers(): Array<X509Certificate> =
+                defaultTm.acceptedIssuers + isrgTm.acceptedIssuers
+        }
+    }
+
+    /** 从 assets 读取内嵌的 ISRG Root X1 证书。 */
+    private fun loadIsrgRootX1(): X509Certificate {
+        val pem = context.assets.open("isrg-root-x1.pem").use { it.readBytes().toString(Charsets.UTF_8) }
+        val base64 = pem
+            .replace("-----BEGIN CERTIFICATE-----", "")
+            .replace("-----END CERTIFICATE-----", "")
+            .replace("\\s".toRegex(), "")
+        val der = android.util.Base64.decode(base64, android.util.Base64.DEFAULT)
+        return CertificateFactory.getInstance("X.509")
+            .generateCertificate(der.inputStream()) as X509Certificate
+    }
 
     // IP 定位结果缓存 + 失败冷却：成功缓存 30 分钟，失败冷却 10 分钟。
     // 避免 fetchCurrentWeather / fetchForecast 各自发一次必然超时的请求、并刷两条长堆栈。
