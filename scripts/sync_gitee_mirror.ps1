@@ -1,63 +1,68 @@
 ﻿<#
 .SYNOPSIS
-    Gitee 官方「仓库镜像管理」（Pull 方向）的配置 / 触发 / 校验工具。
+    Gitee 主仓库发布 / 校验工具（GitHub 暂时冻结，不再作为同步源）。
 
 .DESCRIPTION
-    机制：Gitee 仓库后台配置 Pull 方向镜像（GitHub → Gitee），平时不自动同步；
-    需要同步时，用本脚本发一条 API 指令让 Gitee 去 GitHub 拉一次。
+    ⭐ 所有者 2026-11-17 裁决：以后以 Gitee 为主，暂时不推 GitHub。
+      · 代码与 Release 的权威源：Gitee 上的 hxzhang2000/NASMusicTV
+      · 本地 main 是工作副本；发布走 PublishLocal（本地 main + 可达标签 → Gitee）
+      · GitHub 冻结：不 push / 不 tag / 不 release
+      · ⛔ 不要点 Gitee 网页的「更新导入」：那会用较旧的 GitHub 内容覆盖 Gitee
+      · 旧的 GitHub → Gitee 覆盖动作（Trigger / CreateMirror / Push）默认被护栏挡住，
+        只有所有者明确裁定恢复镜像时显式传 -AllowLegacyGitHubSync 才可执行
 
-    触发接口（实测：GET 会 404，必须 POST）：
-        POST https://gitee.com/api/v5/repos/:owner/:repo/remote_mirror/pull?access_token=:Gitee私人令牌
-
-    四个动作：
-        Trigger      触发一次同步（需要 Gitee 令牌）
-        Status       查镜像配置与最近同步状态（需要 Gitee 令牌）
-        Verify       比对 GitHub / Gitee 两端 main 的提交号（不需要令牌）
-        CreateMirror 用 API 直接创建 Pull 镜像配置（**不需要绑定 GitHub 账号**）
-
-    CreateMirror 说明：
-        Gitee 网页端「添加镜像」要靠 OAuth 绑定 GitHub 账号来填仓库下拉框；
-        若 GitHub 账号被 flagged（提示 "This account is flagged, and therefore cannot
-        authorize a third party application"），这一步走不通。
-        但 Gitee 的建配置路由本身是开放的（POST /api/v5/repos/:owner/:repo/remote_mirror），
-        且该端点未收录在公开 OpenAPI 里 ⇒ 参数名靠实测。
-        本动作用几组候选参数依次试，打印 Gitee 的原始响应，命中即停。
+    动作：
+        Verify        默认。只读比对 Gitee / GitHub / 本地 main 的提交号
+        PublishLocal  把本地 main + 可达标签推到 Gitee（唯一发布动作，需 Gitee 令牌）
+        Status        只读查询旧 Pull 镜像配置（仅诊断）
+        CheckToken    只读验证 GitHub 令牌（遗留诊断，不参与发布）
+        Trigger       遗留：触发 Gitee 从 GitHub 拉取（默认拒绝）
+        CreateMirror  遗留：创建 GitHub → Gitee 镜像配置（默认拒绝）
+        Push          遗留：从 GitHub 拉再推 Gitee（默认拒绝）
 
     令牌：
         Gitee 私人令牌 → 用户头像 → 设置 → 私人令牌 → 勾选 `projects` 权限。
-        GitHub 私人令牌（可选，公开仓库免凭据）→ classic PAT，勾 `repo`。
+        GitHub 令牌仅用于遗留诊断（classic PAT，勾 `repo`）。
+
     用法：
+        .\scripts\sync_gitee_mirror.ps1                          # Verify（只读，无副作用）
         $env:GITEE_TOKEN = 'Gitee令牌'
-        $env:GITHUB_TOKEN = 'GitHub令牌'   # 可选
-        .\scripts\sync_gitee_mirror.ps1 -Action CreateMirror
-        .\scripts\sync_gitee_mirror.ps1                 # 触发一次同步
-        .\scripts\sync_gitee_mirror.ps1 -Action Status  # 查镜像配置与最近状态
-        .\scripts\sync_gitee_mirror.ps1 -Action Verify  # 比对两端 main 是否一致
+        .\scripts\sync_gitee_mirror.ps1 -Action PublishLocal     # 发布本地 main 到 Gitee
 
     平台侧约束（Gitee 官方口径）：
-      · 镜像最短更新间隔 5 分钟；更新请求一旦发出无法中断；
-      · 镜像操作会**覆盖**目标仓库的分支、标签和提交记录 ⇒ Gitee 侧只作镜像，别在那边提交；
+      · 镜像操作会覆盖目标仓库的分支、标签和提交记录 ⇒ 这正是默认禁止旧镜像动作的原因；
       · 不支持 Git-LFS；单次同步超 30 分钟视为超时；连续 5 次失败会强制停止。
 
 .PARAMETER Action
-    Trigger（默认）= 触发一次同步；Status = 查镜像配置；Verify = 比对两端 main；
-    CreateMirror = 用 API 创建 Pull 镜像配置。
+    Verify（默认）/ PublishLocal / Status / CheckToken / Trigger / CreateMirror / Push
+
+.PARAMETER AllowLegacyGitHubSync
+    显式解除旧镜像动作护栏。⛔ 仅在所有者裁定恢复「GitHub → Gitee」时使用。
 
 .EXAMPLE
-    $env:GITEE_TOKEN = 'xxx'; .\scripts\sync_gitee_mirror.ps1
+    .\scripts\sync_gitee_mirror.ps1
+.EXAMPLE
+    $env:GITEE_TOKEN = 'xxx'; .\scripts\sync_gitee_mirror.ps1 -Action PublishLocal
 #>
 param(
-    [ValidateSet('Trigger', 'Status', 'Verify', 'CreateMirror', 'CheckToken', 'Push')]
-    [string] $Action = 'Trigger',
+    [ValidateSet('Verify', 'PublishLocal', 'Status', 'CheckToken', 'Trigger', 'CreateMirror', 'Push')]
+    [string] $Action = 'Verify',
     [string] $GiteeOwner = 'hxzhang2000',
     [string] $GiteeRepo = 'NASMusicTV',
     [string] $GitHubOwner = 'hxzhang2000',
     [string] $GitHubRepo = 'NASMusicTV',
     [string] $GitHubToken = $env:GITHUB_TOKEN,
-    [string] $Token = $env:GITEE_TOKEN
+    [string] $Token = $env:GITEE_TOKEN,
+    [switch] $AllowLegacyGitHubSync
 )
 
 $ErrorActionPreference = 'Stop'
+
+# ⭐ 2026-11-17 护栏：Gitee 为主、GitHub 冻结。这三类动作会用 GitHub 的旧内容覆盖 Gitee，
+# 默认一律拒绝；只在所有者明确裁定恢复镜像时显式传 -AllowLegacyGitHubSync 才放行。
+if (-not $AllowLegacyGitHubSync -and @('Trigger', 'CreateMirror', 'Push') -contains $Action) {
+    throw "策略护栏（2026-11-17）：Gitee 为主、GitHub 冻结，禁止 $Action 这类 GitHub → Gitee 覆盖动作。若确需恢复旧镜像，先取得所有者裁定，再显式传 -AllowLegacyGitHubSync。"
+}
 
 # 本机装了失效的系统级代理残留，显式置空，避免 .NET HTTP 走代理导致连不上 gitee.com
 try { [System.Net.WebRequest]::DefaultWebProxy = $null } catch { }
@@ -170,7 +175,7 @@ switch ($Action) {
         try {
             $res = Invoke-GiteeApi -Method 'GET' -Path '/remote_mirror'
             $res | ConvertTo-Json -Depth 8 | Write-Host
-            Write-Host "==> 若这里看不到 Pull 方向的镜像，说明后台还没配置（可用 -Action CreateMirror 直接用 API 建）"
+            Write-Host "==> 若这里看得到 Pull 方向镜像，⛔ 不要点 Gitee 网页的「更新导入」/「同步」：会用 GitHub 的旧提交覆盖 Gitee。详情见 docs/gitee-mirror-setup.md。"
         } catch {
             Write-Host $_.Exception.Message
             exit 1
@@ -178,10 +183,12 @@ switch ($Action) {
     }
 
     'Verify' {
-        Write-Host ">> 比对两端 main 的提交号（不需要令牌）"
+        Write-Host ">> 只读比对：Gitee / GitHub / 本地 main 的提交号（不需要令牌）"
         # 本机 git 全局代理指向死端口（127.0.0.1:31180），必须清空代理走直连
         $gitCommon = @('-c', 'http.proxy=', '-c', 'https.proxy=')
 
+        $localRef = Invoke-GitRetry ($gitCommon + @('rev-parse', 'HEAD'))
+        $localSha = if ($localRef.ok) { $localRef.out.Trim() } else { '(读取失败)' }
         $r1 = Invoke-GitRetry ($gitCommon + @('ls-remote', "https://github.com/$GitHubOwner/$GitHubRepo.git", 'refs/heads/main'))
         if (-not $r1.ok) { Write-Host "GitHub 端读取失败（链路问题，不是仓库问题）：$($r1.out.Trim())"; exit 1 }
         $r2 = Invoke-GitRetry ($gitCommon + @('ls-remote', "https://gitee.com/$GiteeOwner/$GiteeRepo.git", 'refs/heads/main'))
@@ -189,14 +196,61 @@ switch ($Action) {
 
         $ghSha = ($r1.out -split '\s+')[0]
         $gtSha = ($r2.out -split '\s+')[0]
-        Write-Host "   GitHub main: $ghSha"
-        Write-Host "   Gitee  main: $gtSha"
+        Write-Host "   本地 main: $localSha"
+        Write-Host "   GitHub   : $ghSha"
+        Write-Host "   Gitee    : $gtSha"
         if ($ghSha -eq $gtSha) {
-            Write-Host "==> 一致：Gitee 镜像已与 GitHub 对齐"
+            Write-Host "==> 两端一致（当前状态，仅供参考；Gitee 为主，不因此触发任何同步）"
+        } elseif ($localSha -eq $gtSha) {
+            Write-Host "==> 预期状态：Gitee 与本地一致，GitHub 落后 ⇒ 按 2026-11-17 裁定不再推 GitHub。"
         } else {
-            Write-Host "==> 不一致：Gitee 端还没同步到最新"
-            Write-Host "    → 执行 .\scripts\sync_gitee_mirror.ps1 触发一次同步，等待几分钟后重跑本检查"
+            Write-Host "==> 本地 / Gitee 不一致，或 GitHub 意外领先。"
+            Write-Host "    → 若本地领先：用 -Action PublishLocal 把本地推到 Gitee；"
+            Write-Host "    → 若 Gitee 领先：git fetch gitee 后以 Gitee 为准处理本地；"
+            Write-Host "    ⛔ 不要用镜像 / 「更新导入」把 GitHub 的内容覆盖到 Gitee。"
         }
+    }
+
+    'PublishLocal' {
+        # ⭐ Gitee 为主时代的唯一发布动作：本地 main + 可达标签 → Gitee，全程不碰 GitHub。
+        if ([string]::IsNullOrWhiteSpace($Token)) {
+            throw "缺少 Gitee 私人令牌：先设 `$env:GITEE_TOKEN = '你的令牌'，或用 -Token 传入（Gitee → 用户头像 → 设置 → 私人令牌 → 勾选 `projects` 权限）。"
+        }
+        $repoRoot = Split-Path -Parent $PSScriptRoot
+        Set-Location $repoRoot
+        $gitCommon = @('-c', 'http.proxy=', '-c', 'https.proxy=')
+
+        $localRef = Invoke-GitRetry ($gitCommon + @('rev-parse', 'HEAD'))
+        if (-not $localRef.ok) { Write-Host "==> 读取本地 HEAD 失败"; exit 1 }
+        $localSha = $localRef.out.Trim()
+
+        $remoteUrl = "https://gitee.com/$GiteeOwner/$GiteeRepo.git"
+        if ((& git remote) -contains 'gitee') {
+            & git remote set-url gitee $remoteUrl
+        } else {
+            & git remote add gitee $remoteUrl
+        }
+        # 令牌走 extraheader，不写进 remote URL
+        $auth = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("${GiteeOwner}:$Token"))
+        $gitPush = @('-c', 'http.proxy=', '-c', 'https.proxy=', '-c', "http.https://gitee.com/.extraheader=AUTHORIZATION: basic $auth")
+
+        Write-Host ">> 发布本地 main ($localSha) 到 Gitee"
+        & git @gitPush push gitee "HEAD:refs/heads/main"
+        if ($LASTEXITCODE -ne 0) { Write-Host "==> 分支推送失败（见 git 原始报错）；未推标签，未改 GitHub。"; exit 1 }
+
+        $tagRefs = @(& git tag --merged HEAD --format='%(refname)' | Where-Object { $_ })
+        if ($tagRefs.Count -gt 0) {
+            Write-Host ">> 推送 $($tagRefs.Count) 个可从 HEAD 到达的标签"
+            $specs = @()
+            foreach ($t in $tagRefs) { $specs += "$($t):$($t)" }
+            & git @gitPush push gitee @specs
+            if ($LASTEXITCODE -ne 0) { Write-Host "==> 标签推送失败（分支已成功，见 git 原始报错）"; exit 1 }
+        }
+
+        Write-Host ">> 回读 Gitee 端 main 校验"
+        & git @gitPush ls-remote gitee 'refs/heads/main'
+        if ($LASTEXITCODE -ne 0) { Write-Host "==> 回读校验失败"; exit 1 }
+        Write-Host "==> 发布完成：https://gitee.com/$GiteeOwner/$GiteeRepo （GitHub 未被触碰）"
     }
 
     'CheckToken' {

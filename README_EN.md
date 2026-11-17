@@ -4,7 +4,7 @@
 
 An open-source Android music player (works on TV / phone / tablet alike): aggregates NAS (Jellyfin / Navidrome / Subsonic / Daoliyu / FNOS), online music, Baidu Netdisk, and local music into one library, with per-character karaoke lyrics, K-song backing tracks, MTV music videos, weather radio, and other TV-first experiences. A single APK adapts to both TV (remote control) and phone (touchscreen).
 
-[![Release](https://img.shields.io/github/v/release/hxzhang2000/NASMusicTV?color=blue&label=Release)](https://github.com/hxzhang2000/NASMusicTV/releases)
+[![Gitee Release](https://img.shields.io/badge/Gitee-Release-blue)](https://gitee.com/hxzhang2000/NASMusicTV/releases)
 
 Product homepage: https://zd7gxll02-nasmusictv-10j3m3sd.maozi.io/
 
@@ -78,7 +78,7 @@ Product homepage: https://zd7gxll02-nasmusictv-10j3m3sd.maozi.io/
 
 **Requirements**: Android 5.1 (API 22) or later; one APK for TV / phone / tablet. The app detects the device type at runtime — TV uses the remote focus system, phone uses touch interaction. Older ARMv7 TVs are supported too, with high-load effects automatically downgraded.
 
-**Download**: `app-release.apk` from the [Releases](https://github.com/hxzhang2000/NASMusicTV/releases) page.
+**Download**: `NASMusicTV-release-v*.apk` (e.g. `NASMusicTV-release-v2-39-20.apk`) from [Gitee Releases](https://gitee.com/hxzhang2000/NASMusicTV/releases). The GitHub repository has been frozen since 2026-11-17 and no longer receives releases.
 
 **Install on TV**: copy the APK to a USB drive and install with a file manager; or install wirelessly via adb:
 

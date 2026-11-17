@@ -4,7 +4,7 @@
 
 一款开源的 Android 音乐播放器（TV / 手机 / 平板通用）：聚合 NAS（Jellyfin / Navidrome / Subsonic / 道理鱼 / 飞牛）、网络音乐、百度网盘、本地音乐等多音乐源，支持逐字卡拉OK歌词、K 歌伴奏、MTV 音乐视频、天气电台等电视专属体验。同一 APK 同时适配电视（遥控器）与手机（触屏）。
 
-[![Release](https://img.shields.io/github/v/release/hxzhang2000/NASMusicTV?color=blue&label=Release)](https://github.com/hxzhang2000/NASMusicTV/releases)
+[![Gitee Release](https://img.shields.io/badge/Gitee-Release-blue)](https://gitee.com/hxzhang2000/NASMusicTV/releases)
 
 产品主页：https://zd7gxll02-nasmusictv-10j3m3sd.maozi.io/
 
@@ -79,7 +79,7 @@
 
 **系统要求**：Android 5.1（API 22）及以上，电视 / 手机 / 平板通用。同一 APK 自动识别设备类型——电视走遥控器焦点体系，手机走触屏交互。搭载 ARMv7 的老电视同样可以安装，高负载特效会自动降级。
 
-**下载地址**：[Releases](https://github.com/hxzhang2000/NASMusicTV/releases) 页的 `app-release.apk`。
+**下载地址**：[Gitee Releases](https://gitee.com/hxzhang2000/NASMusicTV/releases) 页的 `NASMusicTV-release-v*.apk`（如 v2.39.20 为 `NASMusicTV-release-v2-39-20.apk`）。GitHub 仓库自 2026-11-17 起冻结，不再更新 Release。
 
 **安装到电视**：U 盘拷贝 APK 后用文件管理器安装；或通过 adb 无线安装：
 

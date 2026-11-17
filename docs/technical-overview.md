@@ -28637,3 +28637,39 @@ Compose dp = Android dp / 0.82
 **实测状态（2026-11-16）**：Gitee `hxzhang2000/NASMusicTV` 已存在且为公开仓库；`scripts/sync_gitee_mirror.ps1 -Action Verify` 输出「一致」，两端 `main` 同为 `f83df51`。触发接口用占位令牌实测返回 `401 Unauthorized: Access token does not exist`，脚本已把该错误映射为可操作的提示（检查令牌 `projects` 权限与有效期）。
 
 **影响面**：属仓库基建，不改 APK 行为，不改运行时逻辑。版本号按「上一版已 push + tag ⇒ 升版本」口径进 v2.39.19（versionCode 204）。
+
+### 10.408 仓库基建裁决：以 Gitee 为主，GitHub 冻结（2026-11-17）
+
+**所有者裁定**：以后以 Gitee 为主，暂时不推 GitHub。GitHub 仓库作为历史归档冻结（不 push / 不 tag / 不 release）；权威源 = Gitee `hxzhang2000/NASMusicTV`。
+
+**裁决依据（2026-11-17 实测）**：
+
+| 项 | 实测 | 结论 |
+|---|---|---|
+| `gitee/main` | `a0d47c8`（= 本地 HEAD） | Gitee 已含 v2.39.18~v2.39.20 全部改动 |
+| `origin/main` | `f83df51` | GitHub 落后 6 个提交 |
+| Gitee tag / Release | `v2.39.20` + Release（11-17 15:15 创建），含 `NASMusicTV-release-v2-39-20.apk` 与源码归档 | 国内用户已有可用发行版 |
+| GitHub tag / Release | 最新 tag 仍 `v2.39.7`；Releases API 返回 0 | GitHub 侧发行版缺失 |
+
+⇒ 若仍按 §10.407 的「GitHub → Gitee Pull 镜像」触发一次 `Trigger`，会用 `f83df51` **覆盖** Gitee 上较新的 6 个提交与 `v2.39.20` 关联状态；这是**数据损失级**操作，必须默认禁止。
+
+**改动**：
+
+| 文件 | 内容 |
+|---|---|
+| `scripts/sync_gitee_mirror.ps1` | ① 默认 `Action` 由 `Trigger` 改为 **`Verify`**（只读）；② `Trigger` / `CreateMirror` / `Push` 三个 GitHub → Gitee 覆盖动作加硬护栏，未显式传 `-AllowLegacyGitHubSync` 直接抛错；③ 新增 **`PublishLocal`**：本地 `HEAD` + 可达标签 → `gitee/main`，全程不碰 GitHub，令牌走 `Authorization` 头；④ `Verify` 打印本地 / GitHub / Gitee 三端 SHA，Gitee==本地且 GitHub 落后明确判为**预期状态**；⑤ `Status` 提示即使看到旧镜像配置也不要点 Gitee 网页「更新导入」 |
+| `docs/gitee-mirror-setup.md` | 全文重写为「Gitee 主仓库发布与校验指引」：日常流程、发版（`gitee_release.py`）、禁止旧镜像的事实依据、遗留只读诊断、令牌权限、边界 |
+| `README.md` / `README_EN.md` | 下载入口与 Badge 从 GitHub Releases 改为 Gitee Releases；APK 文件名改为实际命名 `NASMusicTV-release-v*.apk` |
+
+**发布流程（唯一推荐）**：
+
+```powershell
+.\scripts\sync_gitee_mirror.ps1                      # Verify：三端 SHA 只读比对
+$env:GITEE_TOKEN = '你的令牌'
+.\scripts\sync_gitee_mirror.ps1 -Action PublishLocal  # 本地 main + 标签 → Gitee
+python scripts/gitee_release.py                      # 建 Release + 上传 APK（Gitee）
+```
+
+**刻意不做**：① 不向 GitHub 补推 6 个提交 / `v2.39.20` tag / Release；② 不拆 Gitee 上已存在的 Pull 镜像配置（只做脚本护栏 + 文档禁令）；③ 不改 APK 运行时代码，不升版本号；④ 私有分支 `feat/e51-private` 仍只在本地，永不 push。
+
+**验证**：PowerShell 语法解析 + `Trigger` 护栏拒绝执行 + `Verify` 只读三端比对；未执行任何写远端动作。
