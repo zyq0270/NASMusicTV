@@ -39,6 +39,11 @@ REPO_URL = "https://gitee.com/hxzhang2000/NASMusicTV.git"
 
 
 def log(msg: str) -> None:
+    # GBK 控制台（Windows 中文默认）无法编码 emoji/部分字符，强制 stdout 用 UTF-8
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
     print(msg, flush=True)
 
 
