@@ -169,7 +169,7 @@ class NetworkMusicManager(
                 AppLog.d("MetingDiag", "search '$keyword' error on source=${svc.sourceId}: ${e.message}", e)
             }
         }
-        AppLog.w("MetingDiag", "search '$keyword' no results from any source")
+        AppLog.wThrottled("MetingDiag", "search '$keyword' no results from any source")
         emptyList()
     }
 

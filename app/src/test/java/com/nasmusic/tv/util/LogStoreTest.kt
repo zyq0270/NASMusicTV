@@ -363,4 +363,191 @@ class LogStoreTest {
         assertEquals(1, entries.size)
         assertTrue("护栏空转：完整文件被误判成截断", !entries[0].truncated)
     }
+
+    // ───────────────────── §10.401 分级配额轮转 ─────────────────────
+
+    /**
+     * §10.401：高频 W 级噪音不得把 E 级崩溃现场挤出保留窗口。
+     * 写入大量 W 级 + 少量 E 级，触发轮转后 E 级必须全部保留。
+     */
+    @Test
+    fun `分级配额 高频W噪音不得挤掉E级崩溃现场`() {
+        // 用较长的行减少写入次数（fd.sync 是主要耗时），同时保证触发多次轮转
+        val payload = "x".repeat(600)
+        // 阶段 1：写入大量 W 级噪音，触发多次轮转
+        repeat(600) { i ->
+            LogStore.appendBlocking(LogStore.LEVEL_WARN, "NOISE", "$i-$payload", null)
+        }
+        // 阶段 2：写入 E 级崩溃现场
+        repeat(50) { i ->
+            LogStore.appendBlocking(LogStore.LEVEL_ERROR, "CRASH", "crash-$i", null)
+        }
+        // 诊断：写入 E 级后，文件中应能读到 50 条 E 级
+        val afterE = LogStore.snapshot(limit = LogStore.KEEP_LINES).entries
+        val eCountBefore = afterE.filter { it.level == LogStore.LEVEL_ERROR }.size
+        assertEquals(
+            "写入 E 级后应能看到 50 条 E 级（实际 ${eCountBefore} 条）",
+            50,
+            eCountBefore,
+        )
+        // 阶段 3：再刷一批 W 级把文件推过上限、触发多次轮转
+        repeat(600) { i ->
+            LogStore.appendBlocking(LogStore.LEVEL_WARN, "NOISE2", "$i-$payload", null)
+        }
+        // 诊断：rotate 必须把文件压回上限内（否则说明 rotate 未生效）
+        val size = LogStore.fileSizeBytes()
+        assertTrue(
+            "阶段3后文件必须 <= MAX_BYTES（实际 $size）——超过说明 rotate 未生效",
+            size <= LogStore.MAX_BYTES,
+        )
+        val entries = LogStore.snapshot(limit = LogStore.KEEP_LINES).entries
+        val errors = entries.filter { it.level == LogStore.LEVEL_ERROR }
+        assertEquals(
+            "E 级崩溃现场不得被 W 级噪音挤掉（实际保留 ${errors.size} 条）",
+            50,
+            errors.size,
+        )
+        assertTrue(
+            "最新 E 级必须在窗口内",
+            errors.any { it.message == "crash-49" },
+        )
+    }
+
+    /**
+     * §10.401：分级配额语义——E 独立、W/X 合占、D/I 独立。
+     *
+     * ⚠️ 不能靠「写 4000 条 W 后立刻断言 W ≤ 配额」来测：rotate 只在文件超过
+     * [LogStore.MAX_BYTES] 时才触发，两次 rotate 之间新写入的 W 会累积，
+     * 断言「任意时刻 W ≤ 200」必然失败。这里改为**确定性构造一个已超限的文件**，
+     * 再追加一条触发 rotate，然后验证各桶配额。
+     */
+    @Test
+    fun `分级配额 W与X合占配额 D与I不占配额`() {
+        val file = File(File(root, "logs"), "app.log")
+        file.parentFile?.mkdirs()
+        val sb = StringBuilder()
+        // 构造远超 256KB 的混合级别文件：3000 W + 300 X + 300 D + 300 E
+        repeat(3000) { i ->
+            sb.append(LogStore.encode(LogStore.LEVEL_WARN, "W", "w-$i-${"x".repeat(100)}", null)).append('\n')
+        }
+        repeat(300) { i ->
+            sb.append(LogStore.encode(LogStore.LEVEL_DIAG, "X", "x-$i", null)).append('\n')
+        }
+        repeat(300) { i ->
+            sb.append(LogStore.encode(LogStore.LEVEL_DEBUG, "D", "d-$i", null)).append('\n')
+        }
+        repeat(300) { i ->
+            sb.append(LogStore.encode(LogStore.LEVEL_ERROR, "E", "e-$i", null)).append('\n')
+        }
+        file.writeText(sb.toString(), Charsets.UTF_8)
+        assertTrue("构造的文件必须超过 MAX_BYTES 才能触发 rotate", file.length() > LogStore.MAX_BYTES)
+
+        // 追加一条 W 触发 rotate（writeLine 写完后检查大小并 rotate）
+        LogStore.appendBlocking(LogStore.LEVEL_WARN, "W", "trigger-${"x".repeat(100)}", null)
+
+        val entries = LogStore.snapshot(limit = LogStore.KEEP_LINES).entries
+        val errors = entries.filter { it.level == LogStore.LEVEL_ERROR }
+        val warns = entries.filter { it.level == LogStore.LEVEL_WARN }
+        val diags = entries.filter { it.level == LogStore.LEVEL_DIAG }
+        val debugs = entries.filter { it.level == LogStore.LEVEL_DEBUG }
+
+        assertTrue(
+            "E 级独立配额：保留应 ≤ ERROR_KEEP_LINES（实际 ${errors.size}）",
+            errors.size <= LogStore.ERROR_KEEP_LINES,
+        )
+        assertTrue(
+            "W/X 合占配额：保留应 ≤ WARN_KEEP_LINES（实际 ${warns.size + diags.size}）",
+            (warns.size + diags.size) <= LogStore.WARN_KEEP_LINES,
+        )
+        assertTrue(
+            "D/I 独立配额：保留应 ≤ DIAG_KEEP_LINES（实际 ${debugs.size}）",
+            debugs.size <= LogStore.DIAG_KEEP_LINES,
+        )
+        // 三桶都有保留 ⇒ 配额不是把某一类全丢弃
+        assertTrue("E 级必须被保留（不能被 W 挤掉）", errors.isNotEmpty())
+        assertTrue("W/X 级必须被保留", warns.isNotEmpty() || diags.isNotEmpty())
+        assertTrue("D 级必须被保留", debugs.isNotEmpty())
+    }
+
+    /** §10.401 负向自证：配额常量必须合理。 */
+    @Test
+    fun `分级配额常量必须合理`() {
+        assertTrue("E 级配额必须为正", LogStore.ERROR_KEEP_LINES > 0)
+        assertTrue("W/X 配额必须为正", LogStore.WARN_KEEP_LINES > 0)
+        assertTrue("D/I 配额必须为正", LogStore.DIAG_KEEP_LINES > 0)
+        assertEquals(
+            "总配额 = 三级之和",
+            LogStore.ERROR_KEEP_LINES + LogStore.WARN_KEEP_LINES + LogStore.DIAG_KEEP_LINES,
+            LogStore.KEEP_LINES,
+        )
+    }
+
+    // ───────────────────── §10.401 限流去重 ─────────────────────
+
+    /**
+     * §10.401：同 tag + 同 message 的连续 W 级重复，首条完整写入，
+     * 后续只写周期性摘要（每 5 次一条），其余跳过。
+     */
+    @Test
+    fun `限流去重 连续重复只写首条与周期性摘要`() {
+        val msg = "search: all endpoints failed or empty"
+        // 1 条首条 + 4 条重复 = 5 条调用 → 首条 + 第 5 次摘要 = 2 条落盘
+        for (i in 1..5) {
+            LogStore.appendThrottled(LogStore.LEVEL_WARN, "MetingDiag", msg)
+        }
+        val entries = LogStore.snapshot().entries
+        assertEquals("5 条调用应只落盘 2 条（首条 + 第 5 次摘要）", 2, entries.size)
+        assertEquals("首条完整写入", msg, entries[1].message)
+        assertTrue(
+            "第 5 次写紧凑摘要",
+            entries[0].message.contains("（重复 5 次）"),
+        )
+    }
+
+    /** §10.401：E 级日志**绝不**被限流 —— 每条都必须落盘。 */
+    @Test
+    fun `限流去重 E级日志不得被限流`() {
+        for (i in 1..10) {
+            LogStore.appendThrottled(LogStore.LEVEL_ERROR, "CRASH", "crash-$i")
+        }
+        val entries = LogStore.snapshot().entries
+        assertEquals("E 级每条都必须落盘，不得被限流", 10, entries.size)
+        for (i in 1..10) {
+            assertTrue("第 $i 条 E 级必须存在", entries.any { it.message == "crash-$i" })
+        }
+    }
+
+    /**
+     * §10.401：消息内容变化视为新类 —— 每条新消息都写全量，
+     * 旧消息的未写出计数在变化时冲刷。
+     */
+    @Test
+    fun `限流去重 消息内容变化时视为新类重新计数`() {
+        // 写入 3 条相同 W（首条 + 2 重复，不触发阈值 5）
+        LogStore.appendThrottled(LogStore.LEVEL_WARN, "MetingDiag", "msg-A")
+        LogStore.appendThrottled(LogStore.LEVEL_WARN, "MetingDiag", "msg-A")
+        LogStore.appendThrottled(LogStore.LEVEL_WARN, "MetingDiag", "msg-A")
+        // 消息变化：应冲刷旧计数摘要 + 写新消息首条
+        LogStore.appendThrottled(LogStore.LEVEL_WARN, "MetingDiag", "msg-B")
+        val entries = LogStore.snapshot().entries
+        // 应有：msg-A 首条 + msg-A（重复 3 次）摘要 + msg-B 首条 = 3 条
+        assertEquals("3 条相同 + 1 条新消息 → 首条 + 摘要 + 新首条", 3, entries.size)
+        assertTrue("msg-A 首条必须存在", entries.any { it.message == "msg-A" })
+        assertTrue(
+            "msg-A 未触发阈值(5)的计数应在变化时冲刷",
+            entries.any { it.message.contains("msg-A") && it.message.contains("重复 3 次") },
+        )
+        assertTrue("msg-B 首条必须存在", entries.any { it.message == "msg-B" })
+    }
+
+    /** §10.401 负向自证：不同 tag 的相同消息互不干扰（各自计数）。 */
+    @Test
+    fun `限流去重 不同tag的相同消息互不干扰`() {
+        LogStore.appendThrottled(LogStore.LEVEL_WARN, "TagA", "same-msg")
+        LogStore.appendThrottled(LogStore.LEVEL_WARN, "TagB", "same-msg")
+        val entries = LogStore.snapshot().entries
+        assertEquals("不同 tag 各自写首条", 2, entries.size)
+        assertTrue(entries.any { it.tag == "TagA" && it.message == "same-msg" })
+        assertTrue(entries.any { it.tag == "TagB" && it.message == "same-msg" })
+    }
 }

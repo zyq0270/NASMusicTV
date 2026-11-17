@@ -76,9 +76,12 @@ data class LogSnapshot(
  * `\` `\t` `\n` `\r` 分别转义为 `\\` `\t` `\n` `\r`（字面量）。
  * 单行协议让「追加」永远是 O(1)、损坏一行不影响其余行。
  *
- * ## 容量与轮转
- * 单文件上限 [MAX_BYTES]（256KB），超限时**保留最新** [KEEP_LINES] 行重写
- * —— 宁可丢老日志，也不能丢刚发生的崩溃现场。
+ * ## 容量与轮转（分级配额，§10.401）
+ * 单文件上限 [MAX_BYTES]（256KB），超限时按**分级配额**重写（见 [rotate]）：
+ * - **E 级**独立保留 [ERROR_KEEP_LINES] 条，不被高频 W/X 噪音挤掉；
+ * - **W/X 级**合占 [WARN_KEEP_LINES] 条配额；
+ * - **D/I 级**保留 [DIAG_KEEP_LINES] 条（不占 E/W 配额）。
+ * 宁可丢老日志，也不能丢刚发生的崩溃现场。
  *
  * ## 线程模型
  * - 普通写入走单线程执行器（日志调用点可能在主线程，不能做同步磁盘 I/O）；
@@ -159,8 +162,20 @@ object LogStore {
     /** 单文件上限：256KB（约 2000 条短日志） */
     internal const val MAX_BYTES = 256L * 1024L
 
-    /** 轮转后保留的最新行数 */
-    internal const val KEEP_LINES = 400
+    /**
+     * §10.401：轮转后 E 级（错误）独立保留配额。
+     * 高频 W/X 噪音不得把崩溃/真错误挤出保留窗口。
+     */
+    internal const val ERROR_KEEP_LINES = 200
+
+    /** §10.401：轮转后 W/X 级（告警 + 诊断）合占配额。 */
+    internal const val WARN_KEEP_LINES = 200
+
+    /** §10.401：轮转后 D/I 级保留条数（不占 E/W 配额；release 不落盘，仅 debug 构建有）。 */
+    internal const val DIAG_KEEP_LINES = 100
+
+    /** 轮转后保留的总条数上限（三级配额之和，供 [snapshot] 读取窗口）。 */
+    internal const val KEEP_LINES = ERROR_KEEP_LINES + WARN_KEEP_LINES + DIAG_KEEP_LINES
 
     /** 默认读取条数（UI 一次渲染太多会拖慢低端电视） */
     const val READ_LIMIT = 100
@@ -185,6 +200,31 @@ object LogStore {
 
     /** 因背压被丢弃的低优先级日志条数（诊断用；⛔ 不接 AppLog，避免写入→打印→再写入递归）。 */
     private val droppedAppends = AtomicInteger(0)
+
+    /** §10.401：限流去重状态 —— 跟踪每个 tag 最近一条 W 级日志的消息与重复计数。 */
+    private data class ThrottleState(
+        var lastMessage: String,
+        var repeatCount: Int,
+        var lastFlushedCount: Int,
+    )
+
+    /**
+     * §10.401：W 级日志限流去重表（tag → 最近一条消息 + 重复计数）。
+     *
+     * 同一 tag + 同一条 message 的连续重复只写首条 + 周期性摘要，
+     * 消息内容变化则视为新类、重新计数并写出全量条目。
+     *
+     * ⚠️ 仅对 W 级生效；E 级（崩溃/真错误）**绝不**被限流。
+     * ⚠️ 表大小有上限（[MAX_THROTTLE_TAGS]）：标签数量异常膨胀时清空，
+     *     避免无界内存占用（实际生产中 tag 数是个位数）。
+     */
+    private val throttleMap = java.util.concurrent.ConcurrentHashMap<String, ThrottleState>()
+
+    /** 限流表最大标签数（超出即清空，防异常膨胀） */
+    private const val MAX_THROTTLE_TAGS = 64
+
+    /** 重复计数达到该倍数时写一条紧凑摘要 "（重复 N 次）" */
+    private const val THROTTLE_REPEAT_THRESHOLD = 5
 
     /** 串行化「追加 / 轮转 / 删除」三种文件操作（异步线程与崩溃同步写共用） */
     private val lock = Any()
@@ -243,6 +283,55 @@ object LogStore {
         if (logDir == null) return
         val line = encode(level, tag, message, throwable?.stackTraceToString())
         synchronized(lock) { runCatching { writeLine(line, durable = true) } }
+    }
+
+    /**
+     * §10.401：限流去重写入 —— 对**同一 tag + 同一条 message** 的连续 W 级重复做采样。
+     *
+     * ## 规则
+     *  - **首条**完整写入；
+     *  - **后续相同** message 只递增计数，每 [THROTTLE_REPEAT_THRESHOLD] 次写一条
+     *    紧凑摘要 `message（重复 N 次）`，其余跳过不写；
+     *  - **消息内容变化**（同 tag 不同 message）视为新类：冲刷旧计数摘要（如有未写出的），
+     *    然后写新消息首条、重置计数；
+     *  - **E 级绝不被限流**：E 级直接走 [append]，每条都写。
+     *  - D/I/X 级不参与限流，直接走 [append]。
+     *
+     * ## 线程安全
+     * [throttleMap] 是 [java.util.concurrent.ConcurrentHashMap]，每个 [ThrottleState]
+     * 的读写在 `synchronized(state)` 内完成。[append] 的入队是异步的，限流判定在入队前完成，
+     * 不会与磁盘 I/O 竞争。
+     *
+     * ⚠️ 本方法不得调用 [AppLog]（递归门禁，见 `LogsTabWiringGateTest`）。
+     */
+    fun appendThrottled(level: String, tag: String, message: String, throwable: Throwable? = null) {
+        if (logDir == null) return
+        // E 级与 D/I/X 不参与限流
+        if (level != LEVEL_WARN) {
+            append(level, tag, message, throwable)
+            return
+        }
+        if (throttleMap.size > MAX_THROTTLE_TAGS) throttleMap.clear()
+        val state = throttleMap.getOrPut(tag) { ThrottleState(message, 0, 0) }
+        synchronized(state) {
+            if (state.repeatCount > 0 && state.lastMessage == message) {
+                // 连续重复：递增计数，每 N 次写一条紧凑摘要
+                state.repeatCount++
+                if (state.repeatCount % THROTTLE_REPEAT_THRESHOLD == 0) {
+                    append(level, tag, "${message}（重复 ${state.repeatCount} 次）", throwable)
+                    state.lastFlushedCount = state.repeatCount
+                }
+                return
+            }
+            // 新消息（首次或内容变化）：冲刷旧计数摘要
+            if (state.repeatCount > 1 && state.repeatCount != state.lastFlushedCount) {
+                append(level, tag, "${state.lastMessage}（重复 ${state.repeatCount} 次）", throwable)
+            }
+            state.lastMessage = message
+            state.repeatCount = 1
+            state.lastFlushedCount = 1
+            append(level, tag, message, throwable)
+        }
     }
 
     /**
@@ -312,17 +401,46 @@ object LogStore {
         }
     }
 
-    /** 超限重写：只保留最新 [KEEP_LINES] 行（先写临时文件再替换，避免半截文件）。 */
+    /**
+     * §10.401：超限重写 —— **分级配额**保留，避免高频 W/X 噪音把 E 级崩溃现场挤掉。
+     *
+     * 按级别分三个桶：
+     *  - **E 级**：保留最新 [ERROR_KEEP_LINES] 条（独立配额，不被噪音挤占）；
+     *  - **W/X 级**：合占 [WARN_KEEP_LINES] 条配额；
+     *  - **D/I 级**：保留最新 [DIAG_KEEP_LINES] 条（不占 E/W 配额）。
+     *
+     * 各桶保留最新条目后按原始行号排序合并，保证时间顺序不乱。
+     * 先写临时文件再替换，避免半截文件。
+     */
     private fun rotate(file: File) {
-        val kept = runCatching { file.readLines(Charsets.UTF_8) }.getOrDefault(emptyList())
-            .takeLast(KEEP_LINES)
+        val lines = runCatching { file.readLines(Charsets.UTF_8) }.getOrDefault(emptyList())
+            .filter { it.isNotBlank() }
+        val errors = mutableListOf<Pair<Int, String>>()
+        val warns = mutableListOf<Pair<Int, String>>()
+        val diags = mutableListOf<Pair<Int, String>>()
+        lines.forEachIndexed { idx, line ->
+            when (decode(line)?.level) {
+                LEVEL_ERROR -> errors.add(idx to line)
+                LEVEL_WARN, LEVEL_DIAG -> warns.add(idx to line)
+                LEVEL_DEBUG, LEVEL_INFO, null -> diags.add(idx to line)
+            }
+        }
+        val kept = (errors.takeLast(ERROR_KEEP_LINES) +
+            warns.takeLast(WARN_KEEP_LINES) +
+            diags.takeLast(DIAG_KEEP_LINES))
+            .sortedBy { it.first }
+            .map { it.second }
         val tmp = File(file.parentFile, "$FILE_NAME.tmp")
         runCatching {
             tmp.writeText(kept.joinToString("\n", postfix = "\n"), Charsets.UTF_8)
-            if (!tmp.renameTo(file)) {
-                file.delete()
-                tmp.renameTo(file)
-            }
+            // ⚠️ 用 Files.move + REPLACE_EXISTING 替代 renameTo：Windows 上 renameTo 在目标
+            // 文件被短暂锁定时会返回 false，旧实现「delete 原文件 + 再 rename」若第二步再失败
+            // 会**把原文件删掉且不写回** ⇒ 已保留的 E 级日志整批丢失（§10.401 真机/单测踩中）。
+            java.nio.file.Files.move(
+                tmp.toPath(),
+                file.toPath(),
+                java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+            )
         }.onFailure { runCatching { tmp.delete() } }
     }
 

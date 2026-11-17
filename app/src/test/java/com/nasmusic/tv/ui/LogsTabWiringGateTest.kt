@@ -109,6 +109,38 @@ class LogsTabWiringGateTest {
     }
 
     /**
+     * §10.401：`AppLog.wThrottled` 必须走 `LogStore.appendThrottled(` 并写 LEVEL_WARN。
+     * 否则限流去重日志不会进日志页，高频噪音会原样挤占保留窗口。
+     */
+    @Test
+    fun `AppLog 的 wThrottled 必须走 LogStore 限流去重`() {
+        val src = stripComments(mainSource("util/AppLog.kt"))
+        val body = bodyOf(src, "fun wThrottled(")
+        assertTrue("AppLog 里没有 `fun wThrottled(` —— 限流去重日志没有写入方", body != null)
+        body!!
+        assertTrue(
+            "AppLog.wThrottled 方法体里没有 LogStore.appendThrottled( —— 限流去重日志不会进日志页",
+            body.contains("LogStore.appendThrottled("),
+        )
+        assertTrue(
+            "AppLog.wThrottled 必须写 LEVEL_WARN，否则不会进 W 级视图",
+            body.contains("LogStore.LEVEL_WARN"),
+        )
+    }
+
+    /** 负向自证：wThrottled 若退回普通 append 必须被检出。 */
+    @Test
+    fun `负向自证 wThrottled 退回普通append必须判负`() {
+        val sample = """
+            fun wThrottled(tag: String, message: String) {
+                LogStore.append(LogStore.LEVEL_WARN, tag, message)
+            }
+        """.trimIndent()
+        val body = bodyOf(sample, "fun wThrottled(")!!
+        assertTrue("护栏空转：退回普通 append 的样例被误判为已限流", !body.contains("appendThrottled"))
+    }
+
+    /**
      * D/I 是调试级别：**必须**在 Debug 构建落盘（日志页才能按级别过滤），
      * 同时**必须**被 `BuildConfig.DEBUG` 门控（release 既不打 logcat 也不写盘）。
      * 缺门控 ⇒ release 的 D/I 会把 W/E 挤出 400 行窗口（用户报障现场丢失）。

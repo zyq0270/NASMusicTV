@@ -268,7 +268,7 @@ class MetingApiService(
             AppLog.d(DIAG, "search: endpoint[$index] returned empty, trying next")
         }
 
-        AppLog.w(DIAG, "search: all endpoints failed or empty")
+        AppLog.wThrottled(DIAG, "search: all endpoints failed or empty")
         AppLog.d(DIAG, "=== search end ===")
         emptyList()
     }

@@ -51,6 +51,19 @@ object AppLog {
         }
     }
 
+    /**
+     * §10.401：Warning 级别（限流去重）—— 同 tag + 同 message 的连续重复只写首条 +
+     * 周期性摘要，避免高频噪音（如 MetingDiag 的端点全失败 W 日志）挤占日志保留窗口。
+     *
+     * ⚠️ **只限流 W 级**；E 级用 [e]、D/I/X 用 [d]/[i]/[diag]，均不参与限流。
+     */
+    fun wThrottled(tag: String, message: String, throwable: Throwable? = null) {
+        LogStore.appendThrottled(LogStore.LEVEL_WARN, tag, message, throwable)
+        if (BuildConfig.DEBUG) {
+            android.util.Log.w(tag, message, throwable)
+        }
+    }
+
     /** Error 级别：始终落盘 + 始终输出（生产环境也必须可见） */
     fun e(tag: String, message: String, throwable: Throwable? = null) {
         LogStore.append(LogStore.LEVEL_ERROR, tag, message, throwable)
