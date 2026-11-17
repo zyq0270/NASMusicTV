@@ -122,6 +122,12 @@ JAVA_HOME="C:/Program Files/Android/Android Studio/jbr" \
 - **Pinyin search** uses TinyPinyin (`com.github.promeg:tinypinyin`), chosen specifically because the min SDK is API 22 and `android.icu.Transliterator` needs API 26+. Do not swap back to ICU-based pinyin.
 - **Cleartext traffic** is enabled (`usesCleartextTraffic=true`) for local NAS HTTP.
 - **设备支持：电视 + 手机都支持**（2026-09-16 更正，此前写作「Leanback required — 只能装电视、锁定横屏」，与 Manifest 不符）。`AndroidManifest.xml:18-27` 三个 feature 全部 `required="false"`：`android.software.leanback`、`android.hardware.touchscreen`、`android.hardware.screen.portrait`（注释即写着 "both TV and phone supported"）；`MainActivity` 是 `screenOrientation="fullSensor"`，**方向不锁定**。核对手段：`aapt2 dump badging <apk> | grep -i "sdkversion\|native-code"`（会打印 `uses-feature-not-required`）。相关设计见 `docs/archive/phone-support-plan.md`、`docs/archive/phone-media-display-plan.md`。
+- **⭐ 老设备兼容基线（所有者 2026-11-16 裁决：所有者用的电视就是老设备，必须支持）**：
+  - **必须支持**：API 22（Android 5.1）及以上的电视 / 手机，**核心功能**（音乐播放、歌词、照片墙、天气电台、设置、日志排障）必须可用。
+  - **已豁免**：3D 地球（`WORLD`）与生态球（`ECO_GLOBE`）在老电视上黑屏，所有者 2026-11-16 裁决**归因硬件、不再修改**（见 `docs/technical-overview.md` §10.400 六、所有者最终裁决）。门控层与产物层修复一并放弃。
+  - **天气**：§10.399 已修复（内嵌 ISRG Root X1 信任锚，老电视可获取天气；只增信任、不放宽校验）。
+  - **日志**：§10.401 已修复（E 级独立配额 + 高频 W 限流去重，真错误不再被噪音挤掉）。
+  - **新增功能 / 效果**：必须在 API 22 上验证可用，或在设备能力不足时**明确降级 / 隐藏**，不得出现「选项可见、切过去就故障」。
 - **ProGuard**: release build minifies + shrinks. Rules in `proguard-rules.pro` keep `data.model`, `data.prefs`, `backend`, Gson, ExoPlayer. A prior release crash (v2.5.1) came from Gson type erasure under R8 — keep those `-keep` rules when adding serialized models. `Log.d/v` are stripped in release via `-assumenosideeffects`; **注意 `AppLog.d/i/w` 另有 `if (BuildConfig.DEBUG)` 守卫，release 下 R8 会连字符串常量一起折掉（`AppLog.e` 无守卫、必然保留）**——用 dex 字符串验 R8 存活时别拿 d/i/w 文案当证据。
 - **Multi-ABI**: `arm64-v8a`, `armeabi-v7a`, `x86_64`.
 - **Demucs 人声分离的输出契约**（`player/DemucsSeparator.kt`，2026-09-14 起）：`decodeAudioToTempFile()` 保证**输出恒为 44100Hz 立体声**——单声道源复制成 L/R，非 44100Hz 源由私有类 `LinearResampler` 线性插值归一化。因此 `writeWavHeader()` / `patchWavDataSize()` 无条件用 `SAMPLE_RATE`/`CHANNEL_COUNT` 是安全的；**若日后放开该保证，这两处必须改为接收实际参数**。`totalSamples` 取 `writeFrame()` 的调用次数，不要用「float 数 / 声道数」反推。

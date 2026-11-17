@@ -28076,6 +28076,18 @@ Open-Meteo failed and no OpenWeatherMap API key configured
 
 ⇒ **用户可感知的只有天气**；等单独一轮修。
 
+#### 五、✅ 已修复（2026-11-16）
+
+**性质**：已改代码 + 单测通过 + **真机验证通过**（2026-11-17，创维老电视天气可正常获取）。**版本 v2.39.20**。
+
+| 项 | 内容 |
+|---|---|
+| 证书 | 内嵌 ISRG Root X1（`app/src/main/assets/isrg-root-x1.pem`），来源 Let's Encrypt 官方 |
+| 信任语义 | 系统默认 CA + 内嵌 ISRG Root X1 的**并集**：先系统默认校验，失败才追加 ISRG 校验 |
+| ⛔ 安全边界 | 不放宽校验：无 `TrustAllCerts`、无空 `checkServerTrusted`、无 `HostnameVerifier` 放行 |
+| 门禁 | `WeatherTrustAnchorGateTest`（5 例）：证书存在且合法 / 并集语义 / 禁止信任降级 / 负向自证 |
+| 影响面 | 正常设备行为不变（系统 CA 先通过）；老电视可成功获取 Open-Meteo 天气 |
+
 ### 10.400 电视实测：**3D 地球（WORLD）与生态球（EcoGlobe）在这台 Android 5.1 电视上黑屏** —— 产物层报错 + **门控没挡住**（2026-11-12）
 
 > **性质**：**只定位，未改代码**（独立子系统，独立一轮做）。**版本号不变**。
@@ -28164,6 +28176,12 @@ JS[ERROR] Uncaught ReferenceError: WorldGlobe is not defined @:1
 | 其余可视化效果（频谱、粒子、歌词主题…） | ✅ 不受影响（纯 Kotlin 渲染，不经 WebView） |
 | 音乐 / 照片墙 / 歌词 / 设置 | ✅ 不受影响 |
 
+#### 六、所有者最终裁决：归因硬件，不再修改（2026-11-16）
+
+所有者 2026-11-16 明确裁决：**3D 地球（WORLD）与生态球（ECO_GLOBE）在老电视上的黑屏归因于硬件（WebView / 宿主合成层特性），多次修改无法解决，不再修改**。
+
+§10.215 既有的「宿主层不修」裁决继续有效，本节记录的是其最终闭环——**门控层与产物层修复一并放弃**，老电视黑屏作为**已接受的既定限制**，不再跟进。后续无需再为此投入修复轮次。
+
 ### 10.401 电视实测发现：**日志保留窗口只有约 2 分钟 ⇒ 真错误会被高频噪音挤没**（2026-11-12）
 
 > **性质**：**只定位，未改代码**。**版本号不变**。
@@ -28223,6 +28241,19 @@ JS[ERROR] Uncaught ReferenceError: WorldGlobe is not defined @:1
 | 用户报「刚才闪退了 / 一直加载不出来」⇒ 按开发者要求截图日志页 | ❌ **大概率截不到**那条错误（2 分钟窗口） |
 | 开发者自己复现后立刻看日志 | ✅ 还能看到（几十秒内） |
 | 本次排查 §10.400 的 WorldGlobe | ✅ 侥幸在 22:16 读到；换个时间点就看不到了 |
+
+#### 六、✅ 已修复（2026-11-16）
+
+**性质**：已改代码 + 单测通过 + **真机暂未观察到异常**（2026-11-17，日志功能待后续观察）。**版本 v2.39.20**。
+
+| 项 | 内容 |
+|---|---|
+| 分级配额 | `rotate()` 改为按级别分桶：E 级独立 `ERROR_KEEP_LINES=200`、W/X 合占 `WARN_KEEP_LINES=200`、D/I 独立 `DIAG_KEEP_LINES=100`（`KEEP_LINES` 总 500） |
+| 高频限流 | `appendThrottled` + `AppLog.wThrottled`：同 tag + 同 message 的连续 W 级重复只写首条 + 每 5 次一条摘要；E 级绝不被限流 |
+| 噪音源 | `MetingApiService` 与 `NetworkMusicManager` 的「端点全失败」W 日志改用 `wThrottled` |
+| 文件替换 | `rotate()` 用 `Files.move` + `REPLACE_EXISTING` 替代 `renameTo`，修复 Windows 上替换失败导致 E 级整批丢失 |
+| 门禁 | `LogStoreTest` 新增 7 例（分级配额 + 限流去重 + 负向自证）；`LogsTabWiringGateTest` 新增 `wThrottled` 接线门禁 |
+| 验证 | `:app:testDebugUnitTest --tests "*LogStoreTest*"` ⇒ BUILD SUCCESSFUL（26 例全绿） |
 
 ### 10.402 手机实测：两类 E 级「假错误」—— 照片解码取消 / IP 定位不可达（2026-11-13）
 
