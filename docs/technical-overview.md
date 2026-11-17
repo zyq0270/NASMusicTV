@@ -28643,7 +28643,7 @@ Compose dp = Android dp / 0.82
 
 | 项 | 实测 | 结论 |
 |---|---|---|
-| `gitee/main` | `a0d47c8`（= 本地 HEAD） | Gitee 已含 v2.39.18~v2.39.20 全部改动 |
+| `gitee/main` | `a0d47c8`（裁决当时 = 本地 HEAD） | Gitee 已含 v2.39.18~v2.39.20 全部改动 |
 | `origin/main` | `f83df51` | GitHub 落后 6 个提交 |
 | Gitee tag / Release | `v2.39.20` + Release（11-17 15:15 创建），含 `NASMusicTV-release-v2-39-20.apk` 与源码归档 | 国内用户已有可用发行版 |
 | GitHub tag / Release | 最新 tag 仍 `v2.39.7`；Releases API 返回 0 | GitHub 侧发行版缺失 |
@@ -28667,13 +28667,13 @@ $env:GITEE_TOKEN = '你的令牌'
 python scripts/gitee_release.py                      # 建 Release + 上传 APK（Gitee）
 ```
 
-**刻意不做**：① 不向 GitHub 补推 6 个提交 / `v2.39.20` tag / Release；② 不拆 Gitee 上已存在的 Pull 镜像配置（只做脚本护栏 + 文档禁令）；③ 不改 APK 运行时代码，不升版本号；④ 私有分支 `feat/e51-private` 仍只在本地，永不 push。
+**刻意不做**：① 不向 GitHub 补推 6 个提交 / `v2.39.20` tag / Release；② 不拆 Gitee 上已存在的 Pull 镜像配置（只做脚本护栏 + 文档禁令）；③ 本裁决自身不改 APK 运行时代码、不单独升号，但与本轮功能一并收口进 v2.39.21（见 §10.412）；④ 私有分支 `feat/e51-private` 仍只在本地，永不 push。
 
 **验证**：PowerShell 语法解析 + `Trigger` 护栏拒绝执行 + `Verify` 只读三端比对；未执行任何写远端动作。
 
 ### 10.409 IP 定位链路替换：腾讯位置服务 → ip.sb → 北京兜底（2026-11-17）
 
-> **性质**：**有代码变更**（生产 8 文件 + 测试 2 文件 + 中英 strings）。**版本号不变**，并入未发布版本。
+> **性质**：**有代码变更**（生产 8 文件 + 测试 2 文件 + 中英 strings）。收口进 **v2.39.21（versionCode 206）**。
 > 触发来源：所有者「IP 定位服务替换，找找更多国内的服务」。
 
 #### 一、为什么要换
@@ -28701,7 +28701,7 @@ python scripts/gitee_release.py                      # 建 Release + 上传 APK�
 
 ### 10.410 天气电台改用服务端搜索（2026-11-17）
 
-> **性质**：**有代码变更**（1 个生产文件 + 1 个门禁）。**版本号不变**。
+> **性质**：**有代码变更**（1 个生产文件 + 1 个门禁）。收口进 **v2.39.21（versionCode 206）**。
 
 `WeatherRadioManager.searchNasSongs` 的 TODO「等 BackendAdapter 支持 search()」已过期：
 `BackendAdapter.searchSongs(query)` 早已存在，Jellyfin / Navidrome / Subsonic / 飞牛 / 道理鱼 **5 个适配器全部实现**。
@@ -28714,7 +28714,7 @@ python scripts/gitee_release.py                      # 建 Release + 上传 APK�
 
 ### 10.411 下载位置从假开关变成真开关（2026-11-17）
 
-> **性质**：**有代码变更**（生产 8 文件 + 1 门禁 + 中英 strings）。**版本号不变**。
+> **性质**：**有代码变更**（生产 8 文件 + 1 门禁 + 中英 strings）。收口进 **v2.39.21（versionCode 206）**。
 
 #### 一、根因
 
@@ -28741,3 +28741,34 @@ python scripts/gitee_release.py                      # 建 Release + 上传 APK�
   无需 DocumentFile 抽象；SAF 目录还需处理遥控器选目录与持久化授权，属另开一轮的产品决策。
 - 不改备份恢复口径：`downloadLocation` 本就不写回（换设备时外置卷不存在），维持原状。
 - 不自动搬迁已下载文件（现有文案已如此承诺）。
+
+### 10.412 v2.39.21 版本收口（2026-11-17）
+
+> **性质**：**只升版本号 + 更新 CHANGELOG / README 示例**，无新增运行时代码。
+> 触发来源：所有者「版本要升」——此前 §10.409~§10.411 三轮改动都按「同一轮修复不单独升号」压在未发布版本，现统一收口出包。
+
+**版本口径**：
+
+| 项 | 旧 | 新 |
+|---|---|---|
+| `versionName` | `2.39.20` | `2.39.21` |
+| `versionCode` | `205` | `206`（仍满足 `185 + 次版本号`） |
+| APK 名 | `NASMusicTV-release-v2-39-20.apk` | `NASMusicTV-release-v2-39-21.apk` |
+| Release 位置 | Gitee（GitHub 自 11-17 冻结） | Gitee，不补 GitHub |
+
+**本版包含**（逐条细节见对应章节）：
+
+- §10.408 仓库基建：Gitee 为主、GitHub 冻结；镜像脚本默认只读 + 覆盖护栏 + `PublishLocal`
+- §10.409 IP 定位：腾讯（可选 key）→ ip.sb → 北京；GCJ-02 → WGS84
+- §10.410 心情电台：`searchSongs()` 替掉 5000 首分页 + 内存匹配
+- §10.411 下载位置：假开关变真开关，双根扫描 + 统一 rootProvider
+- §10.395 日志页滚动复测：所有者确认通过（只闭合文档状态）
+
+**联动文件**：`app/build.gradle.kts`（版本号 + 口径注释）、`CHANGELOG.md`（新版本段）、
+`docs/technical-overview.md`（§10.408 措辞修正 + §10.409~§10.411 版本归属 + 本章）、
+`README.md` / `README_EN.md`（示例 APK 名）。门禁 `GiteePrimaryGateTest` 里 `v2.39.20` 是**历史实测状态**
+（Gitee 上确实有该 tag + Release），描述的是旧版本被覆盖的风险，不随本次升号改动。
+
+**验证边界**：本机无 JDK 17 / Kotlin 编译器，`testDebugUnitTest` 与 `assembleRelease` 未在本轮执行；
+版本号改动仅涉及 Gradle 常量与文档，编译期风险集中在前几轮新增的测试类，需在构建机上一并验证。
+**未推任何远端**；Gitee main 仍停在 `a0d47c8`，本地 main 领先，发布时用 `PublishLocal` 一次性推送并建 `v2.39.21` Release。

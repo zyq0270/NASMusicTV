@@ -7,6 +7,24 @@
 >
 > 类型：`Added`（新增） | `Changed`（变更） | `Fixed`（修复） | `Removed`（移除）
 
+## [v2.39.21] - 2026-11-17
+
+> 本版以 Gitee 为权威源（GitHub 冻结，不再 push / tag / release）。逐条根因与证据见 `docs/technical-overview.md` §10.408~§10.412。
+
+### Added
+
+- IP 定位新增腾讯位置服务（WebService key 可选，设置页「天气 API Key」卡可填）；失败后走免 key 的 ip.sb，再回退北京坐标。腾讯返回的 GCJ-02 坐标先转 WGS84 再用于天气查询
+- 天气电台心情匹配改用后端 `searchSongs()`，不再受「最多拉 5000 首」的上限，大曲库尾部的歌曲也能命中
+- 下载位置「外部存储」真正生效：新增下载根解析器，落盘 / 扫描 / 空间判定 / 崩溃恢复统一走同一根；双根扫描保证切换后旧下载仍可见，设置页显示实际写入路径与外置不可用提示
+
+### Changed
+
+- 仓库基建改为以 Gitee 为主：镜像脚本默认只读 `Verify`，GitHub → Gitee 覆盖动作加硬护栏，新增 `PublishLocal`；README 下载入口与 Badge 改到 Gitee Releases
+
+### Fixed
+
+- 日志页滚动布局确认测试通过（原待复测项闭合）
+
 ## \[v2.39.20] - 2026-11-16
 
 ### Fixed

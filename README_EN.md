@@ -78,7 +78,7 @@ Product homepage: https://zd7gxll02-nasmusictv-10j3m3sd.maozi.io/
 
 **Requirements**: Android 5.1 (API 22) or later; one APK for TV / phone / tablet. The app detects the device type at runtime — TV uses the remote focus system, phone uses touch interaction. Older ARMv7 TVs are supported too, with high-load effects automatically downgraded.
 
-**Download**: `NASMusicTV-release-v*.apk` (e.g. `NASMusicTV-release-v2-39-20.apk`) from [Gitee Releases](https://gitee.com/hxzhang2000/NASMusicTV/releases). The GitHub repository has been frozen since 2026-11-17 and no longer receives releases.
+**Download**: `NASMusicTV-release-v*.apk` (e.g. `NASMusicTV-release-v2-39-21.apk`) from [Gitee Releases](https://gitee.com/hxzhang2000/NASMusicTV/releases). The GitHub repository has been frozen since 2026-11-17 and no longer receives releases.
 
 **Install on TV**: copy the APK to a USB drive and install with a file manager; or install wirelessly via adb:
 

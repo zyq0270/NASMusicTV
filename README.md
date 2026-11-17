@@ -79,7 +79,7 @@
 
 **系统要求**：Android 5.1（API 22）及以上，电视 / 手机 / 平板通用。同一 APK 自动识别设备类型——电视走遥控器焦点体系，手机走触屏交互。搭载 ARMv7 的老电视同样可以安装，高负载特效会自动降级。
 
-**下载地址**：[Gitee Releases](https://gitee.com/hxzhang2000/NASMusicTV/releases) 页的 `NASMusicTV-release-v*.apk`（如 v2.39.20 为 `NASMusicTV-release-v2-39-20.apk`）。GitHub 仓库自 2026-11-17 起冻结，不再更新 Release。
+**下载地址**：[Gitee Releases](https://gitee.com/hxzhang2000/NASMusicTV/releases) 页的 `NASMusicTV-release-v*.apk`（如 v2.39.21 为 `NASMusicTV-release-v2-39-21.apk`）。GitHub 仓库自 2026-11-17 起冻结，不再更新 Release。
 
 **安装到电视**：U 盘拷贝 APK 后用文件管理器安装；或通过 adb 无线安装：
 
