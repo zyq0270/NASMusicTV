@@ -28654,7 +28654,7 @@ Compose dp = Android dp / 0.82
 
 | 文件 | 内容 |
 |---|---|
-| `scripts/sync_gitee_mirror.ps1` | ① 默认 `Action` 由 `Trigger` 改为 **`Verify`**（只读）；② `Trigger` / `CreateMirror` / `Push` 三个 GitHub → Gitee 覆盖动作加硬护栏，未显式传 `-AllowLegacyGitHubSync` 直接抛错；③ 新增 **`PublishLocal`**：本地 `HEAD` + 可达标签 → `gitee/main`，全程不碰 GitHub，令牌走 `Authorization` 头；④ `Verify` 打印本地 / GitHub / Gitee 三端 SHA，Gitee==本地且 GitHub 落后明确判为**预期状态**；⑤ `Status` 提示即使看到旧镜像配置也不要点 Gitee 网页「更新导入」 |
+| `scripts/sync_gitee_mirror.ps1` | ① 默认 `Action` 由 `Trigger` 改为 **`Verify`**（只读）；② `Trigger` / `CreateMirror` / `Push` 三个 GitHub → Gitee 覆盖动作加硬护栏，未显式传 `-AllowLegacyGitHubSync` 直接抛错；③ 新增 **`PublishLocal`**：本地 `HEAD` + 可达标签 → `gitee/main`，全程不碰 GitHub（实推发现 Gitee 不接受 extraheader Basic，改用 URL 内嵌令牌，`finally` 恢复干净 remote URL 防令牌落盘）；④ `Verify` 打印本地 / GitHub / Gitee 三端 SHA，Gitee==本地且 GitHub 落后明确判为**预期状态**；⑤ `Status` 提示即使看到旧镜像配置也不要点 Gitee 网页「更新导入」 |
 | `docs/gitee-mirror-setup.md` | 全文重写为「Gitee 主仓库发布与校验指引」：日常流程、发版（`gitee_release.py`）、禁止旧镜像的事实依据、遗留只读诊断、令牌权限、边界 |
 | `README.md` / `README_EN.md` | 下载入口与 Badge 从 GitHub Releases 改为 Gitee Releases；APK 文件名改为实际命名 `NASMusicTV-release-v*.apk` |
 
@@ -28772,3 +28772,9 @@ python scripts/gitee_release.py                      # 建 Release + 上传 APK�
 **验证边界**：本机无 JDK 17 / Kotlin 编译器，`testDebugUnitTest` 与 `assembleRelease` 未在本轮执行；
 版本号改动仅涉及 Gradle 常量与文档，编译期风险集中在前几轮新增的测试类，需在构建机上一并验证。
 **未推任何远端**；Gitee main 仍停在 `a0d47c8`，本地 main 领先，发布时用 `PublishLocal` 一次性推送并建 `v2.39.21` Release。
+
+**发布实况（2026-11-17 21:18 补记）**：首次 `-Action PublishLocal` 用 extraheader Basic 认证被 Gitee 拒 `Unauthorized`
+（令牌经 API 核实有 push/admin 权限，GitHub 侧 extraheader 可用，但 Gitee 侧不认），
+改用 URL 内嵌「用户名:令牌」后一次成功；脚本已同步修正，`finally` 恢复干净 remote URL（令牌不落盘）。
+推送结果：`gitee/main` `a0d47c8 → 8047583`（= 本地 HEAD），69 个可达标签已对齐，GitHub 仍 `f83df51` 未被触碰。
+**⚠️ Release 未建**：`gitee_release.py` 需要 APK，本机无 JDK 17 编不出包，需在构建机出包后再跑（UT 也需在构建机验证）。

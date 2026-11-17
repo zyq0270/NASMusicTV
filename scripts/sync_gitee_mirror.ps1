@@ -230,26 +230,35 @@ switch ($Action) {
         } else {
             & git remote add gitee $remoteUrl
         }
-        # 令牌走 extraheader，不写进 remote URL
-        $auth = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("${GiteeOwner}:$Token"))
-        $gitPush = @('-c', 'http.proxy=', '-c', 'https.proxy=', '-c', "http.https://gitee.com/.extraheader=AUTHORIZATION: basic $auth")
+        # ⚠️ 实测 2026-11-17：Gitee **不接受** extraheader 里的 Basic 头（git push 返回 Unauthorized，
+        #    即使令牌有 push/admin 权限、且同一令牌拼进 URL 一次就成功）。这里改用 URL 内嵌「用户名:令牌」。
+        #    令牌只在推送期间写进 remote URL，finally 必须恢复成干净 URL，避免长期落盘。
+        $pushUrl = "https://${GiteeOwner}:$Token@gitee.com/$GiteeOwner/$GiteeRepo.git"
+        $gitPush = @('-c', 'http.proxy=', '-c', 'https.proxy=', '-c', 'credential.helper=')
+        $env:GIT_TERMINAL_PROMPT = '0'
+        try {
+            & git remote set-url gitee $pushUrl
+            Write-Host ">> 发布本地 main ($localSha) 到 Gitee"
+            & git @gitPush push gitee "HEAD:refs/heads/main"
+            if ($LASTEXITCODE -ne 0) { Write-Host "==> 分支推送失败（见 git 原始报错）；未推标签，未改 GitHub。"; exit 1 }
 
-        Write-Host ">> 发布本地 main ($localSha) 到 Gitee"
-        & git @gitPush push gitee "HEAD:refs/heads/main"
-        if ($LASTEXITCODE -ne 0) { Write-Host "==> 分支推送失败（见 git 原始报错）；未推标签，未改 GitHub。"; exit 1 }
+            $tagRefs = @(& git tag --merged HEAD --format='%(refname)' | Where-Object { $_ })
+            if ($tagRefs.Count -gt 0) {
+                Write-Host ">> 推送 $($tagRefs.Count) 个可从 HEAD 到达的标签"
+                $specs = @()
+                foreach ($t in $tagRefs) { $specs += "$($t):$($t)" }
+                & git @gitPush push gitee @specs
+                if ($LASTEXITCODE -ne 0) { Write-Host "==> 标签推送失败（分支已成功，见 git 原始报错）"; exit 1 }
+            }
 
-        $tagRefs = @(& git tag --merged HEAD --format='%(refname)' | Where-Object { $_ })
-        if ($tagRefs.Count -gt 0) {
-            Write-Host ">> 推送 $($tagRefs.Count) 个可从 HEAD 到达的标签"
-            $specs = @()
-            foreach ($t in $tagRefs) { $specs += "$($t):$($t)" }
-            & git @gitPush push gitee @specs
-            if ($LASTEXITCODE -ne 0) { Write-Host "==> 标签推送失败（分支已成功，见 git 原始报错）"; exit 1 }
+            Write-Host ">> 回读 Gitee 端 main 校验"
+            & git @gitPush ls-remote gitee 'refs/heads/main'
+            if ($LASTEXITCODE -ne 0) { Write-Host "==> 回读校验失败"; exit 1 }
+        } finally {
+            # 无论成功/失败都把令牌从 .git/config 抹掉
+            & git remote set-url gitee $remoteUrl
+            Remove-Item Env:GIT_TERMINAL_PROMPT -ErrorAction SilentlyContinue
         }
-
-        Write-Host ">> 回读 Gitee 端 main 校验"
-        & git @gitPush ls-remote gitee 'refs/heads/main'
-        if ($LASTEXITCODE -ne 0) { Write-Host "==> 回读校验失败"; exit 1 }
         Write-Host "==> 发布完成：https://gitee.com/$GiteeOwner/$GiteeRepo （GitHub 未被触碰）"
     }
 
