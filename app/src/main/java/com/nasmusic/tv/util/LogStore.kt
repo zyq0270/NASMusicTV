@@ -433,14 +433,16 @@ object LogStore {
         val tmp = File(file.parentFile, "$FILE_NAME.tmp")
         runCatching {
             tmp.writeText(kept.joinToString("\n", postfix = "\n"), Charsets.UTF_8)
-            // ⚠️ 用 Files.move + REPLACE_EXISTING 替代 renameTo：Windows 上 renameTo 在目标
-            // 文件被短暂锁定时会返回 false，旧实现「delete 原文件 + 再 rename」若第二步再失败
-            // 会**把原文件删掉且不写回** ⇒ 已保留的 E 级日志整批丢失（§10.401 真机/单测踩中）。
-            java.nio.file.Files.move(
-                tmp.toPath(),
-                file.toPath(),
-                java.nio.file.StandardCopyOption.REPLACE_EXISTING,
-            )
+            // I1-01：已彻底移除 NIO 的 Files.move（API26+）。minSdk=22 在 API22-25
+            // 设备上执行到那一行会抛 NoClassDefFoundError，被 runCatching 静默吞掉 →
+            // 日志轮转永久失效、文件无限膨胀、分级配额与 256KB 上限全部失效。
+            // 现改为纯 java.io：同目录内先 renameTo（原子替换，API1 起可用），失败再
+            // copyTo(overwrite=true) 原地覆盖。⚠️ 绝不先 file.delete()：否则第二步一旦失败
+            // 会把已保留的 E 级日志整批删掉（§10.401 旧实现踩过的坑）。
+            if (!tmp.renameTo(file)) {
+                tmp.copyTo(file, overwrite = true)
+                tmp.delete()
+            }
         }.onFailure { runCatching { tmp.delete() } }
     }
 

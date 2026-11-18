@@ -179,7 +179,9 @@ class BaiduPanApi(
                 val cursor = json.get("cursor")?.asInt ?:
                     json.getAsJsonObject("data")?.get("cursor")?.asInt ?: 0
                 PagedResult(files, hasMore, cursor)
-            } ?: break
+            } ?: throw java.io.IOException(
+                "listAllAudioPaged: 第 $start 页未获得有效响应（网络失败/非2xx/非法JSON），终止分页，避免半截索引被当作完整结果落盘"
+            )
 
             allFiles.addAll(result.files)
             onProgress?.invoke(allFiles.size)

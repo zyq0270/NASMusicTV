@@ -35,6 +35,7 @@ object DownloadRootResolver {
 
     /** 内置下载根目录，保留原来的 `filesDir/music` 兜底。 */
     fun internalRoot(context: Context): File =
+        // cache-inventory-exempt: 外部音乐目录的回落路径，与 CacheInventory 的 EXTERNAL_MUSIC（dir=""）是同一份数据，重复登记会双计体积
         context.getExternalFilesDir(Environment.DIRECTORY_MUSIC) ?: File(context.filesDir, "music")
 
     /** 当前写入根目录；CUSTOM 不可用时回落内置。 */

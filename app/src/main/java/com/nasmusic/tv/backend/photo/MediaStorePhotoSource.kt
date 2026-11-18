@@ -86,9 +86,10 @@ class MediaStorePhotoSource(private val context: Context) : PhotoSource {
                     val name = cursor.getString(nameCol) ?: continue
                     // 图库里也可能有 HEIC 之类（系统能解、本应用解不了）⇒ 仍要过白名单
                     if (!isSupportedPhotoName(name)) continue
-                    // `DATE_TAKEN` 原生就是**秒**；缺失 / 脏值 ⇒ 0（由解码期 EXIF 兜底）
+                    // `DATE_TAKEN` 原生是**毫秒**（此处除以 1000 归一为秒）；缺失 / 脏值 ⇒ 0（由解码期 EXIF 兜底）
                     val taken = if (takenCol >= 0 && !cursor.isNull(takenCol)) {
-                        cursor.getLong(takenCol).takeIf { PhotoCaptureDate.isPlausibleEpochSeconds(it) } ?: 0L
+                        cursor.getLong(takenCol).let { it / 1000L }
+                            .takeIf { PhotoCaptureDate.isPlausibleEpochSeconds(it) } ?: 0L
                     } else {
                         0L
                     }

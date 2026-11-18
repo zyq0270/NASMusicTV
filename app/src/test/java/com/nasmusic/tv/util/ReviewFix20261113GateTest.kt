@@ -101,11 +101,17 @@ class ReviewFix20261113GateTest {
 
     @Test
     fun `V3-N02 下载恢复不得把半截文件反推 COMPLETED`() {
+        // 2026-11-18 审查 I3-01 修正：原门禁锁死的 `fileSize > 0L &&` 对本函数调用的
+        // 未完成任务（fileSize 恒 0）恒 false ⇒ 函数恒 null、rename 后的完整文件成孤儿。
+        // 最终文件由 .part + rename 原子替换落地（非 copyTo 半截），故 fileSize<=0 时
+        // 凭「正则匹配 + length>0」认领；仅当 DB 带有效 fileSize(>0) 时要求长度一致。
         val src = mainSource("backend/download/SongDownloadManager.kt")
-        assertTrue("必须要求 DB 有有效 fileSize(>0) 且磁盘长度精确一致",
+        assertTrue("未完成任务必须可凭 length>0 认领（fileSize<=0 时放行）",
+            src.contains("entity.fileSize <= 0L || it.length() == entity.fileSize"))
+        assertFalse("不得再用 fileSize>0 硬门槛把未完成任务全部过滤掉（恒 null）",
             src.contains("entity.fileSize > 0L && it.length() == entity.fileSize"))
-        assertFalse("不得再以 fileSize<=0 放宽校验（对未完成任务恒真，护栏全废）",
-            src.contains("entity.fileSize <= 0L ||"))
+        // 非空校验必须保留，防止零字节文件被认领
+        assertTrue("必须保留 length>0 非空校验", src.contains("filter { it.length() > 0L }"))
     }
 
     @Test
@@ -177,7 +183,7 @@ class ReviewFix20261113GateTest {
         val src = mainSource("backend/weather/WeatherApi.kt")
         assertTrue("用 Mutex 而非 synchronized 串行化整段（请求是 suspend）",
             src.contains("private val locationLock = Mutex()"))
-        val body = bodyOf(src, "suspend fun getIpLocation(): IpLocation")
+        val body = bodyOf(src, "suspend fun getIpLocation(tencentMapKey: String? = null): IpLocation")
         assertTrue("找不到 getIpLocation 方法体", body != null)
         assertTrue("读缓存/请求/写回必须在同一把锁内", body!!.contains("locationLock.withLock {"))
         assertTrue("拿锁后必须二次判缓存", body.contains("if (cached != null) return@withLock cached"))

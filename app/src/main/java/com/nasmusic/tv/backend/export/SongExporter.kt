@@ -346,7 +346,11 @@ class SongExporter(
                             tmp.copyTo(part2, overwrite = true)
                             if (!part2.renameTo(target)) error("rename part2 to target failed")
                         } finally {
+                            // I3-02：成功路径被 rename 替换的是 part2，复制源 tmp（.part）此前从未删除，
+                            // 只在 catch 异常分支才清理 ⇒ 成功导出后目标目录残留等大 .part 副本。
+                            // 这里一并幂等清理 tmp（rename 失败时 catch 已删过，再删无副作用）。
                             runCatching { part2.delete() }
+                            runCatching { tmp.delete() }
                         }
                     }
                     true

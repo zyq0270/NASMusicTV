@@ -13,10 +13,7 @@ import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
 import ai.onnxruntime.TensorInfo
 import java.io.BufferedOutputStream
-import java.io.BufferedInputStream
-import java.io.DataInputStream
 import java.io.File
-import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.nio.FloatBuffer
 import kotlinx.coroutines.sync.Mutex
@@ -438,16 +435,25 @@ class DemucsSeparator(private val context: Context) {
                 writtenFrames++
             }
 
-            DataInputStream(BufferedInputStream(FileInputStream(tempFile))).use { dis ->
+            // B2-01：改用 RandomAccessFile，每轮 seek 到 startSample*8 字节再读。
+            // 原只进 DataInputStream 每轮连续读 segLen(=SEGMENT=343980) 帧、流位置前进一整段，
+            // 但 startSample 每轮只推进 hop(=SEGMENT-OVERLAP=340540)。因 SEGMENT>hop，
+            // 累计读取帧数 > 文件实际帧数 totalSamples，末轮 readFloat 越界抛 EOFException，
+            // 被外层 catch(e:Exception) 吞掉 → separate() 返回 null，长于一段(≈7.8s)的
+            // 曲目确定性分离失败。改为每轮 seek 到窗口起点（等价于回退 OVERLAP_SAMPLES
+            // 帧做真正的 overlap-add 重叠），且 segLen 以 totalSamples 为硬上界，
+            // 末轮恰好读到文件尾，绝不越过 EOF。
+            java.io.RandomAccessFile(tempFile, "r").use { raf ->
                 while (startSample < totalSamples) {
                     val segLen = minOf(SEGMENT_SAMPLES, totalSamples - startSample)
 
-                    // 从磁盘读取当前段的交织 PCM float32，直接 deinterleave 到 segmentInputBuf
-                    // 临时文件为连续交织 float32（L0,R0,L1,R1,...，无段间填充），逐采样连续
-                    // readFloat() 即为正确读取，无需任何 skip。
+                    // 每帧 = L/R 两个 big-endian float32 = 8 字节；回退到本窗口全局起点读取。
+                    // big-endian 与 decodeAudioToTempFile 的写入端字节序一致（readFloat 同 DataInputStream）。
+                    raf.seek(startSample.toLong() * 8L)
+                    // 每轮读取帧数 == segLen，与上方 segLen 定义严格一致，不越过 totalSamples。
                     for (i in 0 until segLen) {
-                        segmentInputBuf[i] = dis.readFloat()                    // left
-                        segmentInputBuf[i + SEGMENT_SAMPLES] = dis.readFloat()  // right
+                        segmentInputBuf[i] = raf.readFloat()                    // left
+                        segmentInputBuf[i + SEGMENT_SAMPLES] = raf.readFloat()  // right
                     }
                     // 修复：末段不足 SEGMENT_SAMPLES 时，缓冲区尾部必须清零，否则会把上一段的
                     // 陈旧采样当作末段内容送进 ONNX，导致末尾损坏。

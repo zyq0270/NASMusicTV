@@ -28778,3 +28778,82 @@ python scripts/gitee_release.py                      # 建 Release + 上传 APK�
 改用 URL 内嵌「用户名:令牌」后一次成功；脚本已同步修正，`finally` 恢复干净 remote URL（令牌不落盘）。
 推送结果：`gitee/main` `a0d47c8 → 8047583`（= 本地 HEAD），69 个可达标签已对齐，GitHub 仍 `f83df51` 未被触碰。
 **⚠️ Release 未建**：`gitee_release.py` 需要 APK，本机无 JDK 17 编不出包，需在构建机出包后再跑（UT 也需在构建机验证）。
+
+
+### 10.413 增量代码审查 14 条缺陷修复（v2.39.22 - 2026-11-18）
+
+**背景**：在 `main @ 25d0b6a`（v2.39.21）上对 11-13 全库审查基线 `2fb11b8` 以来 17 提交 /
+90 个改动源码做增量审查 + 36 文件全库兜底，12 深审代理 + 3 独立复核代理产出 14 条终稿发现
+（4 High / 2 Medium / 8 Low，复核 13 CONFIRMED + 1 PARTIALLY CORRECT，0 REFUTED）。
+报告归档 `docs/archive/NASMusicTV-代码审查报告-2026-11-18.html`。本版逐条落实全部 14 条。
+
+**四条 High（本增量窗口新引入的回归，主审抽查源码确认非误报）**：
+
+1. **`LogStore.rotate` 用 API26+ 的 `java.nio.file.Files.move`**（commit `89466d9` 引入）：
+   minSdk22 的 API22–25 设备执行即抛 `NoClassDefFoundError`，被 `runCatching` 静默吞 ⇒
+   日志轮转永久失效、文件无限膨胀、分级配额与 256KB 上限全失效；CI lint 也因此报 NewApi。
+   改为纯 `java.io`：同目录 `tmp.renameTo(file)` 原子替换，失败回退 `copyTo(overwrite=true)`，
+   ⛔ 绝不先 `file.delete()`（避免 §10.401 旧实现第二步失败整批丢 E 级日志的坑）。
+2. **`SongDownloadManager.recoverFinalPathOrNull` 恒返回 null**（V3-N02 回归）：
+   新增 `entity.fileSize > 0L && it.length()==entity.fileSize`，而唯一调用方传入的是
+   `getUnfinished()`（PENDING/DOWNLOADING）记录，`newDownloadingEntity` 不写 fileSize（默认 0）、
+   `updateProgress` 也不写 ⇒ 条件恒 false ⇒ rename 成功后的完整文件成孤儿、用户被迫重下并产生 `(2)` 副本。
+   改为 `fileSize<=0L || 长度一致`，无权威长度时凭「命名正则 + length>0」认领（rename 原子替换保证非半截）。
+3. **`DemucsSeparator` 分段 overlap-add 越界读**：只进 `DataInputStream` 每轮读 `segLen(=SEGMENT=343980)`
+   帧但 `startSample` 每轮只推进 `hop(=340540)`，SEGMENT>hop ⇒ 累计读取超过文件帧数，末轮 `readFloat`
+   越界 EOF 被 `catch(e:Exception)` 吞 ⇒ `separate()` 返回 null，长于约 7.8s 的曲目 HQ 分离 100% 失败。
+   改用 `RandomAccessFile` 每轮 `seek(startSample*8)` 回退 overlap 帧，读取量以 `totalSamples` 为硬上界。
+4. **`BaiduPanApi.listAllAudioPaged` 静默 `?: break\**：`executeOnce` 把网络失败/非2xx/非法 JSON
+   一律映射为 `null to -1`，errno=-1 不在 token 过期集 ⇒ `execute()` 返回 null ⇒ break 返回半截列表；
+   `fullScan` 把半截索引当完整结果 `save` + `onComplete`（推进同步时间戳、不再重试）。
+   改为 `throw IOException`（带页码），让 `fullScan` 既有 catch 走 `partial + onFailed`。
+
+**两条 Medium**：
+
+- `MetingApiService.searchWithEndpoint` 的 `response.body?.string()` 无上限读入（整页 HTML 错误页可 OOM）
+  ⇒ 参照 `LxScriptRepo.download` 用 okio `Buffer` + `source.read(limited, 8MB+1)` 限长，超限按端点失败回退。
+- `KaraokePlaybackScreen` 进度细线在父层读 `progressMs.value`，1Hz 推送重组整页
+  ⇒ 抽 `KaraokeProgressLine(progressMs: State<Long>)` 把取值下沉叶子，只重组一条 2dp 细线（同 `MvProgressLine`）。
+
+**八条 Low**：`SongExporter` 成功路径残留 `.part` 副本（finally 补删 tmp）；`BaiduOAuthClient` 的
+`scope`/`expires_in`/`access_token` 加 `isJsonPrimitive` 守卫防 JsonNull 击穿；`LxScriptRepo` 下载
+interceptor 加 scheme 校验禁 https→http 跳（不动 `LxScriptHost.lx.request` 的合法公网 http）；
+`MediaStorePhotoSource` 的 `DATE_TAKEN` 毫秒除以 1000 归一为秒再校验；`PhotoCaptureDate.parse`
+对 `±hh:mm` 时区串改按 UTC 解析避免重复补偿；`DownloadViewModel` 新请求无条件清 `_qualityPicker`
+防旧 `Probing` 残留；照片墙水印 `photoB==null` 时改从 A 槽取日期画一次、删除与 `p>=1` 约束互斥的
+A 槽死分支（产品口径「切换完成后显示当前图日期」，同步改 `PhotoDateStampTest` 断言）。
+
+**涉及文件**：`app/build.gradle.kts`、`CHANGELOG.md`、本章，以及 13 个源码文件
+（`LogStore` / `SongDownloadManager` / `DemucsSeparator` / `BaiduPanApi` / `MetingApiService` /
+`KaraokePlaybackScreen` / `SongExporter` / `BaiduOAuthClient` / `LxScriptRepo` /
+`MediaStorePhotoSource` / `PhotoSource` / `DownloadViewModel` / `PhotoRenderer`）+ 1 个测试断言
+（`PhotoDateStampTest`）。未改版本号以外的构建配置；未新增依赖。
+
+**版本变更**：`versionCode 206 → 207`，`versionName 2.39.21 → 2.39.22`（口径 = 185 + 次版本号）。
+
+**门禁回归处置（全量 testDebugUnitTest 3139 例）**：修复落地后单测 7 红，逐条处置：
+
+1. `ReviewFix20261113GateTest.V3-N02`（本轮直接回归）：原门禁断言锁死 `entity.fileSize > 0L && ...`，
+   正是审查 I3-01 判定的错误逻辑（对未完成任务恒 null）。已反转门禁：断言新逻辑
+   `fileSize <= 0L || 长度一致` + 保留 `length>0` 非空校验，禁止旧硬门槛回退。
+2. `ExpectedFailureLogLevelGateTest` ×3 + `ReviewFix20261113GateTest.S05-08`（4 条既有红）：
+   11-18 增量窗口给 `WeatherApi.getIpLocation` / `requestIpLocation` 加了 `tencentMapKey` 参数，
+   门禁仍按旧无参签名 `bodyOf` 截取方法体 ⇒ 找不到而 NPE / 断言失败。已把 5 处签名字符串同步为
+   带参签名（含 `requestIpLocation(tencentMapKey)` 调用断言），业务代码零改动。
+3. `CacheInventoryGateTest`（既有红）：11-18 新增 `DownloadRootResolver.kt:38` 的 `filesDir/music`
+   字面量未登记。该路径是外部音乐目录的回落、与 `CacheInventory` 的 `EXTERNAL_MUSIC(dir="")` 同一份数据，
+   重复登记会双计体积 ⇒ 在该行加 `cache-inventory-exempt:` 豁免注释（与 `CacheInventory.kt:132` 同口径），
+   不新增重复登记项。
+4. `PrivateOverlayDriftGateTest`（既有红，本轮不修）：`visualizer/RenderContext.kt` 覆盖层漂移。
+   根因是两分支**各有对方缺的字段**：`feat/e51-private` 版有 `lofiCityCursor`（E51 私有功能）但缺
+   main 11-18 新增的 `photoA/BCapturedAt`（日期戳）；main 版反之。在 main 上跑
+   `python scripts/sync_private_overlay.py` 会把覆盖层刷成私有版 ⇒ 照片墙 `Unresolved reference
+   'photoACapturedAt'`；换成 main 版 ⇒ E51 `Unresolved reference 'lofiCityCursor'`（均实测暴雷）。
+   本轮把覆盖层 `ovl/app/src/main/java/.../RenderContext.kt` **合并成两版字段并集**（私有版 + 日期戳段），
+   使 `lofi.city=true` 本地构建同时编出真 E51 与真日期戳。⛔ 该覆盖层是 gitignored 本地物、不入提交；
+   要永久消红须**在私有分支把两个日期戳字段补进其 RenderContext 并提交**再同步（另立任务，需所有者裁定）。
+
+**验证边界**：本轮直接相关的 V3-N02 门禁、WeatherApi 全部签名/断言门禁（ExpectedFailure ×3 +
+ReviewFix S05-08）、CacheInventory 门禁均已转绿；`testDebugUnitTest` 全量 3139 例中仅
+`PrivateOverlayDriftGateTest` 1 条既有红保留（根因见上第 4 条，须在私有分支补字段，main 上无法安全消除）。
+`assembleRelease` 见下方收口。未 push 任何远端；仅本地提交。

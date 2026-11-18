@@ -185,6 +185,10 @@ object PhotoCaptureDate {
                     val off = readOffset(s, i)
                     if (off != null) {
                         zoneOffsetSec = off.first
+                        // ⛔ 与 `Z` 同理：wall-clock 必须按 UTC 解析，再在末尾减一次偏移。
+                        //   若沿用系统默认时区，当系统时区恰等于该偏移时会被重复补偿一次
+                        //   （东八区机器 +08:00 串 ⇒ 差 8h 且跨天，单测抓到过）。
+                        zone = java.util.TimeZone.getTimeZone("UTC")
                         i = off.second
                     } else {
                         i = s.length
@@ -195,7 +199,8 @@ object PhotoCaptureDate {
             }
         }
 
-        // 带 `Z` 时 `zone` 已经是 UTC，`zoneOffsetSec` 就是 0 ⇒ 再减一次也无副作用
+        // 带 `Z` / `±hh:mm` 时 `zone` 都已是 UTC ⇒ 这里减去 `zoneOffsetSec` 得到正确时刻
+        // （`Z` 的 `zoneOffsetSec` 是 0，再减一次也无副作用）
         val local = toEpochSeconds(y.first, mo.first, d.first, h.first, mi.first, sec, zone) ?: return 0L
         return local - (zoneOffsetSec ?: 0)
     }

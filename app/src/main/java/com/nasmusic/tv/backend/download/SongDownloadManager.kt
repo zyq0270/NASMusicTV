@@ -705,10 +705,11 @@ class SongDownloadManager(
                     // 被误标 COMPLETED 后 playableLocalUri 指向坏文件且永不重下。
                     // 追加两道校验：非空；DB 有 fileSize 记录时必须一致。
                     ?.filter { it.length() > 0L }
-                    // V3-N02：未完成任务（fileSize<=0）没有权威长度，绝不以「长度>0」放宽校验
-                    // 反推 COMPLETED——否则 copyTo 中途崩溃留下的半截文件会被标成已完成且永不重下。
-                    // 只有 DB 有有效 fileSize(>0) 且磁盘长度精确一致时才认定为完整的孤儿完成文件。
-                    ?.filter { entity.fileSize > 0L && it.length() == entity.fileSize }
+                    // V3-N02 修正：本函数只处理未完成任务（fileSize<=0，调用链见 recoverAfterCrash）。
+                    // 该类最终文件是 .part + rename 原子替换（S04-01）落地的完整文件，不存在 copyTo
+                    // 半截文件；此时没有权威 fileSize，仅凭「命名正则匹配 + length>0」认领，
+                    // 否则函数对任何入参恒 null、完整文件成孤儿。仅当 DB 带有效 fileSize(>0) 时要求磁盘长度精确一致。
+                    ?.filter { entity.fileSize <= 0L || it.length() == entity.fileSize }
                     ?.maxByOrNull { it.lastModified() }
                 if (hit != null) return hit.absolutePath
             }

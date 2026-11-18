@@ -214,16 +214,14 @@ class PhotoRenderer : VisualizerRenderer {
                 }
             }
             // ── 拍摄日期水印（2026-11-13，见 [PhotoDateStamp]）──
-            // ⛔ 顺序不能改：必须在转场**之后**画（它是叠在最上层的信息，任何转场都盖不掉它）；
-            //    而且必须先画 A 再画转场 —— 见下一条。
+            // ⛔ 顺序不能改：必须在转场**之后**画（它是叠在最上层的信息，任何转场都盖不掉它）。
             //
-            // ⛔ **A 的水印只在转场窗口内（p < 1）显示**：进入 HOLD 后画面上只有 B
-            //   （这正是「切换完成、完整显示出来」的那一刻）⇒ A 的水印必须消失，
-            //   否则 HOLD 期两张的水印会在同一个右下角**重叠**（旧日期压着新日期）。
-            //   ⚠️ 不能让 `drawDateStamp` 自己判 —— 那个函数只看 `capturedAt` 与 `p`，
-            //   而这里额外需要「A 这一刻到底还在不在画面上」这个信息。
-            val inTransition = ctx.photoProgress < 1f
-            if (inTransition) drawDateStamp(ctx, aCapturedAt, atA = true)
+            // ⛔ **只画「切换完成后画面上的当前图」日期**（产品口径）：HOLD 期画面上只有 B
+            //   ⇒ 画 B 的日期一次。原先的 A 分支（`p < 1` 时画）与 `shouldShowDateStamp`
+            //   要求的 `p >= 1` 互斥，是恒早返回的死代码，已删除 —— 不要再为 A 加分支，
+            //   否则 HOLD 期两张水印会在同一个右下角重叠（旧日期压着新日期）。
+            //   ⚠️ 首图 / 单图退化时 `photoB == null`（`b === a`、`photoBCapturedAt = 0`），
+            //   水印由 `drawDateStamp` 改从 A 槽取日期画一次（见该函数）。
             t.run { render(a, b, ctx.photoProgress, geom) }
             drawDateStamp(ctx, bCapturedAt, atA = false)
         }
@@ -239,24 +237,32 @@ class PhotoRenderer : VisualizerRenderer {
      *
      * ## 什么时候不画
      *
-     * - 日期未知（`capturedAt <= 0`）
+     * - 日期未知（`effective <= 0`，含首图退化位置换后仍为 0）
      * - **转场还没走完**（`progress < 1`）—— 见 [shouldShowDateStamp]
-     * - `photoB == null`（单图退化 / 首图没有旧图 ⇒ `b === a`，只画一次）
      *
-     * ⚠️ **A 的显示时机由调用点判定**（只在 `p < 1` 时画）：它在 HOLD 期已不在画面上，
-     * 由本函数自身看不到这件事。
+     * ⚠️ **只画当前图一次**：调用点在 render 之后只调本函数一次（B 槽）。
+     *   首图 / 单图退化时 `photoB == null`（`b === a`、`photoBCapturedAt = 0`），
+     *   这里改从 A 槽取 `photoACapturedAt` 画一次；几何仍用实际绘制的 dstB
+     *   （HOLD 期 Ken Burns 只作用在 dstB 上，贴 dstA 会偏离图角）。
+     *   ⛔ 不能再对 `photoB == null` 直接 return —— 那会让首图整个展示期没有水印。
      *
-     * ⚠️ `p >= 1` 之后整个 HOLD 期都是 1 ⇒ 水印与照片一起定格，直到下一次切换把它换成 A。
+     * ⚠️ `p >= 1` 之后整个 HOLD 期都是 1 ⇒ 水印与照片一起定格，直到下一次切换换成新图。
      */
     private fun DrawScope.drawDateStamp(ctx: RenderContext, capturedAt: Long, atA: Boolean) {
-        if (!shouldShowDateStamp(capturedAt, ctx.photoProgress)) return
-        // 单图退化时 `photoB` 为 null / 与 A 是同一张 ⇒ 只画一次
-        if (!atA && ctx.photoB == null) return
+        // 首图 / 单图退化：`photoB == null` ⇒ `b === a`，B 槽日期是占位 0 ⇒ 用 A 槽日期补上
+        val effective = if (!atA && ctx.photoB == null && capturedAt <= 0L) {
+            ctx.photoACapturedAt
+        } else {
+            capturedAt
+        }
+        if (!shouldShowDateStamp(effective, ctx.photoProgress)) return
+        // 几何始终跟随实际绘制的槽：单图退化时画面画的是 `b === a`（用 dstB），
+        // 而 HOLD 期 Ken Burns 只作用在 dstB 上 ⇒ 必须贴 dstB 才不会偏离图角。
         val dst = if (atA) geom.dstA else geom.dstB
         dateStampRect(dst, ctx.photoScaleMode, stampRect)
         dateStamp.draw(
             scope = this,
-            text = dateStamp.format(capturedAt),
+            text = dateStamp.format(effective),
             dst = stampRect,
             canvasW = geom.canvasW,
             canvasH = geom.canvasH,

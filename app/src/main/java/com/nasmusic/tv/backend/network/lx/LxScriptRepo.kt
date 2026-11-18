@@ -196,6 +196,11 @@ internal class LxScriptRepo(
             // ⚠️ 与初始校验同口径用 rejectReason（严格，私网也拦），不放宽到 ForPlayback。
             .addNetworkInterceptor { chain ->
                 val target = chain.request().url
+                // I4-04：与安装入口 installFromUrl 同口径——脚本下载只允许 https，
+                // 防止合法 https 脚本 302 到公网 http 主机后明文下载并被当脚本执行。
+                // ⚠️ 只约束本下载 client，不动 LxScriptHost 的 lx.request 守卫
+                //（脚本请求公网 http 端点是既有合法行为）。
+                if (target.scheme != "https") throw IOException("脚本下载禁止 http 跳：${target.scheme}")
                 val reason = NetAddressGuard.rejectReason(target.toString())
                 if (reason != null) throw IOException("blocked redirect hop: $reason")
                 chain.proceed(chain.request())

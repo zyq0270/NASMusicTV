@@ -313,10 +313,26 @@ class MetingApiService(
                 .header("User-Agent", "Mozilla/5.0")
                 .build()
             client.newCall(request).execute().use { response ->
-                val body = response.body?.string()
-                AppLog.d(DIAG, "searchWithEndpoint: response code=${response.code} bodyLen=${body?.length ?: 0}")
-                if (!response.isSuccessful || body.isNullOrBlank()) {
-                    AppLog.d(DIAG, "searchWithEndpoint: failed code=${response.code} bodyEmpty=${body.isNullOrBlank()}")
+                // I4-02：搜索响应可能是整页 HTML 错误页/超大正文，body?.string() 无上限读入会 OOM。
+                // 参照 LxScriptRepo.download 的 okio.Buffer + MAX+1 限量读取（8 MB 足够搜索结果），
+                // 超限按本次端点失败返回（上层会 fallback 其它端点）。限长后的字符串复用给
+                // parseSongs，其下游 MetingJsonShape.preview 也只处理这一份限长正文。
+                val maxBodyBytes = 8L * 1024 * 1024
+                val source = response.body?.source()
+                if (source == null) {
+                    AppLog.d(DIAG, "searchWithEndpoint: failed code=${response.code} bodyEmpty=true")
+                    return@use emptyList()
+                }
+                val limited = okio.Buffer()
+                val read = source.read(limited, maxBodyBytes + 1)
+                if (read > maxBodyBytes) {
+                    AppLog.w(DIAG, "searchWithEndpoint: body 超过 ${maxBodyBytes / 1024 / 1024} MB 上限（read=$read），按失败返回")
+                    return@use emptyList()
+                }
+                val body = limited.readUtf8()
+                AppLog.d(DIAG, "searchWithEndpoint: response code=${response.code} bodyLen=${body.length}")
+                if (!response.isSuccessful || body.isBlank()) {
+                    AppLog.d(DIAG, "searchWithEndpoint: failed code=${response.code} bodyEmpty=${body.isBlank()}")
                     return@use emptyList()
                 }
                 parseSongs(body)

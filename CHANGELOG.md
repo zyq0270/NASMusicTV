@@ -7,6 +7,25 @@
 >
 > 类型：`Added`（新增） | `Changed`（变更） | `Fixed`（修复） | `Removed`（移除）
 
+## [v2.39.22] - 2026-11-18
+
+> 落实 2026-11-18 增量代码审查全部 14 条发现（4 High / 2 Medium / 8 Low）。逐条根因与证据见 `docs/technical-overview.md` §10.413。
+
+### Fixed
+
+- **日志轮转在 API22–25 静默失效（High）**：`LogStore.rotate` 用的 `java.nio.file.Files.move` 是 API26+ 类，minSdk22 设备上抛 `NoClassDefFoundError` 被静默吞掉，日志无限膨胀、分级配额失效。改用纯 `java.io`（同目录 `renameTo` 原子替换，失败回退 `copyTo(overwrite)`），彻底移除 NIO 依赖；同时修复 CI 的 NewApi 门禁报错。
+- **下载崩溃恢复确定性失效（High）**：`SongDownloadManager.recoverFinalPathOrNull` 新增的 `entity.fileSize > 0L && ...` 过滤使函数对未完成任务（fileSize 恒 0）恒返回 null，rename 成功后的完整文件成孤儿、用户被迫重下。改为 `fileSize<=0 || 长度一致`，无权威长度时凭「正则匹配 + length>0」认领。
+- **HQ 人声分离对长曲目 100% 失败（High）**：`DemucsSeparator` 分段 overlap-add 用只进流每轮多读 3440 帧、不回退，末段越界 EOF 被吞导致 `separate()` 返回 null。改用 `RandomAccessFile` 每轮 seek 到窗口起点（回退 overlap），以 `totalSamples` 为硬上界不越 EOF。
+- **百度网盘索引被半截落盘（High）**：`BaiduPanApi.listAllAudioPaged` 的 `?: break` 静默吞网络/非2xx/非法 JSON 错误，半截列表被当完整索引 `save` + `onComplete`（显示"同步成功"且不再重试）。改为抛 `IOException`，让 `fullScan` 既有 catch 走 `partial + onFailed`。
+- Meting 搜索响应无界 `body.string()` 读入（整页 HTML 错误页可 OOM）→ 改 okio 限长 8MB，超限按本次端点失败回退。
+- K 歌页进度条在叶子外读 `progressMs.value`，1Hz 推送重组整页 → 抽 `KaraokeProgressLine` 把取值下沉到叶子，只重组一条 2dp 细线。
+- 照片墙日期水印：`photoB == null`（首图/单图）时水印全周期缺失 → 改从 A 槽取日期画一次；删除与 `progress>=1` 约束互斥的 A 槽死分支，避免 HOLD 期两张水印重叠。
+- 导出成功路径残留等大 `.part` 副本；Baidu OAuth 的 `scope`/`expires_in`/`access_token` 被 JsonNull 击穿；LX 脚本 https 302 到 http 的 scheme 降级；`DATE_TAKEN` 毫秒当秒误判；带 `±hh:mm` 的 EXIF 日期时区重复补偿；下载质量探测早返回时旧 `Probing` 面板残留——共 8 条 Low 一并修复。
+
+### Changed
+
+- 版本号 `versionCode 206 → 207`，`versionName 2.39.21 → 2.39.22`。
+
 ## [v2.39.21] - 2026-11-17
 
 > 本版以 Gitee 为权威源（GitHub 冻结，不再 push / tag / release）。逐条根因与证据见 `docs/technical-overview.md` §10.408~§10.412。

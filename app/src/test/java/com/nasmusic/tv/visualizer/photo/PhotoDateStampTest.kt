@@ -160,15 +160,21 @@ class PhotoDateStampTest {
         val stampIdx = clean.lastIndexOf("drawDateStamp(ctx,")
         assertTrue("找不到转场 render 调用点", renderIdx >= 0)
         assertTrue("找不到 drawDateStamp 调用点", stampIdx >= 0)
-        // A 的水印在 render 之前（它只在转场窗口内显示）、B 的水印在 render 之后；
         // 「B 在 render 之后」由最后一个 drawDateStamp 的位置保证
         assertTrue(
             "B 的水印必须在转场 render **之后**绘制（顺序反了会被转场盖掉）",
             stampIdx > renderIdx,
         )
+        // I9-02 方案①：A 分支与 shouldShowDateStamp 的 p>=1 约束互斥（恒早返回死代码），已删除；
+        // 产品口径只要求「切换完成后显示当前图日期」⇒ HOLD 期只画当前图（B）一次
         assertTrue(
-            "A 的水印必须在 `progress < 1` 时才画 —— 否则 HOLD 期两张的水印会在右下角重叠",
-            clean.contains("inTransition") && clean.contains("if (inTransition) drawDateStamp(ctx, aCapturedAt, atA = true)"),
+            "A 的水印死分支必须已删除，HOLD 期只画当前图（B）一次，避免两张水印在右下角重叠",
+            !clean.contains("inTransition") && !clean.contains("atA = true"),
+        )
+        // I9-01：首图 / 单图退化时 photoB == null 且 B 槽日期为占位 0，须用 A 槽日期补上
+        assertTrue(
+            "首图 / 单图退化时必须改从 A 槽取日期画一次，否则首图整段展示期没有水印",
+            clean.contains("ctx.photoB == null") && clean.contains("ctx.photoACapturedAt"),
         )
         assertTrue(
             "FIT 终帧「只画新图」的分支也要画新图的水印（否则 FIT 模式下水印只有在转场那一帧出现）",

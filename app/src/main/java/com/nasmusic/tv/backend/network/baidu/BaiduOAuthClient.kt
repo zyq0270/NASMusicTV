@@ -155,7 +155,10 @@ class BaiduOAuthClient(
                 val json = gson.fromJson(body, JsonObject::class.java)
                     ?: return@use PollResult.Failed(context.getString(R.string.baidu_oauth_parse_failed, body.take(100)))
                 if (resp.code == 200 && json.has("access_token")) {
-                    val grantedScope = json.get("scope")?.asString ?: BaiduNetdiskConfig.SCOPE
+                    // I4-03：与 refreshAccessToken（:277-279）同口径——JsonNull/JsonObject/JsonArray
+                    // 不是 JsonPrimitive，直接 .asString/.asLong 会抛 UnsupportedOperationException
+                    // 被外层 catch 吞成 PollResult.Failed，连本次拿到的合法 access_token 一起丢失。
+                    val grantedScope = json.get("scope")?.takeIf { it.isJsonPrimitive }?.asString ?: BaiduNetdiskConfig.SCOPE
                     AppLog.i(TAG, "pollDeviceToken: granted scope='$grantedScope'")
                     if (!grantedScope.contains("netdisk")) {
                         AppLog.e(TAG, "pollDeviceToken: scope 缺少 netdisk! granted='$grantedScope', 阻断保存 token")
@@ -165,7 +168,8 @@ class BaiduOAuthClient(
                     //（脏数据 / 被中间人篡改的响应给出极大值）⇒ `expiresAt` 变负数 ⇒
                     // `needsRefresh` 恒 true，表现为「刚授权完又要求重新授权」。
                     // 下限 60s：防止服务端给 0 导致每分钟刷新一次。
-                    val expiresInSec = (json.get("expires_in")?.asLong ?: 2592000L)
+                    val expiresInSec = (json.get("expires_in")
+                        ?.takeIf { it.isJsonPrimitive }?.asLong ?: 2592000L)
                         .coerceIn(60L, 365L * 24 * 3600)
                     // `refresh_token` 并非所有链路都下发（设备码授权在部分场景只给 access_token），
                     // 原实现直接 `.asString` 会在缺字段时抛 NPE（JsonNull.asString）。
@@ -174,7 +178,8 @@ class BaiduOAuthClient(
                         ?.asString
                         .orEmpty()
                     val tokens = BaiduTokens(
-                        accessToken = json.get("access_token").asString,
+                        accessToken = json.get("access_token")?.takeIf { it.isJsonPrimitive }?.asString
+                            ?: return@use PollResult.Failed(context.getString(R.string.baidu_oauth_parse_failed, body.take(100))),
                         refreshToken = refreshToken,
                         expiresAt = System.currentTimeMillis() + expiresInSec * 1000,
                         scope = grantedScope

@@ -378,35 +378,13 @@ fun KaraokePlaybackScreen(
                         .fillMaxWidth()
                         .padding(vertical = 36.dp)
                 )
-                // 进度细线：背景轨道 + 渐变填充，贴半透明框下沿（下沿上方留 8dp 间距）
-                val karaokeProgress = if (durationMs > 0L) {
-                    (progressMs.value.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
-                } else {
-                    0f
-                }
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .fillMaxWidth()
-                        .padding(horizontal = 20.dp, vertical = 8.dp)
-                        .height(2.dp)
-                ) {
-                    // 轨道底色
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .clip(RoundedCornerShape(1.dp))
-                            .background(NasMusicColors.SurfaceVariant.copy(alpha = 0.6f))
-                    )
-                    // 渐变进度填充
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth(karaokeProgress)
-                            .fillMaxHeight()
-                            .clip(RoundedCornerShape(1.dp))
-                            .background(NasMusicBrushes.progressBar)
-                    )
-                }
+                // 进度细线：背景轨道 + 渐变填充，贴半透明框下沿（下沿上方留 8dp 间距）——
+                // M26：进度比例在 KaraokeProgressLine 内部读取，本层不读 ⇒ 1Hz 只重组这一条线
+                KaraokeProgressLine(
+                    progressMs = progressMs,
+                    durationMs = durationMs,
+                    modifier = Modifier.align(Alignment.BottomCenter),
+                )
             }
 
             Spacer(Modifier.height(48.dp))
@@ -583,6 +561,47 @@ fun KaraokePlaybackScreen(
             onCommit = { onCommitSpeed() },
             onReset = { onResetSpeed() },
             onDismiss = { showSpeedPicker = false }
+        )
+    }
+}
+
+/**
+ * K 歌页底部进度细线（M26）。
+ *
+ * 只有这里读 `progressMs.value` ⇒ 1Hz 进度推送只重组这一条 2dp 细线，不重组整页。
+ * 与 `MvPlaybackScreen.MvProgressLine` 同范式（监听 State、在叶子取值）。
+ */
+@Composable
+private fun KaraokeProgressLine(
+    progressMs: androidx.compose.runtime.State<Long>,
+    durationMs: Long,
+    modifier: Modifier = Modifier,
+) {
+    val karaokeProgress = if (durationMs > 0L) {
+        (progressMs.value.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
+    } else {
+        0f
+    }
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp, vertical = 8.dp)
+            .height(2.dp)
+    ) {
+        // 轨道底色
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .clip(RoundedCornerShape(1.dp))
+                .background(NasMusicColors.SurfaceVariant.copy(alpha = 0.6f))
+        )
+        // 渐变进度填充
+        Box(
+            modifier = Modifier
+                .fillMaxWidth(karaokeProgress)
+                .fillMaxHeight()
+                .clip(RoundedCornerShape(1.dp))
+                .background(NasMusicBrushes.progressBar)
         )
     }
 }

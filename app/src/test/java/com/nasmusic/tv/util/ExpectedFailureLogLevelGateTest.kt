@@ -79,26 +79,28 @@ class ExpectedFailureLogLevelGateTest {
 
     @Test
     fun `IP 定位失败只记 W 且不携带 throwable`() {
-        val body = bodyOf(
-            mainSource("backend/weather/WeatherApi.kt"),
-            "private fun requestIpLocation(): IpLocation",
-        )
-        assertTrue("找不到 requestIpLocation 方法体", body != null)
-        val b = body!!
-
-        val catchAt = b.indexOf("} catch (e: Exception) {")
-        assertTrue("找不到网络异常 catch", catchAt >= 0)
-        val catch = b.substring(catchAt)
-
-        assertFalse(
-            "IP 定位不可达是预期降级（已有北京坐标兜底），不得记 E",
-            catch.contains("AppLog.e("),
-        )
-        assertTrue("降级信息仍要留痕，必须记 W", catch.contains("AppLog.w("))
-        assertFalse(
-            "不得把 Throwable 传进日志：SocketTimeoutException 的 20 行堆栈会占掉日志窗口",
-            catch.contains(", e)"),
-        )
+        // 11-18：requestIpLocation 变为调度器（腾讯 → ip.sb），实际网络请求与 catch
+        // 落在 requestTencentIpLocation / requestIpSbLocation 两个子函数里。
+        val src = mainSource("backend/weather/WeatherApi.kt")
+        for ((sig, label) in listOf(
+            "private fun requestTencentIpLocation(key: String): IpLocation" to "腾讯",
+            "private fun requestIpSbLocation(): IpLocation" to "ip.sb",
+        )) {
+            val body = bodyOf(src, sig)
+            assertTrue("找不到 $label IP 定位方法体", body != null)
+            val catchAt = body!!.indexOf("} catch (e: Exception) {")
+            assertTrue("$label 分支找不到网络异常 catch", catchAt >= 0)
+            val catch = body.substring(catchAt)
+            assertFalse(
+                "$label IP 定位不可达是预期降级（已有北京坐标兜底），不得记 E",
+                catch.contains("AppLog.e("),
+            )
+            assertTrue("$label 降级信息仍要留痕，必须记 W", catch.contains("AppLog.w("))
+            assertFalse(
+                "$label 不得把 Throwable 传进日志：SocketTimeoutException 的 20 行堆栈会占掉日志窗口",
+                catch.contains(", e)"),
+            )
+        }
     }
 
     @Test
@@ -109,7 +111,7 @@ class ExpectedFailureLogLevelGateTest {
         assertTrue("成功结果必须有 TTL 缓存", src.contains("IP_LOCATION_TTL_MS"))
         assertTrue("失败必须有冷却窗口", src.contains("IP_LOCATION_COOLDOWN_MS"))
 
-        val getBody = bodyOf(src, "suspend fun getIpLocation(): IpLocation")
+        val getBody = bodyOf(src, "suspend fun getIpLocation(tencentMapKey: String? = null): IpLocation")
         assertTrue("找不到 getIpLocation 方法体", getBody != null)
         assertTrue(
             "S05-08：缓存读/请求/写回必须用 Mutex 单飞串行化",
@@ -119,12 +121,23 @@ class ExpectedFailureLogLevelGateTest {
             "拿到锁后必须二次判缓存，否则并发仍会各发一次 3s 请求",
             getBody.contains("if (cached != null) return@withLock cached"),
         )
-        assertTrue("必须走真正发请求的方法", getBody.contains("requestIpLocation()"))
+        assertTrue("必须走真正发请求的方法", getBody.contains("requestIpLocation(tencentMapKey)"))
 
-        val reqBody = bodyOf(src, "private fun requestIpLocation(): IpLocation")
+        val reqBody = bodyOf(src, "private fun requestIpLocation(tencentMapKey: String?): IpLocation")
         assertTrue("找不到 requestIpLocation 方法体", reqBody != null)
-        assertTrue("请求必须走短超时 client，而不是主 client 的 10 秒", reqBody!!.contains("ipLocationClient.newCall(request)"))
-        assertTrue("响应必须 use{} 关流（M9 修复不得回退）", reqBody.contains(".execute().use { response ->"))
+        // 11-18：调度器必须依次尝试腾讯（有 key 时）与 ip.sb 两条链路
+        assertTrue("必须尝试腾讯 IP 定位", reqBody!!.contains("requestTencentIpLocation("))
+        assertTrue("腾讯失败后必须回退 ip.sb", reqBody.contains("requestIpSbLocation()"))
+        // 真正的网络请求在子函数里，短超时 client / use{} 关流在子函数上核验
+        for (sig in listOf(
+            "private fun requestTencentIpLocation(key: String): IpLocation",
+            "private fun requestIpSbLocation(): IpLocation",
+        )) {
+            val body = bodyOf(src, sig)
+            assertTrue("找不到子函数方法体 $sig", body != null)
+            assertTrue("请求必须走短超时 client", body!!.contains("ipLocationClient.newCall(request)"))
+            assertTrue("响应必须 use{} 关流（M9 修复不得回退）", body.contains(".execute().use { response ->"))
+        }
     }
 
     @Test
@@ -148,8 +161,9 @@ class ExpectedFailureLogLevelGateTest {
     @Test
     fun `negative proof - function body extraction is scoped`() {
         val src = mainSource("backend/weather/WeatherApi.kt")
-        val req = bodyOf(src, "private fun requestIpLocation(): IpLocation")!!
-        assertTrue("IP 定位函数体应包含 IP_API_BASE", req.contains("IP_API_BASE"))
+        // 11-18：端点常量在子函数里；用 ip.sb 子函数做有边界提取自证
+        val req = bodyOf(src, "private fun requestIpSbLocation(): IpLocation")!!
+        assertTrue("ip.sb 定位函数体应包含其端点常量", req.contains("IP_SB_GEOIP_URL"))
         assertFalse(
             "IP 定位函数体不应包含天气端点（否则 bodyOf 把别的方法也吞进来了）",
             req.contains("OPEN_METEO_BASE"),

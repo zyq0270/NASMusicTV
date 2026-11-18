@@ -124,6 +124,10 @@ class DownloadViewModel(
         // S07-06：新请求先取消在途探测并取本地代数，写回前校验，避免旧歌结果覆盖新歌面板
         qualityProbeJob?.cancel()
         val generation = ++qualityProbeGeneration
+        // 无条件清掉旧面板状态：新请求若命中总开关 / 可下载性 / 非 Meting 源的早返回，
+        // 既不写 _qualityPicker 也进不了 finally；而旧 Job 的 finally 因 generation 已变
+        // 会跳过清理 ⇒ 上一首的 Probing 会残留。确实要弹窗的新请求会在协程内重新写入。
+        _qualityPicker.value = null
         qualityProbeJob = viewModelScope.launch {
             // P1-15: 补齐 downloadNow 中的安全检查（enqueue → executeDownload 会跳过这些）
             // 1. 总开关
