@@ -1,0 +1,728 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>NASMusicTV 增量代码审查报告 · 2026-11-18</title><style>
+
+:root{--bg:#f5f7fa;--card:#fff;--ink:#1c2430;--muted:#5b6879;--line:#e3e8ef;--brand:#1f4e79;--brand2:#2563eb;--soft:#eef3f9}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.7 -apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei","PingFang SC",sans-serif}
+a{color:var(--brand2);text-decoration:none}
+a:hover{text-decoration:underline}
+.wrap{max-width:1240px;margin:0 auto;padding:0 24px}
+header.hero{background:linear-gradient(135deg,#1f4e79 0%,#2d6ca8 55%,#3f8fd0 100%);color:#fff;padding:40px 0 34px}
+header.hero h1{margin:0 0 8px;font-size:30px;letter-spacing:.5px}
+header.hero .sub{opacity:.9;font-size:15px}
+.herometa{display:flex;flex-wrap:wrap;gap:10px;margin-top:20px}
+.herometa span{background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.3);padding:5px 12px;border-radius:20px;font-size:12.5px}
+nav.bar{position:sticky;top:0;z-index:20;background:rgba(255,255,255,.96);border-bottom:1px solid var(--line);backdrop-filter:blur(6px)}
+nav.bar .wrap{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding-top:10px;padding-bottom:10px}
+nav.bar a{font-size:13px;color:var(--muted)}
+.filters{margin-left:auto;display:flex;gap:6px;flex-wrap:wrap}
+.filters button{border:1px solid var(--line);background:#fff;color:var(--muted);border-radius:16px;padding:4px 12px;font-size:12.5px;cursor:pointer}
+.filters button.on{background:var(--brand);border-color:var(--brand);color:#fff}
+.layout{display:flex;gap:26px;margin-top:26px;align-items:flex-start}
+aside{width:224px;flex:0 0 224px;position:sticky;top:62px;max-height:calc(100vh - 84px);overflow:auto;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px}
+aside h4{margin:0 0 8px;font-size:12px;color:var(--muted);letter-spacing:1px}
+aside a{display:block;font-size:12.5px;padding:3px 0;color:var(--muted)}
+main{flex:1;min-width:0}
+section{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:22px 24px;margin-bottom:22px}
+h2{font-size:20px;margin:0 0 14px;color:var(--brand);border-bottom:2px solid var(--soft);padding-bottom:9px}
+h3{font-size:15.5px;margin:22px 0 9px;color:#243b55}
+p{margin:9px 0}
+.muted{color:var(--muted)}
+.small{font-size:12.5px}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:14px 0}
+.kpi{background:var(--soft);border:1px solid var(--line);border-radius:10px;padding:14px}
+.kpi .n{font-size:26px;font-weight:700;color:var(--brand);line-height:1.2}
+.kpi .t{font-size:12px;color:var(--muted)}
+.dist{display:flex;height:22px;border-radius:6px;overflow:hidden;margin:12px 0;border:1px solid var(--line)}
+.dist i{display:block;height:100%}
+.legend{display:flex;gap:16px;flex-wrap:wrap;font-size:12.5px;color:var(--muted)}
+.legend b{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px}
+table{width:100%;border-collapse:collapse;font-size:13px;margin:10px 0}
+th,td{border:1px solid var(--line);padding:9px 10px;text-align:left;vertical-align:top}
+th{background:var(--soft);color:#243b55}
+.callout{background:#fff8e6;border:1px solid #f0dc9a;border-left:4px solid #e2b13c;border-radius:8px;padding:12px 16px;margin:14px 0}
+.finding{border:1px solid var(--line);border-left-width:4px;border-radius:8px;padding:14px 16px;margin:14px 0;background:#fff}
+.finding.Critical{border-left-color:#b91c1c}
+.finding.High{border-left-color:#ea7317}
+.finding.Medium{border-left-color:#e2b13c}
+.finding.Low{border-left-color:#9fb0c4}
+.finding h3{margin:0 0 6px;font-size:15px;color:#243b55}
+.sev{display:inline-block;border-radius:5px;padding:1px 8px;font-size:11.5px;font-weight:600;margin-right:8px}
+.sev.Critical{background:#fee2e2;color:#b91c1c}
+.sev.High{background:#ffedd5;color:#c2410c}
+.sev.Medium{background:#fef3c7;color:#a16207}
+.sev.Low{background:#eef2f7;color:#5b6879}
+.row{margin:6px 0;font-size:13px}
+.row b{display:inline-block;min-width:52px;color:var(--brand)}
+code{background:#eef2f7;border-radius:4px;padding:1px 5px;font:12px/1.5 "SFMono-Regular",Consolas,monospace;color:#a03030;word-break:break-all}
+.fbox{border-left:3px solid #2563eb;background:#f7faff;border-radius:0 8px 8px 0;padding:12px 15px;margin:12px 0}
+.fbox h4{margin:0 0 6px;font-size:14px;color:#1f4e79}
+.fbox p{margin:6px 0;font-size:13px}
+.tag{display:inline-block;background:#eef3f9;border:1px solid #dbe5f1;border-radius:5px;padding:1px 7px;font-size:11.5px;color:#40618a;margin-right:6px}
+.chk{background:#e5f5ea;color:#15803d;border-radius:5px;padding:1px 8px;font-size:11.5px;font-weight:600}
+.vnote{background:#f7faff;border:1px dashed #c7d8f0;border-radius:6px;padding:8px 11px;margin-top:8px;font-size:12.5px;color:#40618a}
+.hide{display:none!important}
+
+</style></head><body>
+<header class="hero"><div class="wrap">
+<h1>NASMusicTV 增量代码审查报告</h1>
+<div class="sub">增量优先 + 全库兜底 · 10 增量组 + 2 兜底组并行深审 + 全部 14 条独立怀疑式复核 · main @ 25d0b6a · v2.39.21 / versionCode 206</div>
+<div class="herometa"><span>审查日期 2026-11-18</span><span>增量窗口 2fb11b8 → 25d0b6a（17 提交）</span><span>90 个改动源码 + 36 个兜底抽样</span><span>12 深审代理 + 3 复核代理</span><span>两阶段：并行审查 → 独立证伪</span><span>仅出报告，未改动业务代码</span></div>
+</div></header>
+<nav class="bar"><div class="wrap"><a href="#summary">执行摘要</a><a href="#top">最高优先级</a><a href="#verify">复核结论</a><a href="#subs">各子系统发现</a><a href="#strength">跨模块优点</a><a href="#roadmap">整改路线</a><a href="#scope">口径与取舍</a>
+<div class="filters"><button class="on" data-f="all">全部</button><button data-f="Critical">Critical</button><button data-f="High">High</button><button data-f="Medium">Medium</button><button data-f="Low">Low</button></div></div></nav>
+<div class="wrap layout"><aside><h4>目录</h4>
+<a href="#summary">1. 执行摘要</a><a href="#top">2. 最高优先级（High）</a><a href="#verify">3. 独立复核结论</a><a href="#subs">4. 各子系统发现</a>
+<a href="#i1">&nbsp;&nbsp;4.1 应用骨架 / 偏好 / util / 网络服 · 增量 (1)</a>
+<a href="#i10">&nbsp;&nbsp;4.10 视觉框架 / fx / 街机 / 渲染器 / · 增量 (0)</a>
+<a href="#i2">&nbsp;&nbsp;4.2 播放器 / MediaSession / H · 增量 (0)</a>
+<a href="#i3">&nbsp;&nbsp;4.3 后端核心 / NAS 适配器 / 本地媒体  · 增量 (2)</a>
+<a href="#i4">&nbsp;&nbsp;4.4 网络音源 / 云盘 OAuth / LX 脚 · 增量 (4)</a>
+<a href="#i5">&nbsp;&nbsp;4.5 照片源 / 歌单解析 / 电台 / 天气 A · 增量 (2)</a>
+<a href="#i6">&nbsp;&nbsp;4.6 UI 主屏 / 导航 / 主题 / View · 增量 (1)</a>
+<a href="#i7">&nbsp;&nbsp;4.7 UI 组件（播放器/歌词/卡片/设置分支） · 增量 (1)</a>
+<a href="#i8">&nbsp;&nbsp;4.8 UI 子屏（详情/库/设置/发现/搜索） · 增量 (0)</a>
+<a href="#i9">&nbsp;&nbsp;4.9 照片墙缓冲 / 渲染 / 日期戳 / 转场 · 增量 (2)</a>
+<a href="#b1">&nbsp;&nbsp;4.B1 兜底 A：未改动的后端 / 网络 / 数据层 · 兜底 (0)</a>
+<a href="#b2">&nbsp;&nbsp;4.B2 兜底 B：未改动的 UI / 渲染器 / 歌 · 兜底 (1)</a>
+<a href="#strength">5. 跨模块优点</a><a href="#roadmap">6. 整改路线</a><a href="#scope">7. 审查范围与已知取舍</a></aside><main>
+<section id="summary"><h2>1. 执行摘要</h2>
+<p>本轮在 <code>main @ 25d0b6a</code>（v2.39.21）上做增量优先审查：对 11-13 全库审查基线 <code>2fb11b8</code> 以来 17 个提交、90 个改动的 main 源码 Kotlin 文件做逐文件通读审，另抽 36 个未改动的高风险文件做兜底。方法沿用两阶段：先按子系统切成 <strong>10 个增量组 + 2 个兜底组</strong>互不重叠并行深审，再对<strong>全部 14 条初稿</strong>派 3 个独立复核代理逐条重读引用文件、尽力证伪。复核裁定 13 CONFIRMED / 1 PARTIALLY CORRECT / 0 REFUTED。</p>
+<div class="cards"><div class="kpi"><div class="n">90+36</div><div class="t">深审文件（增量+兜底）</div></div><div class="kpi"><div class="n">12+3</div><div class="t">深审 / 复核代理</div></div><div class="kpi"><div class="n">14</div><div class="t">独立复核条目</div></div><div class="kpi"><div class="n">14</div><div class="t">终稿有效发现</div></div></div>
+<h3>统计口径核对（四组数字必须自洽）</h3>
+<table><tr><th>口径</th><th>Critical</th><th>High</th><th>Medium</th><th>Low</th><th>合计</th><th>说明</th></tr>
+<tr><td><strong>① 初稿分布</strong></td><td>0</td><td>4</td><td>5</td><td>5</td><td><strong>14</strong></td><td class="small">12 组深审原始输出，未做修正</td></tr>
+<tr><td><strong>② 复核范围</strong></td><td>0</td><td>4</td><td>5</td><td>5</td><td><strong>14</strong></td><td class="small">全部初稿，零抽样</td></tr>
+<tr><td><strong>②′ 复核后分布</strong></td><td>0</td><td>4</td><td>2</td><td>8</td><td><strong>14</strong></td><td class="small">CONFIRMED 13 / PARTIALLY CORRECT 1</td></tr>
+<tr><td><strong>③ 初稿经复核调整后</strong></td><td>0</td><td>4</td><td>2</td><td>8</td><td><strong>14</strong></td><td class="small">②′ 的 14 条；本轮全部初稿均已复核</td></tr>
+<tr><td><strong>④ 复核新增（独立立项）</strong></td><td>0</td><td>0</td><td>0</td><td>0</td><td><strong>0</strong></td><td class="small">本轮复核未新立独立缺陷</td></tr>
+<tr style="background:#eef3f9"><td><strong>⑤ 终稿</strong></td><td><strong>0</strong></td><td><strong>4</strong></td><td><strong>2</strong></td><td><strong>8</strong></td><td><strong>14</strong></td><td class="small">③ + ④ = 14 + 0 = 14 <span class="chk">核对通过</span></td></tr>
+</table>
+<div class="dist"><i style="background:#ea7317;width:28.57%" title="High 4"></i><i style="background:#e2b13c;width:14.29%" title="Medium 2"></i><i style="background:#9fb0c4;width:57.14%" title="Low 8"></i></div><div class="legend"><span><b style="background:#b91c1c"></b>Critical 0</span><span><b style="background:#ea7317"></b>High 4</span><span><b style="background:#e2b13c"></b>Medium 2</span><span><b style="background:#9fb0c4"></b>Low 8</span></div>
+<div class="callout"><strong>结论：</strong>本轮未发现 Critical。<strong>4 条 High 全部为本增量窗口新引入的回归</strong>，且均经独立复核 + 主审亲自抽查源码确认（非放水）：① <code>LogStore.rotate</code> 把 <code>renameTo</code> 换成 minSdk22 不可用的 <code>java.nio.file.Files.move</code>，API22–25 日志轮转静默失效；② <code>SongDownloadManager.recoverFinalPathOrNull</code> 的 <code>fileSize&gt;0 &amp;&amp;</code> 过滤使其恒返回 null，P0-2 崩溃恢复确定性失效；③ <code>DemucsSeparator</code> 分段 overlap-add 只进流越界读，HQ 分离对长于 7.8s 的曲目 100% 失败；④ <code>BaiduPanApi</code> 分页 <code>?: break</code> 静默吞掉网络错误，索引被半截落盘。3 条 Medium 在复核后下调为 Low（触发面被收窄）。上轮 154 + 59 条已修项未见整体回归。</div>
+</section>
+<section id="top"><h2>2. 最高优先级修复（High）</h2>
+<div class="finding High" data-sev="High">
+<h3><span class="sev High">High</span><span class="tag">B2</span> B2-01</h3>
+<div class="row"><b>位置</b><code>app/src/main/java/com/nasmusic/tv/player/DemucsSeparator.kt:441</code></div>
+<div class="row"><b>问题</b>分段 overlap-add 读取采用只进的 `DataInputStream`，但每轮读掉的帧数与循环计数器的推进步长不一致：第 448-451 行每轮从 `dis` 连续读 `segLen` 帧（`segLen = min(SEGMENT_SAMPLES, totalSamples-startSample)`，满段时恒为 343980），流位置每轮前进 343980 帧；而第 505 行循环变量 `startSample += hop`（`hop = SEGMENT_SAMPLES - OVERLAP_SAMPLES = 340540`），循环按 `while (startSample &lt; totalSamples)` 执行 `ceil(totalSamples/hop)` 轮。因 SEGMENT(343980) &gt; hop(340540)，读取的帧总量 ≈ 轮数×343980 &gt; 文件实际帧数 totalSamples，最后一轮 `dis.readFloat()`（第 449/450 行）越界读。`readFloat()` 在 EOF 抛 `EOFException`，被第 552 行 `catch (e: Exception)` 吞掉 → `separate()` 返回 null。按真实循环条件复核：8s(352800 帧) 第 2 轮需读 12260 帧而流仅剩 8820 帧即 EOF；240s 第 31 轮同样越界。注意这是「读取流位置」与「逻辑 startSample」的错位，不是「丢弃整帧/截断」——KDoc 第 445-447 行明确声明临时文件无段间填充、连续读取，但 overlap-add 窗口本应每轮回退 OVERLAP_SAMPLES 帧，代码未做任何 seek/回退。</div>
+<div class="row"><b>影响</b>任何长于一段（约 7.8s / 343980 样本 @44100Hz）的音频都会触发，即现实中所有正常歌曲。HQ（Demucs）高质量人声分离对全部真实曲目 100% 失败：`separate()` 在最后一段抛 EOF 后返回 null，不产出 vocals/accompaniment WAV，`lastError` 记为「分离失败」泛化提示。上层 HqSeparationOrchestrator 不在本组清单内，未臆测其兜底；但就本函数而言这是确定性功能失效（非崩溃，异常已被 catch）。</div>
+<div class="row"><b>修法</b>让每个推理窗口真正取到源 [startSample, startSample+SEGMENT) 且总读取量不超过文件长度。二选一：①把只进流换成 `RandomAccessFile`，每轮开头 seek 到 `startSample*8` 字节再读（等价于每轮回退 OVERLAP_SAMPLES 帧），使窗口重叠且末轮只读剩余帧；②仍用连续流，但每轮只读 `hop` 个新帧，并把上一窗口尾部 OVERLAP_SAMPLES 个原始采样搬到 `segmentInputBuf` 头部，凑满一个完整 SEGMENT 送 ONNX——这样流每轮只前进 hop，总读取量恰为 totalSamples。两种修法均需以 `totalSamples` 为硬上界，禁止 readFloat 越过文件尾。
+
+---
+
+**Strengths**（均有实证）：
+1. 资源释放到位：`DemucsSeparator` 的 ONNX `OnnxTensor`/`OrtSession.Result` 用嵌套 try/finally 保证任何路径 close（第 838-875 行），`OrtEnvironment` 进程级单例绝不 close（第 263-266 行注释与实现一致）；`decodeAudioToTempFile` 的 `codec/extractor` 在 finally 中 `stop()/release()`（第 804-809 行）。
+2. 并发/生命周期守卫扎实：Demucs 用 `stateLock`+`opMutex`+`pendingRelease` 三段式处理 init/release 与在飞分离的竞态（第 236-271、310-320 行）；`CrossfadeController.cleanupPlayer` 统一移除 fade Runnable 并 release 副播放器（第 159-172 行），`PlayerManager.release` 对称清理（第 1433-1448 行）。
+3. 网络歌词层防注入/防泄漏：`parseKugouLyrics` 用 `toHttpUrlOrNull()?.newBuilder()?.addQueryParameter` 逐参数编码不可信 id/accesskey（第 395-403 行，M18 修复保留），全部 OkHttp 响应用 `.use{}`（第 181、237、280、337、408 行）。
+4. minSdk22 API 护栏显式：`MediaLibraryTree.mergeSearchResults` 用 `getOrPut` 而非 `Map.putIfAbsent`（API24+），并写明会在 API22 触发 `NoSuchMethodError` 的根因（第 529-547 行）。
+5. FLAC 熔断可捕获：`FlacGuardTrackOutput.format` 在解封装层抛 `FlacUnsupportedException`（IOException），`isFlacUnsupported()` 沿 cause 链查找且有 `MAX_CAUSE_DEPTH=8` 防自引用死循环（FlacGuardExtractors.kt 第 83-95、159-165 行）。
+6. 下载完整性双闸门：`ModelDownloadManager` 下载后即时 SHA-256 校验 + 原子 rename + `disconnect()` in finally（第 218-245、325-327 行），`isModelDownloaded` 用 ±1% 字节窗口做主线程快速判定并把 166MB 哈希放到 IO 线程（第 122-138 行）。
+
+**严重度汇总**：Critical 0 / High 1 / Medium 0 / Low 0
+
+**覆盖自证**：实际读 18/18 个清单文件（完整源码），读不到 0 个。
+- lyrics/：LocalLyricsProvider.kt、LyricsNetworkProvider.kt
+- player/：AccompanimentCache.kt、BrowseCache.kt、CoilBitmapLoader.kt、CrossfadeController.kt、DemucsSeparator.kt、FlacGuardExtractors.kt、MediaLibraryTree.kt、MediaSessionAccessPolicy.kt、ModelDownloadManager.kt、PcmFallbackChannel.kt、PcmRingBuffer.kt、PcmSpectrumTap.kt、PcmTapProcessor.kt、PlaybackServiceStart.kt、PlayerEqualizer.kt、PlayerManager.kt（1547 行，分 4 段读完）
+
+说明：未报项示例——`PcmRingBuffer.write` 的 `from=n-len` 在 `n&gt;src.size` 时理论越界，但唯一调用方 `PcmTapProcessor.capture` 保证 `monoBuf.size&gt;=frames`（第 118 行），按 §7.1/§7.2 核查后降级不报；歌词 URL 中 hash/songId 的裸字符串拼接受固定 host 前缀与 try-catch 约束，影响面不足以构成可指行硬缺陷，按「宁可少报」不报。
+### I1 | 应用骨架 / 偏好 / util / 网络服务 / 天气数据模型</div>
+<div class="vnote"><b>独立复核 <span class="chk">CONFIRMED</span></b>　终稿严重度 High<br>源码实证：DemucsSeparator.kt:55/57 常量 SEGMENT_SAMPLES=343980、OVERLAP_SAMPLES=3440，:392 hop=SEGMENT-OVERLAP=340540，SEGMENT&gt;hop 成立。:441 为只进流 `DataInputStream(BufferedInputStream(FileInputStream(tempFile)))`，:443 `segLen=min(SEGMENT,totalSamples-startSample)`，:448-451 每轮连续 readFloat 读 segLen 帧，:505 `startSample += hop`，无任何 seek/回退（:445-447 注释自承&quot;连续读、无需 skip&quot;）。算术复核：8s=352800 帧，第1轮读343980、流位置=343980、startSample→340540；第2轮 segLen=min(343980,12260)=12260 帧，而流仅剩 352800-343980=8820 帧，第8821次 readFloat 抛 EOFException，被 :552 `catch(e:Exception)` 吞→:555 return null。240s 同理在约第31轮提前 EOF（累计满段读=31×343980=10,663,380 &gt; 文件 10,584,000 帧）。故&quot;长于一段(≈7.8s)必然失败、100%失败&quot;成立；≤343980 帧的短片段单轮读完不触发，初稿已如实限定范围。对照 BRIEF §2&quot;输出恒 44100Hz&quot;：decodeAudioToTempFile 将源重采样为 44100Hz（:574-583, :789-792），totalSamples 即以 44100 为单位的帧数，恰使上述按帧算术精确成立，该取舍不推翻反而支撑结论。调用点非死代码：HqSeparationOrchestrator.kt:566 separator.separate(...) 真实调用。上层兜底：:576 对 result==null 走 else→:595-603 回退 FAST 模式并提示错误，故**非崩溃**，初稿未写&quot;必然崩溃&quot;，无夸大；但 HQ 分离功能对全部真实曲目确定性失效，维持 High。</div>
+</div>
+<div class="finding High" data-sev="High">
+<h3><span class="sev High">High</span><span class="tag">I1</span> I1-01</h3>
+<div class="row"><b>位置</b><code>app/src/main/java/com/nasmusic/tv/util/LogStore.kt:439</code></div>
+<div class="row"><b>问题</b>rotate()` 在轮转替换时用 `java.nio.file.Files.move(tmp.toPath(), file.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)`（本窗口新增，替换原 `renameTo`）；但 `java.nio.file.Files` 自 Android API 26 才引入（Android 官方 API reference 明示 &quot;Added in API level 26&quot;），而本工程 `app/build.gradle.kts:261` 为 `minSdk = 22`，全 `app/src/main` 仅此一处引用 `java.nio.file.*`（已 grep 确认，且 core library desugaring 不提供 java.nio.file）。在 API 22–25 设备上执行到该行会抛 `NoClassDefFoundError`。</div>
+<div class="row"><b>影响</b>触发条件：仅 API 22–25 设备 + 日志文件超过 `MAX_BYTES`（256KB）。release 构建下 `AppLog.w`/`AppLog.e` 始终落盘（无 DEBUG 守卫），日志累积到 256KB 是可达路径；老电视（API22）正是 §10.409/§10.411 反复点名的目标设备。后果链：① `NoClassDefFoundError` 属 `Error`，被上层 `writeLine()` 的 `runCatching { writeLine(line) }`（`LogStore.kt:270`）及崩溃路径 `runCatching`（`LogStore.kt:285`）吞掉，**不会崩溃、也不留任何日志痕迹**，`rotate` 的 `onFailure` 仅删 tmp；② 文件长度未缩小，此后每条新日志写入都会再次进入 `rotate()`，而 `rotate()` 每次都 `file.readLines()` 把整个日志读入内存、分桶、`tmp.writeText()` 再失败删 tmp —— 形成随日志量线性增长的 O(n) 全文件读放大 + 临时文件反复写删，老电视上长期运行后造成内存压力与后台 IO 抖动；③ 分级配额（E200/W200/D100）与 256KB 上限在 API22–25 上完全失效，日志文件无限增长占用内部存储，§10.401「崩溃现场不被噪音挤掉」的修复目标在这些设备上落空。Robolectric/JVM 单测的宿主 JVM 自带 `java.nio.file`，无法暴露该问题，故门禁全绿但真机踩坑。</div>
+<div class="row"><b>修法</b>不要使用 `java.nio.file`。按 API 分支处理：仅 `Build.VERSION.SDK_INT &gt;= 26` 保留 `Files.move`；API&lt;26 走纯 `java.io` 分支——`tmp.copyTo(file, overwrite = true)`（或 `FileInputStream`/`FileOutputStream`）覆盖后删除 tmp；若更看重原子性可用同一父目录内的 `File.renameTo(file)`，失败再回退到 copy 覆盖。⛔ 切勿重走旧实现「先 `file.delete()` 再 `renameTo`，第二步失败即整批丢失 E 级日志」的老路（`LogStore.kt:436-438` 注释已记录该坑）。最简且跨版本一致的做法是全局改用 `java.io` 覆盖写，彻底移除 `java.nio.file` 依赖。
+
+---
+
+**Strengths**（均有源码实证）
+
+1. **multipart 边界扫描用 KMP 且带可验证的反例**：`MultipartBoundaryStreamer.kt:32-39` 构建前缀函数，`:74-88` 回退时只写出 `hold[t..matched)` 而非全部 hold，类注释 `:11-14` 给出「边界 `aab` 出现在 `aaab` 中朴素匹配会漏判并多写 1 字节」的具体反例；整体 O(n)、按 64KB 批量 flush，正确性与性能都有据可查。
+2. **模型上传从&quot;写入即覆盖&quot;升级为临时文件 + 双校验 + 原子替换**：`ModelTransferServer.kt:158-176` 全程写 `.tmp`，`:179-204` 依次做 MIN_SIZE（50MB）与 SHA-256 校验，`:209-212` 全部通过后才 `renameTo(modelFile)`，`:220-227`/`:180`/`:197` 的所有失败分支只删 tmp、绝不删正式模型——彻底消除上传中断/传错文件即毁掉用户已装模型的风险。
+3. **上传体量双向设防**：`ModelTransferServer.kt:129-139` 按 Content-Length 做量级预检并 `.noKeepAlive()` 断连，`:175-176` 再把 `MAX_UPLOAD_BYTES`(1GB) 传入 `streamToFile`，`MultipartBoundaryStreamer.kt:58-67` 在 `flushBuf()` 内以 `totalWritten + writeBuf.size() &gt; maxBytes` 抛 IOException 兜底——即使 chunked 请求不带 Content-Length 也有硬上限，防住畸形流撑爆磁盘。
+4. **日志写入的背压与限流设计完整且自证防递归**：`LogStore.kt:196-202, 257-275` 用 `pendingAppends` AtomicInteger 做队列深度背压（W/E 保底放行、D/I/X 超限丢弃），`:307-335` 的 `appendThrottled` 对 W 级按 tag+message 限流（首条全写、每 5 次一条紧凑摘要、消息变化冲刷旧计数），`throttleMap` 上限 64 tag 且按 `synchronized(state)` 串行；`:201` 明确 `droppedAppends` 不接 AppLog，`LogsTabWiringGateTest` 有递归门禁，规避写入→打印→再写入死循环。
+5. **增量镜像链路同构、零主线程 IO**：`AppPreferences.kt:217-221` 的 `cachedDownloadLocation`/`cachedTencentMapKey` 与其它镜像完全同构，`:239-265` 由单一 `startProviderMirrors` 收集到 `@Volatile`，`:1043`/`:1343` 同步读无需 `runBlocking`；`:1346-1355` 的 setter 走 AES-GCM 加密、留空即移除键，未发无效请求。
+6. **重试不吞协程取消**：`RetryUtil.kt:35` 在 catch 首句调用 `e.rethrowIfCancellation()`，与 `Cancellation.kt:36-38`（`CancellationException` 原样重抛）及全库门禁 `ReviewFix20261113GateTest` 一致，避免 `withRetry` 把取消信号转成重试/失败结果导致上层 cancel 失效。
+
+**严重度汇总**：Critical 0 / High 1 / Medium 0 / Low 0
+
+**覆盖自证**：清单文件数 9，实际读取 9/9（全部通读或按改动区 + 全文符号引用核对）。逐文件：`NasMusicApp.kt`（903 行全文）、`WeatherData.kt`（49 行全文）、`AppPreferences.kt`（分段读取 1-405 + 镜像/键/下载位置/天气 key 全部改动区，并对 `cachedDownloadLocation|keyDownloadLocation|getDownloadLocationSync|setDownloadLocation|downloadLocation` 全量 grep 确认唯一读写点）、`WeatherPrefs.kt`（21 行全文）、`ModelTransferServer.kt`（480 行全文）、`MultipartBoundaryStreamer.kt`（106 行全文）、`AppLog.kt`（86 行全文）、`LogStore.kt`（532 行全文）、`RetryUtil.kt`（52 行全文）。额外核验（清单外，仅用于调用链/兜底判定，不计入发现）：`Cancellation.kt`、`app/build.gradle.kts`、`LogStoreTest.kt`/`LogsTabWiringGateTest.kt`/`ReviewFix20261113GateTest.kt` 的门禁引用、`NetworkMusicManager.kt`/`MetingApiService.kt` 的 `wThrottled` 真实调用点、`app/src/main` 全量 `java.nio.file` 引用。读不到：无。
+
+**误报自检结论**
+- §7.1 死代码：`wThrottled`/`appendThrottled` 有 2 处生产调用 + 门禁/单测引用，非死代码；I1-01 的 `rotate` 由 `writeLine` 在超限时真实调用，非死代码。
+- §7.2 上层兜底：已确认 `NoClassDefFoundError` 被 `runCatching` 吞掉，故**未**写成&quot;必然崩溃&quot;，Impact 如实写为&quot;静默轮转失效 + O(n) 读放大 + 配额失效&quot;。
+- §7.3 条件性：I1-01 明确限定&quot;仅 API 22–25 + 日志超 256KB&quot;。
+- §7.4 机制方向：I1-01 是&quot;新增 API26 调用导致老设备轮转失败&quot;，非&quot;删除/覆盖方向说反&quot;；模型上传 tmp→rename 的删除对象已逐行确认为临时文件。
+### I10 | 视觉框架 / fx / 街机 / 渲染器 / 歌词舞台
+
+本轮增量窗口内，本组 10 个文件的全部 diff 改动已逐条追踪调用链与上层兜底，并按 BRIEF §2/3/4「不要报」清单与 §7 四类误报自检复核。
+
+**发现：0 条（无符合上报标准的真实可指行缺陷）。**
+
+改动核验结论（为何均不构成缺陷，逐条）：
+
+- **BeatDetector.kt**：`BeatInfo` 改可变 class + `result` 单例原地赋值 + `bpmScratch` 预分配插入排序。全库唯一调用点 `SpectrumRepository.kt:115-118` 当帧内连续读完 `isBeat/pulse/bpm` 三个字段到 `f`，不跨帧持有返回引用，无别名覆盖；`reset()` 同样原地清零。排序等价性成立：写入 `bpmScratch[n++]` 的 n ≤ `intervalCount` ≤ `intervals.size`=8=数组长度，对 `[0,n)` 插入排序后取 `bpmScratch[n/2]` 与原 `slice.sort()` 的中位数一致。data class→普通 class 的 `==` 语义变化只影响 JVM 单测，非生产缺陷。
+- **RenderContext.kt**：仅新增 `photoACapturedAt/photoBCapturedAt` 两个字段声明，属 BRIEF §4 已核验的照片日期水印（commit `ec64de2`）范畴，且本 diff 无应用逻辑。
+- **ArcadeInputQueue.kt**：新增单一 `lock` 覆盖 `head/tail/slots` 全部读写（offer/drainStart/size/clear）。改动准确识别了真实竞态根因——满队列 `offer` 推进 `head`（丢最旧）与 GL 端 `drainStart` 消费构成 `head` 双写者，原 `@Volatile` 只保可见性不保读-改-写原子；锁粒度正确，`@Volatile` 保留作可见性兜底，逻辑无遗漏。
+- **ProceduralTexture.kt**：`ensureFullscreen` 覆盖前 recycle 旧槽位 bitmap，注释给出的理由精确（API 22–25 像素在 native 堆、覆盖后旧引用永久丢失、`release()` 只遍历当前 slots 无法回收）。平铺型走 `TILED_KEY` 常量键、只生成一次不重建，故无需回收——区分准确。调用点（OverlayFx/AdvancedRenderers/StarrySky 等）均为 draw 期 `tile()` 即时取用，且 `ensure()` 设计上在 onEnter/尺寸变化调用、不在 draw 内，回收时机安全。
+- **ParticleRenderers.kt（BeatFireworkRenderer）**：`lastBeatMs &lt;= 0L || ...` 修复「从未命中鼓点的曲目 `lastBeatMs` 恒为 0，被原条件 `lastBeatMs &gt; 0L` 前提屏蔽 ⇒ idle 兜底永不触发 ⇒ 长期空屏」；有鼓点曲目在 `lastBeatMs&gt;0` 时行为与原式一致，且 `idlePhase&gt;=60` 有节流。修复方向正确。
+- **SeasideRenderer.kt**：`drawLinesBatch(..., dst0, dst - dst0, paint)`——`drawLinesBatch(pts, offset, count, ...)` 的 `count` 是 float 个数，追踪 `var dst=0` → `drawRippleFlush(..., dst0+dst)` 返回绝对结束下标可知 `dst` 为绝对下标，`dst - dst0` 才是本档有效写入量，改前用绝对值 `dst` 作 count 偏大，改动为修正。属修复行，不上报。（`drawRippleFlush` 边界用 `SAND_GRAIN_SEG_STRIDE` 对 b&gt;0 档过早 break 的可疑点是既有代码、非本 diff 改动行，按「不报改动外/机制不外推」不自本组上报。）
+- **VintageTvRenderer.kt**：onExit 对 `lyricBitmap/osdBitmap` 显式 recycle（runCatching 包裹），与 `rebuildLyricBitmap:642`/`ensureOsd:900` 既有回收范式一致且幂等；回收后置 null，下次 draw 的 `needRebuild || lyricBitmap==null` 会重建，onEnter 复位 `lastLyricText/osdValid*`，无悬空引用。
+- **LyricsStagePayload.kt（LyricsStageBridge.tokenize）**：按 `codePointAt/charCount` 逐码点切词，CJK 逐字、其余非空白聚合成词。原正则 `[A-Za-z0-9&#x27;]+` 会丢弃 emoji/俄/泰/希腊等非 ASCII 字符导致 words≠fullText，改动修复且仅用 `java.lang.Character`（守 minSdk22）；CJK 判断范围与原正则逐项一致，substring 边界落在码点边界，无越界。
+- **PartitaSubRenderer.kt / TiltPulseSubRenderer.kt**：新增 C50/M54 重建守卫，以 `linesGeneration`+canvas 尺寸+`density` 三元组触发，清 `activeState` 后由 `syncLine` 的 `activeState == null` changed 判据保证重建，与 `GlowLineSubRenderer:1343` 同范式；onEnter/onExit 均复位。Partita onExit 刻意不清辉光缓存（避免子模式切换时主线程高斯模糊卡顿）有明确注释，属所有者取舍。`density` 为 `DrawScope` 属性，在 `DrawScope.draw` 内可读。
+
+**Strengths**
+
+1. 并发修复抓到根因而非表象：`ArcadeInputQueue.kt:9-11,25-68` 明确写出「head 双写者、`@Volatile` 不保读-改-写原子」的机制，并用单锁覆盖全部状态访问，无遗漏路径，注释与实现一致。
+2. 零分配纪律被严格保持并证明：`BeatDetector.kt:17,30-31,84-104` 的 scratch 数组 + 原地插入排序给出「排序结果与 `slice.sort()` 一致 ⇒ 中位数/最终 BPM 不变」的等价性论证；与 `RenderContext` 的复用实例口径一致。
+3. bitmap 生命周期管理精确且分型：`ProceduralTexture.kt:305-309` 区分「全屏型尺寸变化重建需回收 / 平铺型常量键不重建无需回收」，并注明 API22–25 native 堆与 `release()` 覆盖盲区；`VintageTvRenderer.kt:304-321`、`:642`、`:900` 三处回收形成闭环且幂等。
+4. 兜底逻辑修复带节流、不扩大影响面：`ParticleRenderers.kt:249-264` 仅放开「从未有 beat」场景，保留 `lastBeatMs&gt;0` 时的原有 6s 判据与 `idlePhase&gt;=60` 节流，避免空屏同时不引入高频爆发。
+5. 歌词分词 codepoint 化兼顾正确性与兼容性：`LyricsStagePayload.kt:212-239` 逐码点处理 emoji 代理对、组合标记与俄/泰/希腊文，修复 words/fullText 不一致的下游时间反查根因，且刻意只用 `java.lang.Character` 守住 minSdk22。
+6. 歌词舞台重建守卫有护栏与性能注释：`PartitaSubRenderer.kt:257-271,303-308`、`TiltPulseSubRenderer.kt:190-204` 的代数/视口/density 三元组守卫 + 跨子模式保留辉光缓存的注释，体现对 C50/M54 正确性与主线程卡顿的双重把控。
+
+**严重度汇总**：Critical 0 / High 0 / Medium 0 / Low 0
+
+**覆盖自证**：清单 10 个文件全部读取（10/10），读不到：无。
+- 全文通读（8 个）：BeatDetector.kt(131)、RenderContext.kt(143)、ArcadeInputQueue.kt(73)、ProceduralTexture.kt(727)、ParticleRenderers.kt(379)、VintageTvRenderer.kt(969)、LyricsStagePayload.kt(245)、TiltPulseSubRenderer.kt(750)。
+- 改动区块 + 调用链分块读取（2 个超大文件，未逐行通读全文）：SeasideRenderer.kt(7665)——读取改动点 7474-7584、原语定义 4660-4692、全部 5 处 drawLinesBatch 调用点、常量 508-519、缓冲分配 2486-2531；PartitaSubRenderer.kt(1565)——读取改动点 220-340、onEnter/draw/onExit/syncLine 全部相关方法并 grep 定位全文件符号。两文件的本组 diff 改动均落在已读区块内，足以判定改动本身；其余无关段落未逐行审。
+- 上层调用链核验：`SpectrumRepository.kt:100-165`（BeatInfo 即时消费）、`OverlayFx.kt:86-127` 等 tile() 调用点、`GlowLineSubRenderer.kt:1343`（重建守卫同范式）。
+### I2 | 播放器 / MediaSession / HQ 分离 / 歌词解析缓存
+
+本轮对 5 个改动文件逐行通读全文，并沿调用链核验上层兜底：
+- `SleepTimerController.kt`（state 发射时机、`remainingMinutes()` 口径、`isRunning()`）；
+- `PlayerManager.kt:93`（`hqOrchestrator` 为字段、随 app 级单例构造一次）、`:294-305`（组件转发器）、`:1447`（`release()` 由服务销毁触发）；
+- `MainViewModel.kt:3966-4004`（`networkLyricsCandidateIndex` 的递增/重置来源）。
+
+对 5 处改动（S02-01/02/03/04/05）逐一分析如下，均无真实可指到具体行的缺陷：
+
+- **S02-04 / LrcParser**（:25-32、:53、:116）：`offset` 与头部 offset 各自 `coerceIn(-86400000, 86400000)` 后再相加并钳制，各项 ≤ 8.64e7、和 ≤ 1.73e8，远小于 `Long.MAX_VALUE`，无溢出；`wTimeMs`/`timeMs` 均 `coerceAtLeast(0)` 口径一致，写回前 `wStart = wt.startMs.coerceAtLeast(0)` 保证 `&lt;mm:ss.xx&gt;` 可被 `WORD_TIMESTAMP_REGEX` 回读。合理 LRC 行为不变。
+- **S02-03 / LyricsManager**（:361、:372-377）：轮次无条件推进修复了空结果卡在首轮的问题；因 `MainViewModel` 在返回 null 后会把 `currentSource` 置空并在下次点击将 `candidateIndex` 重置为 0，若不推进 round 确会重复同一 suffix/单飞 key，此改动成立且未引入越界（`safeIndex = candidateIndex.coerceIn(0, all.lastIndex)` 仍在）。异常路径 round 不推进属合理重试，非回归。
+- **S02-05 / LyricsPersistentCache**（get/put/remove/clear/exportAll/importAll + :237 `saveLock`）：`saveLock` 为 Java 可重入 monitor，`saveIndex()` 及 `maybePersistTouch()` 在其内嵌套加锁不死锁；`ConcurrentHashMap` 上 `exportAll()` 迭代中 `remove` 不抛 CME；所有读改写序列被提升为原子单元，消除「清掉条目被写回复活/孤儿文件」。无新缺陷。
+- **S02-01 / HqSeparationOrchestrator.release**（:735-749）：移除 `scope.cancel()` 正确——`hqOrchestrator` 随 app 级 `PlayerManager` 构造一次（PlayerManager.kt:93），`release()` 被服务销毁多处调用；保留 scope 使重建后可复用，`separationJob?.cancel()` 已覆盖在途分离，`finally` 仍执行。`kotlinx.coroutines.cancel` import 移除后无遗留使用。
+- **S02-02 / PlaybackService**（:56、:78、:240-247、:1081-1082）：`state` 为 `StateFlow`，仅在 start/cancel/expire 时发射（非逐秒），collect 运行于 `serviceScope`（Main），对 player 的访问线程正确；`restartSleepMinuteTick()` 先 stop 再 start 不重复；`remainingMinutes()` 未运行恒为 0，`Triple` 键稳定；service 销毁 `serviceScope.cancel()` 自动退订。`kotlinx.coroutines.flow.collect` import 必要。
+
+未发现任何 Critical / High / Medium / Low 级别可上报缺陷。
+
+**Strengths**（均有实证）：
+1. LrcParser 偏移钳制采用「先各自钳到 ±24h 再相加并二次钳制」，从算术上根除脏值 Long 溢出（:25-32），且与行时间轴下界钳制口径统一（:53 对照 :77）。
+2. 逐字时间戳写回补零并 `coerceAtLeast(0)`，直接消除「写盘→重载后卡拉 OK 时间轴静默丢失」（:116-126，沿用 M20 注释的回读正则依据）。
+3. LyricsPersistentCache 用单一可重入 `saveLock` 把索引变更、`.lrc` 文件删写、索引落盘提升为原子单元，并有 C24 进程级单例保证一个真源（:58-63、:228-237）——注释给出了「清掉条目被写回复活/孤儿」的具体并发反例。
+4. HqSeparationOrchestrator.release 明确保留 app 级 scope、只取消 `separationJob`，注释精确到「服务重建后 scope.launch 立即取消、finally 不执行、单飞守卫永久忽略」（:743-748），是对单例生命周期的正确论证。
+5. PlaybackService 将 UI 侧与通知侧两条睡眠定时入口通过订阅 `sleepTimer.state` 统一收敛，去重键并入睡眠分钟，注释说明「逐分钟递减触发刷新」（:236-247、:1079-1082）。
+6. 上层兜底完备：`fetchCandidatesSingleFlight`（LyricsManager.kt:104-124）以 `CompletableDeferred` 合并同 key 请求且 `finally` 注销，`safeIndex`、`rethrowIfCancellation` 等边界/取消语义在改动邻域一致保留。
+
+**严重度汇总**：Critical 0 / High 0 / Medium 0 / Low 0
+
+**覆盖自证**：清单 5 个 .kt 文件全部通读全文（5/5），均可正常读取；额外核验调用链文件 3 个（SleepTimerController.kt、PlayerManager.kt、MainViewModel.kt），未读不到的文件。
+### I3 | 后端核心 / NAS 适配器 / 本地媒体 / 下载 / 导出
+
+---</div>
+<div class="vnote"><b>独立复核 <span class="chk">CONFIRMED</span></b>　终稿严重度 High<br>源码实证：LogStore.kt:439-443 `java.nio.file.Files.move(tmp.toPath(), file.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)`，Location :439 准确。新引入性：git diff 2fb11b8..25d0b6a 显示原为 `tmp.renameTo(file)` + 失败时 `file.delete(); tmp.renameTo(file)`，本窗口 commit 89466d9（BRIEF §4 列明）改为 Files.move，确属新引入。可用性：app/build.gradle.kts:261 `minSdk=22`；全库 grep 无任何 `isCoreLibraryDesugaringEnabled`/`coreLibraryDesugaring` 配置（当前未启用），且 desugar_jdk_libs 本就不覆盖 java.nio.file；app/src/main 全量 java.nio.* 引用中仅本处为 `java.nio.file`（其余为 charset/ByteBuffer/FloatBuffer/ByteOrder，均 API1 起可用），故 API22-25 执行该行抛 NoClassDefFoundError 成立。兜底核查（未夸大&quot;必然崩溃&quot;）：rotate() 由 :400 `if(file.length()&gt;MAX_BYTES) rotate(file)` 调用；其 :434 `runCatching{...}.onFailure{runCatching{tmp.delete()}}` 及上层 writeLine 的 :270/:285 `runCatching` 均捕获 Throwable（含 Error），故错误被静默吞掉、**不崩溃**，初稿 Impact 已照此写明&quot;静默轮转失效&quot;。后果链属实：文件不缩短→后续每次写入重复全文件 readLines(:416)+分桶+tmp.writeText(:435)+move 失败删 tmp，O(n) 读放大、分级配额与 256KB 上限在 API22-25 全失效。附带校正：BRIEF §2 称&quot;AppLog.w 有 DEBUG 守卫&quot;不精确——AppLog.kt:47-48 中 w 无条件 `LogStore.append`，仅 logcat 受 DEBUG 守卫，故 release 下 W/E/diag 均落盘，日志触达 256KB 为可达路径；此点使初稿触发条件更站得住，不构成推翻。维持 High。</div>
+</div>
+<div class="finding High" data-sev="High">
+<h3><span class="sev High">High</span><span class="tag">I3</span> I3-01</h3>
+<div class="row"><b>位置</b><code>app/src/main/java/com/nasmusic/tv/backend/download/SongDownloadManager.kt:711</code></div>
+<div class="row"><b>问题</b>recoverFinalPathOrNull` 新增的 `?.filter { entity.fileSize &gt; 0L &amp;&amp; it.length() == entity.fileSize }` 使该函数对任何输入都恒返回 null。该函数唯一调用方是 `recoverAfterCrash()` 的 `repo.getUnfinished().forEach { entity -&gt; val finalPath = entity.audioPath ?: recoverFinalPathOrNull(entity) }`（:733-734），而 `getUnfinished()` 的 SQL 是 `status IN (&#x27;PENDING&#x27;,&#x27;DOWNLOADING&#x27;)`（DownloadSongDao.kt:73）；这些记录由 `newDownloadingEntity()`（DownloadRepository.kt:250-274）创建，不写 `fileSize`，实体默认 `fileSize = 0L`（DownloadSongEntity.kt:44），且下载过程中只 `updateProgress` 从不写 `fileSize`。因此 `entity.fileSize &gt; 0L` 恒为 false → 所有反推候选被过滤 → `hit` 恒 null → 函数恒 null。注释声称&quot;DB 有有效 fileSize(&gt;0) 时才认定&quot;，但该函数根本拿不到带 fileSize 的记录，条件与调用链自相矛盾。</div>
+<div class="row"><b>影响</b>触发条件——下载进程在音频已 `rename` 到 finalFile 成功之后、COMPLETED 记录 `upsert`（:450）之前被强杀/崩溃/断电（即 P0-2 初衷覆盖的窗口）。此时磁盘已有完整音频，DB 仍是 DOWNLOADING（fileSize=0、audioPath=null）。本改动前可反推并认领为 COMPLETED，回写 audioPath/fileSize；改动后恒判 null，落到 :761 的 else 分支 → `updateStatus(FAILED,&quot;已中断&quot;)` + 删除 tmpPath，磁盘上完整文件变孤儿，既不被认领也不被清理，用户被迫整首重下，且残留孤儿文件会随重下产生 &quot;(2)&quot; 副本。这使 2026-09-16 的 P0-2 崩溃恢复能力完全失效。上层无兜底：:768 的 COMPLETED 校验只覆盖 getCompleted()，够不到被改成 FAILED 的记录。</div>
+<div class="row"><b>修法</b>该函数只处理未完成任务，而 rename 已由同批 S04-01（:398-403 的 .part + rename 原子替换）保证 finalFile 不是半截文件，故未完成任务应以&quot;命名正则匹配 + length&gt;0&quot;为准，不应再用 fileSize 否定。恢复为 `?.filter { entity.fileSize &lt;= 0L || it.length() == entity.fileSize }`；或写成分支：`fileSize &gt; 0L` 时精确匹配、`fileSize &lt;= 0L` 时仅凭 length&gt;0 认领（该路径只可能是 rename 成功的完整文件）。
+
+---</div>
+<div class="vnote"><b>独立复核 <span class="chk">CONFIRMED</span></b>　终稿严重度 High<br>源码实证：SongDownloadManager.kt:711 `?.filter { entity.fileSize &gt; 0L &amp;&amp; it.length() == entity.fileSize }`，Location 准确。新引入性（回答&quot;新入口 vs 上轮已修&quot;）：git diff 2fb11b8..25d0b6a 显示该行由 `entity.fileSize &lt;= 0L || it.length()==entity.fileSize`（V3-P2 旧护栏）本窗口改为 `&gt;0L &amp;&amp;`，标记 V3-N02，属**本窗口新引入的回归**，既非上轮已修那处、也不是重复上报。调用链实证&quot;恒 null&quot;：唯一调用点 :734 `entity.audioPath ?: recoverFinalPathOrNull(entity)`（在 recoverAfterCrash :733 内）；getUnfinished() 的 SQL 为 `status IN (&#x27;PENDING&#x27;,&#x27;DOWNLOADING&#x27;)`（DownloadSongDao.kt:73）；这些记录由 newDownloadingEntity()（DownloadRepository.kt:250-274）创建，不写 fileSize/audioPath，实体默认 `fileSize=0L`（DownloadSongEntity.kt:44）；下载中只 updateProgress（Dao:67-68）与 updateStatus（Dao:64-65）从不写 fileSize；fileSize/audioPath 仅在 COMPLETED upsert 写入（:443/:447、DownloadRepository.kt:200-204、:748）。故对任何入参 `entity.fileSize&gt;0L` 恒 false→全部候选被滤→hit=null→函数恒 null，机制确定性成立。上层无兜底：:761 else 将记录置 FAILED 并删 tmp；:768 的 COMPLETED 校验只覆盖 getCompleted()，够不到被改 FAILED 的记录。触发条件（rename 后、COMPLETED upsert 前被强杀/断电）初稿已写明，未夸大为&quot;必然崩溃/必然泄漏&quot;。后果为完整文件成孤儿、用户被迫重下并产生 &quot;(2)&quot; 副本，P0-2 崩溃恢复确定性失效，维持 High。</div>
+</div>
+<div class="finding High" data-sev="High">
+<h3><span class="sev High">High</span><span class="tag">I4</span> I4-01</h3>
+<div class="row"><b>位置</b><code>app/src/main/java/com/nasmusic/tv/backend/network/baidu/BaiduPanApi.kt:182</code></div>
+<div class="row"><b>问题</b>listAllAudioPaged` 的分页循环以 `val result = execute(url) { … } ?: break` 收尾，而 `execute()`（:332-343）对 `executeOnce()` 返回的 `null to -1`（:307 / :310 / :312 / :323 的网络/IO/非2xx/JSON 解析失败）不区分错误态，errno=-1 又不在 `tokenExpiredErrnos`（:291）里，于是原样 `return null`；本轮 V5-N03 只把 `listDir`/`executeWithErrno` 改成「ioError 抛 IOException」（:407-409），没有覆盖 `execute()`。触发条件：listall 递归分页过程中任一次请求出现瞬时网络失败、非 2xx 或响应体不是合法 JSON，循环即静默 break 并返回 `allFiles` 半截列表。</div>
+<div class="row"><b>影响</b>生产主建索引路径 `BaiduFileIndexCache.fullScan`（:437 调 `listAllAudioPaged`，:514-520 `save(index)` + `onProgress?.onComplete(total)`）把这半截列表当作完整结果落盘；`NetworkMusicViewModel` 的 `onComplete`（:745-749）还会推进 `_baiduIndexLastSync` 并刷新 UI，而「失败提示 + partial」分支只在 :459-464 的 catch 里、本路径根本不经过。用户在一次网络抖动后曲库索引被截断甚至清空（首屏失败即 0 条），且时间戳显示「刚刚同步成功」不会再自动重试。这正是 V5-N03 注释声称要消灭的「返回半截列表」缺陷，只是它留在了未改的 `execute()` 路径上。</div>
+<div class="row"><b>修法</b>让 `executeOnce`/`execute` 返回可区分的 IO 错误态（如 `errno = LOCAL_ERRNO_NETWORK` + `ioError`），或直接在 `listAllAudioPaged` 的 `?:` 分支抛 `IOException`；使 `fullScan` 进入既有 catch 走 `partial + onFailed`，并避免把半截结果以完整索引 `save` + `onComplete` 上报。</div>
+<div class="vnote"><b>独立复核 <span class="chk">CONFIRMED</span></b>　终稿严重度 High<br>源码实证：BaiduPanApi.kt:182 `} ?: break`，Location 准确。错误态丢失链：executeOnce() :307(body null)、:310(非2xx)、:312(JSON 解析失败)、:321-323(Exception) 一律 `null to -1`；errno=-1 不在 :291 `tokenExpiredErrnos=setOf(-6,31045)`，故 execute()（:332-343）原样返回 null→`?: break`→listAllAudioPaged 返回半截 allFiles，静默中断。V5-N03 改动范围核实：git diff 2fb11b8..25d0b6a 显示本窗口仅为 listDir 路径新增 ioError/networkFailure()/:407-408 `throw IOException`，**未触及** execute()/executeOnce()/listAllAudioPaged；初稿称&quot;半截列表缺陷留在未改的 execute() 路径&quot;属实，非&quot;上轮已修那处&quot;的重复上报。上层无兜底实证：BaiduFileIndexCache.fullScan :437 调 listAllAudioPaged，:436-465 try/catch 捕获的是抛出的异常，而静默 break 不抛异常→不进 catch 的 partial/onFailed 分支；直接落到 :514-520 `save(index)`+`onComplete(entries.size)` 当完整结果落盘。NetworkMusicViewModel:745-749 的 onComplete 推进 `_baiduIndexLastSync=now` 并 onMergedDataInvalidated 刷新 UI，失败提示 onFailed(:750-752) 根本不经过；无自动重试。触发条件初稿已写明（分页过程中任一次瞬时网络失败/非2xx/非法JSON），未夸大&quot;必然&quot;——但一次抖动即致索引被截断甚至清空（首屏失败即 0 条）且显示&quot;刚刚同步成功&quot;不再重试，用户可感知后果确定，维持 High。
+
+复核范围：5/5 条
+
+
+### V2 | 复核 I4-02 I4-03 I4-04 I5-01 I5-02</div>
+</div>
+</section>
+<section id="verify"><h2>3. 独立复核结论</h2>
+<p>对全部 14 条初稿派 3 个独立复核代理，逐条重读源码、grep 调用点、追上层兜底、核对机制方向，尽力证伪。裁定分布：CONFIRMED <strong>13</strong>，PARTIALLY CORRECT <strong>1</strong>。主审另对 4 条 High 亲自抽查 diff 与调用链，确认非放水。</p>
+<table><tr><th>ID</th><th>初稿</th><th>裁定</th><th>终稿</th><th>行号</th><th>复核实证（摘要）</th></tr>
+<tr><td><code>B2-01</code></td><td>High</td><td>CONFIRMED</td><td><strong>High</strong></td><td>无</td><td class="small">源码实证：DemucsSeparator.kt:55/57 常量 SEGMENT_SAMPLES=343980、OVERLAP_SAMPLES=3440，:392 hop=SEGMENT-OVERLAP=340540，SEGMENT&gt;hop 成立。:441 为只进流 `DataInputStream(BufferedInputStream(FileInputStream(tempFile)))`，:443 `segLen=min(SEGMENT,totalSamples-startSample)`，:448-451 每轮连续 readFloat 读 segLen 帧，:505 `startSample += hop`，无任何 see</td></tr>
+<tr><td><code>I1-01</code></td><td>High</td><td>CONFIRMED</td><td><strong>High</strong></td><td>无</td><td class="small">源码实证：LogStore.kt:439-443 `java.nio.file.Files.move(tmp.toPath(), file.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)`，Location :439 准确。新引入性：git diff 2fb11b8..25d0b6a 显示原为 `tmp.renameTo(file)` + 失败时 `file.delete(); tmp.renameTo(file)`，本窗口 commit 89466d9（BRIEF §4 列明）改为 Files.move，确属新引入。可用性：app/build.gradle.</td></tr>
+<tr><td><code>I3-01</code></td><td>High</td><td>CONFIRMED</td><td><strong>High</strong></td><td>无</td><td class="small">源码实证：SongDownloadManager.kt:711 `?.filter { entity.fileSize &gt; 0L &amp;&amp; it.length() == entity.fileSize }`，Location 准确。新引入性（回答&quot;新入口 vs 上轮已修&quot;）：git diff 2fb11b8..25d0b6a 显示该行由 `entity.fileSize &lt;= 0L || it.length()==entity.fileSize`（V3-P2 旧护栏）本窗口改为 `&gt;0L &amp;&amp;`，标记 V3-N02，属**本窗口新引入的回归**，既非上轮已修那处、也不是重复上报。调用链实证&quot;恒 null&quot;：唯一调用点 :734 `ent</td></tr>
+<tr><td><code>I4-01</code></td><td>High</td><td>CONFIRMED</td><td><strong>High</strong></td><td>无</td><td class="small">源码实证：BaiduPanApi.kt:182 `} ?: break`，Location 准确。错误态丢失链：executeOnce() :307(body null)、:310(非2xx)、:312(JSON 解析失败)、:321-323(Exception) 一律 `null to -1`；errno=-1 不在 :291 `tokenExpiredErrnos=setOf(-6,31045)`，故 execute()（:332-343）原样返回 null→`?: break`→listAllAudioPaged 返回半截 allFiles，静默中断。V5-N03 改动范围核实：git diff 2fb11b8..25d0b6</td></tr>
+<tr><td><code>I4-02</code></td><td>Medium</td><td>CONFIRMED</td><td><strong>Medium</strong></td><td>无</td><td class="small">源码 MetingApiService.kt:316 `val body = response.body?.string()` 属实（无上限一次性读入），该行为既有代码、本窗口 diff 未触及（改动在 :268/:428/:505）。下游坐实三份驻留：:322 parseSongs → MetingJsonShape.kt:63 `gson.fromJson(body, JsonElement::class.java)` 建完整 DOM，MetingJsonShape.kt:111 `body.replace(...)` 先复制整串再 take(PREVIEW_LIMIT=240)。调用链非空：search(:200)→searc</td></tr>
+<tr><td><code>I7-01</code></td><td>Medium</td><td>CONFIRMED</td><td><strong>Medium</strong></td><td>无</td><td class="small">KaraokePlaybackScreen.kt:110 确认 `progressMs: androidx.compose.runtime.State&lt;Long&gt;`；:375 已把 State 传给 KaraokeLyricsView（歌词侧下沉完成）；但 :382-386 的 `karaokeProgress` 在 :383 直接读 `progressMs.value`，位于 :368-410 的 Box content lambda 内、仍属同一函数体（下一个 @Composable 在 :594）。Compose UI 1.6.x（BOM 2024.02.00，app/build.gradle.kts:396）的 `Box` </td></tr>
+<tr><td><code>I3-02</code></td><td>Low</td><td>CONFIRMED</td><td><strong>Low</strong></td><td>无</td><td class="small">源码实证：SongExporter.kt:335 `tmp=File(target.parentFile,&quot;${target.name}.part&quot;)`；:340 `if(!tmp.renameTo(target))` 失败时，:344 `part2=File(...,&quot;${target.name}.part2&quot;)`，:346 `tmp.copyTo(part2, overwrite=true)`，:347 `part2.renameTo(target)`，:348-350 finally 只 `part2.delete()`；:352 直接 `return true`，成功路径无 `tmp.delete()`；:353-354 c</td></tr>
+<tr><td><code>I4-03</code></td><td>Low</td><td>CONFIRMED</td><td><strong>Low</strong></td><td>无</td><td class="small">源码 BaiduOAuthClient.kt:168 `(json.get(&quot;expires_in&quot;)?.asLong ?: 2592000L).coerceIn(...)` 属实，无 takeIf 守卫；refresh 侧 :277-279 有 `?.takeIf { it.isJsonPrimitive }?.asLong`，两侧不一致属实，:274 注释&quot;对齐 pollDeviceToken 的安全解析&quot;名不副实。Gson 行为坐实：JsonNull/JsonObject.asLong 抛 UnsupportedOperationException（Exception 子类），被 :199-201 catch(Exceptio</td></tr>
+<tr><td><code>I4-04</code></td><td>Low</td><td>CONFIRMED</td><td><strong>Low</strong></td><td>无</td><td class="small">源码 LxScriptRepo.kt:199 `NetAddressGuard.rejectReason(target.toString())` 属实；interceptor 整体 :197-202 系本窗口 S05-01 新增（diff @@ -190,6 +190,16），followRedirects(true) 在 :192。口径不一致坐实：NetAddressGuard.rejectReason :98-107 只要求 scheme∈{http,https}(:100-102) 且非内网主机，不要求 https；installFromUrl :81 却强制 `parsed.scheme == &quot;https&quot;`。机制成立：h</td></tr>
+<tr><td><code>I5-01</code></td><td>Medium</td><td>CONFIRMED</td><td><strong>Low</strong></td><td>无</td><td class="small">源码 MediaStorePhotoSource.kt:91 `cursor.getLong(takenCol).takeIf { PhotoCaptureDate.isPlausibleEpochSeconds(it) } ?: 0L` 属实（行号无漂移）；:89 注释&quot;DATE_TAKEN 原生就是秒&quot;属实，且与 :30-31（DATE_ADDED/DATE_MODIFIED 为秒）并列，单位写反。Android MediaColumns.DATE_TAKEN 单位为毫秒（API1 起），正常照片 ≈1.6e12；isPlausibleEpochSeconds :220-221 上限 UPPER_EPOCH_SECONDS=7_</td></tr>
+<tr><td><code>I5-02</code></td><td>Low</td><td>CONFIRMED</td><td><strong>Low</strong></td><td>无</td><td class="small">源码 PhotoSource.kt:200 `return local - (zoneOffsetSec ?: 0)`、:199 `toEpochSeconds(..., zone)` 属实（行号无漂移）。对照证实作者掌握正确做法：Z 分支 :150-151 令 zone=UTC、:183 zoneOffsetSec=0，:199 用 UTC 解析后 :200 减 0，结果正确；而 ±hh:mm 分支 :184-192 只记 zoneOffsetSec 却不改 zone（仍为 zoneIn=系统默认时区），wall-clock 被按系统时区解析后 :200 再减一次偏移——当系统时区恰等于字符串偏移（中国 +08、串也 +08）时重</td></tr>
+<tr><td><code>I6-01</code></td><td>Medium</td><td>PARTIALLY CORRECT</td><td><strong>Low</strong></td><td>无</td><td class="small">源码逐行核对 DownloadViewModel.kt:123-188 属实：:125 `qualityProbeJob?.cancel()`、:126 `val generation = ++qualityProbeGeneration`、:131/133/138 三处早返回均在 :143 `try` 之前，:179-186 finally 的清理受 :181 `generation == qualityProbeGeneration` 守卫。代码层面的陈旧态逻辑真实：若 Job A 在 :142 写入 Probing 后于 :144 `probeAvailableQualities()`（suspend，withContext(</td></tr>
+<tr><td><code>I9-01</code></td><td>Medium</td><td>CONFIRMED</td><td><strong>Low</strong></td><td>无</td><td class="small">PhotoRenderer.kt:251-264 属实，:254 `if (!atA &amp;&amp; ctx.photoB == null) return`。首图路径实证：PhotoWallController.kt:600-606 首图 `currentRef = next; incomingRef = null`；applyTo :327-331 写 `ctx.photoB = null`、`ctx.photoBCapturedAt = 0L`；首图用 `enterMs = 0`（:615）无 ENTER，PhotoTransitionClock.kt:219-226 的 HOLD 令 `progress = 1f`（:221）⇒ Pho</td></tr>
+<tr><td><code>I9-02</code></td><td>Low</td><td>CONFIRMED</td><td><strong>Low</strong></td><td>无</td><td class="small">PhotoRenderer.kt:225-228 属实（`val inTransition = ctx.photoProgress &lt; 1f`，:226 `if (inTransition) drawDateStamp(ctx, aCapturedAt, atA = true)`）；:252 首行 `if (!shouldShowDateStamp(capturedAt, ctx.photoProgress)) return`；PhotoDateStamp.kt:199-200 `shouldShowDateStamp = capturedAt &gt; 0L &amp;&amp; progress &gt;= 1f`。A 分支仅在 p&lt;1f 时调用，而 sh</td></tr>
+</table></section>
+<section id="subs"><h2>4. 各子系统发现</h2>
+<p>下列按子系统分组列出全部终稿发现。每组先用 <span class="tag">增量/兜底</span> 标明来源。<code>data-sev</code> 属性支持顶部严重度筛选按钮。</p>
+<div id="i1"><h3>I1 · 应用骨架 / 偏好 / util / 网络服务 / 天气数据模型 <span class="tag">增量</span> <span class="muted small">1 条发现</span></h3>
+<div class="finding High" data-sev="High">
+<h3><span class="sev High">High</span><span class="tag">I1</span> I1-01</h3>
+<div class="row"><b>位置</b><code>app/src/main/java/com/nasmusic/tv/util/LogStore.kt:439</code></div>
+<div class="row"><b>问题</b>rotate()` 在轮转替换时用 `java.nio.file.Files.move(tmp.toPath(), file.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)`（本窗口新增，替换原 `renameTo`）；但 `java.nio.file.Files` 自 Android API 26 才引入（Android 官方 API reference 明示 &quot;Added in API level 26&quot;），而本工程 `app/build.gradle.kts:261` 为 `minSdk = 22`，全 `app/src/main` 仅此一处引用 `java.nio.file.*`（已 grep 确认，且 core library desugaring 不提供 java.nio.file）。在 API 22–25 设备上执行到该行会抛 `NoClassDefFoundError`。</div>
+<div class="row"><b>影响</b>触发条件：仅 API 22–25 设备 + 日志文件超过 `MAX_BYTES`（256KB）。release 构建下 `AppLog.w`/`AppLog.e` 始终落盘（无 DEBUG 守卫），日志累积到 256KB 是可达路径；老电视（API22）正是 §10.409/§10.411 反复点名的目标设备。后果链：① `NoClassDefFoundError` 属 `Error`，被上层 `writeLine()` 的 `runCatching { writeLine(line) }`（`LogStore.kt:270`）及崩溃路径 `runCatching`（`LogStore.kt:285`）吞掉，**不会崩溃、也不留任何日志痕迹**，`rotate` 的 `onFailure` 仅删 tmp；② 文件长度未缩小，此后每条新日志写入都会再次进入 `rotate()`，而 `rotate()` 每次都 `file.readLines()` 把整个日志读入内存、分桶、`tmp.writeText()` 再失败删 tmp —— 形成随日志量线性增长的 O(n) 全文件读放大 + 临时文件反复写删，老电视上长期运行后造成内存压力与后台 IO 抖动；③ 分级配额（E200/W200/D100）与 256KB 上限在 API22–25 上完全失效，日志文件无限增长占用内部存储，§10.401「崩溃现场不被噪音挤掉」的修复目标在这些设备上落空。Robolectric/JVM 单测的宿主 JVM 自带 `java.nio.file`，无法暴露该问题，故门禁全绿但真机踩坑。</div>
+<div class="row"><b>修法</b>不要使用 `java.nio.file`。按 API 分支处理：仅 `Build.VERSION.SDK_INT &gt;= 26` 保留 `Files.move`；API&lt;26 走纯 `java.io` 分支——`tmp.copyTo(file, overwrite = true)`（或 `FileInputStream`/`FileOutputStream`）覆盖后删除 tmp；若更看重原子性可用同一父目录内的 `File.renameTo(file)`，失败再回退到 copy 覆盖。⛔ 切勿重走旧实现「先 `file.delete()` 再 `renameTo`，第二步失败即整批丢失 E 级日志」的老路（`LogStore.kt:436-438` 注释已记录该坑）。最简且跨版本一致的做法是全局改用 `java.io` 覆盖写，彻底移除 `java.nio.file` 依赖。
+
+---
+
+**Strengths**（均有源码实证）
+
+1. **multipart 边界扫描用 KMP 且带可验证的反例**：`MultipartBoundaryStreamer.kt:32-39` 构建前缀函数，`:74-88` 回退时只写出 `hold[t..matched)` 而非全部 hold，类注释 `:11-14` 给出「边界 `aab` 出现在 `aaab` 中朴素匹配会漏判并多写 1 字节」的具体反例；整体 O(n)、按 64KB 批量 flush，正确性与性能都有据可查。
+2. **模型上传从&quot;写入即覆盖&quot;升级为临时文件 + 双校验 + 原子替换**：`ModelTransferServer.kt:158-176` 全程写 `.tmp`，`:179-204` 依次做 MIN_SIZE（50MB）与 SHA-256 校验，`:209-212` 全部通过后才 `renameTo(modelFile)`，`:220-227`/`:180`/`:197` 的所有失败分支只删 tmp、绝不删正式模型——彻底消除上传中断/传错文件即毁掉用户已装模型的风险。
+3. **上传体量双向设防**：`ModelTransferServer.kt:129-139` 按 Content-Length 做量级预检并 `.noKeepAlive()` 断连，`:175-176` 再把 `MAX_UPLOAD_BYTES`(1GB) 传入 `streamToFile`，`MultipartBoundaryStreamer.kt:58-67` 在 `flushBuf()` 内以 `totalWritten + writeBuf.size() &gt; maxBytes` 抛 IOException 兜底——即使 chunked 请求不带 Content-Length 也有硬上限，防住畸形流撑爆磁盘。
+4. **日志写入的背压与限流设计完整且自证防递归**：`LogStore.kt:196-202, 257-275` 用 `pendingAppends` AtomicInteger 做队列深度背压（W/E 保底放行、D/I/X 超限丢弃），`:307-335` 的 `appendThrottled` 对 W 级按 tag+message 限流（首条全写、每 5 次一条紧凑摘要、消息变化冲刷旧计数），`throttleMap` 上限 64 tag 且按 `synchronized(state)` 串行；`:201` 明确 `droppedAppends` 不接 AppLog，`LogsTabWiringGateTest` 有递归门禁，规避写入→打印→再写入死循环。
+5. **增量镜像链路同构、零主线程 IO**：`AppPreferences.kt:217-221` 的 `cachedDownloadLocation`/`cachedTencentMapKey` 与其它镜像完全同构，`:239-265` 由单一 `startProviderMirrors` 收集到 `@Volatile`，`:1043`/`:1343` 同步读无需 `runBlocking`；`:1346-1355` 的 setter 走 AES-GCM 加密、留空即移除键，未发无效请求。
+6. **重试不吞协程取消**：`RetryUtil.kt:35` 在 catch 首句调用 `e.rethrowIfCancellation()`，与 `Cancellation.kt:36-38`（`CancellationException` 原样重抛）及全库门禁 `ReviewFix20261113GateTest` 一致，避免 `withRetry` 把取消信号转成重试/失败结果导致上层 cancel 失效。
+
+**严重度汇总**：Critical 0 / High 1 / Medium 0 / Low 0
+
+**覆盖自证**：清单文件数 9，实际读取 9/9（全部通读或按改动区 + 全文符号引用核对）。逐文件：`NasMusicApp.kt`（903 行全文）、`WeatherData.kt`（49 行全文）、`AppPreferences.kt`（分段读取 1-405 + 镜像/键/下载位置/天气 key 全部改动区，并对 `cachedDownloadLocation|keyDownloadLocation|getDownloadLocationSync|setDownloadLocation|downloadLocation` 全量 grep 确认唯一读写点）、`WeatherPrefs.kt`（21 行全文）、`ModelTransferServer.kt`（480 行全文）、`MultipartBoundaryStreamer.kt`（106 行全文）、`AppLog.kt`（86 行全文）、`LogStore.kt`（532 行全文）、`RetryUtil.kt`（52 行全文）。额外核验（清单外，仅用于调用链/兜底判定，不计入发现）：`Cancellation.kt`、`app/build.gradle.kts`、`LogStoreTest.kt`/`LogsTabWiringGateTest.kt`/`ReviewFix20261113GateTest.kt` 的门禁引用、`NetworkMusicManager.kt`/`MetingApiService.kt` 的 `wThrottled` 真实调用点、`app/src/main` 全量 `java.nio.file` 引用。读不到：无。
+
+**误报自检结论**
+- §7.1 死代码：`wThrottled`/`appendThrottled` 有 2 处生产调用 + 门禁/单测引用，非死代码；I1-01 的 `rotate` 由 `writeLine` 在超限时真实调用，非死代码。
+- §7.2 上层兜底：已确认 `NoClassDefFoundError` 被 `runCatching` 吞掉，故**未**写成&quot;必然崩溃&quot;，Impact 如实写为&quot;静默轮转失效 + O(n) 读放大 + 配额失效&quot;。
+- §7.3 条件性：I1-01 明确限定&quot;仅 API 22–25 + 日志超 256KB&quot;。
+- §7.4 机制方向：I1-01 是&quot;新增 API26 调用导致老设备轮转失败&quot;，非&quot;删除/覆盖方向说反&quot;；模型上传 tmp→rename 的删除对象已逐行确认为临时文件。
+### I10 | 视觉框架 / fx / 街机 / 渲染器 / 歌词舞台
+
+本轮增量窗口内，本组 10 个文件的全部 diff 改动已逐条追踪调用链与上层兜底，并按 BRIEF §2/3/4「不要报」清单与 §7 四类误报自检复核。
+
+**发现：0 条（无符合上报标准的真实可指行缺陷）。**
+
+改动核验结论（为何均不构成缺陷，逐条）：
+
+- **BeatDetector.kt**：`BeatInfo` 改可变 class + `result` 单例原地赋值 + `bpmScratch` 预分配插入排序。全库唯一调用点 `SpectrumRepository.kt:115-118` 当帧内连续读完 `isBeat/pulse/bpm` 三个字段到 `f`，不跨帧持有返回引用，无别名覆盖；`reset()` 同样原地清零。排序等价性成立：写入 `bpmScratch[n++]` 的 n ≤ `intervalCount` ≤ `intervals.size`=8=数组长度，对 `[0,n)` 插入排序后取 `bpmScratch[n/2]` 与原 `slice.sort()` 的中位数一致。data class→普通 class 的 `==` 语义变化只影响 JVM 单测，非生产缺陷。
+- **RenderContext.kt**：仅新增 `photoACapturedAt/photoBCapturedAt` 两个字段声明，属 BRIEF §4 已核验的照片日期水印（commit `ec64de2`）范畴，且本 diff 无应用逻辑。
+- **ArcadeInputQueue.kt**：新增单一 `lock` 覆盖 `head/tail/slots` 全部读写（offer/drainStart/size/clear）。改动准确识别了真实竞态根因——满队列 `offer` 推进 `head`（丢最旧）与 GL 端 `drainStart` 消费构成 `head` 双写者，原 `@Volatile` 只保可见性不保读-改-写原子；锁粒度正确，`@Volatile` 保留作可见性兜底，逻辑无遗漏。
+- **ProceduralTexture.kt**：`ensureFullscreen` 覆盖前 recycle 旧槽位 bitmap，注释给出的理由精确（API 22–25 像素在 native 堆、覆盖后旧引用永久丢失、`release()` 只遍历当前 slots 无法回收）。平铺型走 `TILED_KEY` 常量键、只生成一次不重建，故无需回收——区分准确。调用点（OverlayFx/AdvancedRenderers/StarrySky 等）均为 draw 期 `tile()` 即时取用，且 `ensure()` 设计上在 onEnter/尺寸变化调用、不在 draw 内，回收时机安全。
+- **ParticleRenderers.kt（BeatFireworkRenderer）**：`lastBeatMs &lt;= 0L || ...` 修复「从未命中鼓点的曲目 `lastBeatMs` 恒为 0，被原条件 `lastBeatMs &gt; 0L` 前提屏蔽 ⇒ idle 兜底永不触发 ⇒ 长期空屏」；有鼓点曲目在 `lastBeatMs&gt;0` 时行为与原式一致，且 `idlePhase&gt;=60` 有节流。修复方向正确。
+- **SeasideRenderer.kt**：`drawLinesBatch(..., dst0, dst - dst0, paint)`——`drawLinesBatch(pts, offset, count, ...)` 的 `count` 是 float 个数，追踪 `var dst=0` → `drawRippleFlush(..., dst0+dst)` 返回绝对结束下标可知 `dst` 为绝对下标，`dst - dst0` 才是本档有效写入量，改前用绝对值 `dst` 作 count 偏大，改动为修正。属修复行，不上报。（`drawRippleFlush` 边界用 `SAND_GRAIN_SEG_STRIDE` 对 b&gt;0 档过早 break 的可疑点是既有代码、非本 diff 改动行，按「不报改动外/机制不外推」不自本组上报。）
+- **VintageTvRenderer.kt**：onExit 对 `lyricBitmap/osdBitmap` 显式 recycle（runCatching 包裹），与 `rebuildLyricBitmap:642`/`ensureOsd:900` 既有回收范式一致且幂等；回收后置 null，下次 draw 的 `needRebuild || lyricBitmap==null` 会重建，onEnter 复位 `lastLyricText/osdValid*`，无悬空引用。
+- **LyricsStagePayload.kt（LyricsStageBridge.tokenize）**：按 `codePointAt/charCount` 逐码点切词，CJK 逐字、其余非空白聚合成词。原正则 `[A-Za-z0-9&#x27;]+` 会丢弃 emoji/俄/泰/希腊等非 ASCII 字符导致 words≠fullText，改动修复且仅用 `java.lang.Character`（守 minSdk22）；CJK 判断范围与原正则逐项一致，substring 边界落在码点边界，无越界。
+- **PartitaSubRenderer.kt / TiltPulseSubRenderer.kt**：新增 C50/M54 重建守卫，以 `linesGeneration`+canvas 尺寸+`density` 三元组触发，清 `activeState` 后由 `syncLine` 的 `activeState == null` changed 判据保证重建，与 `GlowLineSubRenderer:1343` 同范式；onEnter/onExit 均复位。Partita onExit 刻意不清辉光缓存（避免子模式切换时主线程高斯模糊卡顿）有明确注释，属所有者取舍。`density` 为 `DrawScope` 属性，在 `DrawScope.draw` 内可读。
+
+**Strengths**
+
+1. 并发修复抓到根因而非表象：`ArcadeInputQueue.kt:9-11,25-68` 明确写出「head 双写者、`@Volatile` 不保读-改-写原子」的机制，并用单锁覆盖全部状态访问，无遗漏路径，注释与实现一致。
+2. 零分配纪律被严格保持并证明：`BeatDetector.kt:17,30-31,84-104` 的 scratch 数组 + 原地插入排序给出「排序结果与 `slice.sort()` 一致 ⇒ 中位数/最终 BPM 不变」的等价性论证；与 `RenderContext` 的复用实例口径一致。
+3. bitmap 生命周期管理精确且分型：`ProceduralTexture.kt:305-309` 区分「全屏型尺寸变化重建需回收 / 平铺型常量键不重建无需回收」，并注明 API22–25 native 堆与 `release()` 覆盖盲区；`VintageTvRenderer.kt:304-321`、`:642`、`:900` 三处回收形成闭环且幂等。
+4. 兜底逻辑修复带节流、不扩大影响面：`ParticleRenderers.kt:249-264` 仅放开「从未有 beat」场景，保留 `lastBeatMs&gt;0` 时的原有 6s 判据与 `idlePhase&gt;=60` 节流，避免空屏同时不引入高频爆发。
+5. 歌词分词 codepoint 化兼顾正确性与兼容性：`LyricsStagePayload.kt:212-239` 逐码点处理 emoji 代理对、组合标记与俄/泰/希腊文，修复 words/fullText 不一致的下游时间反查根因，且刻意只用 `java.lang.Character` 守住 minSdk22。
+6. 歌词舞台重建守卫有护栏与性能注释：`PartitaSubRenderer.kt:257-271,303-308`、`TiltPulseSubRenderer.kt:190-204` 的代数/视口/density 三元组守卫 + 跨子模式保留辉光缓存的注释，体现对 C50/M54 正确性与主线程卡顿的双重把控。
+
+**严重度汇总**：Critical 0 / High 0 / Medium 0 / Low 0
+
+**覆盖自证**：清单 10 个文件全部读取（10/10），读不到：无。
+- 全文通读（8 个）：BeatDetector.kt(131)、RenderContext.kt(143)、ArcadeInputQueue.kt(73)、ProceduralTexture.kt(727)、ParticleRenderers.kt(379)、VintageTvRenderer.kt(969)、LyricsStagePayload.kt(245)、TiltPulseSubRenderer.kt(750)。
+- 改动区块 + 调用链分块读取（2 个超大文件，未逐行通读全文）：SeasideRenderer.kt(7665)——读取改动点 7474-7584、原语定义 4660-4692、全部 5 处 drawLinesBatch 调用点、常量 508-519、缓冲分配 2486-2531；PartitaSubRenderer.kt(1565)——读取改动点 220-340、onEnter/draw/onExit/syncLine 全部相关方法并 grep 定位全文件符号。两文件的本组 diff 改动均落在已读区块内，足以判定改动本身；其余无关段落未逐行审。
+- 上层调用链核验：`SpectrumRepository.kt:100-165`（BeatInfo 即时消费）、`OverlayFx.kt:86-127` 等 tile() 调用点、`GlowLineSubRenderer.kt:1343`（重建守卫同范式）。
+### I2 | 播放器 / MediaSession / HQ 分离 / 歌词解析缓存
+
+本轮对 5 个改动文件逐行通读全文，并沿调用链核验上层兜底：
+- `SleepTimerController.kt`（state 发射时机、`remainingMinutes()` 口径、`isRunning()`）；
+- `PlayerManager.kt:93`（`hqOrchestrator` 为字段、随 app 级单例构造一次）、`:294-305`（组件转发器）、`:1447`（`release()` 由服务销毁触发）；
+- `MainViewModel.kt:3966-4004`（`networkLyricsCandidateIndex` 的递增/重置来源）。
+
+对 5 处改动（S02-01/02/03/04/05）逐一分析如下，均无真实可指到具体行的缺陷：
+
+- **S02-04 / LrcParser**（:25-32、:53、:116）：`offset` 与头部 offset 各自 `coerceIn(-86400000, 86400000)` 后再相加并钳制，各项 ≤ 8.64e7、和 ≤ 1.73e8，远小于 `Long.MAX_VALUE`，无溢出；`wTimeMs`/`timeMs` 均 `coerceAtLeast(0)` 口径一致，写回前 `wStart = wt.startMs.coerceAtLeast(0)` 保证 `&lt;mm:ss.xx&gt;` 可被 `WORD_TIMESTAMP_REGEX` 回读。合理 LRC 行为不变。
+- **S02-03 / LyricsManager**（:361、:372-377）：轮次无条件推进修复了空结果卡在首轮的问题；因 `MainViewModel` 在返回 null 后会把 `currentSource` 置空并在下次点击将 `candidateIndex` 重置为 0，若不推进 round 确会重复同一 suffix/单飞 key，此改动成立且未引入越界（`safeIndex = candidateIndex.coerceIn(0, all.lastIndex)` 仍在）。异常路径 round 不推进属合理重试，非回归。
+- **S02-05 / LyricsPersistentCache**（get/put/remove/clear/exportAll/importAll + :237 `saveLock`）：`saveLock` 为 Java 可重入 monitor，`saveIndex()` 及 `maybePersistTouch()` 在其内嵌套加锁不死锁；`ConcurrentHashMap` 上 `exportAll()` 迭代中 `remove` 不抛 CME；所有读改写序列被提升为原子单元，消除「清掉条目被写回复活/孤儿文件」。无新缺陷。
+- **S02-01 / HqSeparationOrchestrator.release**（:735-749）：移除 `scope.cancel()` 正确——`hqOrchestrator` 随 app 级 `PlayerManager` 构造一次（PlayerManager.kt:93），`release()` 被服务销毁多处调用；保留 scope 使重建后可复用，`separationJob?.cancel()` 已覆盖在途分离，`finally` 仍执行。`kotlinx.coroutines.cancel` import 移除后无遗留使用。
+- **S02-02 / PlaybackService**（:56、:78、:240-247、:1081-1082）：`state` 为 `StateFlow`，仅在 start/cancel/expire 时发射（非逐秒），collect 运行于 `serviceScope`（Main），对 player 的访问线程正确；`restartSleepMinuteTick()` 先 stop 再 start 不重复；`remainingMinutes()` 未运行恒为 0，`Triple` 键稳定；service 销毁 `serviceScope.cancel()` 自动退订。`kotlinx.coroutines.flow.collect` import 必要。
+
+未发现任何 Critical / High / Medium / Low 级别可上报缺陷。
+
+**Strengths**（均有实证）：
+1. LrcParser 偏移钳制采用「先各自钳到 ±24h 再相加并二次钳制」，从算术上根除脏值 Long 溢出（:25-32），且与行时间轴下界钳制口径统一（:53 对照 :77）。
+2. 逐字时间戳写回补零并 `coerceAtLeast(0)`，直接消除「写盘→重载后卡拉 OK 时间轴静默丢失」（:116-126，沿用 M20 注释的回读正则依据）。
+3. LyricsPersistentCache 用单一可重入 `saveLock` 把索引变更、`.lrc` 文件删写、索引落盘提升为原子单元，并有 C24 进程级单例保证一个真源（:58-63、:228-237）——注释给出了「清掉条目被写回复活/孤儿」的具体并发反例。
+4. HqSeparationOrchestrator.release 明确保留 app 级 scope、只取消 `separationJob`，注释精确到「服务重建后 scope.launch 立即取消、finally 不执行、单飞守卫永久忽略」（:743-748），是对单例生命周期的正确论证。
+5. PlaybackService 将 UI 侧与通知侧两条睡眠定时入口通过订阅 `sleepTimer.state` 统一收敛，去重键并入睡眠分钟，注释说明「逐分钟递减触发刷新」（:236-247、:1079-1082）。
+6. 上层兜底完备：`fetchCandidatesSingleFlight`（LyricsManager.kt:104-124）以 `CompletableDeferred` 合并同 key 请求且 `finally` 注销，`safeIndex`、`rethrowIfCancellation` 等边界/取消语义在改动邻域一致保留。
+
+**严重度汇总**：Critical 0 / High 0 / Medium 0 / Low 0
+
+**覆盖自证**：清单 5 个 .kt 文件全部通读全文（5/5），均可正常读取；额外核验调用链文件 3 个（SleepTimerController.kt、PlayerManager.kt、MainViewModel.kt），未读不到的文件。
+### I3 | 后端核心 / NAS 适配器 / 本地媒体 / 下载 / 导出
+
+---</div>
+<div class="vnote"><b>独立复核 <span class="chk">CONFIRMED</span></b>　终稿严重度 High<br>源码实证：LogStore.kt:439-443 `java.nio.file.Files.move(tmp.toPath(), file.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)`，Location :439 准确。新引入性：git diff 2fb11b8..25d0b6a 显示原为 `tmp.renameTo(file)` + 失败时 `file.delete(); tmp.renameTo(file)`，本窗口 commit 89466d9（BRIEF §4 列明）改为 Files.move，确属新引入。可用性：app/build.gradle.kts:261 `minSdk=22`；全库 grep 无任何 `isCoreLibraryDesugaringEnabled`/`coreLibraryDesugaring` 配置（当前未启用），且 desugar_jdk_libs 本就不覆盖 java.nio.file；app/src/main 全量 java.nio.* 引用中仅本处为 `java.nio.file`（其余为 charset/ByteBuffer/FloatBuffer/ByteOrder，均 API1 起可用），故 API22-25 执行该行抛 NoClassDefFoundError 成立。兜底核查（未夸大&quot;必然崩溃&quot;）：rotate() 由 :400 `if(file.length()&gt;MAX_BYTES) rotate(file)` 调用；其 :434 `runCatching{...}.onFailure{runCatching{tmp.delete()}}` 及上层 writeLine 的 :270/:285 `runCatching` 均捕获 Throwable（含 Error），故错误被静默吞掉、**不崩溃**，初稿 Impact 已照此写明&quot;静默轮转失效&quot;。后果链属实：文件不缩短→后续每次写入重复全文件 readLines(:416)+分桶+tmp.writeText(:435)+move 失败删 tmp，O(n) 读放大、分级配额与 256KB 上限在 API22-25 全失效。附带校正：BRIEF §2 称&quot;AppLog.w 有 DEBUG 守卫&quot;不精确——AppLog.kt:47-48 中 w 无条件 `LogStore.append`，仅 logcat 受 DEBUG 守卫，故 release 下 W/E/diag 均落盘，日志触达 256KB 为可达路径；此点使初稿触发条件更站得住，不构成推翻。维持 High。</div>
+</div>
+</div>
+<div id="i10"><h3>I10 · 视觉框架 / fx / 街机 / 渲染器 / 歌词舞台 <span class="tag">增量</span> <span class="muted small">0 条发现</span></h3>
+<p class="muted small">本组未发现符合上报标准的缺陷。</p>
+</div>
+<div id="i2"><h3>I2 · 播放器 / MediaSession / HQ 分离 / 歌词解析缓存 <span class="tag">增量</span> <span class="muted small">0 条发现</span></h3>
+<p class="muted small">本组未发现符合上报标准的缺陷。</p>
+</div>
+<div id="i3"><h3>I3 · 后端核心 / NAS 适配器 / 本地媒体 / 下载 / 导出 <span class="tag">增量</span> <span class="muted small">2 条发现</span></h3>
+<div class="finding High" data-sev="High">
+<h3><span class="sev High">High</span><span class="tag">I3</span> I3-01</h3>
+<div class="row"><b>位置</b><code>app/src/main/java/com/nasmusic/tv/backend/download/SongDownloadManager.kt:711</code></div>
+<div class="row"><b>问题</b>recoverFinalPathOrNull` 新增的 `?.filter { entity.fileSize &gt; 0L &amp;&amp; it.length() == entity.fileSize }` 使该函数对任何输入都恒返回 null。该函数唯一调用方是 `recoverAfterCrash()` 的 `repo.getUnfinished().forEach { entity -&gt; val finalPath = entity.audioPath ?: recoverFinalPathOrNull(entity) }`（:733-734），而 `getUnfinished()` 的 SQL 是 `status IN (&#x27;PENDING&#x27;,&#x27;DOWNLOADING&#x27;)`（DownloadSongDao.kt:73）；这些记录由 `newDownloadingEntity()`（DownloadRepository.kt:250-274）创建，不写 `fileSize`，实体默认 `fileSize = 0L`（DownloadSongEntity.kt:44），且下载过程中只 `updateProgress` 从不写 `fileSize`。因此 `entity.fileSize &gt; 0L` 恒为 false → 所有反推候选被过滤 → `hit` 恒 null → 函数恒 null。注释声称&quot;DB 有有效 fileSize(&gt;0) 时才认定&quot;，但该函数根本拿不到带 fileSize 的记录，条件与调用链自相矛盾。</div>
+<div class="row"><b>影响</b>触发条件——下载进程在音频已 `rename` 到 finalFile 成功之后、COMPLETED 记录 `upsert`（:450）之前被强杀/崩溃/断电（即 P0-2 初衷覆盖的窗口）。此时磁盘已有完整音频，DB 仍是 DOWNLOADING（fileSize=0、audioPath=null）。本改动前可反推并认领为 COMPLETED，回写 audioPath/fileSize；改动后恒判 null，落到 :761 的 else 分支 → `updateStatus(FAILED,&quot;已中断&quot;)` + 删除 tmpPath，磁盘上完整文件变孤儿，既不被认领也不被清理，用户被迫整首重下，且残留孤儿文件会随重下产生 &quot;(2)&quot; 副本。这使 2026-09-16 的 P0-2 崩溃恢复能力完全失效。上层无兜底：:768 的 COMPLETED 校验只覆盖 getCompleted()，够不到被改成 FAILED 的记录。</div>
+<div class="row"><b>修法</b>该函数只处理未完成任务，而 rename 已由同批 S04-01（:398-403 的 .part + rename 原子替换）保证 finalFile 不是半截文件，故未完成任务应以&quot;命名正则匹配 + length&gt;0&quot;为准，不应再用 fileSize 否定。恢复为 `?.filter { entity.fileSize &lt;= 0L || it.length() == entity.fileSize }`；或写成分支：`fileSize &gt; 0L` 时精确匹配、`fileSize &lt;= 0L` 时仅凭 length&gt;0 认领（该路径只可能是 rename 成功的完整文件）。
+
+---</div>
+<div class="vnote"><b>独立复核 <span class="chk">CONFIRMED</span></b>　终稿严重度 High<br>源码实证：SongDownloadManager.kt:711 `?.filter { entity.fileSize &gt; 0L &amp;&amp; it.length() == entity.fileSize }`，Location 准确。新引入性（回答&quot;新入口 vs 上轮已修&quot;）：git diff 2fb11b8..25d0b6a 显示该行由 `entity.fileSize &lt;= 0L || it.length()==entity.fileSize`（V3-P2 旧护栏）本窗口改为 `&gt;0L &amp;&amp;`，标记 V3-N02，属**本窗口新引入的回归**，既非上轮已修那处、也不是重复上报。调用链实证&quot;恒 null&quot;：唯一调用点 :734 `entity.audioPath ?: recoverFinalPathOrNull(entity)`（在 recoverAfterCrash :733 内）；getUnfinished() 的 SQL 为 `status IN (&#x27;PENDING&#x27;,&#x27;DOWNLOADING&#x27;)`（DownloadSongDao.kt:73）；这些记录由 newDownloadingEntity()（DownloadRepository.kt:250-274）创建，不写 fileSize/audioPath，实体默认 `fileSize=0L`（DownloadSongEntity.kt:44）；下载中只 updateProgress（Dao:67-68）与 updateStatus（Dao:64-65）从不写 fileSize；fileSize/audioPath 仅在 COMPLETED upsert 写入（:443/:447、DownloadRepository.kt:200-204、:748）。故对任何入参 `entity.fileSize&gt;0L` 恒 false→全部候选被滤→hit=null→函数恒 null，机制确定性成立。上层无兜底：:761 else 将记录置 FAILED 并删 tmp；:768 的 COMPLETED 校验只覆盖 getCompleted()，够不到被改 FAILED 的记录。触发条件（rename 后、COMPLETED upsert 前被强杀/断电）初稿已写明，未夸大为&quot;必然崩溃/必然泄漏&quot;。后果为完整文件成孤儿、用户被迫重下并产生 &quot;(2)&quot; 副本，P0-2 崩溃恢复确定性失效，维持 High。</div>
+</div>
+<div class="finding Low" data-sev="Low">
+<h3><span class="sev Low">Low</span><span class="tag">I3</span> I3-02</h3>
+<div class="row"><b>位置</b><code>app/src/main/java/com/nasmusic/tv/backend/export/SongExporter.kt:344</code></div>
+<div class="row"><b>问题</b>File 分支 rename 失败的 fallback 块（:340-351）在 S04-01 改动中丢失了原代码成功路径尾部的 `tmp.delete()`。新实现为 `val part2 = File(..., &quot;${target.name}.part2&quot;); try { tmp.copyTo(part2, overwrite = true); part2.renameTo(target) } finally { part2.delete() }` —— 复制成功后被 rename 替换的是 `part2`，作为复制源的 `tmp`（`${target.name}.part`）在成功路径中从未被删除；`tmp.delete()` 只剩在 :353 的 catch 异常分支里。原实现 `tmp.copyTo(target, overwrite=true); tmp.delete()` 是会清理 tmp 的。</div>
+<div class="row"><b>影响</b>触发条件——`tmp.renameTo(target)` 失败（注释称为&quot;极少数情况&quot;，如目标被占用/跨介质）但随后 `part2.renameTo(target)` 成功。后果：目标设备（U 盘/SD）残留一个与音频等大的 `${name}.part` 完整副本，占用空间且扩展名 .part 不会被媒体扫描识别为音频；export_records 也不会记录/清理它。仅在下次对同一 relPath 成功导出（tmp.outputStream() 截断重写并在首路 rename 成功）时被顺带清掉，否则持续残留。</div>
+<div class="row"><b>修法</b>在 part2 成功 rename 后补删复制源，例如在 finally 中一并清理 tmp（成功时 tmp 仍存在、rename 失败时 tmp 已被 catch 处理，删除是幂等的）：`finally { runCatching { part2.delete() }; runCatching { tmp.delete() } }`，或把 tmp 清理提到 try 之后的统一收尾。
+
+---
+
+## Strengths
+
+1. **连接/断开并发守卫扎实**：BackendRegistry 用 C04 单调世代号，认证头 `update` 与 adapter 提交同处一个 `synchronized(lock)` 临界区（:162-181）；本次把 `BackendAuthHeaders.clear()` 与 `initGeneration++` 移入同一临界区（:262-278），注释核验正确——锁序恒为 BackendRegistry.lock → BackendAuthHeaders.lock 且后者不回调前者，不会死锁，消除了&quot;断开后被在飞 initialize 自我重连/旧令牌重注入&quot;的竞态。
+
+2. **下载根决策集中且有硬件护栏**：DownloadRootResolver 对 CUSTOM 外置卷逐项校验&quot;路径不同于内置 + MEDIA_MOUNTED + 可写 + 512MB 空间门槛&quot;，并对不可用节流记 W（:45-50, :73-85），针对创维 API22 RAM-backed 小分区做了实证约束；`currentRoot/scanRoots` 把四处硬编码收口为唯一来源（NasMusicApp.kt:622-665），`scanRoots` 双根扫描避免切换位置后旧下载从曲库消失。
+
+3. **崩溃恢复残留清理覆盖双根**：`clearAll()` 空目录回收与 `recoverAfterCrash()` 的 .part 清理均改为遍历 `allRootsProvider()`（:626-634, :721-727），与写入根同源，兼容位置切换前后的双根场景。
+
+4. **SAF 覆盖语义未回退上轮修复**：SongExporter 的 SAF 分支继续沿用 C15&quot;先写完整 .part 副本再覆盖目标、失败保留副本&quot;的机制；本次 S04-02 还新增 `openInputStream(part)` 返回 null 的保护与 `written != src.length()` 的写入字节数校验（:303-317），`return@withContext` 经 `use` 的 finally 正常关闭 targetOut，未重演上轮&quot;失败删用户唯一副本却返回成功&quot;。
+
+5. **脏 JSON 逐条隔离**：FeiniuAdapter 的 `totalOf()` 对字段缺失/JSON null/对象/数组/非数字字符串统一返回 null 并与分页共用（:1411-1421, :1145-1154），JellyfinAdapter 用 `str/numInt/numLong/arr/obj` 安全访问器 + `runCatching` 包裹 `parseSongUnsafe`（:1264-1340），第三方插件/CUE 产生的单条脏类型只丢该条，不再整批变空列表。
+
+6. **明文凭据跨断开清理对称**：SubsonicAdapter.close() 同时清空本类与 restClient 的 baseUrl/username/password/salt（:806-821），与 NavidromeAdapter 对齐，消除断开后旧明文凭据与旧 baseUrl 驻留导致的在途分页请求打旧服务器。
+
+---
+
+## 严重度汇总
+
+Critical 0 / High 1 / Medium 0 / Low 1
+
+---
+
+## 覆盖自证
+
+- 清单文件 9/9 全部用 Read 通读全文：BackendRegistry.kt、DownloadRootResolver.kt、SongDownloadManager.kt、SongExporter.kt、FeiniuAdapter.kt、JellyfinAdapter.kt、SubsonicAdapter.kt、CoverUrlPersistentCache.kt、LocalMusicRepository.kt。
+- 为验证调用链/上层兜底/锁语义，另读了清单外文件（仅作核验，未作为缺陷上报对象）：BackendAuthHeaders.kt、Cancellation.kt、DownloadRepository.kt、DownloadSongDao.kt、DownloadSongEntity.kt、SubsonicRestClient.kt、NasMusicApp.kt（:615-685）、MainViewModel.kt（:4365-4405）。
+- 读不到的文件：无。
+### I4 | 网络音源 / 云盘 OAuth / LX 脚本链路</div>
+<div class="vnote"><b>独立复核 <span class="chk">CONFIRMED</span></b>　终稿严重度 Low<br>源码实证：SongExporter.kt:335 `tmp=File(target.parentFile,&quot;${target.name}.part&quot;)`；:340 `if(!tmp.renameTo(target))` 失败时，:344 `part2=File(...,&quot;${target.name}.part2&quot;)`，:346 `tmp.copyTo(part2, overwrite=true)`，:347 `part2.renameTo(target)`，:348-350 finally 只 `part2.delete()`；:352 直接 `return true`，成功路径无 `tmp.delete()`；:353-354 catch 才删 tmp（成功路径不进入）。机制方向核实：被残留的 tmp 是 `${name}.part` **临时文件**而非用户目标文件，删除它安全，初稿对&quot;删的是临时文件&quot;方向描述正确，无&quot;删用户文件&quot;之误。新引入性：git diff 2fb11b8..25d0b6a 显示旧实现成功路径为 `tmp.copyTo(target, overwrite=true); tmp.delete()`，S04-01 改为 part2 rename 原子替换时丢失 tmp.delete()，确属回归。触发条件初稿已限定为&quot;tmp.renameTo(target) 失败但 part2.renameTo(target) 成功&quot;（跨介质/目标占用等极少数情形），后果仅为目标设备残留等大 .part 副本、不被媒体扫描识别、下次同 relPath 成功导出时被截断重写顺带清掉——无数据丢失、无崩溃，Low 定级恰当。维持 CONFIRMED/Low。</div>
+</div>
+</div>
+<div id="i4"><h3>I4 · 网络音源 / 云盘 OAuth / LX 脚本链路 <span class="tag">增量</span> <span class="muted small">4 条发现</span></h3>
+<div class="finding High" data-sev="High">
+<h3><span class="sev High">High</span><span class="tag">I4</span> I4-01</h3>
+<div class="row"><b>位置</b><code>app/src/main/java/com/nasmusic/tv/backend/network/baidu/BaiduPanApi.kt:182</code></div>
+<div class="row"><b>问题</b>listAllAudioPaged` 的分页循环以 `val result = execute(url) { … } ?: break` 收尾，而 `execute()`（:332-343）对 `executeOnce()` 返回的 `null to -1`（:307 / :310 / :312 / :323 的网络/IO/非2xx/JSON 解析失败）不区分错误态，errno=-1 又不在 `tokenExpiredErrnos`（:291）里，于是原样 `return null`；本轮 V5-N03 只把 `listDir`/`executeWithErrno` 改成「ioError 抛 IOException」（:407-409），没有覆盖 `execute()`。触发条件：listall 递归分页过程中任一次请求出现瞬时网络失败、非 2xx 或响应体不是合法 JSON，循环即静默 break 并返回 `allFiles` 半截列表。</div>
+<div class="row"><b>影响</b>生产主建索引路径 `BaiduFileIndexCache.fullScan`（:437 调 `listAllAudioPaged`，:514-520 `save(index)` + `onProgress?.onComplete(total)`）把这半截列表当作完整结果落盘；`NetworkMusicViewModel` 的 `onComplete`（:745-749）还会推进 `_baiduIndexLastSync` 并刷新 UI，而「失败提示 + partial」分支只在 :459-464 的 catch 里、本路径根本不经过。用户在一次网络抖动后曲库索引被截断甚至清空（首屏失败即 0 条），且时间戳显示「刚刚同步成功」不会再自动重试。这正是 V5-N03 注释声称要消灭的「返回半截列表」缺陷，只是它留在了未改的 `execute()` 路径上。</div>
+<div class="row"><b>修法</b>让 `executeOnce`/`execute` 返回可区分的 IO 错误态（如 `errno = LOCAL_ERRNO_NETWORK` + `ioError`），或直接在 `listAllAudioPaged` 的 `?:` 分支抛 `IOException`；使 `fullScan` 进入既有 catch 走 `partial + onFailed`，并避免把半截结果以完整索引 `save` + `onComplete` 上报。</div>
+<div class="vnote"><b>独立复核 <span class="chk">CONFIRMED</span></b>　终稿严重度 High<br>源码实证：BaiduPanApi.kt:182 `} ?: break`，Location 准确。错误态丢失链：executeOnce() :307(body null)、:310(非2xx)、:312(JSON 解析失败)、:321-323(Exception) 一律 `null to -1`；errno=-1 不在 :291 `tokenExpiredErrnos=setOf(-6,31045)`，故 execute()（:332-343）原样返回 null→`?: break`→listAllAudioPaged 返回半截 allFiles，静默中断。V5-N03 改动范围核实：git diff 2fb11b8..25d0b6a 显示本窗口仅为 listDir 路径新增 ioError/networkFailure()/:407-408 `throw IOException`，**未触及** execute()/executeOnce()/listAllAudioPaged；初稿称&quot;半截列表缺陷留在未改的 execute() 路径&quot;属实，非&quot;上轮已修那处&quot;的重复上报。上层无兜底实证：BaiduFileIndexCache.fullScan :437 调 listAllAudioPaged，:436-465 try/catch 捕获的是抛出的异常，而静默 break 不抛异常→不进 catch 的 partial/onFailed 分支；直接落到 :514-520 `save(index)`+`onComplete(entries.size)` 当完整结果落盘。NetworkMusicViewModel:745-749 的 onComplete 推进 `_baiduIndexLastSync=now` 并 onMergedDataInvalidated 刷新 UI，失败提示 onFailed(:750-752) 根本不经过；无自动重试。触发条件初稿已写明（分页过程中任一次瞬时网络失败/非2xx/非法JSON），未夸大&quot;必然&quot;——但一次抖动即致索引被截断甚至清空（首屏失败即 0 条）且显示&quot;刚刚同步成功&quot;不再重试，用户可感知后果确定，维持 High。
+
+复核范围：5/5 条
+
+
+### V2 | 复核 I4-02 I4-03 I4-04 I5-01 I5-02</div>
+</div>
+<div class="finding Medium" data-sev="Medium">
+<h3><span class="sev Medium">Medium</span><span class="tag">I4</span> I4-02</h3>
+<div class="row"><b>位置</b><code>app/src/main/java/com/nasmusic/tv/backend/network/MetingApiService.kt:316</code></div>
+<div class="row"><b>问题</b>搜索端点响应体用 `val body = response.body?.string()` 一次性无上限读入内存，随后 `parseSongs`（:669）→ `MetingJsonShape.extract`（MetingJsonShape.kt:63 `gson.fromJson(body, JsonElement::class.java)`）再构建完整 JSON DOM，`preview()`（:111 `body.replace(...)`）还会复制整串。`MetingJsonShape` 自己的注释（:56「端点可能回整页 HTML 错误页」）已承认会收到超大正文，但读取侧没有任何字节上限。触发条件：用户自建/被投毒的 Meting 端点，或预设公共端点被劫持，返回一个超大/流式不结束的 body。</div>
+<div class="row"><b>影响</b>在低内存 Android TV 上一次搜索即可触发 OOM（`string()` 的字符串 + Gson 树 + preview 副本三份同时驻留）；`searchWithEndpoint` 的 catch（:324-327）只捕获 `Exception`，`OutOfMemoryError` 属 `Error` 不会被吞，直接冒泡到 `withContext(Dispatchers.IO)` 的 `search`，可能使搜索页/天气电台/歌单补全等所有 `search` 消费方一起崩溃。</div>
+<div class="row"><b>修法</b>参照同仓 `LxScriptRepo.download`（:144-149）的写法，用 `okio.Buffer` + `body.source().read(buf, MAX_BODY_BYTES + 1)` 限量读取（搜索结果给 4–8 MB 足够），超限按本次端点失败返回；`parseSongs`/`preview` 复用限长后的字符串，避免整串反复复制。</div>
+<div class="vnote"><b>独立复核 <span class="chk">CONFIRMED</span></b>　终稿严重度 Medium<br>源码 MetingApiService.kt:316 `val body = response.body?.string()` 属实（无上限一次性读入），该行为既有代码、本窗口 diff 未触及（改动在 :268/:428/:505）。下游坐实三份驻留：:322 parseSongs → MetingJsonShape.kt:63 `gson.fromJson(body, JsonElement::class.java)` 建完整 DOM，MetingJsonShape.kt:111 `body.replace(...)` 先复制整串再 take(PREVIEW_LIMIT=240)。调用链非空：search(:200)→searchViaEndpoints(:254)→searchWithEndpoint(:306)←searchCoverUrl(:585)，上层 NetworkMusicManager.search:161、SearchAggregator.search:239 真实消费，非死代码。上层兜底已核：searchWithEndpoint catch(e:Exception)(:324)、NetworkMusicManager:167、SearchAggregator:248 全部只捕 Exception，OutOfMemoryError 属 Error 不被吞，冒泡成立；但 client readTimeout=15s(:100) 会截断&quot;流式不结束&quot;路径，真实触发面收窄为&quot;超大但可发完的 body&quot;——初稿触发条件已含&quot;超大/流式&quot;，风险略收窄但不推翻。Fix 引用 LxScriptRepo.download :144-149 的 okio.Buffer+MAX+1 限量读取属实可执行。维持 Medium：条件性触发（需恶意/被劫持端点），措辞用&quot;可能&quot;未写成必然，符合 §7.3。</div>
+</div>
+<div class="finding Low" data-sev="Low">
+<h3><span class="sev Low">Low</span><span class="tag">I4</span> I4-03</h3>
+<div class="row"><b>位置</b><code>app/src/main/java/com/nasmusic/tv/backend/network/baidu/BaiduOAuthClient.kt:168</code></div>
+<div class="row"><b>问题</b>pollDeviceToken` 仍用 `json.get(&quot;expires_in&quot;)?.asLong ?: 2592000L` 直接取 `asLong`，没有本轮 S05-03 在 `refreshAccessToken`（:277-279）新增的 `?.takeIf { it.isJsonPrimitive }` 守卫；而该处注释（:274「对齐 pollDeviceToken 的安全解析 + 钳制」）实际只改了 refresh 一侧，两边并不一致。触发条件：token 端点在 HTTP 200 且带合法 `access_token` 的响应里，把 `expires_in` 下发为 JsonNull / JsonObject / JsonArray。</div>
+<div class="row"><b>影响</b>JsonNull.asLong` 抛 `UnsupportedOperationException`，被 :199-201 的外层 catch 吞成 `PollResult.Failed`；刚拿到的有效 `access_token` 不会被 `saveBaiduTokens`（:182）保存，用户看到「UnsupportedOperationException」式错误并被要求重新走一遍设备码授权。这是「缺字段/JsonNull 让整次授权作废」的同根因残留入口，不是上轮已修的刷新路径。</div>
+<div class="row"><b>修法</b>与 :277-279 同口径改为 `json.get(&quot;expires_in&quot;)?.takeIf { it.isJsonPrimitive }?.asLong ?: 2592000L`；同理 `grantedScope`（:158）与 `access_token`（:177）的 `.asString` 也加 `takeIf { it.isJsonPrimitive }`，避免 JsonNull 击穿整次授权。</div>
+<div class="vnote"><b>独立复核 <span class="chk">CONFIRMED</span></b>　终稿严重度 Low<br>源码 BaiduOAuthClient.kt:168 `(json.get(&quot;expires_in&quot;)?.asLong ?: 2592000L).coerceIn(...)` 属实，无 takeIf 守卫；refresh 侧 :277-279 有 `?.takeIf { it.isJsonPrimitive }?.asLong`，两侧不一致属实，:274 注释&quot;对齐 pollDeviceToken 的安全解析&quot;名不副实。Gson 行为坐实：JsonNull/JsonObject.asLong 抛 UnsupportedOperationException（Exception 子类），被 :199-201 catch(Exception) 吞成 PollResult.Failed，:182 saveBaiduTokens 不执行 → 刚拿到的合法 access_token 丢失、用户被要求重走设备码授权，机制方向正确。调用点 NetworkMusicViewModel.kt:453 `baiduOAuth.pollDeviceToken(...)` 属实，非死代码。同根因核实：refresh 侧系本窗口 S05-03 新改（diff @@ -271,11 +271,21），poll 侧为既有未改入口；初稿已写明&quot;不是上轮已修的刷新路径&quot;并给出具体行 :168，符合 BRIEF §3 新入口要求，非重复上报。维持 Low：触发需 token 端点在 HTTP200+合法 access_token 下把 expires_in 下发为 JsonNull/Object/Array，窄；异常被吞为 Failed 不崩溃。</div>
+</div>
+<div class="finding Low" data-sev="Low">
+<h3><span class="sev Low">Low</span><span class="tag">I4</span> I4-04</h3>
+<div class="row"><b>位置</b><code>app/src/main/java/com/nasmusic/tv/backend/network/lx/LxScriptRepo.kt:199</code></div>
+<div class="row"><b>问题</b>本轮 S05-01 给下载 client 加的逐跳守卫用 `NetAddressGuard.rejectReason(target.toString())`，而该守卫（NetAddressGuard.kt:98-107）只校验 `scheme ∈ {http, https}` 与非内网主机，**不要求 https**；安装入口 `installFromUrl`（:81）却强制 `parsed.scheme == &quot;https&quot;`。触发条件：用户安装的合法 https 脚本地址 302 到任意公网 http 主机（脚本托管方自行跳转，或 https 链路上的中间人注入跳转）；`followRedirects(true)` 会自动跟随，跳转目标只过 `rejectReason` 即被放行。</div>
+<div class="row"><b>影响</b>将被 QuickJS 直接执行的脚本正文从 https 降级为明文下载，随后 `installText`（:98 写盘、:112 pin SHA-256、加载后正文被执行）照单全收，绕过了「只允许 https 安装脚本」的信任前提；中间人可投毒脚本正文，进而借脚本的 `lx.request` 等能力控制音源行为。这与上轮已修的「302 到内网/回环/云元数据 SSRF」是不同维度（本条是公网 http 降级），不是同一处。</div>
+<div class="row"><b>修法</b>在 S05-01 的 network interceptor 中追加 scheme 校验：`if (target.scheme != &quot;https&quot;) throw IOException(&quot;脚本下载禁止 http 跳：${target.scheme}&quot;)`，与安装入口同口径；注意不要改 `LxScriptHost` 的 `lx.request` 守卫（脚本请求公网 http 端点是既有合法行为）。
+
+**Strengths**
+1. SSRF 逐跳复核已真正落地而非只守首跳：`LxScriptHost.kt:75-82` 与 `LxScriptRepo.kt:197-202` 都派生带 network interceptor 的 client 对每一跳调用 `rejectReason`，且 `LxScriptHost.kt:383-388` 在回传响应体前再校验最终 URL（纵深防御）；与 `UrlReachabilityChecker.kt:197-202` 同口径。
+2. 播放直链统一收口到单一守卫：`MetingApiService.guardPlayUrl`（:440-445）覆盖增强层命中、networkId 缺失、200-JSON/302 三条放行路径（:477 / :480 / :508）；`fetchPlayUrl` 对 302 Location 用 `rejectReasonForPlayback`（:389）、对非 302 跳用严格 `rejectReason`（:405），`LxPlayUrlEnhancer.kt:87-91` 在 `probe.probe(url)` 之前拦截，避免探测端被打成内网/元数据探测。
+3. 远程脚本完整性有硬护栏：`LxScriptRepo.scriptTextOf`（:61-73）在加载前用安装时 pin 的 SHA-256 比对磁盘正文，外部绕过写入即拒绝加载；`download`（:146-149）读 `MAX_SCRIPT_BYTES+1` 判定超限，避免了「静默截断成半截仍可执行」的 C25 老问题。
+4. OAuth token 钳制与并发单飞：`refreshAccessToken`（:277-284）把 `expires_in` 钳制到 [60s, 1 年] 防 Long 溢出，并在缺 `refresh_token` 时保留旧值；`refreshLock = Mutex()`（:42, :240）避免两协程用同一枚单次有效 refresh_token 各刷一次。
+5. 网盘 listDir 错误态与合法空目录已分离：`networkFailure()`（:349-355）用 `LOCAL_ERRNO_NETWORK=-101` + `ioError=true`，`executeWithErrno`（:407-409）显式抛错让扫描循环中断；所有实际调用点（`NetworkMusicViewModel.kt:363-368 / 392-397 / 531-538 / 580-588 / 717-720`、`BaiduFileIndexCache.kt:459-464 / 508-511`）都有 try/catch + `rethrowIfCancellation()`，不会因新增异常导致未捕获崩溃。
+6. 安全日志 hygiene 到位：`sanitizeUrl`（BaiduPanApi.kt:273-274）以正则遮掉 `access_token`，错误响应体统一 `take(200)`（:368 / :379）；搜索空结果/全失败改 `wThrottled`（MetingApiService.kt:271、NetworkMusicManager.kt:172），避免 W 级日志在 release 刷屏挤掉崩溃现场。
+
+**严重度汇总**：Critical 0 / High 1 / Medium 1 / Low 2
+
+**覆盖自证**：实读清单文件 7/7（MetingApiService、NetworkMusicManager、BaiduOAuthClient、BaiduPanApi、LxPlayUrlEnhancer、LxScriptHost、LxScriptRepo）全文；另通读/抽读佐证文件 12 个：NetAddressGuard.kt、BaiduNetdiskConfig.kt、BaiduTokens.kt、MetingJsonShape.kt、UrlReachabilityChecker.kt、ResolveResult.kt、NetworkMusicViewModel.kt、BaiduFileIndexCache.kt、BaiduLyricsProvider.kt、BaiduCoverProvider.kt、LxHostPool.kt、AppLog.kt。读不到的文件：无。
+### I5 | 照片源 / 歌单解析 / 电台 / 天气 API</div>
+<div class="vnote"><b>独立复核 <span class="chk">CONFIRMED</span></b>　终稿严重度 Low<br>源码 LxScriptRepo.kt:199 `NetAddressGuard.rejectReason(target.toString())` 属实；interceptor 整体 :197-202 系本窗口 S05-01 新增（diff @@ -190,6 +190,16），followRedirects(true) 在 :192。口径不一致坐实：NetAddressGuard.rejectReason :98-107 只要求 scheme∈{http,https}(:100-102) 且非内网主机，不要求 https；installFromUrl :81 却强制 `parsed.scheme == &quot;https&quot;`。机制成立：https 脚本 302→公网 http 主机时 rejectReason 放行（http 在允许集、公网非内网），正文明文下载 → installText :98 写盘/:112 pin SHA-256/加载后 QuickJS 执行；installText 无 scheme 复校，scriptTextOf :61-73 只比对安装时 pin 的 hash（首次投毒会被固化），无上层兜底。用户指定的同根因核实：上轮已修的是 LxScriptRepo 远程 JS 校验/SSRF，即 installFromUrl 初始 URL 的 https+内网校验(:77-82)与 SHA pin；本窗口 S05-01 逐跳守卫补的是&quot;302 到内网/回环/云元数据&quot;（注释 :193-196）。本条是 scheme 降级（公网 http）这一不同维度，落在本轮新增 interceptor 的具体行 :197-202/:199，初稿已写明具体行并与上轮区分——属新代码新维度入口，符合 BRIEF §3，非重复上报，故不 REFUTED/不降级。维持 Low：触发需托管方自行 http 跳转或 MITM 注入 302（后者已要求攻破 TLS），为纵深防御缺口；Fix 精准（明确不改 LxScriptHost 的 lx.request 守卫）。</div>
+</div>
+</div>
+<div id="i5"><h3>I5 · 照片源 / 歌单解析 / 电台 / 天气 API <span class="tag">增量</span> <span class="muted small">2 条发现</span></h3>
+<div class="finding Low" data-sev="Low">
+<h3><span class="sev Low">Low</span><span class="tag">初稿 Medium → 终稿 Low</span><span class="tag">I5</span> I5-01</h3>
+<div class="row"><b>位置</b><code>app/src/main/java/com/nasmusic/tv/backend/photo/MediaStorePhotoSource.kt:91</code></div>
+<div class="row"><b>问题</b>DATE_TAKEN` 在本窗口新增读取，`cursor.getLong(takenCol)` 直接喂给 `PhotoCaptureDate.isPlausibleEpochSeconds(it)`，但 Android `MediaStore.MediaColumns.DATE_TAKEN` 的单位是**毫秒**（自 API 1 起即如此，与同文件中确实是&quot;秒&quot;的 `DATE_ADDED`/`DATE_MODIFIED` 不同）。正常照片毫秒值约 1.6e12，远超判定上限 `UPPER_EPOCH_SECONDS=7_258_118_400`（2200 年的秒值），因此 `takeIf{...}` 恒为 false，`taken` 被无条件折算为 `0L`——注释&quot;`DATE_TAKEN` 原生就是**秒**&quot;把单位写反了。结果：图库来源 `capturedAt` 这一档近似值 100% 被丢弃。</div>
+<div class="row"><b>影响</b>触发条件：任意带 `datetaken` 列的图库照片（几乎所有手机照片都带）。该类照片的 `PhotoRef.capturedAt` 恒为 0；水印解析链 `PhotoCaptureDate.resolve(exif, fromSource, lastModified, dateAdded)` 中 `fromSource` 永远失效，只能靠 EXIF 或文件修改时间兜底。对相机原图（带 EXIF `DateTimeOriginal`）无影响；对无 EXIF 的图库照片（微信保存图、网络下载、被编辑过的截图），右下角水印会显示&quot;文件修改/入库时间&quot;而非拍摄时间，回忆照片墙的日期准确性下降。天气/去重不受影响（`capturedAt` 明确不参与去重排序）。</div>
+<div class="row"><b>修法</b>读值先换算成秒再校验：`cursor.getLong(takenCol).let { it / 1000L }.takeIf { PhotoCaptureDate.isPlausibleEpochSeconds(it) } ?: 0L`；同时把 line 89 注释里的&quot;秒&quot;改为&quot;毫秒（此处除以 1000 归一为秒）&quot;。</div>
+<div class="vnote"><b>独立复核 <span class="chk">CONFIRMED</span></b>　终稿严重度 Low<br>源码 MediaStorePhotoSource.kt:91 `cursor.getLong(takenCol).takeIf { PhotoCaptureDate.isPlausibleEpochSeconds(it) } ?: 0L` 属实（行号无漂移）；:89 注释&quot;DATE_TAKEN 原生就是秒&quot;属实，且与 :30-31（DATE_ADDED/DATE_MODIFIED 为秒）并列，单位写反。Android MediaColumns.DATE_TAKEN 单位为毫秒（API1 起），正常照片 ≈1.6e12；isPlausibleEpochSeconds :220-221 上限 UPPER_EPOCH_SECONDS=7_258_118_400（2200 年秒值，:234），1.6e12 必判 false → taken 恒 0L，图库来源 capturedAt 档 100% 丢弃，机制成立。调用链非空：listPhotos(:49) → PhotoSourceAggregator.kt:97 `source.listPhotos()` → 水印展示，非死代码。用户特别核实的&quot;minSdk22 列兼容性版本分支缺失&quot;：核实为无缺失——:149 用字面量 &quot;datetaken&quot; 规避 API29 常量 NewApi、:82 getColumnIndex（非 orThrow）、:90 `takenCol&gt;=0 &amp;&amp; !isNull`、:130-136 collection() 的 API29 分支，老系统缺列按未知处理不抛；初稿并未把列兼容性报为缺陷，反在 Strengths 表扬此点（drafts 第270行）。该核实点不成立，不影响单位错误成立。SeverityAfter 由 Medium 调 Low：capturedAt 仅用于装饰性水印（PhotoSource.kt:69-70 明确不参与去重/排序/人脸键），有 EXIF（resolve :212 exif&gt;0 优先）与文件修改时间双重兜底，相机原图带 EXIF 不受影响，用户可感知影响有限。</div>
+</div>
+<div class="finding Low" data-sev="Low">
+<h3><span class="sev Low">Low</span><span class="tag">I5</span> I5-02</h3>
+<div class="row"><b>位置</b><code>app/src/main/java/com/nasmusic/tv/backend/photo/PhotoSource.kt:200</code></div>
+<div class="row"><b>问题</b>PhotoCaptureDate.parse` 声称支持带显式时区的 `2021:09:13 12:26:40+08:00`（文档表格），但仅对 `Z` 后缀做了 `zone = UTC` 处理（line 150-151）；对 `±hh:mm` 分支（line 184-192）只把偏移记入 `zoneOffsetSec`，wall-clock 仍用**系统默认时区** `zone` 解析（line 199 `toEpochSeconds(..., zone)`），随后在 line 200 `return local - zoneOffsetSec` 再减一次。当系统时区恰好等于字符串偏移时区（中国用户系统 +08:00、照片也标 +08:00）时构成重复补偿。</div>
+<div class="row"><b>影响</b>触发条件较窄：EXIF 日期串带显式 `±hh:mm`（非标准写法，标准 `DateTimeOriginal` 不带时区）且系统时区与该偏移相同（或存在偏差）。此时水印日期偏移一个时区量（东八区约 8 小时，可跨天），例：`12:26:40+08:00` 在系统 +08 下被算成前一日 `20:26:40Z`。Jellyfin `PremiereDate` 走的是另一函数 `isoToEpochSeconds`，不受此影响。仅影响装饰性水印日期显示。</div>
+<div class="row"><b>修法</b>遇到 `±hh:mm` 时与 `Z` 同样把解析时区设为 UTC 再减偏移，例如记下 offset 后令 `zone = TimeZone.getTimeZone(&quot;UTC&quot;)` 参与 line 199 解析；或按 `GMT±hh:mm` 构造固定时区直接解析且不再做 line 200 的减法。
+
+Strengths:
+- IP 定位链路（`WeatherApi.requestIpLocation` → 腾讯 → ip.sb → 北京兜底）单飞正确：`locationLock.withLock` 把&quot;读缓存 → 请求 → 写回&quot;整段串行化并做锁内二次判缓存，`fetchCurrentWeather`/`fetchForecast` 并发只发一次请求；成功 TTL 30min / 失败冷却 10min 口径与注释一致（`WeatherApi.kt:180-202`）。
+- 腾讯 `status==0` 判断、`result.location.lat/lng`、`address_component.city` 字段路径正确；`GCJ-02→WGS84` 一次反减近似的 `transformLat`/`transformLng` 系数、`A=6378245.0`/`EE=0.00669...`、境外坐标原样返回（`Gcj02Converter.kt:21-52`）均与标准实现吻合，误差米级远小于 IP 定位公里级误差，取舍合理。
+- `doubleOrNull`（`WeatherApi.kt:307-311`）先判 `isJsonPrimitive` 再 `asString.toDoubleOrNull()`，兼容 number/string 且 `JsonNull` 安全；两处定位请求都 `.use{}` 关流、`isSuccessful` 先判非 2xx 早返回，无资源泄漏与异常堆栈刷屏。
+- 内嵌 ISRG Root X1 采用&quot;系统默认 CA 校验失败再追加单根校验&quot;的并集逻辑（`WeatherApi.kt:113-124`），不放宽主机名校验、非信任所有证书，`assets/isrg-root-x1.pem` 文件确实存在，`by lazy` 避免类初始化期 I/O。
+- `MediaStorePhotoSource` 用字面量 `&quot;datetaken&quot;` 而非 `MediaStore.Images.Media.DATE_TAKEN`（`MediaStorePhotoSource.kt:149`）规避 minSdk22 的 `NewApi`，且取列用 `getColumnIndex &lt; 0 ⇒ 未知` 而非 `getColumnIndexOrThrow`，兼容老系统缺列；投影其它列仍用 `getColumnIndexOrThrow` 但都在 `try/catch` 内。
+- SAF 路线对授权撤销导致的 `query` `SecurityException` 增加了 `onFailure` 日志（`ExternalFilePhotoSource.kt:188-199`），`status()` 复用 `PhotoWallAccessPolicy.shouldClearDirectoryUri` 查持久授权（`:65-70`），判定口径与 `VisualizerViewModel` 一致，避免了自存标志与系统状态不一致。
+- 网易云解析器 `parse` 顶层 `runCatching` 兜底 + `getAsJson*` 全量换成 `as? JsonObject/JsonArray` 安全转换（`NeteaseCloudPlaylistParser.kt:40-45, 58-83`），消除了 `IllegalStateException` 冒泡到 `PlaylistImporter`（其 :96 无 catch）致整次导入失败的风险；`canParse` 字面量带引号比较修复裸词误判（`:30`）。
+
+严重度汇总：Critical 0 / High 0 / Medium 1 / Low 1
+
+覆盖自证：清单 8/8 个 .kt 全部完整读完并逐行核对（ExternalFilePhotoSource / JellyfinPhotoSource / MediaStorePhotoSource / PhotoSource / NeteaseCloudPlaylistParser / Gcj02Converter / WeatherApi / WeatherRadioManager）；另完整读了调用链文件 `backend/photo/PhotoWallAccessPolicy.kt`、分段读了 `visualizer/photo/PhotoBuffer.kt`（:150-174 / :315-361），并通过 grep 核查了 `fetchCurrentWeather`/`fetchForecast`（入口 `WeatherRadioViewModel.kt:116/127` 均传入 tencentKey）、`searchSongs` 接口及五个适配器实现、`shouldClearDirectoryUri` 调用点、`isrg-root-x1.pem` 资产存在性。无清单文件读不到。§4 已核验项（IP 定位改造、GCJ 转换、服务端搜索、日期水印、证书信任锚）未作为&quot;未修&quot;重复上报，仅报其新引入的具体缺陷。
+### I6 | UI 主屏 / 导航 / 主题 / ViewModel 层
+
+---</div>
+<div class="vnote"><b>独立复核 <span class="chk">CONFIRMED</span></b>　终稿严重度 Low<br>源码 PhotoSource.kt:200 `return local - (zoneOffsetSec ?: 0)`、:199 `toEpochSeconds(..., zone)` 属实（行号无漂移）。对照证实作者掌握正确做法：Z 分支 :150-151 令 zone=UTC、:183 zoneOffsetSec=0，:199 用 UTC 解析后 :200 减 0，结果正确；而 ±hh:mm 分支 :184-192 只记 zoneOffsetSec 却不改 zone（仍为 zoneIn=系统默认时区），wall-clock 被按系统时区解析后 :200 再减一次偏移——当系统时区恰等于字符串偏移（中国 +08、串也 +08）时重复补偿：`12:26:40+08:00` 在 +08 系统下算成前一日 20:26:40Z（正确应 04:26:40Z），差 8h 且跨天；系统为 UTC 时反而不误。机制与&quot;窄触发条件&quot;均成立，符合 §7.3。调用点 PhotoBuffer.kt:359 `PhotoCaptureDate.parse(raw)` 属实，非死代码；仅影响装饰性水印日期、不崩溃。维持 Low。
+
+复核范围：5/5 条
+
+
+### V3 | 复核 I6-01 I7-01 I9-01 I9-02</div>
+</div>
+</div>
+<div id="i6"><h3>I6 · UI 主屏 / 导航 / 主题 / ViewModel 层 <span class="tag">增量</span> <span class="muted small">1 条发现</span></h3>
+<div class="finding Low" data-sev="Low">
+<h3><span class="sev Low">Low</span><span class="tag">初稿 Medium → 终稿 Low</span><span class="tag">I6</span> I6-01</h3>
+<div class="row"><b>位置</b><code>app/src/main/java/com/nasmusic/tv/ui/viewmodel/DownloadViewModel.kt:125</code></div>
+<div class="row"><b>问题</b>downloadSong()` 在第 125 行 `qualityProbeJob?.cancel()`、第 126 行 `val generation = ++qualityProbeGeneration` 之后启动新协程，但第 131 行 `if (!settings.downloadEnabled) return@launch`、第 133 行 `if (!isDownloadableSong(song)) return@launch`、第 138 行非 Meting 源 `return@launch` 这三个早返回分支全部位于第 143 行 `try` 块**之前**——命中它们时既不写 `_qualityPicker`，也不进入第 179 行 `finally`；与此同时被取消的旧 Job 即使在 `finally` 中，也因第 181 行 `generation == qualityProbeGeneration` 校验失败（generation 已被新请求 ++）而跳过第 184 行的清理。两条路径叠加，导致第 142 行写入的 `QualityPickerState.Probing(A)` 残留且无人清除。</div>
+<div class="row"><b>影响</b>条件性触发——(1) 前一次点击的是 Meting 网络歌曲且第 144 行 `probeAvailableQualities()` 仍在网络挂起中；(2) 后一次点击的歌曲命中上述任一早返回分支（下载总开关在探测期间被关 / 该歌曲不可下载 / 非 Meting 源）。满足后，`AppRoot.kt:437-438` 对 `Probing` 只渲染 `QualityProbingDialog`，而该 Dialog 的 `onDismissRequest` 为空、`dismissOnBackPress=false`、`dismissOnClickOutside=false`（`components/QualityProbingDialog.kt:49-53`），`AppRoot` 的自动 dismiss 又只覆盖 `None` 分支（`AppRoot.kt:449-454`），`Probing` 无任何清理出口。用户可感知后果：界面永久卡在&quot;质量探测中&quot;对话框，返回键/点击外部均无效，无法继续任何下载操作，只能杀进程重启 App。</div>
+<div class="row"><b>修法</b>在 `downloadSong()` 中 `qualityProbeJob?.cancel()` 之后、启动新协程**之前**无条件清除旧面板状态，例如紧接第 125 行加 `_qualityPicker.value = null`（或调用 `dismissQualityPicker()`）。这样无论新请求走哪条早返回路径，旧的 `Probing` 都不会残留；而确实需要弹窗的新请求会在协程内第 142 行重新写入 `Probing`，不受影响。
+
+---
+
+### Strengths
+
+1. 进度类参数按下沉范式改造且类型匹配：`LyricsView.currentTimeMs` 为 `State&lt;Long&gt;`，`NowPlayingScreen` 三处调用由 `progressMs.value` 改回 `progressMs`（`NowPlayingScreen.kt:611 / 1878 / 2190`），既避免 1Hz tick 重组整页，又与叶子组件签名一致，不是缺陷而是修复。
+2. 子 ViewModel 生命周期兜底完整：`disposeChildViewModels()` 实为 `vm.viewModelScope.cancel()`，`MainViewModel.onCleared()` 将 `visualizerVM` 补入 dispose 列表（`MainViewModel.kt:3697-3702`），补齐了原先 dispose 未取消其作用域的缺口。
+3. 顶部留白修复收敛到唯一口径：新增 `pagePadding()` 统一 TV/横屏/竖屏边距（`Theme.kt:588-641`），首页改 `pagePadding(vertical = 0.dp)` 避免叠出多余 20dp，播放页 `nowPlayingTopPadding` 按手机横屏/沉浸/TV 三档分别标注且注明沉浸模式 40dp 的唯一留白依据；BRIEF §4 记载有 `PagePaddingContractTest` / `NowPlayingTopGapGateTest` 门禁覆盖。
+4. 消息/结果写回的竞态治理成体系：`DownloadViewModel.showMessage()` 的 `messageJob` 取消旧定时器、`ServerViewModel` 统一走 `postConnectMessage()` 单调版本号、`SearchViewModel` 空关键词时 `networkSearchGeneration++` + `networkSearchJob?.cancel()`、`MvSearchViewModel.switchToNextCandidate()` 取消在途 `mvSearchJob`，多处消除&quot;旧定时器/慢请求覆盖新状态&quot;。
+5. 取消异常处理规范：NetworkMusicViewModel.collectAudioInDir、SearchViewModel.searchNetworkSongsBlocking、ServerViewModel.connectToServer 及 DownloadViewModel 的探测 catch 均调用 `rethrowIfCancellation()`，避免把 `CancellationException` 误记为错误日志（部分入口同步将日志由 E 降为 W，分级合理）。
+6. MV 候选切换无并行写回也无崩溃：新增 `mvSearchJob?.cancel()` 后，`resolveMv()` 内部逐源 try/catch 并返回 null，调用方无需额外 catch 即可避免异常外泄（`backend/network/mv/MvSearchManager.kt`）。
+
+---
+
+### 严重度汇总
+
+Critical 0 / High 0 / Medium 1 / Low 0
+
+---
+
+### 覆盖自证
+
+- 按 BRIEF → I6.txt → I6.diff → 清单源码顺序执行；完整读取 I6.diff 全部 488 行，逐改动点核对。
+- 清单内 11 个 .kt 文件全部发起完整读取（合计约 12541 行）：MainActivity(702)、HomeScreen(861)、NowPlayingScreen(2486)、Theme(667)、DownloadViewModel(507)、MainViewModel(4910)、MvSearchViewModel(404)、NetworkMusicViewModel(892)、SearchViewModel(562)、ServerViewModel(256)、WeatherRadioViewModel(294)。其中 MainViewModel、NetworkMusicViewModel 等超长文件的部分分段输出被工具转为 persisted-output，已通过分段重读 + Grep 定点复核改动点及其调用链，未留有未核验的关键路径。
+- 为非清单下游契约额外读取/定点核验：`ViewModelDispose.kt`（disposeChildViewModels 确为 cancel scope）、`components/LyricsView.kt`（currentTimeMs: State&lt;Long&gt;）、`backend/network/mv/MvSearchManager.kt`（resolveMv 内部逐源 catch）、`backend/weather/WeatherApi.kt`（fetchCurrentWeather/fetchForecast 的 tencentMapKey 签名）、`components/AppRoot.kt`（qualityPicker 三态消费）、`components/QualityProbingDialog.kt`（不可取消）。
+- 用户特别提醒的委托属性智能转换陷阱定点复查：`qrBitmap` 的 8 处使用均为 `qrBitmap?.let { ... }` 或先取本地 `val qr = qrBitmap` 再判空（KaraokePlaybackScreen.kt:204、MvPlaybackScreen.kt:330 等），未发现 `if (qrBitmap != null) qrBitmap.x` 形式的智能转换依赖；`currentSong`、`usbIndexRefresh` 在改动路径内未发现同类问题。
+- 读不到的文件：无（大文件持久化输出已通过分段与 Grep 补足）。
+### I7 | UI 组件（播放器/歌词/卡片/设置分支）</div>
+<div class="vnote"><b>独立复核 <span class="tag">PARTIALLY CORRECT</span></b>　终稿严重度 Low<br>源码逐行核对 DownloadViewModel.kt:123-188 属实：:125 `qualityProbeJob?.cancel()`、:126 `val generation = ++qualityProbeGeneration`、:131/133/138 三处早返回均在 :143 `try` 之前，:179-186 finally 的清理受 :181 `generation == qualityProbeGeneration` 守卫。代码层面的陈旧态逻辑真实：若 Job A 在 :142 写入 Probing 后于 :144 `probeAvailableQualities()`（suspend，withContext(IO)）期间被取消，其 finally 因 gen 已变而跳过 :184 清理；新 Job 命中早返回则不写 _qualityPicker，Probing(A) 残留。非死代码：downloadSong 有 6 处真实 UI 调用点（NetdiskScreen.kt:223/316、ArtistDetailBranch.kt:69、AlbumDetailBranch.kt:62、MineBranch.kt:86、LibraryBranch.kt:251、WeatherRadioBranch.kt:65）。关于委托属性智能转换：本路径无 `by` 委托属性——_qualityPicker 为 StateFlow、qualityProbeJob/qualityProbeGeneration 为普通 var、generation 已正确捕获为本地 val，故该陷阱不适用；真实机制是协程代数/早返回。但&quot;必然卡死&quot;被夸大（§7.2/§7.3）：Probing(A) 令 AppRoot.kt:436-438 渲染 QualityProbingDialog，而该 Dialog 为全屏模态（usePlatformDefaultWidth=false + fillMaxSize 遮罩 Box，QualityProbingDialog.kt:48-55），dismissOnBackPress=false / dismissOnClickOutside=false / onDismissRequest 空，遮住所有 downloadSong 调用按钮，故&quot;探测中点第二首歌&quot;这一主触发路径被模态框阻断；&quot;探测期间关总开关&quot;亦不成立——settings 在 :130 一次性读入本地 `settings`，中途改开关不影响在飞协程，而新调用若读到 false 在 :131 早返回、根本不写 Probing。现实触发收窄到 :142 之后、Dialog 组合完成之前的亚帧竞态，几不可达。Fix（cancel 后无条件清 _qualityPicker）仍成立，故 Medium→Low。</div>
+</div>
+</div>
+<div id="i7"><h3>I7 · UI 组件（播放器/歌词/卡片/设置分支） <span class="tag">增量</span> <span class="muted small">1 条发现</span></h3>
+<div class="finding Medium" data-sev="Medium">
+<h3><span class="sev Medium">Medium</span><span class="tag">I7</span> I7-01</h3>
+<div class="row"><b>位置</b><code>app/src/main/java/com/nasmusic/tv/ui/components/KaraokePlaybackScreen.kt:383</code></div>
+<div class="row"><b>问题</b>本屏参数已是 `progressMs: State&lt;Long&gt;`，歌词在本次改动中已改为把 State 下沉（:375 `progressMs = progressMs`），但底部进度细线仍在此处**组合期内联读取** `progressMs.value`（`(progressMs.value.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)`）。该 Box（:387-409）并非独立 composable，而是内联在 `KaraokePlaybackScreen` 函数体内——组合期读 State 会让 State 的每次变化重组整个函数体。</div>
+<div class="row"><b>影响</b>播放中 `progressMs` 由 PlayerManager 每秒推送一次，每一次 tick 都会重组整个 K 歌页（全屏封面、暗色遮罩、歌曲信息、控制栏、二维码区域、弹窗逻辑一并重算），抵消了 M26 注释（:107-108）声称的「每秒进度推送不会重组播放页整棵子树，只有读 .value 的叶子重组」。对照同仓 `MvPlaybackScreen` 已把同类进度线抽成独立 `MvProgressLine`（MvPlaybackScreen.kt:471-496），只有细线自身重组。触发条件：K 歌页打开且正在播放（progressMs 持续 1Hz 更新）。属于本次 State 下沉改动未闭环的既有行，非新引入的功能错误。</div>
+<div class="row"><b>修法</b>将 :387-409 的进度细线抽成独立 `@Composable`（如 `KaraokeProgressLine(progressMs: State&lt;Long&gt;, durationMs: Long)`），把 `progressMs.value` 的读取移入该叶子内部，使 1Hz 重组范围从整页收敛到一条 2dp 细线，与 MvPlaybackScreen.MvProgressLine 的做法一致。</div>
+<div class="vnote"><b>独立复核 <span class="chk">CONFIRMED</span></b>　终稿严重度 Medium<br>KaraokePlaybackScreen.kt:110 确认 `progressMs: androidx.compose.runtime.State&lt;Long&gt;`；:375 已把 State 传给 KaraokeLyricsView（歌词侧下沉完成）；但 :382-386 的 `karaokeProgress` 在 :383 直接读 `progressMs.value`，位于 :368-410 的 Box content lambda 内、仍属同一函数体（下一个 @Composable 在 :594）。Compose UI 1.6.x（BOM 2024.02.00，app/build.gradle.kts:396）的 `Box` 是 inline 布局可组合项，其 content lambda 被内联、State 读取计入外层 KaraokePlaybackScreen 的重组作用域 ⇒ 每次 1Hz tick 重组整页，违背 :107-108 的 M26 意图。同仓 MvPlaybackScreen 已抽出独立非 inline 的 MvProgressLine（:471-496，:461 调用、:460 注释）正是为避免此问题，说明本处下沉未闭环。非死代码：由 NowPlayingScreen.kt:208-216 真实调用。&quot;越界&quot;核查：有 `durationMs &gt; 0L` 守卫 + `.coerceIn(0f, 1f)` 钳制，无除零/越界，故发现点纯为重组作用域而非边界。机制准确、无夸大，维持 Medium（既有行、纯性能项，修复有同仓范式）。</div>
+</div>
+</div>
+<div id="i8"><h3>I8 · UI 子屏（详情/库/设置/发现/搜索） <span class="tag">增量</span> <span class="muted small">0 条发现</span></h3>
+<p class="muted small">本组未发现符合上报标准的缺陷。</p>
+</div>
+<div id="i9"><h3>I9 · 照片墙缓冲 / 渲染 / 日期戳 / 转场 <span class="tag">增量</span> <span class="muted small">2 条发现</span></h3>
+<div class="finding Low" data-sev="Low">
+<h3><span class="sev Low">Low</span><span class="tag">初稿 Medium → 终稿 Low</span><span class="tag">I9</span> I9-01</h3>
+<div class="row"><b>位置</b><code>app/src/main/java/com/nasmusic/tv/visualizer/photo/PhotoRenderer.kt:254</code></div>
+<div class="row"><b>问题</b>drawDateStamp` 首行过滤 `if (!atA &amp;&amp; ctx.photoB == null) return` 把「B 槽为空」的水印整个丢掉；而首张照片在 `PhotoWallController.tryStartSwap` 里走 `currentRef = next; incomingRef = null`（PhotoWallController.kt:605-606），`applyTo` 因此写 `ctx.photoB = null` 且 `ctx.photoBCapturedAt = 0L`（同文件 :328/:331）。首图 HOLD 期 `ctx.photoProgress` 恒为 `1f`（PhotoTransitionClock.kt:221），`inTransition = photoProgress &lt; 1f` 为 false ⇒ A 水印分支（PhotoRenderer.kt:226）同样不执行。两路都不画，首图整个展示周期没有任何日期水印。</div>
+<div class="row"><b>影响</b>用户进入照片墙后看到的第一张照片，即使 EXIF/来源里有合法拍摄时间，完整显示后右下角也始终不出现日期，与需求「每一幅照片切换完成、完整显示出来后显示拍摄日期」不符；从第二次切换起 B 槽非空才正常。触发条件：进入效果后的首张照片，以及池里只有一张、`incomingRef` 长期为 null 的单图退化场景。</div>
+<div class="row"><b>修法</b>在 `photoB == null`（此时 `b === a`，两槽就是同一张图）时把水印改从 A 槽取：例如 `PhotoRenderer.draw` 增加 `if (ctx.photoB == null &amp;&amp; ctx.photoProgress &gt;= 1f) drawDateStamp(ctx, aCapturedAt, atA = falseOrTrue)`，并让 `drawDateStamp` 在 `ctx.photoB == null` 时以 `aCapturedAt` 画一次；或让 `applyTo` 在 `incomingRef == null` 时把 `photoBCapturedAt` 写成 `currentRef` 的日期、`photoB` 仍留 null 而由渲染器用 `b ?: a` 的几何绘制。注意不要简单删掉 `:254` 的判空——那会在单图退化时重复画两遍。</div>
+<div class="vnote"><b>独立复核 <span class="chk">CONFIRMED</span></b>　终稿严重度 Low<br>PhotoRenderer.kt:251-264 属实，:254 `if (!atA &amp;&amp; ctx.photoB == null) return`。首图路径实证：PhotoWallController.kt:600-606 首图 `currentRef = next; incomingRef = null`；applyTo :327-331 写 `ctx.photoB = null`、`ctx.photoBCapturedAt = 0L`；首图用 `enterMs = 0`（:615）无 ENTER，PhotoTransitionClock.kt:219-226 的 HOLD 令 `progress = 1f`（:221）⇒ PhotoRenderer:225 `inTransition = false`、A 分支 :226 跳过；B 路径 :228 以 bCapturedAt=0 调用 → :252 shouldShowDateStamp(0,1f) 为 false（且 :254 空槽守卫）→ 不画；FIT 路径 :209-213 同理（bCapturedAt=0）。故首图整个展示期不渲染日期水印，机制成立。用户指定的交叉核查均支持而非推翻初稿：解码在后台 `PhotoBuffer-decode` 线程池（无主线程解码）；PhotoDateStamp.draw（:96-128）只改 Paint 属性 + 两次 nativeCanvas.drawText，不碰 canvas matrix/clip，无 save/restore 配对问题（本就不需要）；日期水印为本窗口新增（ec64de2，BRIEF §4），非上轮已修项——本条是逻辑缺陷，与解码/Canvas 无关。影响仅为装饰性水印在首图与单图退化场景缺失（EXIF 仍有效，第二张起正常），无崩溃/数据损坏，故 Medium→Low。Fix 方向（photoB==null 时改从 aCapturedAt 画一次）可行。</div>
+</div>
+<div class="finding Low" data-sev="Low">
+<h3><span class="sev Low">Low</span><span class="tag">I9</span> I9-02</h3>
+<div class="row"><b>位置</b><code>app/src/main/java/com/nasmusic/tv/visualizer/photo/PhotoRenderer.kt:226</code></div>
+<div class="row"><b>问题</b>A 水印分支 `if (inTransition) drawDateStamp(ctx, aCapturedAt, atA = true)` 只在 `inTransition = ctx.photoProgress &lt; 1f`（:225）时调用，但 `drawDateStamp` 第一行 `if (!shouldShowDateStamp(capturedAt, ctx.photoProgress)) return`（:252）要求的判据是 `capturedAt &gt; 0L &amp;&amp; progress &gt;= 1f`（PhotoDateStamp.kt:199-200）——两个条件互斥，A 水印永远不可能画出来，是逻辑上不可达的死代码。同文件 KDoc（:220-224）却写「A 的水印只在转场窗口内（p &lt; 1）显示」，源码门禁 `PhotoDateStampTest.kt:171` 还把这句写成「必须存在」，进一步固化了矛盾。</div>
+<div class="row"><b>影响</b>无直接运行时收益（该分支恒 return），属于死代码；危害是维护者据 KDoc 与门禁误以为转场期旧图会带日期，实际旧图可见期间水印从不出现，排查「日期没显示」时会走错方向。</div>
+<div class="row"><b>修法</b>明确产品口径后二选一：① 若只要求「切换完成后显示当前图日期」，删除 :225-226 的 A 分支及 PhotoDateStampTest.kt:171 对应断言，首图日期缺口按 I9-01 单独修；② 若要求转场期旧图也带日期，为 A 分支绕过 `shouldShowDateStamp` 的 `progress &gt;= 1f` 约束（如给 `drawDateStamp` 增加 `requireSettled: Boolean` 参数，A 传 false），并同步改 KDoc 与门禁断言，避免再次出现「代码与文档相反」。
+
+Strengths:
+- 日期解析与格式化时区自洽：`PhotoCaptureDate.parse`（PhotoSource.kt:138-201）对无时区的 EXIF `DateTimeOriginal` 按 `TimeZone.getDefault()` 解释为 epoch 秒，`PhotoDateStamp.format`（PhotoDateStamp.kt:72）用默认时区 `Calendar` 回转，往返一致；带 `Z`/`±hh:mm` 的写法单独补偿且避免重复减偏移（:148-151/:198-200），minSdk22 不用 `java.time`（PhotoSource.kt:280）。
+- EXIF 读取严格在解码后台线程、且不开第二次流：`readExifCapturedAt`（PhotoBuffer.kt:350-361）由 `decodeEntry`（:319-334）在 `PhotoBuffer-decode` 线程池里调用，从已读入的同一份 `ByteArray` 构造 `ExifInterface(ByteArrayInputStream(...))`，对 Jellyfin 仍是一次 HTTP；任何异常 `runCatching{}.getOrDefault(0L)` 吞掉，装饰信息不会让可显示的照片解码失败。
+- 取消语义已正确解耦（本窗口修复）：`isDecodeCancelled(t)`（PhotoBuffer.kt:299-308）只沿 cause 链认 `InterruptedException` / `CancellationException`，不再用 `closed || generation != gen` 把世代作废期的 OOM/坏图降到 `AppLog.d`；结果作废在 `decodeAndPublish` 回写处单独判定（:277-281），日志分级与结果丢弃互不干扰。
+- 转场档 `available()` 判定有双保险：固定档在 `PhotoWallController.pickTransition`（:643-668）先过 `PhotoTransitionRegistry.available()` 再回落 Default，随机档从同一 `available()` 构造池，备份导入写入「合法但未实现」的枚举不会导致整面墙黑屏（对应上轮 C47 已修，本轮未引入新入口）。
+- 转场终态 `p &gt;= 1f` 兜底方向正确且过门禁：`ChannelGhostTransition`/`PerspectivePushTransition` 在 `p &gt;= 1f` 改画整幅新图（`drawPhoto(b, ...)`），`ComicPanelTransition` 在终态跳过黑边框；三处均写在 `clipRect` 之外、无未配对的 save/restore，`PhotoRenderContractScanTest.skipViolations`（:344-360）对字面量 `1f` 刻意放行，未违反「p 接近 1 不得跳过新图」门禁。
+- Canvas 绘制配对干净：`PhotoDateStamp.draw`（PhotoDateStamp.kt:96-128）只改 `Paint` 的 textSize/alpha/strokeWidth 并调用两次 `nativeCanvas.drawText`，不改 canvas 的 matrix/clip，无需 save/restore；`PhotoRenderer` 外层 `clipRect`（:191-229）自动成对恢复。水印按「秒」做格式化缓存键（:69-71），Paint/Calendar 仅构造一次，稳态绘制零字符串分配。
+
+严重度汇总：Critical 0 / High 0 / Medium 1 / Low 1
+
+覆盖自证：实际完整读过 7/7 清单文件（PhotoBuffer.kt、PhotoDateStamp.kt、PhotoRenderer.kt、PhotoWallController.kt、EffectsP1Transitions.kt、TilesP2Transitions.kt、TransformP2Transitions.kt）；为核实调用链与兜底另读 RenderContext.kt、PhotoTransitionClock.kt、PhotoTransition.kt（含 PhotoRect/PhotoGeometry）、PhotoSource.kt（含 PhotoRef/PhotoCaptureDate）、Easing.kt、PhotoDateStampTest.kt、PhotoRenderContractScanTest.kt 共 7 份辅助文件，全部可读，无读不到的文件。未报 BRIEF §2/§3/§4 明令排除项（EXIF 缺失/时区归属的产品决策、上轮已修的 `available()` 与取消语义、E51/E52 覆盖层）。</div>
+<div class="vnote"><b>独立复核 <span class="chk">CONFIRMED</span></b>　终稿严重度 Low<br>PhotoRenderer.kt:225-228 属实（`val inTransition = ctx.photoProgress &lt; 1f`，:226 `if (inTransition) drawDateStamp(ctx, aCapturedAt, atA = true)`）；:252 首行 `if (!shouldShowDateStamp(capturedAt, ctx.photoProgress)) return`；PhotoDateStamp.kt:199-200 `shouldShowDateStamp = capturedAt &gt; 0L &amp;&amp; progress &gt;= 1f`。A 分支仅在 p&lt;1f 时调用，而 shouldShowDateStamp 要求 p&gt;=1f，二者互斥 ⇒ :226 调用必然在 :252 早返回，A 水印为不可达死代码。KDoc :220-224 与门禁 PhotoDateStampTest.kt:169-172 确把&quot;A 在 p&lt;1 显示&quot;写成必须存在的契约，固化了代码与文档的矛盾。非委托属性问题；无主线程解码/Canvas save-restore 纠葛（同上核查）；新增代码、非上轮已修。无运行时危害（恒 return 的死分支），仅维护/KDoc 误导风险，维持 Low。
+
+复核范围：4/4 条</div>
+</div>
+</div>
+<div id="b1"><h3>B1 · 兜底 A：未改动的后端 / 网络 / 数据层 <span class="tag">兜底</span> <span class="muted small">0 条发现</span></h3>
+<p class="muted small">本组未发现符合上报标准的缺陷。</p>
+</div>
+<div id="b2"><h3>B2 · 兜底 B：未改动的 UI / 渲染器 / 歌词 <span class="tag">兜底</span> <span class="muted small">1 条发现</span></h3>
+<div class="finding High" data-sev="High">
+<h3><span class="sev High">High</span><span class="tag">B2</span> B2-01</h3>
+<div class="row"><b>位置</b><code>app/src/main/java/com/nasmusic/tv/player/DemucsSeparator.kt:441</code></div>
+<div class="row"><b>问题</b>分段 overlap-add 读取采用只进的 `DataInputStream`，但每轮读掉的帧数与循环计数器的推进步长不一致：第 448-451 行每轮从 `dis` 连续读 `segLen` 帧（`segLen = min(SEGMENT_SAMPLES, totalSamples-startSample)`，满段时恒为 343980），流位置每轮前进 343980 帧；而第 505 行循环变量 `startSample += hop`（`hop = SEGMENT_SAMPLES - OVERLAP_SAMPLES = 340540`），循环按 `while (startSample &lt; totalSamples)` 执行 `ceil(totalSamples/hop)` 轮。因 SEGMENT(343980) &gt; hop(340540)，读取的帧总量 ≈ 轮数×343980 &gt; 文件实际帧数 totalSamples，最后一轮 `dis.readFloat()`（第 449/450 行）越界读。`readFloat()` 在 EOF 抛 `EOFException`，被第 552 行 `catch (e: Exception)` 吞掉 → `separate()` 返回 null。按真实循环条件复核：8s(352800 帧) 第 2 轮需读 12260 帧而流仅剩 8820 帧即 EOF；240s 第 31 轮同样越界。注意这是「读取流位置」与「逻辑 startSample」的错位，不是「丢弃整帧/截断」——KDoc 第 445-447 行明确声明临时文件无段间填充、连续读取，但 overlap-add 窗口本应每轮回退 OVERLAP_SAMPLES 帧，代码未做任何 seek/回退。</div>
+<div class="row"><b>影响</b>任何长于一段（约 7.8s / 343980 样本 @44100Hz）的音频都会触发，即现实中所有正常歌曲。HQ（Demucs）高质量人声分离对全部真实曲目 100% 失败：`separate()` 在最后一段抛 EOF 后返回 null，不产出 vocals/accompaniment WAV，`lastError` 记为「分离失败」泛化提示。上层 HqSeparationOrchestrator 不在本组清单内，未臆测其兜底；但就本函数而言这是确定性功能失效（非崩溃，异常已被 catch）。</div>
+<div class="row"><b>修法</b>让每个推理窗口真正取到源 [startSample, startSample+SEGMENT) 且总读取量不超过文件长度。二选一：①把只进流换成 `RandomAccessFile`，每轮开头 seek 到 `startSample*8` 字节再读（等价于每轮回退 OVERLAP_SAMPLES 帧），使窗口重叠且末轮只读剩余帧；②仍用连续流，但每轮只读 `hop` 个新帧，并把上一窗口尾部 OVERLAP_SAMPLES 个原始采样搬到 `segmentInputBuf` 头部，凑满一个完整 SEGMENT 送 ONNX——这样流每轮只前进 hop，总读取量恰为 totalSamples。两种修法均需以 `totalSamples` 为硬上界，禁止 readFloat 越过文件尾。
+
+---
+
+**Strengths**（均有实证）：
+1. 资源释放到位：`DemucsSeparator` 的 ONNX `OnnxTensor`/`OrtSession.Result` 用嵌套 try/finally 保证任何路径 close（第 838-875 行），`OrtEnvironment` 进程级单例绝不 close（第 263-266 行注释与实现一致）；`decodeAudioToTempFile` 的 `codec/extractor` 在 finally 中 `stop()/release()`（第 804-809 行）。
+2. 并发/生命周期守卫扎实：Demucs 用 `stateLock`+`opMutex`+`pendingRelease` 三段式处理 init/release 与在飞分离的竞态（第 236-271、310-320 行）；`CrossfadeController.cleanupPlayer` 统一移除 fade Runnable 并 release 副播放器（第 159-172 行），`PlayerManager.release` 对称清理（第 1433-1448 行）。
+3. 网络歌词层防注入/防泄漏：`parseKugouLyrics` 用 `toHttpUrlOrNull()?.newBuilder()?.addQueryParameter` 逐参数编码不可信 id/accesskey（第 395-403 行，M18 修复保留），全部 OkHttp 响应用 `.use{}`（第 181、237、280、337、408 行）。
+4. minSdk22 API 护栏显式：`MediaLibraryTree.mergeSearchResults` 用 `getOrPut` 而非 `Map.putIfAbsent`（API24+），并写明会在 API22 触发 `NoSuchMethodError` 的根因（第 529-547 行）。
+5. FLAC 熔断可捕获：`FlacGuardTrackOutput.format` 在解封装层抛 `FlacUnsupportedException`（IOException），`isFlacUnsupported()` 沿 cause 链查找且有 `MAX_CAUSE_DEPTH=8` 防自引用死循环（FlacGuardExtractors.kt 第 83-95、159-165 行）。
+6. 下载完整性双闸门：`ModelDownloadManager` 下载后即时 SHA-256 校验 + 原子 rename + `disconnect()` in finally（第 218-245、325-327 行），`isModelDownloaded` 用 ±1% 字节窗口做主线程快速判定并把 166MB 哈希放到 IO 线程（第 122-138 行）。
+
+**严重度汇总**：Critical 0 / High 1 / Medium 0 / Low 0
+
+**覆盖自证**：实际读 18/18 个清单文件（完整源码），读不到 0 个。
+- lyrics/：LocalLyricsProvider.kt、LyricsNetworkProvider.kt
+- player/：AccompanimentCache.kt、BrowseCache.kt、CoilBitmapLoader.kt、CrossfadeController.kt、DemucsSeparator.kt、FlacGuardExtractors.kt、MediaLibraryTree.kt、MediaSessionAccessPolicy.kt、ModelDownloadManager.kt、PcmFallbackChannel.kt、PcmRingBuffer.kt、PcmSpectrumTap.kt、PcmTapProcessor.kt、PlaybackServiceStart.kt、PlayerEqualizer.kt、PlayerManager.kt（1547 行，分 4 段读完）
+
+说明：未报项示例——`PcmRingBuffer.write` 的 `from=n-len` 在 `n&gt;src.size` 时理论越界，但唯一调用方 `PcmTapProcessor.capture` 保证 `monoBuf.size&gt;=frames`（第 118 行），按 §7.1/§7.2 核查后降级不报；歌词 URL 中 hash/songId 的裸字符串拼接受固定 host 前缀与 try-catch 约束，影响面不足以构成可指行硬缺陷，按「宁可少报」不报。
+### I1 | 应用骨架 / 偏好 / util / 网络服务 / 天气数据模型</div>
+<div class="vnote"><b>独立复核 <span class="chk">CONFIRMED</span></b>　终稿严重度 High<br>源码实证：DemucsSeparator.kt:55/57 常量 SEGMENT_SAMPLES=343980、OVERLAP_SAMPLES=3440，:392 hop=SEGMENT-OVERLAP=340540，SEGMENT&gt;hop 成立。:441 为只进流 `DataInputStream(BufferedInputStream(FileInputStream(tempFile)))`，:443 `segLen=min(SEGMENT,totalSamples-startSample)`，:448-451 每轮连续 readFloat 读 segLen 帧，:505 `startSample += hop`，无任何 seek/回退（:445-447 注释自承&quot;连续读、无需 skip&quot;）。算术复核：8s=352800 帧，第1轮读343980、流位置=343980、startSample→340540；第2轮 segLen=min(343980,12260)=12260 帧，而流仅剩 352800-343980=8820 帧，第8821次 readFloat 抛 EOFException，被 :552 `catch(e:Exception)` 吞→:555 return null。240s 同理在约第31轮提前 EOF（累计满段读=31×343980=10,663,380 &gt; 文件 10,584,000 帧）。故&quot;长于一段(≈7.8s)必然失败、100%失败&quot;成立；≤343980 帧的短片段单轮读完不触发，初稿已如实限定范围。对照 BRIEF §2&quot;输出恒 44100Hz&quot;：decodeAudioToTempFile 将源重采样为 44100Hz（:574-583, :789-792），totalSamples 即以 44100 为单位的帧数，恰使上述按帧算术精确成立，该取舍不推翻反而支撑结论。调用点非死代码：HqSeparationOrchestrator.kt:566 separator.separate(...) 真实调用。上层兜底：:576 对 result==null 走 else→:595-603 回退 FAST 模式并提示错误，故**非崩溃**，初稿未写&quot;必然崩溃&quot;，无夸大；但 HQ 分离功能对全部真实曲目确定性失效，维持 High。</div>
+</div>
+</div>
+</section>
+<section id="strength"><h2>5. 跨模块优点</h2>
+<p>以下优点来自各深审代理的 Strengths 小结，均有实证（具体护栏 / 门禁 / 注释），非泛泛而谈。</p>
+<div class="fbox"><h4>I1 · 应用骨架 / 偏好 / util / 网络服务 / 天气数据模型</h4><p>1. **multipart 边界扫描用 KMP 且带可验证的反例**：`MultipartBoundaryStreamer.kt:32-39` 构建前缀函数，`:74-88` 回退时只写出 `hold[t..matched)` 而非全部 hold，类注释 `:11-14` 给出「边界 `aab` 出现在 `aaab` 中朴素匹配会漏判并多写 1 字节」的具体反例；整体 O(n)、按 64KB 批量 flush，正确性与性能都有据可查。
+2. **模型上传从&quot;写入即覆盖&quot;升级为临时文件 + 双校验 + 原子替换**：`ModelTransferServer.kt:158-176` 全程写 `.tmp`，`:179-204` 依次做 MIN_SIZE（50MB）与 SHA-256 校验，`:209-212` 全部通过后才 `renameTo(modelFile)`，`:220-227`/`:180`/`:197` 的所有失败分支只删 tmp、绝不删正式模型——彻底消除上传中断/传错文件即毁掉用户已装模型的风险。
+3. **上传体量双向设防**：`ModelTransferServer.kt:129-139` 按 Content-Length 做量级预检并 `.noKeepAlive()` 断连，`:175-176` 再把 `MAX_UPLOAD_BYTES`(1GB) 传入 `streamToFile`，`MultipartBoundaryStreamer.kt:58-67` 在 `flushBuf()` 内以 `totalWritten + writeBuf.size() &gt; maxBytes` 抛 IOException 兜底——即使 chunked 请求不带 Content-Length 也有硬上限，防住畸形流撑爆磁盘。
+4. **日志写入的背压与限流设计完整且自证防递归**：`LogStore.kt:196-202, 257-275` 用 `pendingAppends` AtomicInteger 做队列深度背压（W/E 保底放行、D/I/X 超限丢弃），`:307-335` 的 `appendThrottled` 对 W 级按 tag+message 限流（首条全写、每 5 次一条紧凑摘要、消息变化冲刷旧计数），`throttleMap` 上限 64 tag 且按 `synchronized(state)` 串行；`:201` 明确 `droppedAppends` 不接 AppLog，`LogsTabWiringGateTest` 有递归门禁，规避写入→打印→再写入死循环。
+5. **增量镜像链路同构、零主线程 IO**：`AppPreferences.kt:217-221` 的 `cachedDownloadLocation`/`cachedTencentMapKey` 与其它镜像完全同构，`:239-265` 由单一 `startProviderMirrors` 收集到 `@Volatile`，`:1043`/`:1343` 同步读无需 `runBlocking`；`:1346-1355` 的 setter 走 AES-GCM 加密、留空即移除键，未发无效请求。
+6. **重试不吞协程取消**：`RetryU</p></div>
+<div class="fbox"><h4>I10 · 视觉框架 / fx / 街机 / 渲染器 / 歌词舞台</h4><p>1. 并发修复抓到根因而非表象：`ArcadeInputQueue.kt:9-11,25-68` 明确写出「head 双写者、`@Volatile` 不保读-改-写原子」的机制，并用单锁覆盖全部状态访问，无遗漏路径，注释与实现一致。
+2. 零分配纪律被严格保持并证明：`BeatDetector.kt:17,30-31,84-104` 的 scratch 数组 + 原地插入排序给出「排序结果与 `slice.sort()` 一致 ⇒ 中位数/最终 BPM 不变」的等价性论证；与 `RenderContext` 的复用实例口径一致。
+3. bitmap 生命周期管理精确且分型：`ProceduralTexture.kt:305-309` 区分「全屏型尺寸变化重建需回收 / 平铺型常量键不重建无需回收」，并注明 API22–25 native 堆与 `release()` 覆盖盲区；`VintageTvRenderer.kt:304-321`、`:642`、`:900` 三处回收形成闭环且幂等。
+4. 兜底逻辑修复带节流、不扩大影响面：`ParticleRenderers.kt:249-264` 仅放开「从未有 beat」场景，保留 `lastBeatMs&gt;0` 时的原有 6s 判据与 `idlePhase&gt;=60` 节流，避免空屏同时不引入高频爆发。
+5. 歌词分词 codepoint 化兼顾正确性与兼容性：`LyricsStagePayload.kt:212-239` 逐码点处理 emoji 代理对、组合标记与俄/泰/希腊文，修复 words/fullText 不一致的下游时间反查根因，且刻意只用 `java.lang.Character` 守住 minSdk22。
+6. 歌词舞台重建守卫有护栏与性能注释：`PartitaSubRenderer.kt:257-271,303-308`、`TiltPulseSubRenderer.kt:190-204` 的代数/视口/density 三元组守卫 + 跨子模式保留辉光缓存的注释，体现对 C50/M54 正确性与主线程卡顿的双重把控。</p></div>
+<div class="fbox"><h4>I2 · 播放器 / MediaSession / HQ 分离 / 歌词解析缓存</h4><p>1. LrcParser 偏移钳制采用「先各自钳到 ±24h 再相加并二次钳制」，从算术上根除脏值 Long 溢出（:25-32），且与行时间轴下界钳制口径统一（:53 对照 :77）。
+2. 逐字时间戳写回补零并 `coerceAtLeast(0)`，直接消除「写盘→重载后卡拉 OK 时间轴静默丢失」（:116-126，沿用 M20 注释的回读正则依据）。
+3. LyricsPersistentCache 用单一可重入 `saveLock` 把索引变更、`.lrc` 文件删写、索引落盘提升为原子单元，并有 C24 进程级单例保证一个真源（:58-63、:228-237）——注释给出了「清掉条目被写回复活/孤儿」的具体并发反例。
+4. HqSeparationOrchestrator.release 明确保留 app 级 scope、只取消 `separationJob`，注释精确到「服务重建后 scope.launch 立即取消、finally 不执行、单飞守卫永久忽略」（:743-748），是对单例生命周期的正确论证。
+5. PlaybackService 将 UI 侧与通知侧两条睡眠定时入口通过订阅 `sleepTimer.state` 统一收敛，去重键并入睡眠分钟，注释说明「逐分钟递减触发刷新」（:236-247、:1079-1082）。
+6. 上层兜底完备：`fetchCandidatesSingleFlight`（LyricsManager.kt:104-124）以 `CompletableDeferred` 合并同 key 请求且 `finally` 注销，`safeIndex`、`rethrowIfCancellation` 等边界/取消语义在改动邻域一致保留。</p></div>
+<div class="fbox"><h4>I3 · 后端核心 / NAS 适配器 / 本地媒体 / 下载 / 导出</h4><p>1. **连接/断开并发守卫扎实**：BackendRegistry 用 C04 单调世代号，认证头 `update` 与 adapter 提交同处一个 `synchronized(lock)` 临界区（:162-181）；本次把 `BackendAuthHeaders.clear()` 与 `initGeneration++` 移入同一临界区（:262-278），注释核验正确——锁序恒为 BackendRegistry.lock → BackendAuthHeaders.lock 且后者不回调前者，不会死锁，消除了&quot;断开后被在飞 initialize 自我重连/旧令牌重注入&quot;的竞态。
+
+2. **下载根决策集中且有硬件护栏**：DownloadRootResolver 对 CUSTOM 外置卷逐项校验&quot;路径不同于内置 + MEDIA_MOUNTED + 可写 + 512MB 空间门槛&quot;，并对不可用节流记 W（:45-50, :73-85），针对创维 API22 RAM-backed 小分区做了实证约束；`currentRoot/scanRoots` 把四处硬编码收口为唯一来源（NasMusicApp.kt:622-665），`scanRoots` 双根扫描避免切换位置后旧下载从曲库消失。
+
+3. **崩溃恢复残留清理覆盖双根**：`clearAll()` 空目录回收与 `recoverAfterCrash()` 的 .part 清理均改为遍历 `allRootsProvider()`（:626-634, :721-727），与写入根同源，兼容位置切换前后的双根场景。
+
+4. **SAF 覆盖语义未回退上轮修复**：SongExporter 的 SAF 分支继续沿用 C15&quot;先写完整 .part 副本再覆盖目标、失败保留副本&quot;的机制；本次 S04-02 还新增 `openInputStream(part)` 返回 null 的保护与 `written != src.length()` 的写入字节数校验（:303-317），`return@withContext` 经 `use` 的 finally 正常关闭 targetOut，未重演上轮&quot;失败删用户唯一副本却返回成功&quot;。
+
+5. **脏 JSON 逐条隔离**：FeiniuAdapter 的 `totalOf()` 对字段缺失/JSON null/对象/数组/非数字字符串统一返回 null 并与分页共用（:1411-1421, :1145-1154），JellyfinAdapter 用 `str/numInt/numLong/arr/obj` 安全访问器 + `runCatching` 包裹 `parseSongUnsafe`（:1264-1340），第三方插件/CUE 产生的单条脏类型只丢该条，不再整批变空列表。
+
+6. **明文凭据跨断开清理对称**：SubsonicAdapter.close() 同时清空本类与 restClient 的 baseUrl/username/password/salt（:806-821），与 NavidromeAdapter 对齐，消除断开后旧明文凭据与旧 baseUrl 驻留导致的在</p></div>
+<div class="fbox"><h4>I4 · 网络音源 / 云盘 OAuth / LX 脚本链路</h4><p>1. SSRF 逐跳复核已真正落地而非只守首跳：`LxScriptHost.kt:75-82` 与 `LxScriptRepo.kt:197-202` 都派生带 network interceptor 的 client 对每一跳调用 `rejectReason`，且 `LxScriptHost.kt:383-388` 在回传响应体前再校验最终 URL（纵深防御）；与 `UrlReachabilityChecker.kt:197-202` 同口径。
+2. 播放直链统一收口到单一守卫：`MetingApiService.guardPlayUrl`（:440-445）覆盖增强层命中、networkId 缺失、200-JSON/302 三条放行路径（:477 / :480 / :508）；`fetchPlayUrl` 对 302 Location 用 `rejectReasonForPlayback`（:389）、对非 302 跳用严格 `rejectReason`（:405），`LxPlayUrlEnhancer.kt:87-91` 在 `probe.probe(url)` 之前拦截，避免探测端被打成内网/元数据探测。
+3. 远程脚本完整性有硬护栏：`LxScriptRepo.scriptTextOf`（:61-73）在加载前用安装时 pin 的 SHA-256 比对磁盘正文，外部绕过写入即拒绝加载；`download`（:146-149）读 `MAX_SCRIPT_BYTES+1` 判定超限，避免了「静默截断成半截仍可执行」的 C25 老问题。
+4. OAuth token 钳制与并发单飞：`refreshAccessToken`（:277-284）把 `expires_in` 钳制到 [60s, 1 年] 防 Long 溢出，并在缺 `refresh_token` 时保留旧值；`refreshLock = Mutex()`（:42, :240）避免两协程用同一枚单次有效 refresh_token 各刷一次。
+5. 网盘 listDir 错误态与合法空目录已分离：`networkFailure()`（:349-355）用 `LOCAL_ERRNO_NETWORK=-101` + `ioError=true`，`executeWithErrno`（:407-409）显式抛错让扫描循环中断；所有实际调用点（`NetworkMusicViewModel.kt:363-368 / 392-397 / 531-538 / 580-588 / 717-720`、`BaiduFileIndexCache.kt:459-464 / 508-511`）都有 try/catch + `rethrowIfCancellation()`，不会因新增异常导致未捕获崩溃。
+6. 安全日志 hygiene 到位：`sanitizeUrl`（BaiduPanApi.kt:273-274）以正则遮掉 `access_token`，错误响应体统一 `take(200)`（:368 / :379）；搜索空结果/全失败改 `wThrottled`（MetingApiService.kt:271、NetworkMusicManager.kt:172），避免 W 级日志在 release 刷屏挤</p></div>
+<div class="fbox"><h4>I5 · 照片源 / 歌单解析 / 电台 / 天气 API</h4><p>IP 定位链路（`WeatherApi.requestIpLocation` → 腾讯 → ip.sb → 北京兜底）单飞正确：`locationLock.withLock` 把&quot;读缓存 → 请求 → 写回&quot;整段串行化并做锁内二次判缓存，`fetchCurrentWeather`/`fetchForecast` 并发只发一次请求；成功 TTL 30min / 失败冷却 10min 口径与注释一致（`WeatherApi.kt:180-202`）。
+- 腾讯 `status==0` 判断、`result.location.lat/lng`、`address_component.city` 字段路径正确；`GCJ-02→WGS84` 一次反减近似的 `transformLat`/`transformLng` 系数、`A=6378245.0`/`EE=0.00669...`、境外坐标原样返回（`Gcj02Converter.kt:21-52`）均与标准实现吻合，误差米级远小于 IP 定位公里级误差，取舍合理。
+- `doubleOrNull`（`WeatherApi.kt:307-311`）先判 `isJsonPrimitive` 再 `asString.toDoubleOrNull()`，兼容 number/string 且 `JsonNull` 安全；两处定位请求都 `.use{}` 关流、`isSuccessful` 先判非 2xx 早返回，无资源泄漏与异常堆栈刷屏。
+- 内嵌 ISRG Root X1 采用&quot;系统默认 CA 校验失败再追加单根校验&quot;的并集逻辑（`WeatherApi.kt:113-124`），不放宽主机名校验、非信任所有证书，`assets/isrg-root-x1.pem` 文件确实存在，`by lazy` 避免类初始化期 I/O。
+- `MediaStorePhotoSource` 用字面量 `&quot;datetaken&quot;` 而非 `MediaStore.Images.Media.DATE_TAKEN`（`MediaStorePhotoSource.kt:149`）规避 minSdk22 的 `NewApi`，且取列用 `getColumnIndex &lt; 0 ⇒ 未知` 而非 `getColumnIndexOrThrow`，兼容老系统缺列；投影其它列仍用 `getColumnIndexOrThrow` 但都在 `try/catch` 内。
+- SAF 路线对授权撤销导致的 `query` `SecurityException` 增加了 `onFailure` 日志（`ExternalFilePhotoSource.kt:188-199`），`status()` 复用 `PhotoWallAccessPolicy.shouldClearDirectoryUri` 查持久授权（`:65-70`），判定口径与 `VisualizerViewModel` 一致，避免了自存标志与系统状态不一致。
+- 网易云解析器 `parse` 顶层 `runCatching` 兜底 + `getAsJson*` 全量换成 `as? JsonObject/JsonArray` 安全转换（`Net</p></div>
+<div class="fbox"><h4>I6 · UI 主屏 / 导航 / 主题 / ViewModel 层</h4><p>1. 进度类参数按下沉范式改造且类型匹配：`LyricsView.currentTimeMs` 为 `State&lt;Long&gt;`，`NowPlayingScreen` 三处调用由 `progressMs.value` 改回 `progressMs`（`NowPlayingScreen.kt:611 / 1878 / 2190`），既避免 1Hz tick 重组整页，又与叶子组件签名一致，不是缺陷而是修复。
+2. 子 ViewModel 生命周期兜底完整：`disposeChildViewModels()` 实为 `vm.viewModelScope.cancel()`，`MainViewModel.onCleared()` 将 `visualizerVM` 补入 dispose 列表（`MainViewModel.kt:3697-3702`），补齐了原先 dispose 未取消其作用域的缺口。
+3. 顶部留白修复收敛到唯一口径：新增 `pagePadding()` 统一 TV/横屏/竖屏边距（`Theme.kt:588-641`），首页改 `pagePadding(vertical = 0.dp)` 避免叠出多余 20dp，播放页 `nowPlayingTopPadding` 按手机横屏/沉浸/TV 三档分别标注且注明沉浸模式 40dp 的唯一留白依据；BRIEF §4 记载有 `PagePaddingContractTest` / `NowPlayingTopGapGateTest` 门禁覆盖。
+4. 消息/结果写回的竞态治理成体系：`DownloadViewModel.showMessage()` 的 `messageJob` 取消旧定时器、`ServerViewModel` 统一走 `postConnectMessage()` 单调版本号、`SearchViewModel` 空关键词时 `networkSearchGeneration++` + `networkSearchJob?.cancel()`、`MvSearchViewModel.switchToNextCandidate()` 取消在途 `mvSearchJob`，多处消除&quot;旧定时器/慢请求覆盖新状态&quot;。
+5. 取消异常处理规范：NetworkMusicViewModel.collectAudioInDir、SearchViewModel.searchNetworkSongsBlocking、ServerViewModel.connectToServer 及 DownloadViewModel 的探测 catch 均调用 `rethrowIfCancellation()`，避免把 `CancellationException` 误记为错误日志（部分入口同步将日志由 E 降为 W，分级合理）。
+6. MV 候选切换无并行写回也无崩溃：新增 `mvSearchJob?.cancel()` 后，`resolveMv()` 内部逐源 try/catch 并返回 null，调用方无需额外 catch 即可避免异常外泄（`backend/network/mv/MvSearchManager.kt`）。</p></div>
+<div class="fbox"><h4>I7 · UI 组件（播放器/歌词/卡片/设置分支）</h4><p>1. State&lt;T&gt; 下沉调用链完整一致：`LyricsView` 三处调用（`ui/screens/NowPlayingScreen.kt:611/1878/2190`）与 `KaraokeLyricsView` 两处（`KaraokePlaybackScreen.kt:375`、`MvPlaybackScreen.kt:513`）均传 State 引用而非快照；叶子侧单点读 `.value`（LyricsView.kt:115、KaraokeLyricsView.kt:87），父级不再订阅 1Hz tick。
+2. 歌词时间轴边界稳健：`findCurrentLineIndex` 用二分并夹取到 `0..size-1`（KaraokeLyricsView.kt:215-225），`lineProgress` 用 `coerceIn(0f,1f)` 且对 `lineEnd&lt;=lineStart` 早返回（:233-237），末行结束时间用 `getOrNull + ?: (last.time+3000L)` 兜底（:139-140），对超时进度/末行/无下一行均有保护。
+3. 委托属性智能转换处理规范：`AppRoot.kt:385`、`KaraokePlaybackScreen.kt:204`、`MvPlaybackScreen.kt:330` 全部先取本地 `val` 再判空，未出现对 `by` 委托属性直接智能转换的编译/空安全坑。
+4. 组合期副作用已根治：`CoverCarousel` 的 `onAllFailed` 统一收进 `ReportAllFailedOnce` 的 LaunchedEffect（CoverCarousel.kt:135-140）；V6-N03 补 `LaunchedEffect(isPlaying, autoCycle)` 修复暂停且非自动轮播时 `fallbackOffset` 不归零（:89-93）；并用 `remember(coverCandidates)`/:key 重置轮播与失败态（:46/:72/:73）。
+5. dp 单位口径澄清到位：`CommonComponents.kt:126-166` 明确区分阈值用「未缩放 Android dp」与布局用「Compose dp（÷0.82）」，并保留 `LocalUiMode==PhonePortrait` 直接选档避开 439dp 误入 medium 的老坑。
+6. 设置页高频流按需订阅：`SettingsBranch.kt:168-184` 仅当歌词/K歌分区打开时才订阅下载进度四个高频 Flow，其余用 `flowOf(...)`；`downloadRootInfo` 用 `remember(settings.downloadLocation)` 缓存，避免每次重组做 StatFs（:67，配套 ViewModel 注释 MainViewModel.kt:4368-4380）。</p></div>
+<div class="fbox"><h4>I8 · UI 子屏（详情/库/设置/发现/搜索）</h4><p>列表 key 改造有明确崩溃根因与全文件一致落地：`AlbumDetailScreen.kt:244-246`、`ArtistDetailScreen.kt:209-211` 的 M29 注释点明「歌单/专辑/电台同一首歌可重复出现，只用 `song.id` 会撞 `Key was already used` 直接崩溃」，与 `QueueScreen.kt:318-320` 的 #2 修复（队列允许重复歌曲，key 拼 index）同源；本窗口把同一口径推广到 `SearchTab.kt:212`、`DiscoverTab.kt:222`、`JamendoTab.kt:217`、`SongList.kt:132`、`MineScreen.kt:183/281/470/538/661`。属修掉既存崩溃面，不是新引入的 key 不稳定。
+- `pagePadding()` 迁移逐屏等价，未引入尺寸回归：`Theme.kt:613-636` 的 `base`（TV 32 / 横屏 16 / 竖屏 16）与 `v`（TV 20 / 横屏 0 / 竖屏 12）逐项对应旧 `horizontal/vertical` 表达式；`pagePadding(uniform = true)` 对应 `MineScreen`/`SettingsScreen` 旧 uniform 写法。`QueueScreen.kt:127-151` 竖屏提前 return 且自带 `padding(16.dp)`，故 `:154` 的 uniform 改动不影响竖屏；`BRIEF §4` 的 `9f417f1` 已有 `PagePaddingContractTest` / `NowPlayingTopGapGateTest` 覆盖。
+- 下载位置「假开关变真开关」链路完整闭环，不是死代码：`SettingsBranch.kt:67` 用 `remember(settings.downloadLocation) { viewModel.downloadRootInfo() }` 按设置值懒计算（切「内/外」即重算），`:428-429` 把 `first/second` 传入；`SettingsScreen.kt:212-214` → `:869-870` → `DownloadSettingsSection.kt:36-39/118-133` 全链路贯通。新增两个字符串在 `values/strings.xml:295-296` 与 `values-en/strings.xml:291-292` 均存在，无资源缺失。
+- 搜索续页的 `remember` key 有精确的反面教材注释稳定化：`SearchTab.kt:113-132` 明确写出 2026-09-25 #16「无 key 时 `derivedStateOf` 捕获首次组合快照、续页一次都不触发」，且 key 取 `searchResults.size / hasMore / isLoading / isSearching` 稳定字段而非整个 `SongsPagingState` 对象（VM 每次 `copy()` 出新实例，整对象入 key 会无谓重建派生块）。footer 行 `SearchTab.kt:231-241` </p></div>
+<div class="fbox"><h4>I9 · 照片墙缓冲 / 渲染 / 日期戳 / 转场</h4><p>日期解析与格式化时区自洽：`PhotoCaptureDate.parse`（PhotoSource.kt:138-201）对无时区的 EXIF `DateTimeOriginal` 按 `TimeZone.getDefault()` 解释为 epoch 秒，`PhotoDateStamp.format`（PhotoDateStamp.kt:72）用默认时区 `Calendar` 回转，往返一致；带 `Z`/`±hh:mm` 的写法单独补偿且避免重复减偏移（:148-151/:198-200），minSdk22 不用 `java.time`（PhotoSource.kt:280）。
+- EXIF 读取严格在解码后台线程、且不开第二次流：`readExifCapturedAt`（PhotoBuffer.kt:350-361）由 `decodeEntry`（:319-334）在 `PhotoBuffer-decode` 线程池里调用，从已读入的同一份 `ByteArray` 构造 `ExifInterface(ByteArrayInputStream(...))`，对 Jellyfin 仍是一次 HTTP；任何异常 `runCatching{}.getOrDefault(0L)` 吞掉，装饰信息不会让可显示的照片解码失败。
+- 取消语义已正确解耦（本窗口修复）：`isDecodeCancelled(t)`（PhotoBuffer.kt:299-308）只沿 cause 链认 `InterruptedException` / `CancellationException`，不再用 `closed || generation != gen` 把世代作废期的 OOM/坏图降到 `AppLog.d`；结果作废在 `decodeAndPublish` 回写处单独判定（:277-281），日志分级与结果丢弃互不干扰。
+- 转场档 `available()` 判定有双保险：固定档在 `PhotoWallController.pickTransition`（:643-668）先过 `PhotoTransitionRegistry.available()` 再回落 Default，随机档从同一 `available()` 构造池，备份导入写入「合法但未实现」的枚举不会导致整面墙黑屏（对应上轮 C47 已修，本轮未引入新入口）。
+- 转场终态 `p &gt;= 1f` 兜底方向正确且过门禁：`ChannelGhostTransition`/`PerspectivePushTransition` 在 `p &gt;= 1f` 改画整幅新图（`drawPhoto(b, ...)`），`ComicPanelTransition` 在终态跳过黑边框；三处均写在 `clipRect` 之外、无未配对的 save/restore，`PhotoRenderContractScanTest.skipViolations`（:344-360）对字面量 `1f` 刻意放行，未违反「p 接近 1 不得跳过新图」门禁。
+- Canvas 绘制配对干净：`PhotoDateStamp.draw`（PhotoDateStamp.kt:96-128）只改 `Paint` 的 textSize/alpha/</p></div>
+<div class="fbox"><h4>B1 · 兜底 A：未改动的后端 / 网络 / 数据层</h4><p>1. **认证头注入的安全底线扎实**（`BackendAuthHeaders.kt:78-89`）：`forHost` 先做 host 精确匹配（`equals(ignoreCase=true)`）再实时读取 provider；日志只记 host（`:61`）与 `e.message`（`:86`），不触达任何令牌值；KDoc `:31-33` 明确跨域重定向由 OkHttp 自带逻辑剥离 Authorization 作双保险。`update`/`clear` 在 `synchronized(lock)` 内维护 `@Volatile` 的 provider/host（`:55-71`）。
+
+2. **下载路径构造防穿越 + 防媒体扫描**（`DownloadPathBuilder.kt:184-196, 50-52`）：`ILLEGAL` 正则覆盖反斜杠/正斜杠/冒号/通配符/控制字符，`trim().trimEnd(&#x27;.&#x27;, &#x27; &#x27;)` + 80 字符截断；`.tmp` 目录内创建 `.nomedia` 防止 `.part` 临时文件被媒体扫描器索引。
+
+3. **资源关闭到位**：`CoverFileWriter.kt:131` 与 `:77/:104` 对 OkHttp `Response` 和 `FileOutputStream` 均用 `.use{}`；`MediaTagWriter.kt:121-126` 在 finally 中以 `scaled !== src` 判重回收 Bitmap，避免&quot;无需缩放时返回同一实例&quot;导致的 double recycle；`StorageGuard.kt:113-117` stop() 同时 cancel pollJob 并 unregisterReceiver。
+
+4. **Room 迁移的 API22 兼容护栏**（`DownloadDatabase.kt:68-96, 104-108`）：明确不启用 `fallbackToDestructiveMigration`（`:105`，注释说明会导致孤儿文件）；`MIGRATION_1_2` 只用 `ALTER TABLE ADD COLUMN`（SQLite 非破坏性）；`MIGRATION_2_3` 因 API22 SQLite 不支持 DROP COLUMN 而按标准 12 步重建 export_records；schema 导出开启并用 MigrationTestHelper 校验（`:13-16`）。
+
+5. **跨源搜索的超时隔离与可见性兜底**（`SearchAggregator.kt:107-147, 365-414`）：`withHardTimeout` 用独立 `escapeScope` + `CompletableDeferred` 把阻塞 socket 读与主聚合解耦，避免单源超时拖垮整页；每个源独立 try/catch + `rethrowIfCancellation()`；结果层再按&quot;分支标签可见 &amp;&amp; 歌曲实际归属可见&quot;二次过滤（`:382`），并对 DOWNLOAD 源恒可见开白名单（`:380-381`）。
+
+6. **安卓</p></div>
+<div class="fbox"><h4>B2 · 兜底 B：未改动的 UI / 渲染器 / 歌词</h4><p>1. 资源释放到位：`DemucsSeparator` 的 ONNX `OnnxTensor`/`OrtSession.Result` 用嵌套 try/finally 保证任何路径 close（第 838-875 行），`OrtEnvironment` 进程级单例绝不 close（第 263-266 行注释与实现一致）；`decodeAudioToTempFile` 的 `codec/extractor` 在 finally 中 `stop()/release()`（第 804-809 行）。
+2. 并发/生命周期守卫扎实：Demucs 用 `stateLock`+`opMutex`+`pendingRelease` 三段式处理 init/release 与在飞分离的竞态（第 236-271、310-320 行）；`CrossfadeController.cleanupPlayer` 统一移除 fade Runnable 并 release 副播放器（第 159-172 行），`PlayerManager.release` 对称清理（第 1433-1448 行）。
+3. 网络歌词层防注入/防泄漏：`parseKugouLyrics` 用 `toHttpUrlOrNull()?.newBuilder()?.addQueryParameter` 逐参数编码不可信 id/accesskey（第 395-403 行，M18 修复保留），全部 OkHttp 响应用 `.use{}`（第 181、237、280、337、408 行）。
+4. minSdk22 API 护栏显式：`MediaLibraryTree.mergeSearchResults` 用 `getOrPut` 而非 `Map.putIfAbsent`（API24+），并写明会在 API22 触发 `NoSuchMethodError` 的根因（第 529-547 行）。
+5. FLAC 熔断可捕获：`FlacGuardTrackOutput.format` 在解封装层抛 `FlacUnsupportedException`（IOException），`isFlacUnsupported()` 沿 cause 链查找且有 `MAX_CAUSE_DEPTH=8` 防自引用死循环（FlacGuardExtractors.kt 第 83-95、159-165 行）。
+6. 下载完整性双闸门：`ModelDownloadManager` 下载后即时 SHA-256 校验 + 原子 rename + `disconnect()` in finally（第 218-245、325-327 行），`isModelDownloaded` 用 ±1% 字节窗口做主线程快速判定并把 166MB 哈希放到 IO 线程（第 122-138 行）。</p></div>
+</section>
+<section id="roadmap"><h2>6. 整改路线建议</h2>
+<table><tr><th>优先级</th><th>条目</th><th>建议动作</th></tr>
+<tr><td><span class="sev High">High</span></td><td><code>B2-01</code> DemucsSeparator.kt:441</td><td>让每个推理窗口真正取到源 [startSample, startSample+SEGMENT) 且总读取量不超过文件长度。二选一：①把只进流换成 `RandomAccessFile`，每轮开头 seek 到 `startSample*8` 字节再读（等价于每轮回退 OVERLAP_SAMPLES 帧），使窗口重叠且末轮只读剩余帧；②仍用连续流，但每轮只读 `hop` 个新帧，并把上一窗口尾部 OVERLAP_SAMPLES 个原始采样搬</td></tr>
+<tr><td><span class="sev High">High</span></td><td><code>I1-01</code> LogStore.kt:439</td><td>不要使用 `java.nio.file`。按 API 分支处理：仅 `Build.VERSION.SDK_INT &gt;= 26` 保留 `Files.move`；API&lt;26 走纯 `java.io` 分支——`tmp.copyTo(file, overwrite = true)`（或 `FileInputStream`/`FileOutputStream`）覆盖后删除 tmp；若更看重原子性可用同一父目录内的 `File.renameT</td></tr>
+<tr><td><span class="sev High">High</span></td><td><code>I3-01</code> SongDownloadManager.kt:711</td><td>该函数只处理未完成任务，而 rename 已由同批 S04-01（:398-403 的 .part + rename 原子替换）保证 finalFile 不是半截文件，故未完成任务应以&quot;命名正则匹配 + length&gt;0&quot;为准，不应再用 fileSize 否定。恢复为 `?.filter { entity.fileSize &lt;= 0L || it.length() == entity.fileSize }`；或写成分支：`fileSiz</td></tr>
+<tr><td><span class="sev High">High</span></td><td><code>I4-01</code> BaiduPanApi.kt:182</td><td>让 `executeOnce`/`execute` 返回可区分的 IO 错误态（如 `errno = LOCAL_ERRNO_NETWORK` + `ioError`），或直接在 `listAllAudioPaged` 的 `?:` 分支抛 `IOException`；使 `fullScan` 进入既有 catch 走 `partial + onFailed`，并避免把半截结果以完整索引 `save` + `onComplete` 上报</td></tr>
+<tr><td><span class="sev Medium">Medium</span></td><td><code>I4-02</code> MetingApiService.kt:316</td><td>参照同仓 `LxScriptRepo.download`（:144-149）的写法，用 `okio.Buffer` + `body.source().read(buf, MAX_BODY_BYTES + 1)` 限量读取（搜索结果给 4–8 MB 足够），超限按本次端点失败返回；`parseSongs`/`preview` 复用限长后的字符串，避免整串反复复</td></tr>
+<tr><td><span class="sev Medium">Medium</span></td><td><code>I7-01</code> KaraokePlaybackScreen.kt:383</td><td>将 :387-409 的进度细线抽成独立 `@Composable`（如 `KaraokeProgressLine(progressMs: State&lt;Long&gt;, durationMs: Long)`），把 `progressMs.value` 的读取移入该叶子内部，使 1Hz 重组范围从整页收敛到一条 2dp 细线，与 MvPlaybackScreen.</td></tr>
+</table><p class="muted small">Low 级条目见第 4 节各子系统分组，按实际触达再排期。本轮仅出报告，未改动任何业务代码 / 未升版本号。</p></section>
+<section id="scope"><h2>7. 审查范围与已知取舍</h2>
+<h3>范围</h3><p>增量窗口 <code>2fb11b8 → 25d0b6a</code>（17 提交）内 90 个 main 源码 .kt 全量通读；另抽 36 个未改动高风险文件兜底。不改业务代码、不升版本号。配置文件（Gitee 镜像 / 发版脚本 / CI）不属源码审查范围。</p>
+<h3>已核验但不作为缺陷的所有者取舍（摘要）</h3>
+<ul class="small"><li>手工 DI、OkHttp 不用 Retrofit、Handler 轮询进度、单 Activity 手动导航、五级 BACK 状态机。</li><li>usesCleartextTraffic &amp; 本地 HTTP 无鉴权（家庭局域网）；AES-GCM 凭据加密、系统默认 TLS 校验。</li><li>minSdk22 相关：TinyPinyin 不用 android.icu、onnxruntime 1.17.1、proguard keep 规则必留。</li><li>渲染器零分配/预烘焙；<code>TripodFogRenderer.drawLinPoly</code> 禁一切矩阵承载变换；Compose <code>Stroke.width</code> 是 val；E51/E52 私有分支专属，main 上不报缺失。</li><li>天空 <code>SKY_QUAD_SCALE=64</code>、天空侧不雾化、只用上游 vUUv 世界坐标云、底色 uNearCol 平铺。</li><li>上轮 154 + 59 条已全部落地；本窗口刚修的日期水印 / IP 定位 / 日志限流 / 下载位置 / 顶部留白 / ISRG Root X1 不重复上报，仅查新引入回归。</li></ul>
+<h3>四类高频误报自检（复核据此砍掉严重度）</h3><ol class="small"><li>拿死代码当基线——报前 grep 调用点。</li><li>忽略上层 catch / 调度 / 返回值兜底——不写「必然崩溃」。</li><li>把条件性风险写成必然——写明触发条件。</li><li>机制说反——删临时还是用户文件、截断还是丢帧、新增还是覆盖。</li></ol>
+</section>
+</main></div>
+<script>document.querySelectorAll(".filters button").forEach(function(b){b.addEventListener("click",function(){document.querySelectorAll(".filters button").forEach(function(x){x.classList.remove("on")});b.classList.add("on");var f=b.getAttribute("data-f");document.querySelectorAll(".finding").forEach(function(el){el.classList.toggle("hide",f!=="all"&&el.getAttribute("data-sev")!==f)})})})</script>
+</body></html>
