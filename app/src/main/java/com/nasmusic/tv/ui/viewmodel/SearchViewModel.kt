@@ -110,6 +110,17 @@ class SearchViewModel(
      */
     private var searchGeneration = 0
 
+    /**
+     * P2 修复 2026-11-19：主（服务端）搜索的在途协程。
+     *
+     * 原实现只靠 [searchGeneration] 闸门挡住旧结果发布，但旧协程会**跑完整段**——
+     * 包括艺人展开的 `findArtist` / `getArtistSongs` 远程请求，并对单例 [artistExpansion]
+     * 交错 reset/写状态。新搜索直接 cancel 旧的，与 [networkSearchJob] 同构：
+     * 取消点在各 `await` / suspend 处生效，子协程的 `rethrowIfCancellation()` 保证不吞取消。
+     * 代数闸门保留，作为「已取消协程恰好在取消前发布」的最后一道防线。
+     */
+    private var searchJob: Job? = null
+
     // --- 网络音乐搜索结果（NetworkMusicManager 搜索）---
     private val _networkSearchResults = MutableStateFlow<UiState<List<Song>>>(UiState.Success(emptyList()))
     val networkSearchResults: StateFlow<UiState<List<Song>>> = _networkSearchResults.asStateFlow()
@@ -224,7 +235,10 @@ class SearchViewModel(
             _searchResults.value = UiState.Success(emptyList())
             return
         }
-        // 缓存命中：同一关键词 + 同一 searchType 且结果已是 Success 且非空
+        // 缓存命中：同一关键词 + 同一 searchType 且结果已是 Success（含空结果）
+        // P5 修复 2026-11-19：原条件额外要求 data 非空 ⇒ 搜一个无结果的词每次都
+        // 重新发起五源并行扇出（含最长 15s 超时等待）。空结果同样是有效结论，命中即可；
+        // 换词/切 Tab/切来源(force)/清空仍各自改键或 force，不受影响。
         val currentSearchType = when (libraryActiveTabProvider()) {
             com.nasmusic.tv.ui.screens.LibraryTab.ALBUMS -> SearchType.ALBUM
             com.nasmusic.tv.ui.screens.LibraryTab.ARTISTS -> SearchType.ARTIST
@@ -233,8 +247,8 @@ class SearchViewModel(
         }
         if (!force && query == lastSearchedKeyword && currentSearchType == lastSearchType) {
             val cached = _searchResults.value
-            if (cached is UiState.Success && cached.data.isNotEmpty()) {
-                AppLog.d("SearchViewModel", "searchSongsOnServer: cached result for '$query'")
+            if (cached is UiState.Success) {
+                AppLog.d("SearchViewModel", "searchSongsOnServer: cached result for '$query' (${cached.data.size} rows)")
                 return
             }
         }
@@ -242,7 +256,9 @@ class SearchViewModel(
         lastSearchType = currentSearchType
         val gen = ++searchGeneration
         _searchResults.value = UiState.Loading
-        viewModelScope.launch {
+        // P2：先取消上一次同域搜索（含其艺人展开请求），再起新的；与代数闸门双保险。
+        searchJob?.cancel()
+        searchJob = viewModelScope.launch {
             // 跨源融合搜索：NAS + 网络音乐 + 百度网盘 + Jamendo + 本地 并行搜索，合并去重
             // 按**有效点亮集**搜索（点亮模式 ∩ 设置里开着的源）——
             // 与聚合器内部的 SourceVisibility 兜底取同一语义 ⇒ chip 显示、结果、集合三者一致。
@@ -332,6 +348,9 @@ class SearchViewModel(
      */
     fun clearSearch() {
         searchGeneration++
+        // P2：清空同样要作废在途搜索，避免慢请求回来后把已清空的结果重新写回
+        searchJob?.cancel()
+        searchJob = null
         lastSearchedKeyword = null
         artistExpansion.reset()
         lastNonNetworkSongs = emptyList()

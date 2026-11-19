@@ -757,11 +757,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
         _searchNetworkPlatform.value = source.apiKey
         viewModelScope.launch {
             prefs.network.setMusicSource(source.apiKey)
-            // 有搜索关键词时自动重新搜索（R-1：经 SearchViewModel）
-            val kw = searchVM.networkSearchKeyword.value
-            if (kw.isNotBlank()) {
-                searchVM.searchNetworkSongs(kw)
-            }
+            // P4 修复 2026-11-19：原此处有 `searchVM.searchNetworkSongs(kw)` 自动重搜。
+            // 该链写入的 _networkSearchResults 在当前 UI 无任何 Composable 收集
+            // （playAllSearchResults / addAllSearchResultsToQueue / shuffleNetworkSearch
+            //  在 ui/ 下均无调用点），切平台时跑完整网络搜索纯属浪费带宽与端点配额。
+            // ⛔ 网络音乐的实际搜索入口是曲库页的 SearchViewModel.searchSongsOnServer，
+            //    由聚合器统一处理；平台切换只做持久化，不再主动发请求。
         }
     }
 

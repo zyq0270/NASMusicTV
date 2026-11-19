@@ -18,8 +18,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 
 /**
@@ -132,6 +132,12 @@ enum class SearchType {
     /**
      * 硬超时：在 [escapeScope] 中执行 [block]，主协程限时等待结果。
      * 超时返回 null（与 withTimeoutOrNull 同形，调用点替换零成本）。
+     *
+     * ⚠️ 孤儿请求取舍（P2 修复 2026-09-22 定稿，P3 复核 2026-11-19 维持）：
+     * 阻塞 socket 读不可被协程取消中断，故这里刻意采用「限时等待 + 丢弃」——
+     * 超时后主聚合立即返回 null，孤儿由 OkHttp readTimeout 自然收尾、连接随即释放。
+     * ⛔ 不要改成真取消或 cancel 孤儿 job：既中断不了阻塞读，又会扰动四个源共用
+     *    的超时语义；堆积风险由各 service 的 readTimeout 上限兜底。
      */
     private suspend fun <T> withHardTimeout(timeoutMs: Long, block: suspend () -> T): T? =
         withTimeoutOrNull(timeoutMs) {
@@ -160,6 +166,15 @@ enum class SearchType {
      * @param localDeviceSongs 已加载的本地音乐歌曲缓存（搜索页传入，用于拼音搜索时客户端过滤）
      * @param baiduLocalSongs 百度网盘本地索引歌曲（搜索页传入，用于拼音搜索时客户端过滤）
      * @return 聚合搜索结果
+     *
+     * 主线程安全（P3 修复 2026-11-19）：调用方是 `viewModelScope.launch`（Main）。
+     * 若用 `coroutineScope`，`await()` 之后的拼音缓存构建 / 逐条 PRECISE 匹配 /
+     * 去重 / 排序，与三个拼音分支对本地缓存的 `filter`，都会继承 Main 执行 ——
+     * TV 大曲库下会掉帧。改用 `withContext(Dispatchers.Default)`：CPU 密集的
+     * 后处理全部落到后台线程池；网络 / Room IO 仍由各 service 内部的
+     * `withContext(IO)` 与 `escapeScope` 负责，不受影响。
+     * ⚠️ `withContext` 的 lambda receiver 同为 `CoroutineScope`，`async` / 结构化并发
+     * 等待语义与 `coroutineScope` 等价，故仅换构造器与 `return@` 标签。
      */
     suspend fun search(
         keyword: String,
@@ -171,12 +186,12 @@ enum class SearchType {
         nasLocalSongs: List<Song> = emptyList(),
         localDeviceSongs: List<Song> = emptyList(),
         baiduLocalSongs: List<Song> = emptyList()
-    ): SearchAggregatorResult = coroutineScope {
+    ): SearchAggregatorResult = withContext(Dispatchers.Default) {
         val baiduKw = baiduKeyword ?: keyword
         AppLog.d(TAG, "search: keyword='$keyword' baiduKeyword='$baiduKw' sources=${sources.map { it.name }} directoryMode=$directoryMode filterMode=$filterMode")
 
         if (keyword.isBlank()) {
-            return@coroutineScope SearchAggregatorResult(
+            return@withContext SearchAggregatorResult(
                 allResults = emptyList(),
                 sourceBreakdown = emptyMap()
             )
