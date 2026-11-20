@@ -1,7 +1,6 @@
 package com.nasmusic.tv.backend.download.model
 
 import com.nasmusic.tv.data.model.Song
-import com.nasmusic.tv.data.model.RadioStation
 import com.nasmusic.tv.backend.network.NetworkSongId
 import com.nasmusic.tv.backend.network.QualityTiers
 
@@ -79,27 +78,38 @@ fun Map<String, DownloadState>.stateOfSong(song: Song): DownloadState {
 }
 
 /**
- * 跨源去重键：标题+艺术家规范化（小写 + 去除内部空白）。
+ * 跨源去重键：标题+艺术家规范化（小写 + 内部空白折叠为单空格）。
  *
  * 用于"同一首歌不同平台 sourceId 不同"时避免重复下载。
  * 命中后即使 [downloadKey] 不同也视为已下载（UI 显示 ✓，不再发起下载）。
+ *
+ * ⚠️ 空白必须**折叠**而不是删除：删除会把 "A B" 与 "AB" 判成同一首，
+ * 从而漏掉本该下载的另一首歌（回归：v2.39.26 审查）。
  */
 val Song.dedupeKey: String
     get() = listOf(title, artist)
-        .joinToString("|") { it.trim().lowercase().replace(Regex("\\s+"), "") }
+        .joinToString("|") { it.trim().lowercase().replace(Regex("\\s+"), " ") }
 
-/** RadioStation 源标识（与 RadioStation.SOURCE_ID 一致，但避免循环依赖） */
-private const val RADIO_SOURCE = "weather"
+/**
+ * 不可下载的流媒体源标识。
+ *
+ * - `radio`：RadioBrowser 在线电台（直播流）
+ * - `weather`：天气电台（纯流媒体，无歌曲文件）
+ *
+ * ⚠️ 值必须与 `RadioStation.SOURCE_ID` / 天气电台的 `networkSource` 一致；
+ * 这里用字面量避免 `backend/download/model` 反向依赖 `data/model`。
+ */
+private val NON_DOWNLOADABLE_SOURCES = setOf("radio", "weather")
 
 /**
  * 是否可下载。
  *
  * 不可下载的源：
  * - 本地歌曲（已经在本地，无需下载）
- * - 天气电台（纯流媒体，无歌曲文件）
+ * - 在线电台 / 天气电台（纯流媒体，无歌曲文件）
  */
 fun isDownloadableSong(song: Song): Boolean =
-    !song.isLocalSong && song.networkSource != RADIO_SOURCE
+    !song.isLocalSong && NON_DOWNLOADABLE_SOURCES.none { it == song.networkSource }
 
 /** 下载运行时配置（来自 AppSettings） */
 data class DownloadSettings(

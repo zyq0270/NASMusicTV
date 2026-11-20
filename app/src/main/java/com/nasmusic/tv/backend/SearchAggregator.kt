@@ -3,6 +3,7 @@ package com.nasmusic.tv.backend
 import com.nasmusic.tv.backend.local.LocalMusicRepository
 import com.nasmusic.tv.backend.network.JamendoService
 import com.nasmusic.tv.backend.network.NetworkMusicManager
+import com.nasmusic.tv.backend.network.NetworkSongId
 import com.nasmusic.tv.backend.network.baidu.BaiduNetdiskService
 import com.nasmusic.tv.data.model.MusicSourceType
 import com.nasmusic.tv.data.model.RankedSong
@@ -259,6 +260,11 @@ enum class SearchType {
                     withHardTimeout(NETWORK_TIMEOUT) {
                         // Q2：「网易优先」只属于统一搜索入口（F1），⛔ 不得下沉到 MetingApiService.search()
                         networkMusicManager.search(keyword, nativeFirst = true)
+                            // 只保留**真正来自 Meting** 的结果：manager.search 在默认源无结果时
+                            // 会 fallback 到百度 / Jamendo，而那些歌在各自独立分支里已经查过一次。
+                            // 若原样收进 NETWORK_MUSIC，同一首歌会以「网络 / 百度」两个标签重复出现，
+                            // 且同一关键词被请求两次（v2.39.26 审查：跨标签重复）。
+                            .filter { it.networkSource == NetworkSongId.METING_SOURCE }
                             .filter { it.title.isNotBlank() }
                             .map { song ->
                                 RankedSong(song = song, source = MusicSourceType.NETWORK_MUSIC)
@@ -350,15 +356,31 @@ enum class SearchType {
 
         // 本地音乐搜索
         val localDeferred = async {
-            if (MusicSourceType.LOCAL in sources && localMusicRepository != null && localMusicEnabled()) {
+            // ⚠️ 旧条件为 `MusicSourceType.LOCAL in sources && localMusicRepository != null && localMusicEnabled()`；
+            // 那样会把「关闭本地」变成「已下载也消失」，与 SourceVisibility 的
+            //「关 = 只显示已下载」自相矛盾。现在分支恒进、由 localOn 决定保留范围：
+            // 关闭时只保留 storageType=DOWNLOAD，并把它标成 DOWNLOAD 分支，
+            // 让结果层的 `visible(it.source)` 仍成立（不必放宽全局过滤）。
+            if (MusicSourceType.LOCAL in sources && localMusicRepository != null) {
+                val localOn = localMusicEnabled()
                 try {
+                    val rank: (Song) -> RankedSong = { song ->
+                        RankedSong(
+                            song = song,
+                            source = if (!localOn && song.storageType == "DOWNLOAD") {
+                                MusicSourceType.DOWNLOAD
+                            } else {
+                                MusicSourceType.LOCAL
+                            }
+                        )
+                    }
                     val searchServer: suspend () -> List<RankedSong> = {
-                        withTimeoutOrNull(LOCAL_TIMEOUT) {
+                        // 与其他源同口径：硬超时（Room 查询可取消，超时后不再等）
+                        withHardTimeout(LOCAL_TIMEOUT) {
                             localMusicRepository.search(keyword)
                                 .filter { it.title.isNotBlank() }
-                                .map { song ->
-                                    RankedSong(song = song, source = MusicSourceType.LOCAL)
-                                }
+                                .filter { localOn || it.storageType == "DOWNLOAD" }
+                                .map(rank)
                         } ?: run {
                             AppLog.w(TAG, "Local search timed out")
                             emptyList()
@@ -368,9 +390,8 @@ enum class SearchType {
                         // 拼音搜索：本地源 Room LIKE 查询不认拼音，改用客户端过滤
                         val localHits = localDeviceSongs.filter { song ->
                             matchesBySearchType(song, keyword, searchType)
-                        }.map { song ->
-                            RankedSong(song = song, source = MusicSourceType.LOCAL)
-                        }
+                        }.filter { localOn || it.storageType == "DOWNLOAD" }
+                            .map(rank)
                         if (localHits.isNotEmpty()) localHits else searchServer()
                     } else {
                         searchServer()

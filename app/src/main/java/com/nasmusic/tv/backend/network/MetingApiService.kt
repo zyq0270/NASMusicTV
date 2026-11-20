@@ -146,6 +146,18 @@ class MetingApiService(
 
         /** 非-302 的 3xx（301/303/307/308）**跟跳上限**：超过即按失败处理，⛔ 不跟着死循环 */
         private const val MAX_REDIRECT_HOPS = 2
+
+        /**
+         * 单曲取链**总预算**（毫秒）。
+         *
+         * 端点链最多 4 个端点 × 降级链最多 4 档 = 16 次串行请求，单次 OkHttp 超时 15s；
+         * 没有总预算时，一首死链歌曲可以把播放解析拖到分钟级（再叠加跨源重搜更久）。
+         * 预算耗尽即结束整条链，返回失败让上层尽快走同源 / 跨源替换。
+         */
+        private const val RESOLVE_BUDGET_MS = 12_000L
+
+        /** 剩余预算低于此值不再发起新请求（连连接建立都不够）。 */
+        private const val MIN_REQUEST_BUDGET_MS = 600L
         // 默认公共 Meting-API 端点
         const val DEFAULT_BASE_URL = "https://meting.api.redcha.cn/api"
 
@@ -386,7 +398,7 @@ class MetingApiService(
      *   旧实现只认 302/200，301 落到 `else -> null` 被当成空结果丢掉 —— 而那一跳之后拿到的是
      *   **该电视（API 22，缺 Let's Encrypt 根）唯一能校验证书**的端点给出的可用直链。
      */
-    private fun fetchPlayUrl(requestUrl: String): PlayUrlFetch {
+    private fun fetchPlayUrl(requestUrl: String, deadlineMs: Long): PlayUrlFetch {
         var url = requestUrl
         var hops = 0
         while (true) {
@@ -394,7 +406,12 @@ class MetingApiService(
             var fromRedirect = false
             var next: HttpUrl? = null
             var code = 0
-            noRedirectClient.newCall(Request.Builder().url(url).build()).execute().use { response ->
+            val remaining = deadlineMs - System.currentTimeMillis()
+            if (remaining <= 0L) return PlayUrlFetch.Miss("budget exhausted")
+            val call = noRedirectClient.newCall(Request.Builder().url(url).build())
+            // 每一跳都不得超过总预算剩余（含 301 跟跳），否则 2 跳就能把预算翻倍。
+            call.timeout().timeout(remaining.coerceAtLeast(1L), TimeUnit.MILLISECONDS)
+            call.execute().use { response ->
                 code = response.code
                 val location = response.header("Location")
                 when {
@@ -503,12 +520,21 @@ class MetingApiService(
             val brChain = QualityTiers.fallbackChainOf(quality)
             var probedDead = false
             val misses = mutableListOf<String>()
-            for (endpoint in endpoints) {
+            // 总预算：跨端点 × 跨档位的串行链必须有时限，否则死链会拖到分钟级。
+            val deadline = System.currentTimeMillis() + RESOLVE_BUDGET_MS
+            fun remainingMs(): Long = deadline - System.currentTimeMillis()
+            budgetLoop@ for (endpoint in endpoints) {
                 for (br in brChain) {
+                    val remaining = remainingMs()
+                    if (remaining < MIN_REQUEST_BUDGET_MS) {
+                        misses += "budget exhausted before $endpoint br=$br"
+                        AppLog.w(TAG, "resolvePlayUrl: 总预算耗尽（${RESOLVE_BUDGET_MS}ms），提前结束端点链 netId=$netId")
+                        break@budgetLoop
+                    }
                     try {
                         val brParam = if (br != null) "&br=$br" else ""
                         val url = "$endpoint?server=${enc(server)}&type=url&id=${URLEncoder.encode(netId, "UTF-8")}$brParam"
-                        val fetched = fetchPlayUrl(url)
+                        val fetched = fetchPlayUrl(url, deadline)
                         when (fetched) {
                             is PlayUrlFetch.Found -> {
                                 // br == null（AUTO 档）时 actualQuality 记为请求档位本身，不产生降级提示
@@ -517,11 +543,15 @@ class MetingApiService(
                                 // 200-JSON 分支不产生重定向链，维持既有"非空即成功"（§6 验收 16 的回归口径，
                                 // 百度网盘 / jamendo 走的是接口默认实现，本方法根本不参与）。
                                 // ⛔ 只有 DEAD 才 continue；UNKNOWN 与 PLAYABLE 一律放行。
-                                if (fetched.fromRedirect && probe?.probe(fetched.url) == Playability.DEAD) {
-                                    probedDead = true
-                                    misses += "$endpoint br=$br → probe DEAD"
-                                    AppLog.d(TAG, "resolvePlayUrl: probe DEAD via '$endpoint' br=$br for netId=$netId")
-                                    continue   // 只跳内层 for(br)：该端点×该档失败，继续降级链
+                                if (fetched.fromRedirect && probe != null) {
+                                    // 探活自身有 3s 超时（HttpPlayabilityProbe），失败/超时返回 UNKNOWN；
+                                    // 按既有保守判据，只有 DEAD 才判失败并继续降级链。
+                                    if (probe.probe(fetched.url) == Playability.DEAD) {
+                                        probedDead = true
+                                        misses += "$endpoint br=$br → probe DEAD"
+                                        AppLog.d(TAG, "resolvePlayUrl: probe DEAD via '$endpoint' br=$br for netId=$netId")
+                                        continue   // 只跳内层 for(br)：该端点×该档失败，继续降级链
+                                    }
                                 }
                                 AppLog.d(TAG, "resolvePlayUrl: resolved via '$endpoint' br=$br (actual=$actual) for netId=$netId")
                                 return@withContext guardPlayUrl(ResolveResult(fetched.url, actual), quality)

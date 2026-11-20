@@ -209,9 +209,10 @@ class NetworkMusicManagerTest {
     fun `跨源降级：原源失败时尝试其他源`() = runBlocking {
         val song = createSong(networkSource = "sourceA")
         val replacementUrl = "https://example.com/play/2"
+        // 标题必须匹配（同曲），歌手不同是允许的跨源兜底形态（同名另一演唱者）
         val replacementSong = createSong(
             id = "ntwk_sourceB_2",
-            title = "Replacement Song",
+            title = "Test Song",
             artist = "Replacement Artist",
             networkSource = "sourceB"
         )
@@ -258,13 +259,13 @@ class NetworkMusicManagerTest {
         val song = createSong(networkSource = "sourceA")
         val candidate1 = createSong(
             id = "ntwk_sourceB_1",
-            title = "Candidate 1",
+            title = "Test Song",
             artist = "Artist 1",
             networkSource = "sourceB"
         )
         val candidate2 = createSong(
             id = "ntwk_sourceB_2",
-            title = "Candidate 2",
+            title = "Test Song",
             artist = "Artist 2",
             networkSource = "sourceB"
         )
@@ -300,7 +301,7 @@ class NetworkMusicManagerTest {
         // sourceB 搜索返回候选但全部不可播
         val candidate = createSong(
             id = "ntwk_sourceB_1",
-            title = "Candidate",
+            title = "Test Song",
             networkSource = "sourceB"
         )
         fakeServiceB.setSearchResults(listOf(candidate))
@@ -343,7 +344,7 @@ class NetworkMusicManagerTest {
         // sourceB 搜索返回与原曲同 id 的候选（应被跳过）
         val sameIdCandidate = createSong(
             id = "ntwk_test_1",  // 与原曲 id 相同
-            title = "Same Id",
+            title = "Test Song",
             networkSource = "sourceB"
         )
         fakeServiceB.setSearchResults(listOf(sameIdCandidate))
@@ -353,6 +354,26 @@ class NetworkMusicManagerTest {
 
         // 同 id 候选被跳过，无其他候选
         assertNull(result)
+    }
+
+    @Test
+    fun `跨源降级：标题不匹配的候选即使可播也不替换`() = runBlocking {
+        val song = createSong(networkSource = "sourceA")
+        val unrelated = createSong(
+            id = "ntwk_sourceB_9",
+            title = "Completely Different Song",
+            artist = "Someone Else",
+            networkSource = "sourceB"
+        )
+        fakeServiceA.setResolveUrlResult(null)
+        fakeServiceB.setSearchResults(listOf(unrelated))
+        // 即使能解析出可播 URL，也不能拿来替换（否则自动播成无关歌）
+        fakeServiceB.setResolveUrlResult("https://example.com/play/wrong")
+
+        val result = manager.resolvePlayUrlWithCrossSourceFallback(song, forceRefresh = true)
+
+        assertNull(result)
+        assertEquals("标题不匹配的候选不应进入解析", 0, fakeServiceB.resolvePlayUrlCallCount)
     }
 
     // ==================== 默认源有效性校验（v2.39.8 方案 §7.5） ====================

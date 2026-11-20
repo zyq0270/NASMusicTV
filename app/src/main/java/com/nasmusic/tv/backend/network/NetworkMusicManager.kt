@@ -2,6 +2,7 @@ package com.nasmusic.tv.backend.network
 
 import com.nasmusic.tv.data.model.Song
 import com.nasmusic.tv.util.AppLog
+import com.nasmusic.tv.util.ArtistSplitter
 import com.nasmusic.tv.util.rethrowIfCancellation
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -43,6 +44,17 @@ class NetworkMusicManager(
         private const val PLAY_URL_CACHE_MAX = 500
         // 艺人全量方案 §3.8 第 1 步：确认过的"假 302"负面判定，与直链缓存同 TTL（避免同一首反复探测）
         private const val DEAD_PROBE_TTL_MS = PLAY_URL_CACHE_TTL_MS
+
+        /**
+         * 跨源 fallback 的**稳定**尝试顺序。
+         *
+         * 只影响 `search` / `searchCoverUrl` / 跨源替换的尝试次序，不改变
+         * `resolvePlayUrl` 按 `networkSource` 的精确路由。
+         * ⚠️ 值必须与各服务的 `sourceId` 一致（`NetworkSongId.METING_SOURCE` /
+         * `BaiduNetdiskService.sourceId` / `JamendoService.sourceId`）；
+         * 未列出的新源排在最后并按 sourceId 字典序，保证顺序确定。
+         */
+        private val FALLBACK_SOURCE_ORDER = listOf(NetworkSongId.METING_SOURCE, "baidu", "jamendo")
     }
 
     /**
@@ -265,15 +277,22 @@ class NetworkMusicManager(
 
         return try {
             val result = svc.resolvePlayUrlDetailed(song, quality)
+            // 解析期间用户可能关掉了这个源（unregisterService 已清过缓存）。
+            // 若仍把结果写回去，重新开源的 5 分钟内会命中「上一个开关周期」的旧直链。
+            val stillRegistered = services[src] === svc
             if (result.isSuccess) {
-                // 写入缓存（含实际档位，降级结果也缓存，避免重复降级探测）
-                playUrlCache[cacheKey] = CachedPlayUrl(result.url!!, now, result.actualQuality)
-                AppLog.d(TAG, "resolvePlayUrl: cached new url for key=$cacheKey actual=${result.actualQuality}")
+                if (stillRegistered) {
+                    // 写入缓存（含实际档位，降级结果也缓存，避免重复降级探测）
+                    playUrlCache[cacheKey] = CachedPlayUrl(result.url!!, now, result.actualQuality)
+                    AppLog.d(TAG, "resolvePlayUrl: cached new url for key=$cacheKey actual=${result.actualQuality}")
+                } else {
+                    AppLog.d(TAG, "resolvePlayUrl: skip cache write — source=$src 在解析期间被注销")
+                }
             } else {
                 // 解析失败：移除缓存条目，避免下次又命中过期项
                 playUrlCache.remove(cacheKey)
                 // ⚠️ 只有**探测确认的 DEAD** 才进负面缓存；普通失败（端点没给链接）不钉 5 分钟
-                if (result.probedDead) {
+                if (result.probedDead && stillRegistered) {
                     deadProbeCache[cacheKey] = now
                     AppLog.d(TAG, "resolvePlayUrl: cached DEAD verdict for key=$cacheKey")
                 }
@@ -440,13 +459,27 @@ class NetworkMusicManager(
     }
 
     /**
-     * 构造按优先级排序的服务列表：默认源在前，其余按 Map 迭代顺序
+     * 构造按优先级排序的服务列表：**修复后的**默认源在前，其余按 [FALLBACK_SOURCE_ORDER]
+     * （Meting → 百度 → Jamendo）稳定排序，未列出的源按 sourceId 字典序排在最后。
+     *
+     * ⚠️ 必须用 [defaultSource] 而不是原始 `defaultSourceProvider()`：
+     * 持久化值可能指向已关闭 / 已删除的源，用原值会让 `defSvc == null`，
+     * 退化回 `ConcurrentHashMap` 的迭代顺序（非确定），与 `getPlaylist` /
+     * `findArtist` 使用的修复值不一致——同一会话里两条链路可能选中不同源。
      */
     private fun orderedServices(): List<NetworkMusicService> {
-        val def = defaultSourceProvider()
-        val defSvc = services[def]
-        val others = services.filterKeys { it != def }.values
-        return if (defSvc != null) listOf(defSvc) + others else others.toList()
+        if (services.isEmpty()) return emptyList()
+        val def = defaultSource
+        val orderedKeys = ArrayList<String>(services.size)
+        orderedKeys.add(def)
+        FALLBACK_SOURCE_ORDER.forEach { key ->
+            if (key != def && services.containsKey(key)) orderedKeys.add(key)
+        }
+        services.keys
+            .filter { it != def && it !in FALLBACK_SOURCE_ORDER }
+            .sorted()
+            .forEach { orderedKeys.add(it) }
+        return orderedKeys.mapNotNull { services[it] }
     }
 
     /**
@@ -515,10 +548,27 @@ class NetworkMusicManager(
                 continue
             }
 
+            // 相关性闸门（修复「跨源兜底播成无关歌」）：
+            // 原实现直接取“第一个能解析出 URL 的搜索结果”，而公共端点的模糊搜索
+            // 很容易把无关歌曲排在前面——自动替换并播放就是事故。
+            // 只接受标题匹配的候选（复用 CandidatePicker.titleMatches：归一化全等，
+            // 或“晴天MV / 晴天2”这类拉丁/数字版本后缀）；歌手不设硬闸门
+            // （跨源本来就是“同名另一演唱者”的兜底），但同歌手候选优先。
+            val relevant = candidates.filter { candidate ->
+                candidate.id != song.id && CandidatePicker.titleMatches(candidate.title, song.title)
+            }
+            if (relevant.isEmpty()) {
+                AppLog.d(TAG, "cross-source: ${svc.sourceId} 无标题匹配候选（raw=${candidates.size}）")
+                continue
+            }
+            val originalArtist = ArtistSplitter.normalizeKey(song.artist)
+            val orderedCandidates = relevant.sortedByDescending { candidate ->
+                originalArtist.isNotEmpty() &&
+                    ArtistSplitter.normalizeKey(candidate.artist) == originalArtist
+            }
+
             // 对候选逐个做可播校验，取第一个可播的
-            for (candidate in candidates) {
-                // 排除原曲本身（同 id 同源）与空标题结果
-                if (candidate.id == song.id) continue
+            for (candidate in orderedCandidates) {
                 val candidateUrl = try {
                     svc.resolvePlayUrl(candidate)
                 } catch (e: Exception) {
