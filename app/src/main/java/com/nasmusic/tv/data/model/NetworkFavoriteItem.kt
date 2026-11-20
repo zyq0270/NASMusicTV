@@ -14,6 +14,11 @@ package com.nasmusic.tv.data.model
  * @param coverUrl 封面 URL（端点 URL 或直联 URL）
  * @param networkSource 网络来源（"meting"/"baidu"/"jamendo"）
  * @param networkId 源平台原始 ID
+ * @param networkPlatform 收藏时的音乐平台快照（如 netease/qq/kuwo）。
+ *   搜索解析时由 `Song.networkPlatform` 写入；回放时洛雪增强器据此按**原平台**取链，
+ *   避免用户切换全局平台后 collect 的歌因平台错配而解析失败。
+ *   ⚠️ 可空 + 默认值：历史收藏 JSON 无此字段，Gson 反序列化后为 null ⇒ 增强器回退当前全局平台，
+ *   与旧行为一致（不迁移、不丢数据）。
  * @param addedAtMs 收藏时间戳（毫秒）
  */
 data class NetworkFavoriteItem(
@@ -24,5 +29,6 @@ data class NetworkFavoriteItem(
     val coverUrl: String?,
     val networkSource: String,
     val networkId: String,
+    val networkPlatform: String? = null,
     val addedAtMs: Long
 )

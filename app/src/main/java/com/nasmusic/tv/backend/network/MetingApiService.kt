@@ -494,7 +494,10 @@ class MetingApiService(
             }
             val netId = song.networkId
                 ?: return@withContext guardPlayUrl(ResolveResult(song.streamUrl, quality), quality)
-            val server = serverProvider()
+            // 平台快照优先：搜索结果/收藏回放的 Song 携带收藏时的 networkPlatform，
+            // 按原平台取链；历史数据缺字段时回退当前全局平台（与旧行为逐字符一致）。
+            // ⚠️ 无 Song 上下文的路径（searchWithEndpoint / getPlaylist / findArtist）仍用 serverProvider()。
+            val server = song.networkPlatform ?: serverProvider()
             val endpoints = buildEndpointFallbackOrder(baseUrl)
             // 档位与降级链（999 → 320 → 192 → 128；AUTO 直接不传 br 走端点默认）
             val brChain = QualityTiers.fallbackChainOf(quality)
@@ -552,7 +555,8 @@ class MetingApiService(
      */
     override suspend fun resolveLyrics(song: Song): String? = withContext(Dispatchers.IO) {
         val netId = song.networkId ?: return@withContext null
-        val server = serverProvider()
+        // 与 resolvePlayUrlDetailed 同口径：按歌曲自带平台快照取词，老数据回退当前全局平台。
+        val server = song.networkPlatform ?: serverProvider()
         val endpoints = buildEndpointFallbackOrder(baseUrl)
         for (endpoint in endpoints) {
             try {

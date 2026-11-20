@@ -705,6 +705,7 @@
     <string name="mine_favorites">Favorites</string>
     <string name="mine_recent">Recently Played</string>
     <string name="mine_playlists">Local Playlists</string>
+    <string name="mine_server_playlists">Server Playlists</string>
     <string name="mine_favorites_empty">No favorite songs</string>
     <string name="mine_playlists_empty">No local playlists</string>
     <string name="mine_create_playlist">New Playlist</string>

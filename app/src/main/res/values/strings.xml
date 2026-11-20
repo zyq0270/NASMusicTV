@@ -713,6 +713,7 @@
     <string name="mine_favorites">收藏</string>
     <string name="mine_recent">最近播放</string>
     <string name="mine_playlists">本地歌单</string>
+    <string name="mine_server_playlists">服务器歌单</string>
     <string name="mine_favorites_empty">暂无收藏歌曲</string>
     <string name="mine_playlists_empty">暂无本地歌单</string>
     <string name="mine_create_playlist">新建歌单</string>

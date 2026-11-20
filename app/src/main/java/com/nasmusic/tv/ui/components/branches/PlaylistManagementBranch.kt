@@ -31,6 +31,9 @@ internal fun PlaylistManagementBranch(
 ) {
                     val playlistsState by viewModel.playlists.collectAsState(initial = UiState.Success(emptyList()))
                     val selectedPlaylistSongsState by viewModel.selectedPlaylistSongs.collectAsState(initial = UiState.Success(emptyList()))
+                    // 进入页面即拉一次服务端歌单：loadPlaylists() 原本只在重开 NAS 源时调用，
+                    // 首次连接 / 直接导航进本页都不会触发 ⇒ 歌单列表恒空（导航入口缺失是另一半问题）。
+                    LaunchedEffect(Unit) { viewModel.loadPlaylists() }
                     PlaylistManagementScreen(
                         playlists = playlistsState.dataOrNull() ?: emptyList(),
                         selectedPlaylistSongs = selectedPlaylistSongsState.dataOrNull() ?: emptyList(),
@@ -43,6 +46,7 @@ internal fun PlaylistManagementBranch(
                             viewModel.navVM.navigateTo(Screen.NowPlaying)
                         },
                         onRemoveSong = { songId -> viewModel.removeFromPlaylist(songId) },
-                        onBack = { viewModel.navVM.navigateTo(Screen.Library) }
+                        // 入口在「我的」页（MineBranch 的"服务器歌单"按钮）⇒ 返回也应回到「我的」。
+                        onBack = { viewModel.navVM.navigateTo(Screen.Mine) }
                     )
 }

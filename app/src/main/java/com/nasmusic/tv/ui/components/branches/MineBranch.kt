@@ -67,8 +67,14 @@ internal fun MineBranch(
                         },
                         onToggleFavorite = { song -> viewModel.toggleNetworkFavorite(song) },
                         onToggleQueue = { song -> viewModel.playerVM.toggleQueueSong(song) },
-                        onCreatePlaylist = { name -> viewModel.playlistVM.createLocalPlaylist(name) },
-                        onRenamePlaylist = { id, newName -> viewModel.playlistVM.renameLocalPlaylist(id, newName) },
+                    onCreatePlaylist = { name -> viewModel.playlistVM.createLocalPlaylist(name) },
+                    onOpenServerPlaylists = {
+                        // 服务端歌单与本地歌单是两个独立数据源：进入页面前显式拉一次，
+                        // 否则 loadPlaylists() 只在重开 NAS 源时被调用 ⇒ 首次进入页面为空。
+                        viewModel.loadPlaylists()
+                        viewModel.navVM.navigateTo(Screen.PlaylistManagement)
+                    },
+                    onRenamePlaylist = { id, newName -> viewModel.playlistVM.renameLocalPlaylist(id, newName) },
                         onDeletePlaylist = { id ->
                             viewModel.playlistVM.deleteLocalPlaylist(id)
                             // 歌单删除联动清理导入历史（2026-09-18 决策：历史行无删除入口）

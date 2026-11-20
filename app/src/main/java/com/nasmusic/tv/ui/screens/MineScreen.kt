@@ -99,6 +99,8 @@ fun MineScreen(
     onToggleFavorite: (Song) -> Unit,
     onToggleQueue: (Song) -> Unit,
     onCreatePlaylist: (String) -> Unit,
+    /** 打开 NAS 服务端歌单管理页（本地歌单与服务端歌单是两个独立数据源）。 */
+    onOpenServerPlaylists: () -> Unit,
     onRenamePlaylist: (String, String) -> Unit,
     onDeletePlaylist: (String) -> Unit,
     onPlayPlaylist: (LocalPlaylist) -> Unit,
@@ -213,6 +215,25 @@ fun MineScreen(
                         modifier = Modifier.padding(end = 24.dp)
                     )
                     Spacer(modifier = Modifier.weight(1f))
+                    FocusableSurface(
+                        onClick = onOpenServerPlaylists,
+                        shape = RoundedCornerShape(12.dp),
+                        focusedScale = 1.08f,
+                        animationDurationMs = 250,
+                        containerColor = NasMusicColors.Surface,
+                        contentColor = NasMusicColors.TextPrimary,
+                        focusedContainerColor = NasMusicColors.Primary.copy(alpha = 0.2f),
+                        focusedContentColor = NasMusicColors.Primary,
+                        pressedScale = 0.96f
+                    ) {
+                        Text(
+                            text = stringResource(R.string.mine_server_playlists),
+                            color = LocalFocusableContentColor.current,
+                            fontSize = FontSize.button(),
+                            modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
                     FocusableSurface(
                         onClick = { showCreateDialog = true },
                         shape = RoundedCornerShape(12.dp),
@@ -331,6 +352,7 @@ fun MineScreen(
                 onRemoveSong = { playlistId, song -> onRemoveSongFromPlaylist(playlistId, song.id) },
                 onAddSongToPlaylist = { pickerSong = it },
                 onCreateClick = { showCreateDialog = true },
+                onOpenServerPlaylists = onOpenServerPlaylists,
                 downloadStates = downloadStates,
                 onDownloadSong = onDownloadSong,
                 onDeleteDownloadSong = onDeleteDownloadSong,
@@ -572,6 +594,7 @@ private fun PlaylistsPane(
     onRemoveSong: (String, Song) -> Unit,
     onAddSongToPlaylist: (Song) -> Unit,
     onCreateClick: () -> Unit,
+    onOpenServerPlaylists: () -> Unit,
     downloadStates: Map<String, DownloadState> = emptyMap(),
     onDownloadSong: (Song) -> Unit = {},
     onDeleteDownloadSong: ((Song) -> Unit)? = null,
@@ -593,6 +616,25 @@ private fun PlaylistsPane(
                 modifier = Modifier.padding(end = 24.dp)
             )
             Spacer(modifier = Modifier.weight(1f))
+            FocusableSurface(
+                onClick = onOpenServerPlaylists,
+                shape = RoundedCornerShape(12.dp),
+                focusedScale = 1.08f,
+                animationDurationMs = 250,
+                containerColor = NasMusicColors.Surface,
+                contentColor = NasMusicColors.TextPrimary,
+                focusedContainerColor = NasMusicColors.Primary.copy(alpha = 0.2f),
+                focusedContentColor = NasMusicColors.Primary,
+                pressedScale = 0.96f
+            ) {
+                Text(
+                    text = stringResource(R.string.mine_server_playlists),
+                    color = LocalFocusableContentColor.current,
+                    fontSize = FontSize.button(),
+                    modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp)
+                )
+            }
+            Spacer(modifier = Modifier.width(12.dp))
             FocusableSurface(
                 onClick = onCreateClick,
                 shape = RoundedCornerShape(12.dp),

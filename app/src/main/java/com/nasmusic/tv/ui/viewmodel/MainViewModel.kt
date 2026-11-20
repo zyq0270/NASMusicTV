@@ -653,25 +653,42 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
 
     // --- 统一收藏（R-1：收藏数据迁至 NetworkMusicViewModel，此处派生只读视图）---
     // 供 UI 使用：转换为 Song 对象列表（根据 source 标记 isLocalSong / isNetworkSong 字段）
-    val networkFavoriteSongs: StateFlow<List<Song>> = netVM.networkFavorites.map { favorites ->
-        favorites.map { item ->
-            val isLocal = item.networkSource == "local"
-            Song(
-                id = item.songId,
-                title = item.title,
-                artist = item.artist,
-                album = item.album,
-                coverUrl = item.coverUrl,
-                isNetworkSong = !isLocal,
-                networkSource = item.networkSource.takeIf { !isLocal },
-                networkId = item.networkId,
-                isLocalSong = isLocal
-            )
-        }
-    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
-    // 网络收藏 ID 集合（用于快速判断是否已收藏）
-    val networkFavoriteIds: StateFlow<Set<String>> = netVM.networkFavorites.map { favorites ->
-        favorites.map { it.songId }.toSet()
+    //
+    // ⚠️ 源可见性过滤（S1）：与 NAS 收藏的 `loadFavorites` 同口径——关闭的源不列出其收藏，
+    //    但**只过滤展示、不删 DataStore 数据**（S3，重开即恢复）。此前这里未过滤，
+    //    导致关掉网络/本地源后收藏仍留在「我的」页，与 NAS 收藏口径不一致。
+    //
+    // ⚠️ 必须 combine 两个重算信号（可见性读 @Volatile 镜像、非 Flow，翻转不自动触发下游）：
+    //    - `_sourceRevision`：setSourceEnabled 覆盖 NAS/Meting/百度/Jamendo，等镜像收敛后再 bump；
+    //    - `_localMusicEnabled`：本地开关走独立观察者（不在 setSourceEnabled 内），单独挂上才能重算
+    //      networkSource=="local" 的收藏项。
+    val networkFavoriteSongs: StateFlow<List<Song>> =
+        combine(netVM.networkFavorites, _sourceRevision, _localMusicEnabled) { favorites, _, _ ->
+            favorites.mapNotNull { item ->
+                val isLocal = item.networkSource == "local"
+                val song = Song(
+                    id = item.songId,
+                    title = item.title,
+                    artist = item.artist,
+                    album = item.album,
+                    coverUrl = item.coverUrl,
+                    isNetworkSong = !isLocal,
+                    networkSource = item.networkSource.takeIf { !isLocal },
+                    networkId = item.networkId,
+                    // 平台快照回填：收藏时存下的平台在回放时交给洛雪增强器按原平台取链，
+                    // 避免切换全局平台后收藏歌曲解析失败（老数据为 null ⇒ 回退当前平台）。
+                    networkPlatform = item.networkPlatform,
+                    isLocalSong = isLocal
+                )
+                song.takeIf { sourceVisibility.isVisible(it) }
+            }
+        }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    // 网络收藏 ID 集合（用于快速判断是否已收藏）。
+    // ⚠️ 由过滤后的 networkFavoriteSongs 派生而非原始 DataStore：保证「展示的收藏」与
+    //    「心形态」同一口径（§SourceVisibility 边界：两套判定必然漂移）。
+    val networkFavoriteIds: StateFlow<Set<String>> = networkFavoriteSongs.map { songs ->
+        songs.map { it.id }.toSet()
     }.stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
 
     // --- 本地歌单（「我的」Tab，DataStore 持久化，可混合 NAS/网络歌曲）---

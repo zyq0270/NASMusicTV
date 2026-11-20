@@ -91,6 +91,9 @@ class NetworkMusicViewModel(app: Application) : AndroidViewModel(app) {
                     coverUrl = song.coverUrl,
                     networkSource = if (song.isLocalSong) "local" else song.networkSource ?: "network",
                     networkId = song.networkId ?: "",
+                    // 平台快照随收藏落盘：搜索解析时 Song 已带 networkPlatform，
+                    // 回放时据此按原平台取链（洛雪增强器读 Song.networkPlatform）。
+                    networkPlatform = song.networkPlatform,
                     addedAtMs = System.currentTimeMillis()
                 )
                 prefs.history.toggleNetworkFavorite(item)
