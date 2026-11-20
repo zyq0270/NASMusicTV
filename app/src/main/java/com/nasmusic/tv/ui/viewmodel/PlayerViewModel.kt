@@ -16,6 +16,7 @@ import com.nasmusic.tv.backend.network.ReplaceLayer
 import com.nasmusic.tv.util.AppLog
 import com.nasmusic.tv.util.rethrowIfCancellation
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -95,6 +96,13 @@ class PlayerViewModel(
     // 避免用旧队列快照回滚用户后续操作。
     private var resolveGeneration = 0
 
+    // 2026-11-19 修复：在途解析 Job。此前这些 launch 只靠 resolveGeneration 丢弃旧结果，
+    // 但公网解析 + resolveAndPlayByIndex 的 delay(1500) 仍会全部跑完（快速切歌/连续错误时
+    // 累积无谓请求）。新解析发起前 cancel 掉在途 job，与 Service 层 uiResolveJob?.cancel()
+    // 同款模式；代数闸门 + id 校验保留作最后防线，cancel 只会中断挂起点，不改状态回写语义。
+    // ⚠️ 每个 catch 首句都是 rethrowIfCancellation()，取消不会被吞成错误状态。
+    private var resolveJob: Job? = null
+
     /** 最近一次替换产物的 id（任一层）。命中即不再二次替换，防替换回环（§6 验收 15） */
     private var lastReplacedSongId: String? = null
 
@@ -119,8 +127,18 @@ class PlayerViewModel(
 
     fun playSong(song: Song) {
         AppLog.d("PlayerViewModel", "playSong: ${song.title}, coverUrl=${song.coverUrl ?: "null"}")
+        // 2026-11-19 修复：空 streamUrl 时 PlayerManager.playSong 会在 `streamUrl ?: return`
+        // 静默丢弃——连 MediaItem 都不 set，onMediaItemTransition(AUTO) 兜底解析链也不会触发，
+        // 但本方法仍调 onRecordPlay（记录了播放却没出声）。委托给 playQueue 的 needsResolve
+        // 回填链：它按网络/本地/NAS/imported stub 四类解析首曲 URL 后再播放，首曲完成时同样
+        // 递增代数 + onRecordPlay，语义与原 playSong 一致（歌词仍由 currentSong.collect 触发）。
+        if (song.streamUrl.isNullOrBlank()) {
+            playQueue(listOf(song), 0)
+            return
+        }
         // 2026-09-25 审查修复（#9）：playSong 整队替换也会使挂起的旧队列解析过期
         resolveGeneration++
+        resolveJob?.cancel()
         playerManager.playSong(song)
         // 歌词由 currentSong.collect 统一触发，避免重复调用
         onRecordPlay?.invoke(song)
@@ -151,7 +169,10 @@ class PlayerViewModel(
             // 立即更新队列状态，避免异步解析期间 UI 读到旧的队列数据
             playerManager.restoreQueue(songs, startIndex)
 
-            viewModelScope.launch {
+            // 2026-11-19：cancel 在途解析（快速连续 playQueue 时旧的首曲解析+公网请求无谓跑完），
+            // 代数闸门保留作最后防线。cancel 落在挂起点，不影响已发布的状态。
+            resolveJob?.cancel()
+            resolveJob = viewModelScope.launch {
                 val resolvedFirst = when {
                     // 导入 stub：同步补全 → NAS 命中带 streamUrl；网络命中 isNetworkSong=true
                     // 但 streamUrl 置空（需走 networkMusicManager.resolvePlayUrl 二次解析）
@@ -235,6 +256,9 @@ class PlayerViewModel(
                 onRecordPlay?.invoke(firstSong)
             }
         } else {
+            // 队列 song 均已有 URL、同步播放：在途解析 job 已被上面的 ++resolveGeneration
+            // 作废，主动 cancel 省掉其公网请求（与 needsResolve 分支同款）。
+            resolveJob?.cancel()
             playerManager.playQueue(songs, startIndex)
             onRecordPlay?.invoke(firstSong)
         }
@@ -271,7 +295,8 @@ class PlayerViewModel(
         // 2026-09-25 审查修复（#9）：与 resolveAndPlayByIndex 同款代数守卫，解析窗口内
         // 用户切歌/换队列时，旧解析结果不得整体回滚新队列。
         val generation = ++resolveGeneration
-        viewModelScope.launch {
+        resolveJob?.cancel()
+        resolveJob = viewModelScope.launch {
             try {
                 val playUrl = when {
                     // 本地歌曲：path 与 streamUrl 存的都是本地 URI，直接回填即可，
@@ -417,7 +442,8 @@ class PlayerViewModel(
         val generation = ++resolveGeneration
         val queueValue = playerState.value.queue
         val song = queueValue.getOrNull(targetIndex) ?: return
-        viewModelScope.launch {
+        resolveJob?.cancel()
+        resolveJob = viewModelScope.launch {
             try {
                 // forceRefresh=true：播放失败重试绝不再命中「已过期未到 TTL」的旧缓存，
                 // 强制走完整降级链重新解析（链接过期重获的核心修复）。
