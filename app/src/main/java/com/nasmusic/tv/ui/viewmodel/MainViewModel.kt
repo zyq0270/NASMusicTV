@@ -1518,6 +1518,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
     )
 
     private var lyricsLoadJob: Job? = null
+    /** 最近一次发起歌词加载的歌曲 id：同歌重复进入加载时用于复用已显示歌词 */
+    private var lastLyricsLoadSongId: String? = null
     // 记录上一首歌的 ID，用于在切歌时统计播放记录
     private var lastRecordedSongId: String? = null
     private var lastRecordedSong: Song? = null
@@ -3878,6 +3880,14 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
     }
 
     private fun loadLyricsForCurrentSong() {
+        val song = playerVM.playerState.value.currentSong
+        // 同一首歌因播放直链重解析 / 队列回填导致 playerState 再次发射时，歌词已加载完成 ⇒
+        // 直接复用，避免重复网络请求与「清空 → 重新渲染」的闪烁；用户手动切换的来源也得以保留。
+        if (song != null && song.id == lastLyricsLoadSongId && _currentLyrics.value != null) {
+            AppLog.d("NASMusic", "loadLyrics: reuse loaded lyrics for ${song.title}")
+            return
+        }
+        lastLyricsLoadSongId = song?.id
         lyricsLoadJob?.cancel()
         // 切歌时清空候选缓存和轮次状态
         lyricsManager.clearCachedCandidates()
@@ -3885,7 +3895,7 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
         _lyricsAvailability.value = LyricsAvailability()
         // 重置网络封面（切歌时清除上一首的网络封面）
         _networkCoverUrl.value = null
-        val song = playerVM.playerState.value.currentSong ?: return
+        if (song == null) return
         AppLog.d("NASMusic", "loadLyrics: loading for ${song.title} by ${song.artist}")
         lyricsLoadJob = viewModelScope.launch {
             try {
