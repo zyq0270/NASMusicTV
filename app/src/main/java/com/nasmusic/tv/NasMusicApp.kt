@@ -490,11 +490,14 @@ val baiduOAuthClient: BaiduOAuthClient by lazy { BaiduOAuthClient(this, baiduOkH
         // 网络音乐管理器：注册所有网络源，默认源与 Meting 端点均由 AppSettings 动态提供
         //
         // ⚠️ 启动期的源开关**必须直接读 DataStore**，不能用 `get*EnabledSync()` 镜像：
-        //    `startProviderMirrors(...)`（上方 341 行）在 applicationScope 上异步收集，
+        //    `startProviderMirrors(...)`（上方 454 行）在 applicationScope 上异步收集，
         //    与本方法并发执行 —— 此刻镜像可能仍是编译期默认值，
         //    会把用户已关掉的源错误地注册回来（症状：关了还在搜索里出现）。
-        val bootSettings = runBlocking { appPreferences.appSettings.first() }
-        val bootJamendoClientId = runBlocking { appPreferences.jamendoClientIdFlow.first() }
+        // v2.39.23：三条 Flow 合并成一次 readBootSnapshot() ⇒ 主线程只等一次 DataStore 读，
+        // 不再是三次串行 runBlocking。注册语义不变（仍同步），需要异步注册是架构级改动。
+        val boot = runBlocking { appPreferences.readBootSnapshot() }
+        val bootSettings = boot.settings
+        val bootJamendoClientId = boot.jamendoClientId
         // 本地音乐总开关的运行期同步镜像（SourceVisibility 的 LOCAL 判据用）：
         // 启动期**直接读 DataStore** 播种（同上，镜像此刻可能还是编译期默认值）。
         // ⚠️ 运行期的写入者是 MainViewModel 的本地开关观察者（单一写入者，见 cachedLocalMusicEnabled）。
@@ -573,9 +576,8 @@ val baiduOAuthClient: BaiduOAuthClient by lazy { BaiduOAuthClient(this, baiduOkH
         // 终审 B3：换平台 / 换 Meting 端点同样要清——缓存 key 不认识这两维，旧 DEAD 会套到另一首歌上
         appPreferences.setOnPlayUrlCacheInvalidated { networkMusicManager.clearPlayUrlCache() }
         // 百度网盘：仅在总开关开启且已登录时注册（运行时切换开关时动态注册/注销）
-        // T2 第一批（2026-09-14）：onCreate 需同步拿配置，用 runBlocking{first()}（不带 IO 调度器，
-        // 不占 Default/IO 线程池；阻塞主线程仅限启动初始化阶段，可接受）
-        if (runBlocking { appPreferences.baidu.baiduConfigFlow.first() }.isActive) {
+        // 与其余开关共用同一次 readBootSnapshot()，不再单独 runBlocking 读 DataStore。
+        if (boot.baiduActive) {
             networkMusicManager.registerService(baiduNetdiskService)
         }
         // Jamendo：开关 **且** 已配置 client_id 才注册（方案 §7.5：生效 = 两条件）

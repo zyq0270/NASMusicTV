@@ -98,6 +98,9 @@ class ServerViewModel(
      * 连接服务器。返回是否成功；连接成功的联动（导航/加载曲库）经 [onConnected] 回调。
      */
     suspend fun connectToServer(config: ServerConfig): Boolean {
+        // 启动提示是一次性「是否连接上次服务器」询问：用户一旦走手动连接（或网络恢复触发
+        // 静默重连），提示就必须消失，否则已连上仍弹窗、点确认会重复 initialize。
+        _showConnectPrompt.value = false
         _isLoading.value = true
         return try {
             val success = backendRegistry.initialize(config)
@@ -209,9 +212,9 @@ class ServerViewModel(
                 return@launch
             }
 
-            if (!silent) {
-                _showConnectPrompt.value = false
-            }
+            // ⛔ 无条件关闭，不能只在 !silent 时关：silent=true 的自动重连同样会走到这里，
+            // 若保留弹窗，用户看到「已连接」的同时仍被问「是否连接」，点确认又是一轮 initialize。
+            _showConnectPrompt.value = false
             _isLoading.value = true
             try {
                 val success = backendRegistry.initialize(config)

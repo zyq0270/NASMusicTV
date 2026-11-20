@@ -1017,6 +1017,26 @@ class AppPreferences internal constructor(private val context: Context) {
         )
     }
 
+    /**
+     * 冷启动一次合并读取（v2.39.23）：音源注册必须读 DataStore 事实源而非异步 @Volatile 镜像，
+     * 但三次独立 `runBlocking { ...first() }` 会让主线程串行等三次 DataStore 磁盘读。
+     * 这里让三条 Flow 共用同一次 DataStore 发射，调用方只阻塞一次。
+     * ⚠️ 仍是同步读：把「启动期异步注册全部音源」是架构级改动，不属本轮范围。
+     */
+    data class BootSnapshot(
+        val settings: AppSettings,
+        val jamendoClientId: String,
+        val baiduActive: Boolean,
+    )
+
+    suspend fun readBootSnapshot(): BootSnapshot = kotlinx.coroutines.flow.combine(
+        appSettings,
+        jamendoClientIdFlow,
+        baiduConfigFlow,
+    ) { settings, jamendoId, baiduConfig ->
+        BootSnapshot(settings, jamendoId, baiduConfig.isActive)
+    }.first()
+
     // --- 全局字体字号调整 ---
     suspend fun setFontAdjustment(adjustment: Int) =
         dataStore.edit { it[keyFontAdjustment] = adjustment }

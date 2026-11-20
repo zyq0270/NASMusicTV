@@ -128,8 +128,12 @@ class NetworkSourceSwitchGateTest {
         if (!metingConditional.containsMatchIn(app)) {
             problems += "meting 注册没有由 `bootSettings.metingEnabled` 决定（缺 if/else 条件注册）"
         }
-        if (!app.contains("val bootSettings = runBlocking { appPreferences.appSettings.first() }")) {
-            problems += "没有在构造期直接读 DataStore（`bootSettings`）—— 同步镜像在冷启动时尚未收敛"
+        // v2.39.23：三次独立 runBlocking 收敛为 readBootSnapshot() 合并读，事实源口径不变；
+        // 判据改为认「bootSettings 由 boot.settings 派生」而不是锁死旧的单条语句。
+        if (!app.contains("val boot = runBlocking { appPreferences.readBootSnapshot() }") ||
+            !app.contains("val bootSettings = boot.settings")
+        ) {
+            problems += "没有在构造期直接读 DataStore（`bootSettings` 必须来自 readBootSnapshot）—— 同步镜像在冷启动时尚未收敛"
         }
         if (app.contains("appPreferences.getMetingEnabledSync()")) {
             problems += "注册决策读了同步镜像 getMetingEnabledSync()（冷启动竞态，方案 §7.7 第 4 条）"

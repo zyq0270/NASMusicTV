@@ -1560,22 +1560,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
             playerManager.setPitch(savedPitch)
             playerManager.setSpeed(savedSpeed.toFloat())
             AppLog.d("MainViewModel", "init: pitch=$savedPitch, speed=$savedSpeed")
-
-            // 等待配置加载完成后判断是否显示连接提示
-            val config = prefs.serverConfig.first()
-            if (config.baseUrl.isNotBlank()) {
-                // 有已保存的服务器配置，询问用户是否自动连接（R-1：由 ServerViewModel 处理，
-                // 但保留此处删除以避免双重触发——init 接线区已调用 checkSavedConfigOnStart()）
-            }
-            // 无配置时不强制跳转，保持首页（用户可自行去 设置 → 服务器 配置）
+            // ⛔ 连接提示只在接线区 checkSavedConfigOnStart() 触发一次；这里不再读 serverConfig
+            // （旧代码读完后是空 if 块，既不触发连接也误导读者以为有第二处入口）。
         }
 
-        // 后台异步：API 版本号聚合（网络请求，不阻塞启动）
-        viewModelScope.launch {
-            withContext(Dispatchers.IO) {
-                refreshApiVersions()
-            }
-        }
+        // API 版本号聚合只在接线区 serverVM.refreshApiVersionsAsync() 触发一次。
+        // 旧实现这里另有一条 withContext(IO) { refreshApiVersions() } ⇒ 冷启动双份网络请求。
 
         // 百度网盘启动恢复（R-1：已迁至 NetworkMusicViewModel.restoreBaiduIndexOnStart，
         // 接线区已调用；API 错误回调在此注册，指向子 VM 状态）
@@ -1691,10 +1681,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
             playbackFailure(song)
         }
 
-        // 播放模式变化同步给 MvSearchViewModel（playMode 是方法参数语义）
-        viewModelScope.launch {
-            playerVM.playMode.collect { mvVM.currentPlayMode = it }
-        }
+        // 播放模式变化同步给 MvSearchViewModel 的唯一入口在下方接线区 init（原 3743 行附近）：
+        // 这里曾有一条同样的 playMode.collect，两处都写同一个普通 var，属冗余双订阅。
 
         // 初始化网络音乐平台来源（从持久化存储读取）
         initMusicSource()

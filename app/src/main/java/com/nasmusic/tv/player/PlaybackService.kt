@@ -44,6 +44,7 @@ import com.nasmusic.tv.data.model.Song
 import com.nasmusic.tv.ui.MainActivity
 import com.nasmusic.tv.util.AppLog
 import com.nasmusic.tv.util.rethrowIfCancellation
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -114,7 +115,16 @@ class PlaybackService : MediaLibraryService() {
     /** 封面加载协程 */
     private var artworkLoadJob: Job? = null
     /** 服务级协程作用域 */
-    private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    /**
+     * 服务级协程作用域。SupervisorJob 只隔离「子协程互相取消」，不会消费未捕获异常——
+     * 没有 CoroutineExceptionHandler 时异常会走线程默认处理器（Android 上直接崩进程）。
+     * 这里统一兜底并留 E 级日志（AppLog.e 在 Release 仍输出）。
+     */
+    private val serviceScope = CoroutineScope(
+        Dispatchers.Main + SupervisorJob() + CoroutineExceptionHandler { _, t ->
+            AppLog.e("PlaybackService", "serviceScope 未捕获异常（已隔离，不影响其他任务）", t)
+        }
+    )
     /** F2-2：睡眠定时器运行中，通知剩余分钟刷新（分钟粒度 key 并入去重状态） */
     private var sleepMinuteTickJob: Job? = null
 
@@ -238,11 +248,18 @@ class PlaybackService : MediaLibraryService() {
         // 把「启动/取消/到期」统一收敛到这里：任一入口改变状态都强制刷新通知与系统媒体
         // 卡片，并启停分钟轮询，避免 UI 侧操作后通知/卡片文案不刷新。
         serviceScope.launch {
-            (application as NasMusicApp).playerManager.sleepTimer.state.collect {
-                lastNotificationState = null
-                updateNotification()
-                refreshSessionCustomLayout()
-                restartSleepMinuteTick()
+            try {
+                (application as NasMusicApp).playerManager.sleepTimer.state.collect {
+                    lastNotificationState = null
+                    updateNotification()
+                    refreshSessionCustomLayout()
+                    restartSleepMinuteTick()
+                }
+            } catch (e: Exception) {
+                e.rethrowIfCancellation()
+                // 通知刷新/自定义布局偶发异常不能让定时状态订阅永久消失（此前会静默失效，
+                // 表现为 UI 已改定时器而通知/媒体卡片不刷新）。
+                AppLog.e("PlaybackService", "sleepTimer state collect failed", e)
             }
         }
 
@@ -359,6 +376,10 @@ class PlaybackService : MediaLibraryService() {
                 AppLog.d("PlaybackService", "onStartCommand: 前台化占位通知（startForegroundService 路径）")
             }.onFailure {
                 AppLog.w("PlaybackService", "onStartCommand: 占位前台化失败", it)
+                // 已经以 startForegroundService 拉起却无法前台化 ⇒ 系统随时可能判 5 秒超时，
+                // 留着服务既不能合法后台播放也会在下一次 startForeground 时再失败；主动 stopSelf
+                // 把窗口关掉，让调用方（通知栏/车机）收到明确的终止而不是 ANR。
+                stopSelf(startId)
             }
         }
         return super.onStartCommand(intent, flags, startId)
