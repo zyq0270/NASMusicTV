@@ -28903,3 +28903,25 @@ Jellyfin 按名查询只发一次请求、fields 补齐并分页；Navidrome/Sub
 已用 `logs_temp/albums_flow_verify_2026-11-20.py` 做等价源码文本门禁与括号平衡检查，专辑链判据全部 PASS
 （`MainViewModel` 的括号计数与 HEAD 基线同为差 1，属字符串模板计数误报，非本轮引入）。CI 首次运行需重点看
 `AlbumsListFlowGateTest`、三组艺术家门禁与 `MusicMergerTest`。未 push；仅本地提交。
+
+### 10.415 播放键点击链路修复（v2.39.24 - 2026-11-20）
+
+**范围**：播放窗口（NowPlaying）点击播放/暂停按钮的完整链路：UI `onClick` → `NowPlayingBranch` → `PlayerViewModel.playPause()` → `PlayerManager.playPause()` → Media3 ExoPlayer，含状态回写驱动图标。
+
+**根因与修复**：
+
+1. **BUFFERING 判据错位（缓冲中无法暂停）**：`PlayerManager.playPause()` 用 `it.isPlaying` 作 toggle 判据。ExoPlayer 在 `STATE_BUFFERING` 期间 `isPlaying=false`（即使 `playWhenReady=true`），二次点击走 else 再次 `play()`，无法取消缓冲。同类问题的 `pause()` 注释早已承认此陷阱（"避免 BUFFERING 时 isPlaying=false 跳过暂停"）但 toggle 路径未同步修复。改为读用户意图 `p.playWhenReady`。
+
+2. **图标与行为必须同源切换**：播放按钮图标原读 `isPlaying`（`onIsPlayingChanged` 写入），与判据同源。若只改判据不改图标，会出现"缓冲中显示播放键、点击却暂停"的新错位。新增 `wantsToPlay: StateFlow<Boolean>`，由 `onPlayWhenReadyChanged` 写入；`PlayerViewModel` 暴露后由 `AppRoot` 收集，仅传给 3 个播放按钮消费者（NowPlaying / Queue / MiniPlayer）。`isPlaying` 保留原语义供可视化动画与 `MainViewModel.isPlaying()` 等真实出声消费者，避免动画在缓冲期停摆。
+
+3. **MTV 防混音护栏缺失**：`suppressPlayback`（MTV/卡拉OK 置 true）已在 `playQueue`/`resume`/`next` 等 6 处检查，唯 `playPause()` 遗漏——媒体键与 `Activity.onKeyDown` 兜底路径在 MTV 模式可能触发 `playPause()` 恢复主播放器造成双音频。`playPause()` 开头补 `if (suppressPlayback) return false`。抑制态返回 false 但 `isPlayerReady()` 仍为 true，故上层不会误弹"未就绪"提示。
+
+4. **MEDIA_STOP 语义错误**：`MediaKeyHandler` 将 `KEYCODE_MEDIA_STOP` 映射到 `playPause()`（切换播放态），与"停止并复位"语义不符。新增 `PlayerManager.stop()`：`pause() + seekTo(0L) + _progress=0`，保持 `STATE_READY` 可直接重播；刻意不用 `ExoPlayer.stop()`（会置 IDLE，之后 `play()` 无法直接恢复，需重新 `setMediaItems + prepare`）。`PlayerViewModel.stop()` 委托并接入 `MediaKeyHandler`；`MediaKeyHandlerTest` STOP 用例改断言 `stop()`。
+
+5. **未就绪静默无反馈**：`playPause()` 原为 `player?.let`，服务未启动时点击无任何反馈。新增 `isPlayerReady()` 检查，`playPause()`/`stop()` 未就绪时经 `showMessage` 弹 `player_not_ready` 文案。
+
+**兼容性影响**：`isPlaying` 语义与写入方均未变，仅新增 `wantsToPlay` 并行流；无存储 schema、无网络协议变更。STOP 键行为由"切换播放/暂停"变为"停止并回曲首"，属语义修正。
+
+**涉及文件**：`PlayerManager`、`PlayerViewModel`、`AppRoot`、`MediaKeyHandler`、`strings.xml`、`app/build.gradle.kts`、`CHANGELOG.md`、本章；新增 `PlayPauseFlowGateTest`，修改 `MediaKeyHandlerTest`。
+
+**验证边界**：本机（zyq02）无 JBR / Android SDK，`assembleRelease` 与 `testDebugUnitTest` 未实跑；已用 Python 等价源码文本门禁（17 条断言）与字符串剥离后的括号平衡检查，全部 PASS。CI 首次运行需重点看 `PlayPauseFlowGateTest` 与 `MediaKeyHandlerTest`。未 push；仅本地提交。

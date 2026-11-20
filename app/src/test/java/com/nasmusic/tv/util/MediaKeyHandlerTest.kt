@@ -80,13 +80,13 @@ class MediaKeyHandlerTest {
     }
 
     @Test
-    fun `STOP calls playPause and returns true`() {
+    fun `STOP calls stop and returns true`() {
         val (vm, playerVM) = mockVm()
         val result = MediaKeyHandler.handleKeyEvent(
             KeyEvent.KEYCODE_MEDIA_STOP, null, vm, false, Screen.NowPlaying
         )
         assertTrue(result)
-        verify(playerVM).playPause()
+        verify(playerVM).stop()
     }
 
     @Test

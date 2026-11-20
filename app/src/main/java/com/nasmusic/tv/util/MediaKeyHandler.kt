@@ -37,7 +37,8 @@ object MediaKeyHandler {
                 true
             }
             KeyEvent.KEYCODE_MEDIA_STOP -> {
-                viewModel.playerVM.playPause()
+                // STOP 语义是"停止并回到曲首"，不是切换播放/暂停。
+                viewModel.playerVM.stop()
                 true
             }
             KeyEvent.KEYCODE_DPAD_CENTER,

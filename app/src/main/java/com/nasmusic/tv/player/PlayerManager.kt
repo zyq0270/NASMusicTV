@@ -214,6 +214,17 @@ class PlayerManager(private val applicationContext: Context) {
     private val _isPlaying = MutableStateFlow(false)
     val isPlaying: StateFlow<Boolean> = _isPlaying
 
+    /**
+     * 「用户想播放吗」的意图态，专供播放/暂停按钮图标使用。
+     *
+     * 与 [isPlaying]（ExoPlayer 实际出声状态）刻意分离：BUFFERING 时 ExoPlayer
+     * `isPlaying=false` 但 `playWhenReady=true`（用户已按播放），此时按钮必须显示
+     * 暂停图标并允许再次点击取消——若图标读 isPlaying，会出现「正在缓冲却显示播放键，
+     * 点下去按 isPlaying 判断又调 play()」的死循环。由 onPlayWhenReadyChanged 驱动。
+     */
+    private val _wantsToPlay = MutableStateFlow(false)
+    val wantsToPlay: StateFlow<Boolean> = _wantsToPlay
+
     private val _progress = MutableStateFlow(0L)
     val progress: StateFlow<Long> = _progress
 
@@ -395,9 +406,15 @@ class PlayerManager(private val applicationContext: Context) {
     private var lastErrorRetryIndex = -1
 
     private val playerListener = object : Player.Listener {
+        override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+            // 按钮图标的真相源：用户意图（playWhenReady），BUFFERING 期间也保持 true。
+            _wantsToPlay.value = playWhenReady
+        }
+
         override fun onIsPlayingChanged(isPlaying: Boolean) {
-            // P5 修复：seek 期间仍需同步 _isPlaying（纯状态记录），否则 seek 窗口内暂停/播放
-            // 会导致播放按钮卡在错误状态（原实现直接 return，_isPlaying 永久失真直到下次回调）。
+            // 保留真实出声状态（MainViewModel.isPlaying()/均衡器/进度轮询仍读它）；
+            // ⛔ 但播放按钮图标不再读它——图标走 onPlayWhenReadyChanged 驱动的 wantsToPlay，
+            //    否则 BUFFERING 时 isPlaying=false 会让按钮显示成"播放"且点击无效。
             _isPlaying.value = isPlaying
             playerEqualizer.setPlaying(isPlaying)
             // seek 期间跳过进度轮询的启停（有副作用），防止播放按钮闪烁与 ExoPlayer 内部位置重置干扰；
@@ -613,6 +630,9 @@ class PlayerManager(private val applicationContext: Context) {
 
         player = exoPlayer
         exoPlayer.addListener(playerListener)
+        // addListener 不回放当前状态：注入时若 playWhenReady 已为 true（服务重建/状态恢复），
+        // 不主动同步会让按钮图标停留在"播放"直到下一次按键。
+        _wantsToPlay.value = exoPlayer.playWhenReady
         exoPlayer.volume = appVolume
         // 仅在播放时启动进度更新
         if (exoPlayer.isPlaying) {
@@ -823,18 +843,61 @@ class PlayerManager(private val applicationContext: Context) {
         }
     }
 
-    fun playPause() {
-        player?.let {
-            val wasPlaying = it.isPlaying
-            AppLog.d("PlayerManager", "playPause: wasPlaying=$wasPlaying, state=${it.playbackState}")
-            if (wasPlaying) {
-                it.pause()
-                AppLog.d("PlayerManager", "playPause: paused")
-            } else {
-                it.play()
-                AppLog.d("PlayerManager", "playPause: playing")
-            }
+    /**
+     * 播放/暂停切换。
+     *
+     * 判据用用户意图 [wantsToPlay]（playWhenReady）而非实际出声状态 isPlaying：
+     * BUFFERING 期间 ExoPlayer isPlaying=false 但用户已点过播放，再点应暂停；
+     * 原实现读 isPlaying 会误判为"未在播放"而再次 play()，导致缓冲中无法暂停。
+     *
+     * @return true 已执行切换；false 被抑制(MTV)或 player 未就绪，
+     *         调用方可据此给出"播放器未就绪"提示，避免静默无反馈。
+     */
+    fun playPause(): Boolean {
+        if (suppressPlayback) {
+            AppLog.d("PlayerManager", "playPause: suppressed (MTV mode)")
+            return false
         }
+        val p = player ?: run {
+            AppLog.e("PlayerManager", "playPause: player is null (service not ready)")
+            return false
+        }
+        val shouldPause = p.playWhenReady
+        AppLog.d("PlayerManager", "playPause: playWhenReady=$shouldPause, isPlaying=${p.isPlaying}, state=${p.playbackState}")
+        if (shouldPause) {
+            p.pause()
+            AppLog.d("PlayerManager", "playPause: paused")
+        } else {
+            p.play()
+            AppLog.d("PlayerManager", "playPause: playing")
+        }
+        return true
+    }
+
+    /** 播放器是否已注入（服务已就绪）。供 UI 在点击前判断，避免静默无反馈。 */
+    fun isPlayerReady(): Boolean = player != null
+
+    /**
+     * 停止播放并复位到曲首（媒体键 STOP 语义，区别于暂停）。
+     *
+     * ExoPlayer.stop() 会把 playbackState 置回 IDLE 并释放解码资源，
+     * 之后 play() 无法直接恢复（需 setMediaItems + prepare）。
+     * 这里用 pause + seekTo(0) 实现"停止并回到开头"：状态保持 READY，
+     * 再次点击播放可立即从头播放，同时不释放资源。
+     */
+    fun stop() {
+        if (suppressPlayback) {
+            AppLog.d("PlayerManager", "stop: suppressed (MTV mode)")
+            return
+        }
+        val p = player ?: run {
+            AppLog.e("PlayerManager", "stop: player is null")
+            return
+        }
+        p.pause()
+        p.seekTo(0L)
+        _progress.value = 0L
+        AppLog.d("PlayerManager", "stop: paused and rewound to 0")
     }
 
     /**

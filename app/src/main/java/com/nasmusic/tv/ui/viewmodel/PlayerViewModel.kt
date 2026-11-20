@@ -50,6 +50,8 @@ class PlayerViewModel(
     // T3: queue/currentIndex/currentSong 合并为 playerState 单流（原子同帧发布）
     val playerState: StateFlow<PlayerState> = playerManager.playerState
     val isPlaying: StateFlow<Boolean> = playerManager.isPlaying
+    /** 播放按钮图标真相源：用户意图（playWhenReady），BUFFERING 时仍为 true */
+    val wantsToPlay: StateFlow<Boolean> = playerManager.wantsToPlay
     val progress: StateFlow<Long> = playerManager.progress
     val duration: StateFlow<Long> = playerManager.duration
     // B-13: playMode 由本类拥有（UI/设置状态，不归 PlayerManager）
@@ -265,6 +267,13 @@ class PlayerViewModel(
     }
 
     fun playPause() {
+        // 服务尚未就绪时给出可见反馈，不让点击静默失效（原实现 player?.let 静默 return）。
+        // 注意：MTV 抑制态 isPlayerReady 仍为 true，由 PlayerManager.playPause 内部吞掉，
+        // 这里不会误弹"未就绪"提示。
+        if (!playerManager.isPlayerReady()) {
+            showMessage?.invoke(getApplication<Application>().getString(R.string.player_not_ready))
+            return
+        }
         val song = playerState.value.currentSong
         // 当前歌曲 streamUrl 为空（网络歌曲懒加载 / 恢复队列后未解析）时，
         // 无论 isPlaying 状态如何都先解析再播放——空 URL 的 ExoPlayer 必然无法播放，
@@ -281,6 +290,15 @@ class PlayerViewModel(
             return
         }
         playerManager.playPause()
+    }
+
+    /** 媒体键 STOP：停止并回到曲首（与 playPause 的"暂停"语义区分） */
+    fun stop() {
+        if (!playerManager.isPlayerReady()) {
+            showMessage?.invoke(getApplication<Application>().getString(R.string.player_not_ready))
+            return
+        }
+        playerManager.stop()
     }
 
     /**

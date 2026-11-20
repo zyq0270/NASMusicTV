@@ -7,6 +7,26 @@
 >
 > 类型：`Added`（新增） | `Changed`（变更） | `Fixed`（修复） | `Removed`（移除）
 
+## [v2.39.24] - 2026-11-20
+
+> 修复播放窗口「点击播放/暂停」链路的四项缺陷（缓冲期无法暂停、图标与判据错位、MTV 抑制缺失、STOP 语义错误、未就绪静默）。逐条根因见 `docs/technical-overview.md` §10.415。
+
+### Fixed
+
+- **BUFFERING 期间无法暂停**：`PlayerManager.playPause()` 原用 `isPlaying` 作 toggle 判据，而 ExoPlayer 在 BUFFERING 时 `isPlaying=false`，二次点击会再次 `play()` 而非暂停。改用用户意图 `playWhenReady` 判据。
+- **播放按钮图标与行为错位**：图标原读 `isPlaying`（实际出声态），与新的意图判据不一致会导致"缓冲中显示播放键、点击却是暂停"。新增 `wantsToPlay`（由 `onPlayWhenReadyChanged` 驱动）作为按钮图标真相源；`isPlaying` 保留给可视化动画等真实出声消费者。
+- **MTV 模式混音风险**：`playPause()` 未检查 `suppressPlayback`，媒体键/Activity 兜底路径可能在 MTV 模式恢复主播放器。补上护栏，抑制态返回 false 不误弹提示。
+- **MEDIA_STOP 语义错误**：`KEYCODE_MEDIA_STOP` 原映射到 `playPause()`（切换播放态），改为 `stop()`——`pause + seekTo(0)` 停止并回曲首，保持 READY 态可直接重播（不用 `ExoPlayer.stop()` 以免置 IDLE）。
+- **播放器未就绪静默无反馈**：`player == null` 时按钮点击无任何反馈。新增 `isPlayerReady()` 检查与 `player_not_ready` 文案；`playPause`/`stop` 未就绪时给出 Toast。
+
+### Added
+
+- 门禁 `PlayPauseFlowGateTest`（6 组源码文本断言 + 负自检）；`MediaKeyHandlerTest` STOP 用例改断言 `stop()`。
+
+### Changed
+
+- 版本号 `versionCode 208 → 209`，`versionName 2.39.23 → 2.39.24`。
+
 ## [v2.39.23] - 2026-11-20
 
 > 同版收口两批修复：艺术家列表/详情链路 + 曲库专辑 Tab 全量列举链路。逐条根因见 `docs/technical-overview.md` §10.414。

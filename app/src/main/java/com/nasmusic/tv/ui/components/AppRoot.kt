@@ -132,6 +132,11 @@ fun AppRoot(
         currentSong?.let { viewModel.effectiveQualityFor(it) } ?: globalQualityTier
     }
     val isPlaying by viewModel.playerVM.isPlaying.collectAsState(initial = false)
+    // 播放/暂停按钮图标的真相源：用户意图（playWhenReady）。
+    // ⛔ 不能用 isPlaying：BUFFERING 时 isPlaying=false 但用户已点播放，
+    //    按钮若显示"播放"再点下去会被判成二次 play()，缓冲中无法取消。
+    // isPlaying 仍保留给可视化动画（需真实出声状态）等消费者。
+    val wantsToPlay by viewModel.playerVM.wantsToPlay.collectAsState(initial = false)
     val playMode by viewModel.playerVM.playMode.collectAsState(initial = com.nasmusic.tv.data.model.PlayMode.SEQUENTIAL)
     // F-2（修复）：progress/duration 不再顶层收集——PlayerManager 的进度由 1000ms
     // Handler 轮询驱动，顶层收集会每秒驱动 AppRoot 全树重组（含 LazyColumn 状态与
@@ -287,7 +292,7 @@ fun AppRoot(
                             currentSong = currentSong,
                             // v2.35.0 多码率：当前生效档位（单曲覆盖 ?: 全局默认，方案 §5.1）
                             qualityTier = qualityTier,
-                            isPlaying = isPlaying,
+                            isPlaying = wantsToPlay,
                             playMode = playMode,
                             coverCandidates = coverCandidates,
                             coverFilterEnabled = coverFilterEnabled,
@@ -322,7 +327,7 @@ fun AppRoot(
                     viewModel = viewModel,
                     currentSong = currentSong,
                     coverCandidates = coverCandidates,
-                    isPlaying = isPlaying,
+                    isPlaying = wantsToPlay,
                     playMode = playMode
                 )
                 Screen.Settings -> SettingsBranch(
@@ -391,7 +396,7 @@ fun AppRoot(
                     coverCandidates = coverCandidates,
                     progressFlow = viewModel.playerVM.progress,
                     durationFlow = viewModel.playerVM.duration,
-                    isPlaying = isPlaying,
+                    isPlaying = wantsToPlay,
                     onExpand = { viewModel.navVM.navigateTo(Screen.NowPlaying) },
                     onPlayPause = { viewModel.playerVM.playPause() },
                     onNext = { viewModel.playerVM.next() },
