@@ -7,6 +7,35 @@
 >
 > 类型：`Added`（新增） | `Changed`（变更） | `Fixed`（修复） | `Removed`（移除）
 
+## [v2.39.26] - 2026-11-20
+
+> 修复「首字母 / 全拼搜索」在四个搜索入口上的链路缺陷。逐条根因见 `docs/technical-overview.md` §10.417。
+
+### Fixed
+
+- **全拼搜索对 NAS / 百度网盘 / 本地三源整体失效**：聚合器采集阶段用 `PinyinUtils.matches`（只有子串 + 首字母）先筛一遍，候选集已空，后续「精细过滤」的全拼逻辑拿到空列表。现三路匹配（子串 + 全拼 + 首字母）合入 `PinyinUtils`，采集与精细过滤共用同一判据。
+- **艺术家 Tab 全拼搜索空白**：聚合结果又被一层 `PinyinUtils.matches` 过滤，`zhoujielun` 能搜到歌却匹配不到「周杰伦」三个字。随匹配口径统一修复，并保留该层过滤（合唱名拆分后需剔除非命中名字）。
+- **英文 / 拼音输入把源静默关掉**：拼音分支在本地缓存为空或零命中时直接返回空（百度尤甚：没建索引就搜不到任何东西）。现改为**本地优先、零命中回退服务端**，`adele` 这类英文词不再被当成拼音判死。
+- **切 Tab 不重搜，搜索结果停在旧维度**：`selectLibraryTab` 只改状态。现按新 Tab 的 `searchType` 重新发起（缓存键本身含维度，同维度切换仍命中缓存，不产生多余请求）。
+- **网盘页搜索不认拼音**：`searchBaidu` 只调服务端 `searchAudio`（字面量匹配）。现拼音/首字母输入先查本地索引、先出结果，服务端返回后按 `fsId` 合并去重；服务端失败时保留本地命中。
+- **电台搜索不认拼音**：radio-browser 的 `name=` 只做字面量匹配。现对拼音形态的输入额外抓一份热门榜在客户端筛，再与直搜结果合并去重。
+- **多词搜索是死代码**：`PinyinMatcher.matchesMultipleWords` 无调用点，实际传进匹配器的是整串。现按空白分词、**每个词都要命中**（可分别落在歌名/歌手/专辑上），覆盖聚合器、百度索引、曲库网格过滤。
+- **首搜卡主线程**：`SearchViewModel` 在实参位置对百度索引（TV 上可达 3.8 万条）做拼音匹配，参数求值发生在聚合器的 `Dispatchers.Default` 之前。现移入 `withContext(Default)`，且只对拼音形态的输入求值。
+- **首字母缓存声明后从未使用**：`PinyinUtils.initialsCache` 接上读写（§10.89.3 只做了 `toPinyin` 一半）。
+
+### Removed
+
+- `util/PinyinMatcher.kt`：全项目零调用点，且与 `PinyinUtils.matches` 能力不等价（正是全拼被裁掉的根因）。能力已合入 `PinyinUtils`。
+
+### Added
+
+- `util/SearchQuery.kt`：`isPinyinLike`（本地拼音过滤 / 服务端搜索的路由判据）与 `tokens`（多词分词）的唯一出处。
+- 单测：`PinyinUtilsTest` 补全拼 / 首字母 / 多词 / 分组首字母；新增 `SearchQueryTest`（形态判定与分词边界）。
+
+### Changed
+
+- 版本号 `versionCode 210 → 211`，`versionName 2.39.25 → 2.39.26`。
+
 ## [v2.39.25] - 2026-11-20
 
 > 修复曲库专辑详情「封面 + 曲目列表」链路的五项缺陷。逐条根因见 `docs/technical-overview.md` §10.416。

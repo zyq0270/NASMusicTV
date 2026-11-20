@@ -267,7 +267,8 @@ class BaiduFileIndexCache(
      * 用于 SearchAggregator 的拼音搜索场景，避免全量 allSongs() + 客户端 filter。
      *
      * @param keyword 搜索关键词
-     * @param pinyinMatch 为 true 时用 PinyinUtils.matches() 做拼音模糊匹配
+     * @param pinyinMatch 为 true 时用 [com.nasmusic.tv.util.PinyinUtils.matches] 做模糊匹配
+     *        （子串 + 拼音全拼 + 拼音首字母，多词按「每词都要命中」）
      * @param limit 最多返回条数（0=不限）
      */
     fun searchSongs(keyword: String, pinyinMatch: Boolean = false, limit: Int = 0): List<Song> {
@@ -279,8 +280,13 @@ class BaiduFileIndexCache(
             .filter { seen.add(it.fsId) }
             .filter { entry ->
                 if (pinyinMatch) {
-                    com.nasmusic.tv.util.PinyinUtils.matches(entry.title, k) ||
-                        (entry.artist?.let { com.nasmusic.tv.util.PinyinUtils.matches(it, k) } == true)
+                    // 多词查询（"zjl 晴"）逐词判定，每个词可落在标题或歌手任一字段上 ——
+                    // 与 `SearchAggregator` 的歌曲级口径一致，⛔ 不能对单字段用整串做 AND。
+                    val tokens = com.nasmusic.tv.util.SearchQuery.tokens(k)
+                    tokens.all { token ->
+                        com.nasmusic.tv.util.PinyinUtils.matches(entry.title, token) ||
+                            entry.artist?.let { com.nasmusic.tv.util.PinyinUtils.matches(it, token) } == true
+                    }
                 } else {
                     entry.title.lowercase().contains(k) ||
                         (entry.artist?.lowercase()?.contains(k) == true)

@@ -528,7 +528,8 @@ MP3 内嵌（MediaMetadataRetriever）
 
 | 工具 | 文件 | 功能 |
 |------|------|------|
-| `PinyinUtils` | `util/PinyinUtils.kt` | 汉字→拼音首字母转换（通过 `android.icu.text.Transliterator`），用于搜索匹配 |
+| `PinyinUtils` | `util/PinyinUtils.kt` | 汉字→拼音（TinyPinyin，API 22+ 兼容）：全拼 + 首字母 + 子串三路匹配，**搜索匹配的唯一真相源**（v2.39.26 起） |
+| `SearchQuery` | `util/SearchQuery.kt` | **v2.39.26 新增**：搜索关键词形态判定（`isPinyinLike`）与多词分词（`tokens`），本地拼音过滤 / 服务端搜索的路由判据唯一出处 |
 | `TimeUtils` | `util/TimeUtils.kt` | 时间格式化工具 |
 | `ArtistSplitter` | `util/ArtistSplitter.kt` | 多歌唱家拆分（按 `&`/`feat.`/`ft.`/`with`/`vs.`/`/` 分隔），用于歌唱家详情页 |
 | `AppLog` | `util/AppLog.kt` | **v2.2.0 新增**：日志工具，Debug 构建输出 `d/i/w` 级别日志，Release 构建中所有调用为空操作；`e` 级别始终输出 |
@@ -6234,6 +6235,8 @@ Phase 1-6 代码已全部落地并编译通过。Phase 7（测试与文档）新
 - 不需要发现页支持（仅 FilterMode.PRECISE / 搜索页）
 - 不需要新增拼音输入窗口（已有 TextInputDialog）
 
+> ⚠️ **v2.39.26 变更**：`PinyinMatcher` 已**删除**（全项目零调用点，且与 `PinyinUtils.matches` 能力不等价 —— 正是「全拼在采集阶段被裁掉」的根因）。三路匹配能力合入 `PinyinUtils.matches`，多词语义（`zjl 周杰`）由 `SearchAggregator` 的词级 AND 承担。详见 §10.417。
+
 **涉及文件**：`app/src/main/java/com/nasmusic/tv/util/PinyinMatcher.kt`（新增）、`app/src/main/java/com/nasmusic/tv/data/model/SongWithPinyin.kt`（新增）、`app/src/main/java/com/nasmusic/tv/util/PinyinUtils.kt`、`app/src/main/java/com/nasmusic/tv/backend/SearchAggregator.kt`、`app/src/main/java/com/nasmusic/tv/NasMusicApp.kt`、`app/build.gradle.kts`、`CHANGELOG.md`、`docs/technical-overview.md`
 
 **验证结果**：✅ `assembleRelease` 编译通过（无 error），已部署电视验证。
@@ -6929,6 +6932,8 @@ val result = with(kotlinx.coroutines.Dispatchers.IO) { separator.separate(...) }
 **问题**：`PinyinUtils.toPinyin`/`toPinyinInitials` 无缓存纯函数，LibraryScreen 过滤每次按键都对全量歌名/歌手重算 TinyPinyin；SearchAggregator 虽自建缓存但其它调用方仍裸调。
 
 **修复**：`PinyinUtils` 内加有界 LRU 缓存（上限 4096，`Collections.synchronizedMap` 线程安全，accessOrder=true 淘汰最久未用），零行为变更、覆盖全部调用方。
+
+> ⚠️ **v2.39.26 补正**：当时只给 `toPinyin` 挂了缓存，`initialsCache` 声明了却**从未读写**，`toPinyinInitials` 仍逐次重算 —— 而首字母恰恰是最热的一条路径（列表过滤 + 每次搜索的精细过滤都走）。现已接上缓存，见 §10.417。
 
 #### 10.89.4 Jellyfin 曲库计数 `Limit=0` 语义风险（P2）
 
@@ -28945,3 +28950,46 @@ Jellyfin 按名查询只发一次请求、fields 补齐并分页；Navidrome/Sub
 **验证边界**：本机（zyq02）无 JBR / Android SDK，`assembleRelease` 与 `testDebugUnitTest` 未实跑；已用 `logs_temp/album_detail_flow_verify_2026-11-20.py` 做等价源码文本门禁（含负自检）与括号平衡检查。CI 首次运行需重点看 `AlbumDetailFlowGateTest` 与既有 `AlbumsListFlowGateTest` / `LibraryBrowseCardStyleGateTest`。未 push；仅本地提交。
 
 **版本号变更**：v2.39.24 → v2.39.25（versionCode 209 → 210）。
+
+### 10.417 首字母 / 全拼搜索链路八项修复（v2.39.26 - 2026-11-20）
+
+**范围**：四个搜索入口（曲库搜索、曲库本地专辑/艺术家网格过滤、电台 Tab、网盘页）与聚合器「采集 → 精细过滤」两阶段。
+
+**总根因**：项目里同时存在**两套拼音匹配器**且能力不等价 —— `PinyinUtils.matches`（子串 + 首字母，**无全拼**）与 `PinyinMatcher.matches`（子串 + 全拼 + 首字母，但**全项目零调用点**）。链路上三处调用前者，于是全拼在「采集阶段」就被裁掉，后面的完整实现拿到的是空列表。这类缺陷单测抓不到：匹配器本身"能跑"，错的只是调用点。
+
+**根因与修复**：
+
+1. **全拼对 NAS / 百度网盘 / 本地三源整体失效**：`SearchAggregator` 采集阶段用 `matchesBySearchType()`（内部 `PinyinUtils.matches`，只有子串 + 首字母）先过滤一遍，候选集已空；`FilterMode.PRECISE` 的 `matchesBySearchTypePrecise()` 再全拼也已经没有输入。修法：**三路匹配（子串 + 全拼 + 首字母）合入 `PinyinUtils.matches` 一处实现**，采集与精细过滤共用同一判据，`PinyinMatcher.kt` 删除。
+
+2. **艺术家 Tab 全拼搜索空白**：`LibraryScreen.filteredArtists` 对聚合结果又做了一层 `PinyinUtils.matches`，`zhoujielun` 能搜到歌却匹配不到「周杰伦」三个字 ⇒ 网格全空。随 1 自动修复。⚠️ 该层过滤**保留**：`MusicMerger.buildArtistsFromSongs` 会把合唱名 `古天乐/萱萱` 拆成两个艺术家块，拆出来的第二个名字并不匹配关键词，不过滤就会冒出无关艺术家。
+
+3. **英文词 / 拼音输入把源静默关掉**：拼音分支在「本地缓存为空或零命中」时直接返回空（百度尤甚：没建本地索引就搜不到任何东西，`SearchAggregator` 旧实现注释还写着「返回空」）。修法：三源统一改为 **`if (localHits.isNotEmpty()) localHits else searchServer()`** —— 本地优先（毫秒级），零命中才回退服务端。`adele` 这类英文词、以及「缓存尚未加载完」的首搜都由此恢复。
+
+4. **切 Tab 不重搜，结果停在旧维度**：`selectLibraryTab` 只改 `_libraryActiveTab`，`LibraryScreen` 的 `LaunchedEffect` 只盯 `filterQuery`。在专辑 Tab 输 `zjl`（维度 = 专辑）再切到歌曲 Tab，看到的仍是专辑维度结果，歌名命中永远补不进来。修法：切到用到搜索结果的 Tab 且关键词非空时调 `searchSongsOnServer(keyword, recordHistory = false)`。⚠️ **不传 `force`**：该方法缓存键本就含 `searchType`（同词 + 同维度才命中），换维度自动重搜、同维度切换免费命中缓存；`recordHistory = false` 避免「切 Tab」把搜索历史计数刷高。
+
+5. **网盘页搜索不认拼音**：`NetworkMusicViewModel.searchBaidu` 只调服务端 `searchAudio`（字面量匹配）⇒ 搜 `zjl` 恒 0 条，而本地索引里明明有周杰伦。修法：拼音形态输入先查 `BaiduFileIndexCache.searchSongs(pinyinMatch = true, limit = 200)`（`Dispatchers.Default`），命中先出结果，服务端返回后按 `Song.id`（`ntwk_baidu_<fsId>`）合并去重；服务端失败时保留本地命中（原先一律置空 = 白算一遍索引）。
+
+6. **电台搜索不认拼音**：radio-browser 的 `name=` 只做字面量匹配，拼音/首字母必然 0 条。修法：`searchRadio` 传 `pinyinFallback = true`，拼音形态输入时额外抓一份热门榜（`limit = 300`，`order=votes&reverse=true`）在客户端用同一套 `PinyinUtils.matchesQuery` 筛，再与直搜结果按 `uuid` 合并去重。⚠️ 覆盖范围是热门榜前 300 条而非全量电台 —— radio-browser 有数万条，全量拉取不现实。
+
+7. **多词搜索是死代码**：`PinyinMatcher.matchesMultipleWords`（`zjl 周杰`）无调用点，实际传进匹配器的是整串，等于「多词 = 必不命中」。修法：`SearchQuery.tokens()` 统一分词口径（空白按 L09 折叠，含全角空格/不换行空格），聚合器、百度索引、曲库网格过滤一律「**每个词都要命中**」，且各词可分别落在不同字段（`周杰伦 晴天` = 歌手命中 + 歌名命中）。
+
+8. **首搜卡主线程 + 首字母缓存空转**：
+   - `SearchViewModel` 把 `baiduFileIndexCache.searchSongs(query, pinyinMatch = true)` 写在聚合器的**实参位置**，参数求值发生在 `search()` 内部 `withContext(Dispatchers.Default)` **之前** ⇒ TV 上 3.8 万条逐条拼音匹配直接压在主线程。修法：移入 `withContext(Dispatchers.Default)`，且只对拼音形态输入求值（中文查询走服务端，聚合器根本不读这份缓存）。
+   - `PinyinUtils.initialsCache` 声明了却**从未读写**（§10.89.3 只给 `toPinyin` 挂了缓存），首字母恰是最热路径。已接上读写。
+
+**顺带收口**：新增 `util/SearchQuery.kt`（`isPinyinLike` + `tokens`）作为「本地拼音过滤 vs 服务端搜索」路由判据的唯一出处 —— 此前聚合器内联一份、`SearchViewModel` 求值时不判、`BaiduFileIndexCache` 只认布尔参数，口径一漂移就是「本地筛了、服务端没搜」的静默 0 条。
+
+**兼容性影响**：
+
+- TV 上 ASCII 输入从「只查本地缓存」变为「本地优先 + 零命中回退服务端」：最坏多一次服务端请求，换取英文词与缓存未就绪首搜不再空。
+- 多词查询语义由「整串子串」改为「每词都要命中」，`"周杰伦 晴天"` 这类输入由必不命中变为可命中。
+- 有活动关键词时切 Tab 会重搜（维度变化时），期间短暂显示 Loading —— 这是修复本身，不再展示错误维度的旧结果。
+- 网盘页拼音输入先出本地索引结果（上限 200 条），服务端结果补齐后合并。
+- 手机端仍不启用拼音匹配（`isTVDevice` 判据未动）；但 `PinyinUtils` 本身是超集，曲库网格的本地专辑/艺术家过滤在手机端同样吃拼音 —— 用户输入中文时无差异，属可接受的口径统一。
+- 无存储 schema、无网络协议变更。
+
+**涉及文件**：`util/PinyinUtils.kt`、`util/SearchQuery.kt`（新增）、`util/PinyinMatcher.kt`（删除）、`backend/SearchAggregator.kt`、`backend/network/baidu/BaiduFileIndexCache.kt`、`ui/screens/LibraryScreen.kt`、`ui/viewmodel/SearchViewModel.kt`、`ui/viewmodel/MainViewModel.kt`、`ui/viewmodel/NetworkMusicViewModel.kt`、`app/build.gradle.kts`、`CHANGELOG.md`、本章；新增 `PinyinSearchGateTest` / `SearchQueryTest`，扩写 `PinyinUtilsTest`。
+
+**验证边界**：本机（zyq02）无 JBR / Android SDK，`assembleRelease` 与 `testDebugUnitTest` 均**未实跑**。已用 `logs_temp/pinyin_search_verify_2026-11-20.py` 做门禁等价预检（27 条源码文本断言，与 `PinyinSearchGateTest` 同判据，27/27 通过）与字符串剥离后的括号平衡检查，全部 PASS。CI 首跑需重点看 `PinyinSearchGateTest` / `PinyinUtilsTest` / `SearchQueryTest`；`PinyinUtilsTest` 里依赖 TinyPinyin 字典的断言用 `assumeTrue` 守护（字典不可用时跳过而非判红）。
+
+**版本号变更**：v2.39.25 → v2.39.26（versionCode 210 → 211）。

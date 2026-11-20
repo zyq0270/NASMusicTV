@@ -10,8 +10,8 @@ import com.nasmusic.tv.data.model.SearchAggregatorResult
 import com.nasmusic.tv.data.model.Song
 import com.nasmusic.tv.data.model.SongWithPinyin
 import com.nasmusic.tv.util.AppLog
-import com.nasmusic.tv.util.PinyinMatcher
 import com.nasmusic.tv.util.PinyinUtils
+import com.nasmusic.tv.util.SearchQuery
 import com.nasmusic.tv.util.rethrowIfCancellation
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -197,11 +197,11 @@ enum class SearchType {
             )
         }
 
-        // 检测关键词是否是纯拼音（仅含英文字母/数字/空格，无中文字符）
-        // 纯拼音关键词发给 NAS/百度/本地源的服务端搜索无意义，改用本地缓存客户端过滤
-        val isPinyinQuery = keyword.all { it.isLetterOrDigit() || it.isWhitespace() } &&
-                keyword.any { it.isLetter() } &&
-                keyword.none { it.code in 0x4E00..0x9FFF }
+        // 检测关键词是否是「拼音/英文」形态（不含中文）
+        // NAS / 百度 / 本地的服务端搜索只做字面量匹配，不认拼音 ⇒ 这类输入先走本地缓存客户端过滤。
+        // ⚠️ 判据与 `SearchViewModel` / `BaiduFileIndexCache` 共用 [SearchQuery.isPinyinLike]，
+        //    ⛔ 不要在这里再内联一份（口径漂移 ⇒ 本地筛了、服务端没搜 = 静默 0 条）。
+        val isPinyinQuery = SearchQuery.isPinyinLike(keyword)
 
         // 为每个源创建独立协程，并行搜索
         val nasDeferred = async {
@@ -213,15 +213,8 @@ enum class SearchType {
             //    否则「关了还在结果里出现」是最难排查的一类静默失效。
             if (MusicSourceType.NAS in sources && backendAdapter != null && nasMusicEnabled()) {
                 try {
-                    if (isPinyinQuery && nasLocalSongs.isNotEmpty() && isTVDevice) {
-                        // 拼音搜索：NAS 服务端不认拼音，改用本地缓存 + 客户端拼音匹配
-                        nasLocalSongs.filter { song ->
-                            matchesBySearchType(song, keyword, searchType)
-                        }.map { song ->
-                            RankedSong(song = song, source = MusicSourceType.NAS)
-                        }
-                    } else {
-                        // 中文/混合关键词：走服务端搜索
+                    // 服务端搜索（中文/混合关键词的主路径，也是拼音分支的兜底）
+                    val searchServer: suspend () -> List<RankedSong> = {
                         withHardTimeout(NAS_TIMEOUT) {
                             backendAdapter.searchSongs(keyword)
                                 .filter { it.title.isNotBlank() }
@@ -232,6 +225,20 @@ enum class SearchType {
                             AppLog.w(TAG, "NAS search timed out")
                             emptyList()
                         }
+                    }
+                    if (isPinyinQuery && nasLocalSongs.isNotEmpty() && isTVDevice) {
+                        // 拼音搜索：NAS 服务端不认拼音，改用本地缓存 + 客户端拼音匹配
+                        val localHits = nasLocalSongs.filter { song ->
+                            matchesBySearchType(song, keyword, searchType)
+                        }.map { song ->
+                            RankedSong(song = song, source = MusicSourceType.NAS)
+                        }
+                        // 本地零命中 ⇒ 回退服务端：英文词（`adele`）与「缓存尚未加载完」的首搜
+                        // 都落在这里。⛔ 旧实现在这条分支上直接返回本地结果（空），等于把 NAS 源静默关掉。
+                        if (localHits.isNotEmpty()) localHits else searchServer()
+                    } else {
+                        // 中文/混合关键词：走服务端搜索
+                        searchServer()
                     }
                 } catch (e: Exception) {
                     e.rethrowIfCancellation()
@@ -277,17 +284,7 @@ enum class SearchType {
                 visible(MusicSourceType.BAIDU_PAN)
             ) {
                 try {
-                    if (isPinyinQuery && baiduLocalSongs.isNotEmpty() && isTVDevice) {
-                        // 拼音搜索：百度网盘服务端不认拼音，改用本地索引缓存 + 客户端拼音匹配
-                        baiduLocalSongs.filter { song ->
-                            matchesBySearchType(song, keyword, searchType)
-                        }.map { song ->
-                            RankedSong(song = song, source = MusicSourceType.BAIDU_PAN)
-                        }
-                    } else if (isPinyinQuery && isTVDevice) {
-                        // 拼音搜索但无本地索引缓存，返回空（用户搜中文时百度结果正常返回）
-                        emptyList()
-                    } else {
+                    val searchServer: suspend () -> List<RankedSong> = {
                         withHardTimeout(BAIDU_TIMEOUT) {
                             val baiduSongs = if (directoryMode) {
                                 baiduService.searchByDirectory(baiduKw)
@@ -303,6 +300,19 @@ enum class SearchType {
                             AppLog.w(TAG, "Baidu search timed out")
                             emptyList()
                         }
+                    }
+                    if (isPinyinQuery && isTVDevice) {
+                        // 拼音搜索：百度网盘服务端不认拼音，改用本地索引缓存 + 客户端拼音匹配
+                        val localHits = baiduLocalSongs.filter { song ->
+                            matchesBySearchType(song, keyword, searchType)
+                        }.map { song ->
+                            RankedSong(song = song, source = MusicSourceType.BAIDU_PAN)
+                        }
+                        // 本地索引为空/零命中 ⇒ 回退服务端。旧实现在这里直接 `emptyList()`：
+                        // 「没建索引就搜英文」等于百度源完全消失，且没有任何提示。
+                        if (localHits.isNotEmpty()) localHits else searchServer()
+                    } else {
+                        searchServer()
                     }
                 } catch (e: Exception) {
                     e.rethrowIfCancellation()
@@ -342,14 +352,7 @@ enum class SearchType {
         val localDeferred = async {
             if (MusicSourceType.LOCAL in sources && localMusicRepository != null && localMusicEnabled()) {
                 try {
-                    if (isPinyinQuery && localDeviceSongs.isNotEmpty() && isTVDevice) {
-                        // 拼音搜索：本地源 Room LIKE 查询不认拼音，改用客户端过滤
-                        localDeviceSongs.filter { song ->
-                            matchesBySearchType(song, keyword, searchType)
-                        }.map { song ->
-                            RankedSong(song = song, source = MusicSourceType.LOCAL)
-                        }
-                    } else {
+                    val searchServer: suspend () -> List<RankedSong> = {
                         withTimeoutOrNull(LOCAL_TIMEOUT) {
                             localMusicRepository.search(keyword)
                                 .filter { it.title.isNotBlank() }
@@ -360,6 +363,17 @@ enum class SearchType {
                             AppLog.w(TAG, "Local search timed out")
                             emptyList()
                         }
+                    }
+                    if (isPinyinQuery && localDeviceSongs.isNotEmpty() && isTVDevice) {
+                        // 拼音搜索：本地源 Room LIKE 查询不认拼音，改用客户端过滤
+                        val localHits = localDeviceSongs.filter { song ->
+                            matchesBySearchType(song, keyword, searchType)
+                        }.map { song ->
+                            RankedSong(song = song, source = MusicSourceType.LOCAL)
+                        }
+                        if (localHits.isNotEmpty()) localHits else searchServer()
+                    } else {
+                        searchServer()
                     }
                 } catch (e: Exception) {
                     e.rethrowIfCancellation()
@@ -472,25 +486,37 @@ enum class SearchType {
         raw.trim().lowercase().replace(WHITESPACE_RUN, " ")
 
     /**
-     * 按 searchType 维度匹配歌曲（客户端拼音过滤用，PinyinUtils 级别）
+     * 按 searchType 维度匹配歌曲（客户端拼音过滤用，子串 + 全拼 + 首字母）
+     *
+     * 多词语义：关键词按空白切分后**每个词都要命中**（`周杰伦 晴天` = 歌手命中 + 歌名命中），
+     * 与 [matchesBySearchTypePrecise] 同一套口径 —— 两者不一致就会出现
+     * 「采集期筛掉的歌，精细过滤阶段根本看不到」，这正是全拼搜索失效的成因。
      */
     private fun matchesBySearchType(song: Song, keyword: String, searchType: SearchType): Boolean {
-        return when (searchType) {
-            SearchType.SONG_NAME_OR_ARTIST ->
-                PinyinUtils.matches(song.title, keyword) ||
-                        PinyinUtils.matches(song.artist, keyword)
-            SearchType.ALBUM ->
-                PinyinUtils.matches(song.album, keyword) ||
-                        PinyinUtils.matches(song.artist, keyword)
-            SearchType.ARTIST ->
-                PinyinUtils.matches(song.artist, keyword)
-            SearchType.SONG_NAME_ONLY ->
-                PinyinUtils.matches(song.title, keyword)
-        }
+        val tokens = SearchQuery.tokens(keyword)
+        if (tokens.isEmpty()) return false
+        return tokens.all { token -> matchesTokenBySearchType(song, token, searchType) }
     }
+
+    /** 单词语义：按 searchType 维度，子串 OR 全拼 OR 首字母命中 */
+    private fun matchesTokenBySearchType(song: Song, token: String, searchType: SearchType): Boolean =
+        when (searchType) {
+            SearchType.SONG_NAME_OR_ARTIST ->
+                PinyinUtils.matches(song.title, token) ||
+                        PinyinUtils.matches(song.artist, token)
+            SearchType.ALBUM ->
+                PinyinUtils.matches(song.album, token) ||
+                        PinyinUtils.matches(song.artist, token)
+            SearchType.ARTIST ->
+                PinyinUtils.matches(song.artist, token)
+            SearchType.SONG_NAME_ONLY ->
+                PinyinUtils.matches(song.title, token)
+        }
 
     /**
      * 按 searchType 维度精细匹配（PRECISE 过滤用，支持子串 + 拼音全拼 + 首字母）
+     *
+     * 多词：每个词都要命中（可分别落在不同字段上）。
      */
     private fun matchesBySearchTypePrecise(
         song: Song,
@@ -499,17 +525,30 @@ enum class SearchType {
         isTVDevice: Boolean,
         pinyinCache: Map<String, SongWithPinyin>
     ): Boolean {
-        if (keyword.isBlank()) return false
+        val tokens = SearchQuery.tokens(keyword)
+        if (tokens.isEmpty()) return false
+        return tokens.all { token ->
+            matchesTokenPrecise(song, token, searchType, isTVDevice, pinyinCache)
+        }
+    }
 
+    /** 精简单词匹配：子串优先；TV 端再追加拼音全拼 + 首字母 */
+    private fun matchesTokenPrecise(
+        song: Song,
+        token: String,
+        searchType: SearchType,
+        isTVDevice: Boolean,
+        pinyinCache: Map<String, SongWithPinyin>
+    ): Boolean {
         // 1. 按 searchType 维度的子串匹配
-        if (matchesSubstringBySearchType(song, keyword, searchType)) return true
+        if (matchesSubstringBySearchType(song, token, searchType)) return true
 
         // 2. 非 TV 设备：仅子串匹配
         if (!isTVDevice) return false
 
         // 3. 拼音匹配（按 searchType 维度）
         val pinyin = pinyinCache[song.id] ?: SongWithPinyin(song)
-        return matchesPinyinBySearchType(pinyin, keyword, searchType)
+        return matchesPinyinBySearchType(pinyin, token, searchType)
     }
 
     /**

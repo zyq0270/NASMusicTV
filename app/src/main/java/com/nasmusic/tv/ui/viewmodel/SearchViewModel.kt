@@ -16,7 +16,9 @@ import com.nasmusic.tv.data.model.Song
 import com.nasmusic.tv.data.model.SongsPagingState
 import com.nasmusic.tv.data.model.UiState
 import com.nasmusic.tv.util.AppLog
+import com.nasmusic.tv.util.SearchQuery
 import com.nasmusic.tv.util.rethrowIfCancellation
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -25,6 +27,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * 搜索域 ViewModel（R-1 拆分自 MainViewModel）：
@@ -229,8 +232,10 @@ class SearchViewModel(
      * 服务端搜索歌曲（不依赖本地全量数据）
      *
      * @param force 设为 true 时跳过缓存（来源点亮切换后强制重搜）；默认 false 走缓存
+     * @param recordHistory 是否记录搜索历史。切 Tab 只是换搜索维度、不是用户"搜了一次"，
+     *        传 false 可避免同一关键词的历史计数被 Tab 切换刷高。
      */
-    fun searchSongsOnServer(query: String, force: Boolean = false) {
+    fun searchSongsOnServer(query: String, force: Boolean = false, recordHistory: Boolean = true) {
         if (query.isBlank()) {
             _searchResults.value = UiState.Success(emptyList())
             return
@@ -264,7 +269,19 @@ class SearchViewModel(
             // 与聚合器内部的 SourceVisibility 兜底取同一语义 ⇒ chip 显示、结果、集合三者一致。
             try {
                 // 拼音搜索时需要本地缓存：NAS 歌曲、本地音乐、百度网盘索引
-                // 服务端不认拼音关键词，改用客户端 PinyinUtils.matches() 过滤
+                // 服务端不认拼音关键词，改用客户端匹配（口径见 `PinyinUtils` / `SearchQuery`）
+                //
+                // ⚠️ 百度索引（TV 上可达 3.8 万条）逐条做拼音匹配是 CPU 密集活，必须离开主线程：
+                //    旧实现把它写在实参位置，参数求值发生在 `SearchAggregator` 的
+                //    `withContext(Dispatchers.Default)` **之前** ⇒ 首搜直接卡住主线程。
+                //    另外中文查询永远走服务端、聚合器根本不读这份缓存 ⇒ 只对拼音形态的输入求值。
+                val baiduLocalSongs = if (SearchQuery.isPinyinLike(query)) {
+                    withContext(Dispatchers.Default) {
+                        nasMusicApp.baiduFileIndexCache.searchSongs(query, pinyinMatch = true)
+                    }
+                } else {
+                    emptyList()
+                }
                 val result = searchAggregator.search(
                     query,
                     sources = effectiveEnabledSearchSources.value,
@@ -272,7 +289,7 @@ class SearchViewModel(
                     searchType = currentSearchType,
                     nasLocalSongs = nasLocalSongsProvider(),
                     localDeviceSongs = localDeviceSongsProvider(),
-                    baiduLocalSongs = nasMusicApp.baiduFileIndexCache.searchSongs(query, pinyinMatch = true)
+                    baiduLocalSongs = baiduLocalSongs
                 )
                 val songs = result.allResults.map { it.song }
                 // C1：网络段的判据是 **Meting 家族**（`networkSource == "meting"`，即 NetworkMusicManager 的路由键），
@@ -327,7 +344,7 @@ class SearchViewModel(
                 )
                 // 搜索成功后才记录历史（空结果也算成功，记录用户确实搜过的词；
                 // 失败不记录，避免污染热门榜）
-                prefs.history.recordSearch(query)
+                if (recordHistory) prefs.history.recordSearch(query)
                 AppLog.d(
                     "SearchViewModel",
                     "searchSongsOnServer: ${merged.size} results for '$query' breakdown=${result.sourceBreakdown}"

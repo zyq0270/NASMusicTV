@@ -431,8 +431,10 @@ fun LibraryScreen(
                         )
                     }
                 // 合并本地过滤的专辑（可能有多源搜索未覆盖的本地专辑）
+                // 匹配口径与聚合器一致：子串 + 全拼 + 首字母（`PinyinUtils` 是唯一真相源）
                 val localFiltered = albums.filter {
-                    PinyinUtils.matches(it.name, filterQuery) || PinyinUtils.matches(it.artist, filterQuery)
+                    PinyinUtils.matchesQuery(it.name, filterQuery) ||
+                        PinyinUtils.matchesQuery(it.artist, filterQuery)
                 }
                 // 去重合并：与 MusicMerger 共用同一口径（专辑名 + 艺术家归一化键），
                 // 同名不同歌手保留两张卡，避免搜索态与无搜索态展示数量不一致。
@@ -461,11 +463,16 @@ fun LibraryScreen(
                 // 多源搜索结果中提取艺术家：
                 // 必须先按 ArtistSplitter 拆分合唱名（"古天乐/萱萱" → 古天乐、萱萱），
                 // 否则合唱名会变成一个独立艺术家块，且详情页按整串匹配永远查不到歌
+                //
+                // ⚠️ 这里必须再 filter 一次：聚合结果按**整串歌手名**命中，拆出来的第二个名字
+                //    （上例的「萱萱」）并不匹配关键词，不过滤就会冒出一堆无关艺术家。
+                //    匹配口径统一走 `PinyinUtils`（全拼 + 首字母），⛔ 别再另写一套判据 ——
+                //    旧版这里缺全拼，`zhoujielun` 能搜到歌却搜不到「周杰伦」，艺术家网格全空。
                 val searchArtists = MusicMerger.buildArtistsFromSongs(searchResults, "search_artist_")
-                    .filter { PinyinUtils.matches(it.name, filterQuery) }
+                    .filter { PinyinUtils.matchesQuery(it.name, filterQuery) }
                 // 合并本地过滤的艺术家
                 val localFiltered = artists.filter {
-                    PinyinUtils.matches(it.name, filterQuery)
+                    PinyinUtils.matchesQuery(it.name, filterQuery)
                 }
                 // 归一化去重（NFKC + trim + 小写），同名不同写法只保留一块
                 val seen = mutableSetOf<String>()

@@ -91,6 +91,8 @@ import com.nasmusic.tv.util.AppLog
 import com.nasmusic.tv.util.LogSnapshot
 import com.nasmusic.tv.util.LogStore
 import com.nasmusic.tv.util.PermissionHelper
+import com.nasmusic.tv.util.PinyinUtils
+import com.nasmusic.tv.util.SearchQuery
 import com.nasmusic.tv.net.RemoteCallbacks
 import com.nasmusic.tv.net.RemoteControlServer
 import com.nasmusic.tv.net.RemoteSearchResult
@@ -158,6 +160,15 @@ private const val SOURCE_MIRROR_AWAIT_TIMEOUT_MS = 1000L
 
 /** 等镜像收敛时的轮询间隔（毫秒）。 */
 private const val SOURCE_MIRROR_AWAIT_POLL_MS = 25L
+
+/**
+ * 电台拼音兜底时的**客户端扫描条数**。
+ *
+ * radio-browser 的 `name=` 只做字面量匹配，不认拼音 ⇒ 拼音/首字母输入必须自己抓一份
+ * 热门榜（`order=votes&reverse=true`，见 `RadioBrowserClient.searchStations`）再客户端筛。
+ * 300 条是「覆盖面 / 响应体积」的折中：再多就变成一次几 MB 的列表拉取。
+ */
+private const val RADIO_PINYIN_SCAN_LIMIT = 300
 
 /**
  * 应用主 ViewModel
@@ -709,7 +720,23 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
     val libraryActiveTab: StateFlow<LibraryTab> = _libraryActiveTab.asStateFlow()
 
     fun selectLibraryTab(tab: LibraryTab) {
+        val changed = _libraryActiveTab.value != tab
         _libraryActiveTab.value = tab
+        if (!changed) return
+        // 搜索维度跟着 Tab 变（同一关键词在「专辑/艺术家/歌曲」三个维度命中集合不同）：
+        // 旧实现只改状态、不重搜，`LibraryScreen` 的 `LaunchedEffect` 又只盯 filterQuery，
+        // 于是「在专辑页输 zjl 再切到歌曲页」看到的仍是专辑维度的结果，歌名命中永远补不进来。
+        val keyword = _librarySearchKeyword.value
+        if (keyword.isBlank()) return
+        when (tab) {
+            LibraryTab.SEARCH, LibraryTab.ALBUMS, LibraryTab.ARTISTS, LibraryTab.SONGS ->
+                // ⚠️ 不传 force：`searchSongsOnServer` 的缓存键本来就含 searchType
+                // （同词 + 同维度才命中），换维度会自动重搜，同维度切换则免费命中缓存。
+                // ⚠️ 不记搜索历史：切 Tab 是换维度，不是用户"搜了一次"。
+                searchVM.searchSongsOnServer(keyword, recordHistory = false)
+            // GENRES / YEARS / DISCOVER / RADIO 不用服务端搜索结果，切过去不触发重搜
+            else -> Unit
+        }
     }
 
     // --- 曲库页滚动位置记忆（切换 Tab 后恢复上次滚动位置） ---
@@ -4839,19 +4866,46 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
 
     /** 搜索电台 */
     fun searchRadio(keyword: String) {
+        val kw = keyword.trim()
         _radioActiveTag.value = null
-        _radioActiveQuery.value = keyword
-        loadRadioStations(tag = null, query = keyword, countryCode = null)
+        _radioActiveQuery.value = kw
+        if (kw.isBlank()) {
+            loadRadioStations(tag = null, query = null, countryCode = null)
+            return
+        }
+        loadRadioStations(tag = null, query = kw, countryCode = null, pinyinFallback = true)
     }
 
-    private fun loadRadioStations(tag: String?, query: String?, countryCode: String?) {
+    /**
+     * @param pinyinFallback 客户端拼音兜底：radio-browser 的 `name=` 参数只做**字面量**匹配，
+     *        拼音/首字母（`zjl`）在服务端必然 0 条。为 true 且关键词是拼音形态时，
+     *        额外抓一份热门榜在客户端按同一套拼音口径筛，再与直搜结果合并去重。
+     */
+    private fun loadRadioStations(
+        tag: String?,
+        query: String?,
+        countryCode: String?,
+        pinyinFallback: Boolean = false,
+        limit: Int = 50
+    ) {
         viewModelScope.launch {
             _radioStations.value = UiState.Loading
             try {
-                val stations = nasMusicApp.radioBrowserClient.searchStations(
-                    query = query, tag = tag, countryCode = countryCode, limit = 50
+                val client = nasMusicApp.radioBrowserClient
+                val direct = client.searchStations(
+                    query = query, tag = tag, countryCode = countryCode, limit = limit
                 )
-                _radioStations.value = UiState.Success(stations)
+                val fallback = if (pinyinFallback && query != null && SearchQuery.isPinyinLike(query)) {
+                    // 热门榜覆盖不到全部电台（radio-browser 有数万条），但足以覆盖「用户会用
+                    // 首字母去找的那批」；真机验证口径见 §10.417。
+                    val broad = client.searchStations(limit = RADIO_PINYIN_SCAN_LIMIT)
+                    withContext(Dispatchers.Default) {
+                        broad.filter { station -> PinyinUtils.matchesQuery(station.name, query) }
+                    }
+                } else {
+                    emptyList()
+                }
+                _radioStations.value = UiState.Success((direct + fallback).distinctBy { it.uuid })
             } catch (e: Exception) {
                 e.rethrowIfCancellation()
                 AppLog.e("Radio", "loadRadioStations failed: ${e.message}", e)

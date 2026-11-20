@@ -13,12 +13,21 @@ import com.nasmusic.tv.data.model.BaiduFile
 import com.nasmusic.tv.data.model.NetworkFavoriteItem
 import com.nasmusic.tv.data.model.Song
 import com.nasmusic.tv.util.AppLog
+import com.nasmusic.tv.util.SearchQuery
 import com.nasmusic.tv.util.rethrowIfCancellation
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+
+/**
+ * 网盘搜索时本地索引命中的**条数上限**。
+ *
+ * 拼音输入会先查本地索引（`BaiduFileIndexCache.searchSongs`），一个宽泛的输入（如 `a`）
+ * 可能命中上万条；网盘页是一次性列表，200 条足够翻，也避免一次性把大列表塞进 Compose。
+ */
+private const val NETDISK_SEARCH_LIMIT = 200
 
 /**
  * 网络音乐/百度网盘域 ViewModel（R-1 拆分自 MainViewModel）。
@@ -623,21 +632,49 @@ class NetworkMusicViewModel(app: Application) : AndroidViewModel(app) {
         netdiskJob?.cancel()
         netdiskJob = viewModelScope.launch {
             _netdiskIsLoading.value = true
+            // 本地命中要在 catch 里继续可用（服务端失败时不清掉它），故声明在 try 之外
+            var localHits: List<Song> = emptyList()
             try {
                 val rootDir = prefs.baidu.getBaiduMusicRootDir().ifBlank { BaiduNetdiskConfig.APP_DIR }
-                val files = baiduApi.searchAudio(keyword, dir = rootDir)
+                // 拼音/首字母输入先查本地索引：`searchAudio` 是服务端字面量匹配，不认拼音，
+                // 否则在网盘页搜 `zjl` 恒 0 条（本地索引明明有周杰伦）。
+                // 3.8 万条逐条拼音匹配是 CPU 密集活 ⇒ 必须离主线程（同 SearchViewModel 口径）。
+                // ⚠️ 按 `rootDir` 前缀过滤：索引只覆盖建索引时的音乐根目录，与服务端 `dir = rootDir`
+                //    的范围对齐，避免用户改过根目录后冒出目录外的歌。
+                localHits = if (SearchQuery.isPinyinLike(keyword)) {
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                        baiduIndexCache.searchSongs(keyword, pinyinMatch = true, limit = NETDISK_SEARCH_LIMIT)
+                            .filter { it.path?.startsWith(rootDir) == true }
+                    }
+                } else {
+                    emptyList()
+                }
+                // 本地先出结果（索引命中通常毫秒级），服务端回来再合并补漏
+                if (localHits.isNotEmpty() && generation == netdiskGeneration) {
+                    _netdiskSearchResults.value = localHits
+                }
+                val remote = baiduApi.searchAudio(keyword, dir = rootDir).map { it.toSong() }
                 // M31：旧搜索不得覆盖新搜索的结果
                 if (generation != netdiskGeneration) return@launch
-                _netdiskSearchResults.value = files.map { it.toSong() }
+                _netdiskSearchResults.value = mergeNetdiskSearchResults(localHits, remote)
             } catch (e: Exception) {
                 e.rethrowIfCancellation()
                 AppLog.e("NetworkMusicViewModel", "searchBaidu error", e)
                 if (generation != netdiskGeneration) return@launch
-                _netdiskSearchResults.value = emptyList()
+                // 服务端失败时保留本地命中；原本一律置空 ⇒ 白算一遍索引
+                _netdiskSearchResults.value = localHits
             } finally {
                 if (generation == netdiskGeneration) _netdiskIsLoading.value = false
             }
         }
+    }
+
+    /** 本地索引命中 + 服务端命中，按 Song.id（`ntwk_baidu_<fsId>`）去重，本地在前 */
+    private fun mergeNetdiskSearchResults(local: List<Song>, remote: List<Song>): List<Song> {
+        if (local.isEmpty()) return remote
+        if (remote.isEmpty()) return local
+        val seen = mutableSetOf<String>()
+        return (local + remote).filter { seen.add(it.id) }
     }
 
     fun clearNetdiskSearch() {
