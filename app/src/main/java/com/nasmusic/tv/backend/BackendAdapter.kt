@@ -101,7 +101,11 @@ interface BackendAdapter {
     fun close() {}
 
     /**
-     * 获取所有专辑
+     * 获取所有专辑。
+     *
+     * ⛔ 失败必须抛异常，⛔ 不许吞成 `emptyList()`：调用方 `MainViewModel.loadLibrary`
+     * 靠异常构造 `UiState.Error`（含重试闭包）。返回空列表只表示「服务端确实没有专辑」。
+     * 分页过程中任一页失败也必须抛，不能把半截列表当成完整结果返回。
      */
     suspend fun getAlbums(): List<Album>
 
@@ -112,15 +116,33 @@ interface BackendAdapter {
 
     /**
      * 获取所有歌手
+     *
+     * ⛔ 失败必须抛异常，⛔ 不许吞成 `emptyList()`：调用方 `MainViewModel.loadArtists`
+     * 靠异常构造 `UiState.Error`（含重试闭包）。返回空列表只表示「服务端确实没有艺术家」。
      */
     suspend fun getArtists(): List<Artist>
 
     /**
-     * 获取歌手的歌曲
-     * @param artistId 艺术家 ID
-     * @param artistName 艺术家名称（可选，某些后端用于按名称查询避免 ArtistIds 不匹配）
+     * 获取歌手的歌曲。
+     *
+     * 参数契约（v2.39.23 统一）：`artistId` 与 `artistName` 由调用方**同时**传入。
+     * - 按 ID 查询的后端（Navidrome / Subsonic / 飞牛 / 刀鱼）：用 `artistId`，忽略名字；
+     * - 按名字查询的后端（Jellyfin）：用 `artistName`，忽略 ID。
+     *
+     * ⚠️ 调用方会为「同一人的多个原始 ID」逐个调用本方法。按名字查询的后端必须把
+     * [queriesArtistSongsByName] 覆盖为 true，调用方据此只发一次请求；否则同一条
+     * 按名查询会被重复发出 N 次，结果还要再靠 dedupeKey 去掉。
+     *
+     * 返回结果**不要求**后端自行按 artist 过滤（调用方有统一的 ArtistSplitter 过滤）；
+     * 但 `song.artist` 必须被正确填充，否则调用方按名过滤会整批丢弃。
      */
     suspend fun getArtistSongs(artistId: String, artistName: String? = null): List<Song>
+
+    /**
+     * 该后端是否按 artistName 查询歌曲（忽略 artistId）。默认 false。
+     * 仅 Jellyfin 为 true；调用方据此避免多 ID 重复请求。
+     */
+    val queriesArtistSongsByName: Boolean get() = false
 
     /**
      * 获取歌曲（支持分页）

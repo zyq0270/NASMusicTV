@@ -51,8 +51,9 @@ internal fun ArtistsTab(
     onOpenArtistDetail: ((String) -> Unit)? = null,
     listState: LazyGridState = rememberLazyGridState()
 ) {
-// 最终兜底：在渲染层按 id 去重，防止上游任何边缘情况导致重复
-    val dedupedArtists = remember(artists) { artists.distinctBy { it.id } }
+    // 渲染层兜底：必须与上游同一口径（normalizeKey）。按 id 去重挡不住
+    // 「同一个人来自 NAS / 本地 / 百度且 id 不同」的重复，只是看上去像兜底的空转。
+    val dedupedArtists = remember(artists) { artists.distinctBy { ArtistSplitter.normalizeKey(it.name) } }
     val firstItemFocusRequester = remember { FocusRequester() }
     val letterFocusRequester = remember { FocusRequester() }
     var focusedGridIndex by remember { mutableStateOf(-1) }
@@ -145,7 +146,11 @@ internal fun ArtistsTab(
                             // 数据行（key 加 index 防重名）
                             item(key = "artist_${index}_${artist.id}", span = { GridItemSpan(1) }) {
                                 val artistSongs = artistSongsMap[ArtistSplitter.normalizeKey(artist.name)] ?: emptyList()
-                                val songCount = artistSongs.size
+                                // 曲目数唯一口径：artist.songCount 由 updateArtistSongCounts
+                                // 用 NAS + 本地 + 百度全量歌曲反向统计。artistSongsMap 只含
+                                // NAS 已分页加载的歌曲，直接取 size 会让本地/百度艺术家恒显 0。
+                                // map 仍用于「是否有歌可播」和主要流派计算。
+                                val songCount = artist.songCount
                                 // Task 10: 计算专辑数和主要流派
                                 val albumCountForArtist = artist.albumCount
                                 val primaryGenreForArtist = remember(artistSongs) {
@@ -180,11 +185,16 @@ internal fun ArtistsTab(
             val activeLetters = remember(groupedItems) {
                 groupedItems.mapNotNull { (letter, _) -> letter }.toSet()
             }
+            // 当前字母 = 可见区域内「最后一个」分组头：滚到某组中部时该组的 header
+            // 可能已划出屏幕，只取第一个可见 item 会让高亮变 null。
             val currentLetter by remember {
                 derivedStateOf {
-                    listState.layoutInfo.visibleItemsInfo.firstOrNull()?.key?.let { key ->
-                        if (key is String && key.startsWith("header_")) key.removePrefix("header_").firstOrNull() else null
-                    }
+                    listState.layoutInfo.visibleItemsInfo
+                        .mapNotNull { info ->
+                            (info.key as? String)?.takeIf { it.startsWith("header_") }
+                                ?.removePrefix("header_")?.firstOrNull()
+                        }
+                        .lastOrNull()
                 }
             }
             SideLetterIndex(

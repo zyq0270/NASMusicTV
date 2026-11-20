@@ -11,6 +11,7 @@ import com.nasmusic.tv.data.model.Song
 import com.nasmusic.tv.data.model.SongTechnicalInfo
 import com.nasmusic.tv.data.model.VersionInfo
 import com.nasmusic.tv.util.AppLog
+import com.nasmusic.tv.util.ArtistSplitter
 import com.nasmusic.tv.util.EncodingUtils
 import com.nasmusic.tv.util.RetryConfig
 import com.nasmusic.tv.util.UrlSanitizer
@@ -157,10 +158,14 @@ class NavidromeAdapter : BackendAdapter {
                 val url = buildRestUrl("getAlbumList2") +
                         "&type=alphabeticalByName&size=$pageSize&offset=$offset"
 
-                val json = executeRequest(url) ?: break
+                // 无响应 / 缺 albumList2 是请求失败，不是「已经翻完」：
+                // 否则半截专辑列表会被当成完整曲库，上层也拿不到错误态。
+                val json = executeRequest(url)
+                    ?: throw IllegalStateException("Navidrome getAlbums 第 ${offset / pageSize + 1} 页无响应")
                 val subsonic = json.getAsJsonObject("subsonic-response")
                 val albumList = subsonic?.getAsJsonObject("albumList2")
-                val albums = albumList?.getAsJsonArray("album") ?: break
+                val albums = albumList?.getAsJsonArray("album")
+                    ?: throw IllegalStateException("Navidrome getAlbums 缺少 albumList2")
 
                 if (albums.size() == 0) break
 
@@ -193,7 +198,7 @@ class NavidromeAdapter : BackendAdapter {
             allAlbums
         } catch (e: Exception) {
             AppLog.e("NavidromeAdapter", "getAlbums failed", e)
-            emptyList()
+            throw e
         }
     }
 
@@ -247,7 +252,9 @@ class NavidromeAdapter : BackendAdapter {
         try {
             val url = buildRestUrl("getArtists")
 
-            val json = executeRequest(url) ?: return@withContext emptyList<Artist>()
+            // 无响应 = 请求失败，不是「没有艺术家」；交给上层产生 UiState.Error
+            val json = executeRequest(url)
+                ?: throw IllegalStateException("Navidrome getArtists 无响应")
             val subsonic = json.getAsJsonObject("subsonic-response")
             val artistsWrap = subsonic?.getAsJsonObject("artists")
             val indices = artistsWrap?.getAsJsonArray("index")
@@ -274,7 +281,7 @@ class NavidromeAdapter : BackendAdapter {
             result
         } catch (e: Exception) {
             AppLog.e("NavidromeAdapter", "getArtists failed", e)
-            emptyList()
+            throw e
         }
     }
 
@@ -295,6 +302,24 @@ class NavidromeAdapter : BackendAdapter {
                         getAlbumSongs(albumId)
                     }
                 }.awaitAll().flatten()
+            }.toMutableList()
+
+            // ⛔ getArtist 只返回「album artist = 该歌手」的专辑。合辑里 track artist
+            // 是该歌手但 album artist 不是的歌不会出现在这些专辑中 ⇒ 详情页漏歌。
+            // 用 search3 按名字补漏，再按 ArtistSplitter 精确过滤 artist 字段（search3 的
+            // query 会匹配标题/专辑名，不过滤会混入无关歌曲）。按 id 去重，补漏失败不影响主结果。
+            if (!artistName.isNullOrBlank()) {
+                val queryName = artistName // 先取本地 val：lambda 内对可空参数的智能转换不可靠
+                try {
+                    val seenIds = allSongs.map { it.id }.toSet()
+                    val supplementary = searchSongs(queryName)
+                        .filter { ArtistSplitter.containsArtist(it.artist, queryName) }
+                        .filterNot { it.id in seenIds }
+                    allSongs.addAll(supplementary)
+                    AppLog.d("NavidromeAdapter", "getArtistSongs($artistId): albums=${albums.size()} songs=${allSongs.size} supplementary=${supplementary.size}")
+                } catch (e: Exception) {
+                    AppLog.w("NavidromeAdapter", "getArtistSongs search3 补漏失败: ${e.message?.take(50)}")
+                }
             }
             allSongs
         } catch (e: Exception) {

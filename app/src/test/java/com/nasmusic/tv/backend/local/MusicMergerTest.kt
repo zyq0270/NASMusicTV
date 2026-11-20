@@ -1,5 +1,6 @@
 package com.nasmusic.tv.backend.local
 
+import com.nasmusic.tv.data.model.Album
 import com.nasmusic.tv.data.model.Artist
 import com.nasmusic.tv.data.model.Song
 import org.junit.Assert.assertEquals
@@ -95,5 +96,62 @@ class MusicMergerTest {
         val merged = MusicMerger.mergeLibrarySongs(nas, emptyList(), emptyList())
 
         assertSame(nas, merged)
+    }
+
+    @Test
+    fun `mergeAlbums keeps same-name albums from different artists separate`() {
+        val merged = MusicMerger.mergeAlbums(
+            nasAlbums = listOf(
+                Album(id = "nas_a", name = "爱情", artist = "甲", songCount = 3),
+                Album(id = "nas_b", name = "爱情", artist = "乙", songCount = 5)
+            ),
+            localAlbums = emptyList()
+        )
+
+        assertEquals(2, merged.size)
+        val byArtist = merged.associateBy { it.artist }
+        assertEquals(3, byArtist["甲"]!!.songCount)
+        assertEquals(5, byArtist["乙"]!!.songCount)
+        assertEquals(setOf("nas_a"), byArtist["甲"]!!.sourceIds.toSet())
+        assertEquals(setOf("nas_b"), byArtist["乙"]!!.sourceIds.toSet())
+    }
+
+    @Test
+    fun `mergeAlbums merges blank-artist source into named group and keeps all source ids`() {
+        val merged = MusicMerger.mergeAlbums(
+            nasAlbums = listOf(Album(id = "nas_love", name = "爱情", artist = "甲", songCount = 4)),
+            localAlbums = emptyList(),
+            baiduAlbums = listOf(Album(id = "baidu_love", name = "爱情", artist = "", songCount = 6))
+        )
+
+        assertEquals(1, merged.size)
+        assertEquals("甲", merged.first().artist)
+        assertEquals(10, merged.first().songCount)
+        assertEquals(setOf("nas_love", "baidu_love"), merged.first().sourceIds.toSet())
+    }
+
+    @Test
+    fun `buildLocalAlbums generates distinct ids for same-name different-artist albums`() {
+        val albums = MusicMerger.buildLocalAlbums(
+            listOf(song("l1", "甲", "爱情"), song("l2", "乙", "爱情"))
+        )
+
+        assertEquals(2, albums.size)
+        assertEquals(2, albums.map { it.id }.distinct().size)
+        assertTrue(albums.all { it.id.startsWith("local_album_") })
+    }
+
+    @Test
+    fun `buildBaiduAlbums generates distinct ids for same-name different-artist albums`() {
+        val albums = MusicMerger.buildBaiduAlbums(
+            listOf(
+                Song(id = "b1", title = "t1", artist = "甲", path = "/音乐/甲/爱情/01.mp3"),
+                Song(id = "b2", title = "t2", artist = "乙", path = "/音乐/乙/爱情/01.mp3")
+            )
+        )
+
+        assertEquals(2, albums.size)
+        assertEquals(2, albums.map { it.id }.distinct().size)
+        assertTrue(albums.all { it.id.startsWith("baidu_album_") })
     }
 }

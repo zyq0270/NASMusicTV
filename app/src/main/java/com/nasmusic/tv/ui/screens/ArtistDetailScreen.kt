@@ -44,6 +44,9 @@ import com.nasmusic.tv.ui.components.FocusableSurface
 import com.nasmusic.tv.ui.components.song.UnifiedSongRow
 import com.nasmusic.tv.ui.components.song.SongRowMode
 import com.nasmusic.tv.ui.components.common.CoverImage
+import com.nasmusic.tv.ui.components.common.EmptyState
+import com.nasmusic.tv.ui.components.common.ErrorDisplay
+import com.nasmusic.tv.ui.components.common.LoadingIndicator
 import kotlinx.coroutines.launch
 import com.nasmusic.tv.backend.download.model.stateOfSong
 
@@ -69,6 +72,9 @@ fun ArtistDetailScreen(
     downloadStates: Map<String, DownloadState> = emptyMap(),
     onDownloadSong: (Song) -> Unit = {},
     onDeleteDownloadSong: ((Song) -> Unit)? = null,
+    isLoading: Boolean = false,
+    errorMessage: String? = null,
+    onRetry: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val listState = rememberLazyListState()
@@ -201,29 +207,44 @@ fun ArtistDetailScreen(
 
         // 歌曲列表（两种形态共用同一份实现）
         val songList: @Composable (Modifier) -> Unit = { m ->
-            LazyColumn(
-                modifier = m,
-                state = listState,
-                verticalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                // M29：歌单/专辑/电台里同一首歌完全可能重复出现，只用 song.id 做 key 会撞
+            when {
+                // ⛔ 三态：原先详情页首次进入或失败时都是空白列表，无从判断是慢还是坏了。
+                // 已有旧缓存（songs 非空）时继续显示旧数据，不用 loading/error 覆盖 ——
+                // 与 loadArtistSongs 故意不清空缓存的策略配套。
+                isLoading && songs.isEmpty() -> LoadingIndicator(modifier = m)
+                errorMessage != null && songs.isEmpty() -> ErrorDisplay(
+                    message = errorMessage,
+                    onRetry = onRetry,
+                    modifier = m
+                )
+                songs.isEmpty() -> EmptyState(
+                    message = stringResource(R.string.library_no_songs),
+                    modifier = m
+                )
+                else -> LazyColumn(
+                    modifier = m,
+                    state = listState,
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    // M29：歌单/专辑/电台里同一首歌完全可能重复出现，只用 song.id 做 key 会撞
                     // 「Key was already used」直接崩溃 ⇒ 索引前缀保证唯一。
                     itemsIndexed(songs, key = { index, song -> "${index}_${song.id}" }) { index, song ->
-                    UnifiedSongRow(
-                        song = song,
-                        onClick = { onPlaySong(song) },
-                        mode = SongRowMode.MODE_ROW,
-                        index = index,
-                        isFavorited = song.id in favoriteIds,
-                        onToggleFavorite = { onToggleFavorite(song) },
-                        isInQueue = song.id in queueSongIds,
-                        onToggleQueue = { onToggleQueue(song) },
-                        onAddToPlaylist = { onAddToPlaylist(song) },
-                        downloadState = downloadStates.stateOfSong(song),
-                        onDownload = { onDownloadSong(song) },
-                        onDeleteDownload = onDeleteDownloadSong?.let { cb -> { cb(song) } },
-                        focusRequester = if (index == 0) firstItemFocusRequester else null
-                    )
+                        UnifiedSongRow(
+                            song = song,
+                            onClick = { onPlaySong(song) },
+                            mode = SongRowMode.MODE_ROW,
+                            index = index,
+                            isFavorited = song.id in favoriteIds,
+                            onToggleFavorite = { onToggleFavorite(song) },
+                            isInQueue = song.id in queueSongIds,
+                            onToggleQueue = { onToggleQueue(song) },
+                            onAddToPlaylist = { onAddToPlaylist(song) },
+                            downloadState = downloadStates.stateOfSong(song),
+                            onDownload = { onDownloadSong(song) },
+                            onDeleteDownload = onDeleteDownloadSong?.let { cb -> { cb(song) } },
+                            focusRequester = if (index == 0) firstItemFocusRequester else null
+                        )
+                    }
                 }
             }
         }

@@ -41,16 +41,26 @@ internal fun LibraryBranch(
                     val albums by viewModel.albums.collectAsState(initial = UiState.Loading as UiState<List<Album>>)
                     val genres by viewModel.genres.collectAsState(initial = UiState.Success(emptyList()))
                     val favoriteIds by viewModel.favoriteIds.collectAsState(initial = emptySet())
-                    val artistsState by viewModel.artists.collectAsState(initial = UiState.Success(emptyList()))
+                    val artistsState by viewModel.artists.collectAsState(initial = UiState.Loading as UiState<List<Artist>>)
                     val mergedAlbumList by viewModel.mergedAlbums.collectAsState(initial = emptyList())
                     val mergedArtistsList by viewModel.mergedArtists.collectAsState(initial = emptyList())
                     val yearsState by viewModel.years.collectAsState(initial = UiState.Success(emptyList()))
+                    // ALBUMS Tab 的骨架屏/错误态必须读 albums 自己的 UiState：
+                    // _isLibraryLoading 只覆盖「派发异步」的瞬间，getAlbums 可能耗时数十秒。
+                    // ⚠️ NAS 关时原始库存流不清空（S2 统计口径），Loading 是历史残留，不能据此显示骨架。
+                    val nasAlbumsVisible = viewModel.sourceVisibility.isVisible(MusicSourceType.NAS)
+                    val albumLoadState = albums.takeIf { nasAlbumsVisible }
+                    val isAlbumsLoading = albumLoadState is UiState.Loading
+                    val albumError = albumLoadState as? UiState.Error
                     // 本地音乐总开关（§5.4）：visibleLocalSongs 在开关关闭时仅含已下载曲目
                     val localSongsList by viewModel.visibleLocalSongs.collectAsState(initial = emptyList())
                     val searchResultsState by viewModel.searchVM.searchResults.collectAsState(initial = UiState.Success(emptyList()))
                     val albumList = albums.dataOrNull() ?: emptyList()
                     val genreList = genres.dataOrNull() ?: emptyList()
-                    val artistsList = artistsState.dataOrNull() ?: emptyList()
+                    // ARTISTS Tab 的骨架屏/错误态必须读 artists 自己的 UiState：
+                    // isLoading 与 isLibraryLoading 只描述 songs，艺术家请求期间两者都是 false。
+                    val isArtistsLoading = artistsState is UiState.Loading
+                    val artistError = artistsState as? UiState.Error
                     val yearsList = yearsState.dataOrNull() ?: emptyList()
                     // 可见歌曲分页（方案 §3.3 G1 · 合成点已迁入 VM）：**合并在 VM 侧完成**，UI 只做透传。
                     // ⛔ 不要在 UI 层再做一次歌曲合并 —— v2 把合并钉在本文件的一个 `remember(...)` 里，
@@ -182,6 +192,12 @@ val discoverCurrentDimensionValues = remember(browseSelections) {
                         onLoadSongsNextPage = { viewModel.loadSongsNextPage() },
                         onRetrySongsLoad = { viewModel.retrySongsLoad() },
                         onLoadArtists = { viewModel.loadArtists() },
+                        isAlbumsLoading = isAlbumsLoading,
+                        albumsErrorText = albumError?.message,
+                        onRetryAlbumsLoad = albumError?.retry ?: { viewModel.refreshLibrary() },
+                        isArtistsLoading = isArtistsLoading,
+                        artistErrorText = artistError?.message,
+                        onRetryArtistsLoad = artistError?.retry ?: { viewModel.loadArtists() },
                         onLoadYears = { viewModel.loadYears() },
                         onSearch = { query -> viewModel.searchSongsOnServer(query) },
                         onClearSearch = { viewModel.searchVM.clearSearch() },

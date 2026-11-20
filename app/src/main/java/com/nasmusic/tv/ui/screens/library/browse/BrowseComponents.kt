@@ -298,14 +298,16 @@ internal fun ButtonChip(text: String, onClick: () -> Unit, modifier: Modifier = 
  * - **加载失败（v2.39.3）** → 显示具体原因 + 「重试」按钮，而不是笼统的「暂无歌曲」
  *
  * @param errorText 非空时优先展示该错误（已本地化，如「服务端返回错误：code=1000xx」）
- * @param onRetry 非空时展示「重试」按钮；通常由 ViewModel.retrySongsLoad 提供
+ * @param onRetry 非空时展示「重试」按钮；通常由 ViewModel 的 retry 闭包提供
+ * @param errorTitleRes 错误态标题文案（SONGS 与 ARTISTS 各用自己的，避免艺术家失败显示「歌曲加载失败」）
  */
 @Composable
 internal fun EmptyHint(
     isConnected: Boolean,
     tab: LibraryTab = LibraryTab.ALBUMS,
     errorText: String? = null,
-    onRetry: (() -> Unit)? = null
+    onRetry: (() -> Unit)? = null,
+    errorTitleRes: Int = R.string.library_songs_load_failed
 ) {
     // v2.39.3：错误态优先于「库为空」——服务端有 1541 首却拉到 0 条时，
     // 用户需要看到原因（code/msg），否则完全无从反馈。
@@ -313,7 +315,7 @@ internal fun EmptyHint(
     val (icon, title, subtitle) = when {
         hasError -> Triple(
             Icons.Default.Warning,
-            stringResource(R.string.library_songs_load_failed, errorText!!),
+            stringResource(errorTitleRes, errorText!!),
             ""
         )
         !isConnected -> Triple(

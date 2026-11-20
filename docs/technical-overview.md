@@ -28857,3 +28857,49 @@ A 槽死分支（产品口径「切换完成后显示当前图日期」，同步
 ReviewFix S05-08）、CacheInventory 门禁均已转绿；`testDebugUnitTest` 全量 3139 例中仅
 `PrivateOverlayDriftGateTest` 1 条既有红保留（根因见上第 4 条，须在私有分支补字段，main 上无法安全消除）。
 `assembleRelease` 见下方收口。未 push 任何远端；仅本地提交。
+
+### 10.414 艺术家与专辑列表链路修复（v2.39.23 - 2026-11-20）
+
+**背景**：在 v2.39.22 基线上先做「曲库 → 专辑 Tab 如何列出所有专辑」只读链路分析，确认主链
+（三路取数 → VM 合并 → UI 透传 → A-Z 分组渲染）成立，但有四处实质缺陷；随后所有者裁定「全部修复」，
+与同工作树尚未收口的艺术家列表/详情修复合并到 v2.39.23 一次发布。
+
+**专辑链四处根因与修法**：
+
+1. **分页截断**：`DaoliyuAdapter.getAlbums` 固定 `page=1&limit=500`，>500 张专辑静默丢失。
+   改为 `while (maxPages-- > 0)` 逐页拉取，`MAX_ALBUM_PAGES=100`（5 万张安全上限），
+   无响应/缺 data 抛 `IllegalStateException` 而非 `break`。
+2. **错误态不可达**：五个后端 `getAlbums` 全把异常吞成 `emptyList()`（飞牛 `getOrDefault`），
+   `MainViewModel.loadLibrary` 构造 `UiState.Error(retry)` 的分支实际不可达，UI 只显示「暂无专辑」。
+   `BackendAdapter.getAlbums` 契约写明「失败必须抛、分页中任一页失败不得返回半截列表」；
+   Jellyfin/Navidrome/Subsonic/Daoliyu 的 `?: break` 改抛异常 + catch 重抛，飞牛清 `lastFailure`
+   后 `getOrThrow()` 并按失败记录抛错。
+3. **骨架屏提前结束**：`loadLibrary:1884` 派发完异步即 `_isLibraryLoading=false`，
+   而 ALBUMS Tab 骨架只看 `isLoading || isLibraryLoading`；`_albums=Loading` 又经
+   `updateMergedData` 把 NAS 段清空 ⇒ 大曲库拉取期间先闪「暂无专辑」。`LibraryBranch` 新增
+   `isAlbumsLoading/albumsErrorText/onRetryAlbumsLoad`，由 `albums` 自身 UiState 驱动；
+   ⚠️ NAS 关时原始库存流不清空（S2 统计口径），故用 `sourceVisibility` 门掉历史 Loading，
+   避免骨架永不消失。
+4. **同名不同歌手归并**：`MusicMerger.mergeAlbums` 原键仅为归一化专辑名。改为先按专辑名归堆，
+   再按归一化 artist 分组；artist 为空的条目并入同堆中曲目数最多的具名分组（保留 B20 的
+   NAS + 百度同名专辑合并，百度侧常无 artist）。`ArtistSplitter.albumKey(name, artist)` 作为列表与
+   搜索态的共用去重键；本地/百度派生 id 同步带 artist，避免 `_albumSongsCache` 键串。
+   `MainViewModel.filterSongsByAlbumName` 与 `BaiduFileIndexCache.songsByAlbumName` 增加可选
+   artist 参数：已知不同 artist 的歌排除，artist 缺失的候选保留（元数据缺失不能反证归属）。
+
+**艺术家链修复摘要**：`artists` UiState 下沉驱动骨架/错误/重试；五个后端 `getArtists` 改为失败抛异常；
+Jellyfin 按名查询只发一次请求、fields 补齐并分页；Navidrome/Subsonic 用 `search3` 补合辑漏歌；
+详情歌曲按 `专辑 > 碟号 > 音轨号 > 标题` 统一排序；缓存命中短路 + 按名字的 loading/error 状态。
+
+**兼容性影响**：仅调整展示与取数口径，无存储 schema、无网络协议变更；关 NAS 时 `albums` 原始库存流
+仍不清空，S2 首页统计数字不受影响。同名不同歌手的专辑由 1 张卡变 2 张卡（此前为错误合并）。
+
+**涉及文件**：`BackendAdapter`、5 个 backend impl、`MusicMerger`、`ArtistSplitter`、
+`BaiduFileIndexCache`、`MainViewModel`、`LibraryBranch`、`LibraryScreen`、`app/build.gradle.kts`、
+`CHANGELOG.md`、本章；新增 `AlbumsListFlowGateTest` / `ArtistDetailFlowGateTest` /
+`ArtistsListFlowGateTest`，扩展 `MusicMergerTest`。
+
+**验证边界**：本机（zyq02）无 JBR / Android SDK，`assembleRelease` 与 `testDebugUnitTest` 未实跑；
+已用 `logs_temp/albums_flow_verify_2026-11-20.py` 做等价源码文本门禁与括号平衡检查，专辑链判据全部 PASS
+（`MainViewModel` 的括号计数与 HEAD 基线同为差 1，属字符串模板计数误报，非本轮引入）。CI 首次运行需重点看
+`AlbumsListFlowGateTest`、三组艺术家门禁与 `MusicMergerTest`。未 push；仅本地提交。

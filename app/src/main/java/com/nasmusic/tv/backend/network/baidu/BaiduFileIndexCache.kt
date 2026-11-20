@@ -231,15 +231,18 @@ class BaiduFileIndexCache(
      * 按专辑名（目录名）过滤索引条目，只对匹配项创建 Song 对象。
      *
      * 匹配逻辑与 [MainViewModel.filterSongsByAlbumName] 一致：
-     * - song.album 精确匹配（忽略大小写）
-     * - album 字段为空时，取 path 倒数第二段目录名匹配
+     * - 专辑名取 path 倒数第二段目录名（entry 没有 album 字段）
+     * - 传入 artistName 时，按归一化 artist 排除「同名但不同歌手」的歌曲；
+     *   entry 缺 artist 时保留（元数据缺失不能反证归属）
      *
      * @param albumName 专辑名（原始大小写，内部统一 lowercase 比较）
+     * @param artistName 专辑艺术家，可空；为空时只按目录名匹配（兼容旧调用）
      */
-    fun songsByAlbumName(albumName: String): List<Song> {
+    fun songsByAlbumName(albumName: String, artistName: String? = null): List<Song> {
         val index = load() ?: return emptyList()
         val name = albumName.lowercase().trim()
         if (name.isBlank()) return emptyList()
+        val artistKey = artistName?.let { com.nasmusic.tv.util.ArtistSplitter.normalizeKey(it) }.orEmpty()
         val seen = mutableSetOf<Long>()
         return index.entries
             .filter { seen.add(it.fsId) }
@@ -249,7 +252,10 @@ class BaiduFileIndexCache(
                 val segments = path.split("/")
                 if (segments.size < 2) return@filter false
                 val dirName = segments.getOrNull(segments.size - 2)
-                dirName?.lowercase()?.trim() == name
+                if (dirName?.lowercase()?.trim() != name) return@filter false
+                val rawArtist = entry.artist.orEmpty()
+                artistKey.isBlank() || rawArtist.isBlank() ||
+                    com.nasmusic.tv.util.ArtistSplitter.containsArtistWithKey(rawArtist, artistKey)
             }
             .map { it.toSong(coverUrl = it.coverUrl) }
     }

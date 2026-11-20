@@ -202,15 +202,27 @@ class DaoliyuAdapter : BackendAdapter {
 
     // ==================== 专辑 ====================
 
-    /** ⚠️ INFERRED: GET /api/albums?page=1&limit=500 */
+    /** ⚠️ INFERRED: GET /api/albums?page=N&limit=500 —— 全量分页，失败必须抛给上层 */
     override suspend fun getAlbums(): List<Album> = withContext(Dispatchers.IO) {
         try {
-            val json = executeGet("$baseUrl/api/albums?page=1&limit=$PAGE_SIZE") ?: return@withContext emptyList()
-            val data = json.getAsJsonArray("data") ?: json.getAsJsonArray("albums") ?: return@withContext emptyList()
-            data.mapNotNull { parseAlbum(it.asJsonObject) }
+            val allAlbums = mutableListOf<Album>()
+            var page = 1
+            var maxPages = MAX_ALBUM_PAGES
+            while (maxPages-- > 0) {
+                // 无响应 = 本次请求失败，不是「这一页没有专辑」：吞掉会把失败伪装成空曲库。
+                val json = executeGet("$baseUrl/api/albums?page=$page&limit=$PAGE_SIZE")
+                    ?: throw IllegalStateException("Daoliyu getAlbums 第 $page 页无响应")
+                val data = json.getAsJsonArray("data") ?: json.getAsJsonArray("albums")
+                    ?: throw IllegalStateException("Daoliyu getAlbums 第 $page 页缺少 data")
+                if (data.size() == 0) break
+                allAlbums.addAll(data.mapNotNull { parseAlbum(it.asJsonObject) })
+                if (data.size() < PAGE_SIZE) break
+                page++
+            }
+            allAlbums
         } catch (e: Exception) {
             AppLog.e(TAG, "getAlbums failed", e)
-            emptyList()
+            throw e
         }
     }
 
@@ -233,12 +245,14 @@ class DaoliyuAdapter : BackendAdapter {
     /** ⚠️ INFERRED: GET /api/artists?page=1&limit=500 */
     override suspend fun getArtists(): List<Artist> = withContext(Dispatchers.IO) {
         try {
-            val json = executeGet("$baseUrl/api/artists?page=1&limit=$PAGE_SIZE") ?: return@withContext emptyList()
+            // 无响应 = 请求失败，不是「没有艺术家」；交给上层产生 UiState.Error
+            val json = executeGet("$baseUrl/api/artists?page=1&limit=$PAGE_SIZE")
+                ?: throw IllegalStateException("Daoliyu getArtists 无响应")
             val data = json.getAsJsonArray("data") ?: json.getAsJsonArray("artists") ?: return@withContext emptyList()
             data.mapNotNull { parseArtist(it.asJsonObject) }
         } catch (e: Exception) {
             AppLog.e(TAG, "getArtists failed", e)
-            emptyList()
+            throw e
         }
     }
 
@@ -568,6 +582,8 @@ class DaoliyuAdapter : BackendAdapter {
     companion object {
         private const val TAG = "DaoliyuAdapter"
         private const val PAGE_SIZE = 500
+        /** 安全上限：最多 100 页 × 500 = 5 万张专辑，防止异常服务端导致无限翻页。 */
+        private const val MAX_ALBUM_PAGES = 100
         private const val SONG_ID_PREFIX = "daoliyu_"
         /** M1 修复：duration 单位启发式阈值（见 parseDurationMs KDoc） */
         internal const val DURATION_MS_HEURISTIC_THRESHOLD = 100_000L

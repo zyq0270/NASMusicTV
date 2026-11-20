@@ -596,9 +596,17 @@ class FeiniuAdapter(private val appContext: Context? = null) : BackendAdapter {
 
     /** `GET album/list?page&size&sort=newTrackAddedAt,desc` */
     override suspend fun getAlbums(): List<Album> = withContext(Dispatchers.IO) {
-        runCatchingSuspend {
+        // 与 getArtists / getSongs 同口径：失败必须抛，⛔ 不能吞成空列表让 UI 误判「没有专辑」。
+        lastFailure = null
+        val result = runCatchingSuspend {
             fetchAllPages("album/list", "sort" to "newTrackAddedAt,desc") { parseAlbum(it) }
-        }.onFailure { AppLog.e(TAG, "getAlbums failed", it) }.getOrDefault(emptyList())
+        }.onFailure { AppLog.e(TAG, "getAlbums failed", it) }.getOrThrow()
+        // fetchPageEnvelope 失败时内部 break 并返回半截列表：只要有失败记录就抛，
+        // 不能把半截结果当完整曲库（分页中任一页失败都必须让上层看到错误）。
+        if (lastFailure != null) {
+            throw IllegalStateException("Feiniu getAlbums 失败：$lastErrorDetail")
+        }
+        result
     }
 
     /** `GET track/album-detail/list?albumGUID=&sort=trackNo,asc` */
@@ -619,9 +627,17 @@ class FeiniuAdapter(private val appContext: Context? = null) : BackendAdapter {
 
     /** `GET artist/list?page&size&sort=trackCount,desc` */
     override suspend fun getArtists(): List<Artist> = withContext(Dispatchers.IO) {
-        runCatchingSuspend {
+        // 与 getSongs 同口径：取数前清掉上次失败，避免旧原因被当成这次的错误
+        lastFailure = null
+        val result = runCatchingSuspend {
             fetchAllPages("artist/list", "sort" to "trackCount,desc") { parseArtist(it) }
-        }.onFailure { AppLog.e(TAG, "getArtists failed", it) }.getOrDefault(emptyList())
+        }.onFailure { AppLog.e(TAG, "getArtists failed", it) }.getOrThrow()
+        // fetchPageEnvelope 失败时内部 break 并返回空列表：不发信号的话失败会被
+        // 上层当成 Success(emptyList())，艺术家页只显示「暂无艺术家」。
+        if (result.isEmpty() && lastFailure != null) {
+            throw IllegalStateException("Feiniu getArtists 失败：$lastErrorDetail")
+        }
+        result
     }
 
     /** `GET track/artist-detail/list?artistGUID=&sort=createdAt,desc` */

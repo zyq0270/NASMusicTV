@@ -46,6 +46,11 @@ internal fun ArtistDetailBranch(
                         }
                     }
                     val favoriteIds by viewModel.favoriteIds.collectAsState(initial = emptySet())
+                    // 详情三态：按当前歌手名从 ViewModel 的按名状态中取值。
+                    val detailLoading by viewModel.artistDetailLoading.collectAsState(initial = emptySet())
+                    val detailErrors by viewModel.artistDetailErrors.collectAsState(initial = emptyMap())
+                    val isDetailLoading = selectedArtistName?.let { it in detailLoading } ?: false
+                    val detailError = selectedArtistName?.let { detailErrors[it] }
                     if (selectedArtistName != null) {
                         ArtistDetailScreen(
                             artist = selectedArtist,
@@ -67,7 +72,10 @@ internal fun ArtistDetailBranch(
                             onAddToPlaylist = { song -> onPickSongForPlaylist(song) },
                             downloadStates = songDownloadStates,
                             onDownloadSong = { song -> viewModel.downloadVM.downloadSong(song) },
-                            onDeleteDownloadSong = { song -> viewModel.downloadVM.deleteDownload(song) }
+                            onDeleteDownloadSong = { song -> viewModel.downloadVM.deleteDownload(song) },
+                            isLoading = isDetailLoading,
+                            errorMessage = detailError,
+                            onRetry = { selectedArtistName?.let { viewModel.openArtistDetail(it, forceReload = true) } }
                         )
                     }
 }

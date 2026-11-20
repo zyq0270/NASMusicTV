@@ -2154,6 +2154,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
         // ⛔ 原始库存流 `_artists` 不动（S2 统计读它）；合并侧的 NAS 段由 updateMergedData 置空。
         if (!sourceVisibility.isVisible(MusicSourceType.NAS)) {
             AppLog.d("NASMusic", "loadArtists: NAS 已关闭，跳过请求")
+            // ⛔ 必须落到 Success(emptyList())：否则 _artists 永远停在 Loading，
+            // LibraryBranch 据此显示的骨架屏再也不会消失（关 NAS 时本地/百度艺术家
+            // 仍由 updateMergedData 合成，NAS 段传空即可，统计读原始流也不受影响）。
+            if (_artists.value !is UiState.Success) {
+                _artists.value = UiState.Success(emptyList())
+            }
             return
         }
         if (_artists.value is UiState.Success && (_artists.value as UiState.Success).data.isNotEmpty()) return
@@ -2205,7 +2211,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
                 e.rethrowIfCancellation()
                 AppLog.e("NASMusic", "loadArtists failed", e)
                 _artists.value = UiState.Error(
-                    message = getApplication<Application>().getString(R.string.load_favorites_error, e.message?.take(50)),
+                    message = getApplication<Application>().getString(R.string.library_artists_load_failed, e.message?.take(50)),
                     retry = { loadArtists() }
                 )
             }
@@ -3046,10 +3052,19 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
     /**
      * 按专辑名（含百度 path 倒数第二段目录名）从候选歌曲中筛选同名专辑歌曲。
      * 复用于本地 / 百度 / 无 NAS 三种来源，统一匹配逻辑。
+     *
+     * ⚠️ 同名不同歌手的专辑已在列表层拆成两张卡，详情/播放也必须按 artist 再过滤，
+     * 否则点《爱情》(甲) 仍会把《爱情》(乙) 的歌一起播了。
+     * artist 为空的候选不能反证「不是这张专辑」（百度/本地老数据常缺 artist），予以保留。
      */
-    private fun filterSongsByAlbumName(albumName: String, candidates: List<Song>): List<Song> {
+    private fun filterSongsByAlbumName(
+        albumName: String,
+        candidates: List<Song>,
+        albumArtist: String? = null
+    ): List<Song> {
         val name = albumName.lowercase().trim()
         if (name.isBlank()) return emptyList()
+        val artistKey = albumArtist?.let { ArtistSplitter.normalizeKey(it) }.orEmpty()
         return candidates.filter { song ->
             val songAlbum = song.album.lowercase().trim()
             val matchAlbum = songAlbum == name
@@ -3058,6 +3073,9 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
                 segments.getOrNull(segments.size - 2)?.lowercase()?.trim() == name
             }
             matchAlbum || matchPath
+        }.filter { song ->
+            artistKey.isBlank() || song.artist.isBlank() ||
+                ArtistSplitter.containsArtistWithKey(song.artist, artistKey)
         }
     }
 
@@ -3084,6 +3102,7 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
         albumId: String
     ): Pair<List<Song>, Exception?> {
         val albumName = album?.name?.lowercase()?.trim().orEmpty()
+        val albumArtist = album?.artist
         // 合并专辑携带多源 id；单源（旧数据/未合并）回退到 albumId，向后兼容
         val sources = album?.sourceIds?.takeIf { it.isNotEmpty() } ?: listOf(albumId)
         val nasVisible = sourceVisibility.isVisible(MusicSourceType.NAS)
@@ -3096,15 +3115,15 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
         for (src in sources) {
             when {
                 src.startsWith("local_album_") -> {
-                    // 本地专辑详情：同时列出本地 + 百度同名歌（保留原行为）
-                    collected += filterSongsByAlbumName(albumName, visibleLocalSongsNow())
+                    // 本地专辑详情：同时列出本地 + 百度同名歌；按 artist 排除同名不同歌手
+                    collected += filterSongsByAlbumName(albumName, visibleLocalSongsNow(), albumArtist)
                     if (baiduVisible) {
-                        collected += baiduIndexCache.songsByAlbumName(albumName)
+                        collected += baiduIndexCache.songsByAlbumName(albumName, albumArtist)
                     }
                 }
                 src.startsWith("baidu_album_") -> {
                     if (baiduVisible) {
-                        collected += baiduIndexCache.songsByAlbumName(albumName)
+                        collected += baiduIndexCache.songsByAlbumName(albumName, albumArtist)
                     }
                 }
                 else -> {
@@ -3121,9 +3140,11 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
                         }
                     } else {
                         // 无 NAS 连接：用已加载歌曲按名兜底（保留原无 NAS 行为）
-                        val baiduFallback = if (baiduVisible) baiduIndexCache.songsByAlbumName(albumName) else emptyList()
+                        val baiduFallback = if (baiduVisible) {
+                            baiduIndexCache.songsByAlbumName(albumName, albumArtist)
+                        } else emptyList()
                         val candidates = visibleLocalSongsNow() + baiduFallback + _songsPaging.value.songs
-                        collected += filterSongsByAlbumName(albumName, candidates)
+                        collected += filterSongsByAlbumName(albumName, candidates, albumArtist)
                     }
                 }
             }
@@ -3181,14 +3202,44 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
         navVM.navigateTo(Screen.AlbumDetail)
     }
 
-    fun openArtistDetail(artistName: String) {
+    fun openArtistDetail(artistName: String, forceReload: Boolean = false) {
         _selectedArtistName.value = artistName
-        loadArtistSongs(artistName)
+        // ⛔ 缓存命中直接短路：原先每次进入详情都重发五源（含 10-15s Meting），
+        // 快速反复进出会并发多次。下拉/重试由 onRetry 传 forceReload=true 显式刷新。
+        if (forceReload || !_artistDetailSongsCache.value.containsKey(artistName)) {
+            loadArtistSongs(artistName)
+        }
         navVM.navigateTo(Screen.ArtistDetail)
+    }
+
+    /**
+     * 统一的「点歌手名」入口：曲库里存在的歌手进详情页；网络歌手等曲库外的名字仍走搜索。
+     * NowPlaying 原先无论哪种歌手都只跳搜索 Tab，与曲库卡片点击进详情的语义不一致。
+     */
+    fun openArtistFromName(name: String) {
+        if (name.isBlank()) return
+        val key = ArtistSplitter.normalizeKey(name)
+        val inLibrary = _rawArtistList.any { ArtistSplitter.containsArtist(it.name, name) } ||
+            mergedArtists.value.any { ArtistSplitter.normalizeKey(it.name) == key }
+        if (inLibrary) {
+            openArtistDetail(name)
+        } else {
+            selectLibraryTab(LibraryTab.SEARCH)
+            setLibrarySearchKeyword(name)
+            navVM.navigateTo(Screen.Library)
+        }
     }
 
     private val _artistDetailSongsCache = MutableStateFlow<Map<String, List<Song>>>(emptyMap())
     val artistDetailSongsCache: StateFlow<Map<String, List<Song>>> = _artistDetailSongsCache.asStateFlow()
+
+    /** 正在加载详情歌曲的艺术家名集合（按名字区分，支持快速切换）。 */
+    private val _artistDetailLoading = MutableStateFlow<Set<String>>(emptySet())
+    val artistDetailLoading: StateFlow<Set<String>> = _artistDetailLoading.asStateFlow()
+
+    /** 详情歌曲加载错误（按名字存，UI 据此展示错误态 + 重试）。 */
+    private val _artistDetailErrors = MutableStateFlow<Map<String, String>>(emptyMap())
+    val artistDetailErrors: StateFlow<Map<String, String>> = _artistDetailErrors.asStateFlow()
 
     /** 五个音乐源并行查找的临时容器 */
     private data class FiveSources(
@@ -3201,6 +3252,8 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
 
     fun loadArtistSongs(artistName: String) {
         viewModelScope.launch(Dispatchers.Default) {
+            _artistDetailLoading.value = _artistDetailLoading.value + artistName
+            _artistDetailErrors.value = _artistDetailErrors.value - artistName
             // ⚠️ NAS 关 ⇒ 不取 NAS 曲目；百度关 ⇒ 不取百度曲目（方案 §3.2.1 #12）。
             // ⛔ **不清空** `_artistDetailSongsCache`：旧数据保持显示，直到新数据就绪后覆盖。
             val nasVisible = sourceVisibility.isVisible(MusicSourceType.NAS)
@@ -3241,7 +3294,12 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
                                     if (artist != null) listOf(artist.id.substringBefore("|", artist.id)) else emptyList()
                                 }
                             AppLog.d("NASMusic", "loadArtistSongs('$artistName') NAS rawMatchingIds=${rawMatchingIds.size}")
-                            rawMatchingIds.flatMap { id ->
+                            // 按名字查询的后端（Jellyfin）忽略 artistId：传多个 ID 会发出 N 条完全相同的请求。
+                            // 只取第一个（允许为空串，name 仍会传）；按 ID 查询的后端保留全部原始 ID。
+                            val idsToQuery = if (adapter.queriesArtistSongsByName) {
+                                listOf(rawMatchingIds.firstOrNull().orEmpty())
+                            } else rawMatchingIds
+                            idsToQuery.flatMap { id ->
                                 try {
                                     adapter.getArtistSongs(id, artistName)
                                 } catch (e: Exception) {
@@ -3283,7 +3341,15 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
                 val allCandidates = (nasSongs + pagingSongs + localDeviceSongs + baiduSongs + networkSongs)
                     .filter { ArtistSplitter.containsArtistWithKey(it.artist, artistKey) }
                 val seenKeys = mutableSetOf<String>()
-                val finalSongs = allCandidates.filter { seenKeys.add(it.dedupeKey) }
+                val deduped = allCandidates.filter { seenKeys.add(it.dedupeKey) }
+                // ⛔ 统一排序：各后端排序口径不同（Jellyfin=SortName、Subsonic=专辑序），
+                // 多源拼接后顺序混乱。统一为 专辑 > 碟号 > 音轨号 > 标题；无专辑名排最后。
+                val finalSongs = deduped.sortedWith(
+                    compareBy<Song> { it.album.ifBlank { "\uFFFF" } }
+                        .thenBy { it.discNumber }
+                        .thenBy { it.trackNumber }
+                        .thenBy { it.title }
+                )
 
                 AppLog.d("NASMusic", "loadArtistSongs('$artistName') final=${finalSongs.size} (nas=${nasSongs.size}, paging=${pagingSongs.size}, local=${localDeviceSongs.size}, baidu=${baiduSongs.size}, network=${networkSongs.size}, beforeDedup=${allCandidates.size})")
                 // 诊断：打印重复 dedupeKey 的歌曲，定位去重失败原因
@@ -3302,7 +3368,11 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
             } catch (e: Exception) {
                 e.rethrowIfCancellation()
                 AppLog.e("NASMusic", "loadArtistSongs failed", e)
+                _artistDetailErrors.value = _artistDetailErrors.value +
+                    (artistName to (e.message?.take(80) ?: "未知错误"))
                 showError(getApplication<Application>().getString(R.string.load_favorites_error, e.message?.take(50)))
+            } finally {
+                _artistDetailLoading.value = _artistDetailLoading.value - artistName
             }
         }
     }

@@ -217,6 +217,16 @@ fun LibraryScreen(
     /** v2.39.3：歌曲加载失败后的「重试」回调（空态展示错误时使用） */
     onRetrySongsLoad: () -> Unit = {},
     onLoadArtists: () -> Unit = {},
+    /** ALBUMS Tab 独立加载态：getAlbums 可能耗时数十秒，isLibraryLoading 只覆盖派发瞬间 */
+    isAlbumsLoading: Boolean = false,
+    /** ALBUMS 加载失败文案（非空时空态展示原因与重试按钮） */
+    albumsErrorText: String? = null,
+    onRetryAlbumsLoad: (() -> Unit)? = null,
+    /** ARTISTS Tab 独立加载态： artists 走独立 API，不能靠 songs 的 isLoading 表达 */
+    isArtistsLoading: Boolean = false,
+    /** ARTISTS Tab 加载失败文案（非空时空态展示原因与重试按钮） */
+    artistErrorText: String? = null,
+    onRetryArtistsLoad: (() -> Unit)? = null,
     onLoadYears: () -> Unit = {},
     onSearch: (String) -> Unit = {},
     onClearSearch: () -> Unit = {},
@@ -400,11 +410,11 @@ fun LibraryScreen(
                 val localFiltered = albums.filter {
                     PinyinUtils.matches(it.name, filterQuery) || PinyinUtils.matches(it.artist, filterQuery)
                 }
-                // 去重合并：同名同艺术家的只保留一个
+                // 去重合并：与 MusicMerger 共用同一口径（专辑名 + 艺术家归一化键），
+                // 同名不同歌手保留两张卡，避免搜索态与无搜索态展示数量不一致。
                 val seen = mutableSetOf<String>()
                 (localFiltered + searchAlbums).filter { album ->
-                    val key = "${album.name.lowercase()}:${album.artist.lowercase()}"
-                    seen.add(key)
+                    seen.add(ArtistSplitter.albumKey(album.name, album.artist))
                 }
             }
         }
@@ -774,7 +784,10 @@ fun LibraryScreen(
                             )
                             else -> {}
                         }
-                    } else if (isLoading) {
+                    } else if (isLoading ||
+                        (targetTab == LibraryTab.ALBUMS && isAlbumsLoading) ||
+                        (targetTab == LibraryTab.ARTISTS && isArtistsLoading)
+                    ) {
                         Column(modifier = Modifier.fillMaxSize()) {
                             // 顶部骨架标题条
                             Box(
@@ -797,7 +810,13 @@ fun LibraryScreen(
                         // 有数据时直接展示（无论 NAS 是否连接，本地/百度/网络数据同样展示）
                         when (targetTab) {
                             LibraryTab.ALBUMS -> if (filteredAlbums.isEmpty()) {
-                                EmptyHint(isConnected = isConnected, tab = LibraryTab.ALBUMS)
+                                EmptyHint(
+                                    isConnected = isConnected,
+                                    tab = LibraryTab.ALBUMS,
+                                    errorText = albumsErrorText,
+                                    onRetry = onRetryAlbumsLoad,
+                                    errorTitleRes = R.string.load_albums_error
+                                )
                             } else {
                                 AlbumsTab(
                                     albums = filteredAlbums,
@@ -807,7 +826,13 @@ fun LibraryScreen(
                                 )
                             }
                             LibraryTab.ARTISTS -> if (filteredArtists.isEmpty()) {
-                                EmptyHint(isConnected = isConnected, tab = LibraryTab.ARTISTS)
+                                EmptyHint(
+                                    isConnected = isConnected,
+                                    tab = LibraryTab.ARTISTS,
+                                    errorText = artistErrorText,
+                                    onRetry = onRetryArtistsLoad,
+                                    errorTitleRes = R.string.library_artists_load_failed
+                                )
                             } else {
                                 ArtistsTab(
                                     artists = filteredArtists,

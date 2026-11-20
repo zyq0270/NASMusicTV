@@ -22,59 +22,83 @@ import com.nasmusic.tv.util.PinyinUtils
 object MusicMerger {
 
     /**
-     * 合并多源专辑（NAS + 本地 + 百度），按 albumName 去重
+     * 合并多源专辑（NAS + 本地 + 百度）。
+     *
+     * 去重键 = [ArtistSplitter.albumKey]（专辑名 + 艺术家）：同名不同歌手的专辑必须是两张卡。
+     * ⚠️ 百度侧经常没有 artist，若直接按「名+艺术家」分组会把 NAS + 百度同名专辑拆开（B20 回归）；
+     * 因此先按专辑名归堆，再把 artist 为空的条目并入同堆中曲目数最多的具名分组。
      */
     fun mergeAlbums(
         nasAlbums: List<Album>,
         localAlbums: List<Album>,
         baiduAlbums: List<Album> = emptyList()
     ): List<Album> {
-        val albumMap = linkedMapOf<String, Album>()
-        // 去重键 -> 来源 id 列表：保留合并前各源的原始 id，详情页据此多源分别取数
-        val sourceIdsMap = linkedMapOf<String, MutableList<String>>()
-
-        fun putSource(key: String, id: String) {
-            sourceIdsMap.getOrPut(key) { mutableListOf() }.apply {
-                if (id !in this) add(id)
+        val byName = linkedMapOf<String, MutableList<Album>>()
+        fun collect(list: List<Album>) {
+            list.forEach { album ->
+                val key = ArtistSplitter.normalizeKey(album.name)
+                if (key.isBlank()) return@forEach
+                byName.getOrPut(key) { mutableListOf() }.add(album)
             }
         }
+        collect(nasAlbums)
+        collect(localAlbums)
+        collect(baiduAlbums)
 
-        fun mergeInto(key: String, album: Album) {
-            val existing = albumMap[key]
-            if (existing == null) {
-                albumMap[key] = album
-            } else {
-                albumMap[key] = existing.copy(
-                    songCount = existing.songCount + album.songCount,
-                    durationMs = existing.durationMs + album.durationMs,
-                    coverUrl = existing.coverUrl ?: album.coverUrl
-                )
+        val merged = mutableListOf<Album>()
+        byName.values.forEach { sameName ->
+            val byArtist = linkedMapOf<String, MutableList<Album>>()
+            val unknownArtist = mutableListOf<Album>()
+            sameName.forEach { album ->
+                if (album.artist.isBlank()) {
+                    unknownArtist.add(album)
+                } else {
+                    val key = ArtistSplitter.normalizeKey(album.artist)
+                    byArtist.getOrPut(key) { mutableListOf() }.add(album)
+                }
             }
-            putSource(key, album.id)
-        }
-
-        nasAlbums.forEach { album ->
-            // L8 修复（2026-10-06）：album 去重键统一走 normalizeKey（NFKC 全角→半角）——
-            // 旧 lowercase().trim() 下全角专辑名（"ＬＯＶＥ"）与半角不被归并，跨源重复。
-            val key = ArtistSplitter.normalizeKey(album.name)
-            if (key.isNotBlank()) mergeInto(key, album)
-        }
-        localAlbums.forEach { album ->
-            val key = ArtistSplitter.normalizeKey(album.name)
-            if (key.isNotBlank()) mergeInto(key, album)
-        }
-        baiduAlbums.forEach { album ->
-            val key = ArtistSplitter.normalizeKey(album.name)
-            if (key.isNotBlank()) mergeInto(key, album)
-        }
-
-        // 回填 sourceIds：让每个合并条目携带全部来源 id（含 NAS / 本地 / 百度），
-        // 详情页 loadAlbumSongs 据此分别取数再拼接，从根上解决"合并后只取 NAS 歌"的丢歌问题
-        val merged = albumMap.map { (key, album) ->
-            album.copy(sourceIds = sourceIdsMap[key].orEmpty())
+            if (unknownArtist.isNotEmpty()) {
+                val target = byArtist.values.maxByOrNull { group -> group.sumOf { it.songCount } }
+                if (target != null) target.addAll(unknownArtist) else byArtist[""] = unknownArtist
+            }
+            byArtist.values.forEach { group -> merged.add(mergeAlbumGroup(group)) }
         }
         return sortByPinyin(merged) { it.name }
     }
+
+    /**
+     * 把一个「同名同艺术家」的多源条目合成一张卡：计数累加、封面/艺术家取首个非空值，
+     * 并回填全部来源 id（详情页 loadAlbumSongs 据此跨源取歌，修复 B20 丢歌）。
+     */
+    private fun mergeAlbumGroup(group: List<Album>): Album {
+        val first = group.first()
+        var songCount = 0
+        var durationMs = 0L
+        var coverUrl: String? = null
+        var artist = ""
+        var year: Int? = null
+        val sourceIds = linkedSetOf<String>()
+        group.forEach { album ->
+            songCount += album.songCount
+            durationMs += album.durationMs
+            if (coverUrl == null) coverUrl = album.coverUrl
+            if (artist.isBlank() && album.artist.isNotBlank()) artist = album.artist
+            if (year == null) year = album.year
+            sourceIds.add(album.id)
+        }
+        return first.copy(
+            artist = artist.ifBlank { first.artist },
+            coverUrl = coverUrl,
+            year = year,
+            songCount = songCount,
+            durationMs = durationMs,
+            sourceIds = sourceIds.toList()
+        )
+    }
+
+    /** 本地/百度派生的专辑 id 也要带艺术家，避免同名不同歌手塌到同一个缓存键。 */
+    private fun generatedAlbumId(prefix: String, name: String, artist: String): String =
+        prefix + ArtistSplitter.albumKey(name, artist).replace(Regex("[\\s:]+"), "_")
 
     /**
      * 合并多源艺术家（NAS + 本地 + 百度），按 artistName 去重
@@ -128,19 +152,19 @@ object MusicMerger {
     }
 
     /**
-     * 从本地歌曲生成本地专辑列表（按 albumName 去重分组）
+     * 从本地歌曲生成本地专辑列表（按「专辑名 + 艺术家」去重分组）。
      *
      * 封面优先级：专辑内第一首有 coverUrl 的歌曲 → null（留给上层异步解析）
      */
     fun buildLocalAlbums(localSongs: List<Song>): List<Album> =
         localSongs
             .filter { it.album.isNotBlank() }
-            // L8 修复：与 mergeAlbums 的 album 键统一走 normalizeKey
-            .groupBy { ArtistSplitter.normalizeKey(it.album) }
-            .map { (key, songs) ->
+            // 同名不同歌手必须分成两张卡，id 也要不同，否则详情页缓存键会串。
+            .groupBy { ArtistSplitter.albumKey(it.album, it.artist) }
+            .map { (_, songs) ->
                 val first = songs.first()
                 Album(
-                    id = "local_album_$key",
+                    id = generatedAlbumId("local_album_", first.album, first.artist),
                     name = first.album,
                     artist = first.artist,
                     coverUrl = songs.firstOrNull { it.coverUrl != null }?.coverUrl,
@@ -192,14 +216,15 @@ object MusicMerger {
                 if (song.artist.isNotBlank() && dirName.lowercase().trim() == song.artist.lowercase().trim()) return@mapNotNull null
                 dirName to song
             }
-            // L8 修复：与 mergeAlbums 的 album 键统一走 normalizeKey
-            .groupBy { (albumName, _) -> ArtistSplitter.normalizeKey(albumName) }
+            // 与 mergeAlbums 同口径：同名不同歌手分开；百度 artist 常为空时按名归并，
+            // 由 mergeAlbums 再并入 NAS 的具名分组（保留 B20 跨源合并行为）。
+            .groupBy { (albumName, song) -> ArtistSplitter.albumKey(albumName, song.artist) }
             .map { (_, entries) ->
                 val albumName = entries.first().first
                 val songs = entries.map { it.second }
                 val first = songs.first()
                 Album(
-                    id = "baidu_album_${albumName.lowercase().replace(" ", "_")}",
+                    id = generatedAlbumId("baidu_album_", albumName, first.artist),
                     name = albumName,
                     artist = first.artist,
                     coverUrl = songs.firstOrNull { it.coverUrl != null }?.coverUrl,

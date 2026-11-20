@@ -213,8 +213,12 @@ class JellyfinAdapter : BackendAdapter {
                         "SortBy=SortName&SortOrder=Ascending&" +
                         "StartIndex=$startIndex&Limit=$pageSize"
 
-                val json = executeJsonRequest(url) ?: break
-                val items = json.getAsJsonArray("Items") ?: break
+                // 无响应 / 缺 Items 是本次请求失败，不是「这一页没有专辑」：
+                // 否则半截列表会被当成完整曲库，且上层拿不到错误态与重试入口。
+                val json = executeJsonRequest(url)
+                    ?: throw IllegalStateException("Jellyfin getAlbums 第 ${startIndex / pageSize + 1} 页无响应")
+                val items = json.getAsJsonArray("Items")
+                    ?: throw IllegalStateException("Jellyfin getAlbums 缺少 Items")
 
                 for (item in items) {
                     val obj = item.asJsonObject
@@ -257,7 +261,7 @@ class JellyfinAdapter : BackendAdapter {
             allAlbums
         } catch (e: Exception) {
             AppLog.e("JellyfinAdapter", "getAlbums failed", e)
-            emptyList()
+            throw e
         }
     }
 
@@ -299,8 +303,13 @@ class JellyfinAdapter : BackendAdapter {
                         "Fields=ImageTags&" +
                         "StartIndex=$startIndex&Limit=$pageSize"
 
-                val json = executeJsonRequest(url) ?: break
-                val items = json.getAsJsonArray("Items") ?: break
+                // ⛔ 响应为 null 是失败，不是「没有艺术家」：必须抛给上层，
+                // 否则 loadArtists 会写 Success(emptyList())，UI 永远显示「暂无艺术家」。
+                val json = executeJsonRequest(url)
+                    ?: throw IllegalStateException("Jellyfin /Artists/AlbumArtists 无响应")
+                // 缺 Items 是响应异常（正常空库也会返回 Items: []），不能当成功空列表
+                val items = json.getAsJsonArray("Items")
+                    ?: throw IllegalStateException("Jellyfin /Artists/AlbumArtists 缺少 Items")
 
                 for (item in items) {
                     val obj = item.asJsonObject
@@ -320,7 +329,19 @@ class JellyfinAdapter : BackendAdapter {
                         else -> null
                     }
                     AppLog.d("NASMusic", "getArtists: raw='${rawName?.take(30)}' fixed='${name.take(30)}' hasCover=${coverUrl != null}")
-                    allArtists.add(Artist(id = id, name = name, coverUrl = coverUrl))
+                    // Jellyfin 的 AlbumArtists 条目一般自带 AlbumCount/SongCount；
+                    // 缺字段或类型异常时保持 0，由上层 updateArtistSongCounts 用全量歌曲反向校正。
+                    val albumCount = obj.numInt("AlbumCount") ?: 0
+                    val songCount = obj.numInt("SongCount") ?: 0
+                    allArtists.add(
+                        Artist(
+                            id = id,
+                            name = name,
+                            coverUrl = coverUrl,
+                            albumCount = albumCount,
+                            songCount = songCount
+                        )
+                    )
                 }
 
                 // 如果返回数量小于 pageSize，说明已加载全部
@@ -332,44 +353,61 @@ class JellyfinAdapter : BackendAdapter {
             allArtists
         } catch (e: Exception) {
             AppLog.e("JellyfinAdapter", "getArtists failed", e)
-            emptyList()
+            // ⛔ 不再吞成 emptyList()：否则失败伪装成「曲库没有艺术家」，
+            // loadArtists 会写 Success(emptyList())，UI 既不展示错误也没有重试入口。
+            throw e
         }
     }
 
+    /**
+     * Jellyfin 按名字查：AlbumArtist / ArtistItems 的 ID 常与 Artists 字符串不一致，
+     * 用 `Artists=<name>` 才可靠。覆盖此标记让调用方对「同一人的多个原始 ID」只发一次请求。
+     */
+    override val queriesArtistSongsByName: Boolean = true
+
     override suspend fun getArtistSongs(artistId: String, artistName: String?): List<Song> = withContext(Dispatchers.IO) {
         try {
-            val fields = "PrimaryImageAspectRatio,SortName,ParentId,RunTimeTicks"
-            // 优先按名称查询（Artists 参数匹配 Artists 字符串数组，比 ArtistIds 更可靠）
-            // 当 ArtistIds 不匹配时（常见于 AlbumArtist 与 ArtistItems ID 不一致），按名称能正确返回
-            val url = if (artistName != null) {
-                "$baseUrl/Items?" +
-                        "Artists=${java.net.URLEncoder.encode(artistName, "UTF-8")}&" +
-                        "IncludeItemTypes=Audio&" +
-                        "Recursive=true&" +
-                        "fields=$fields&" +
-                        "UserId=$userId&" +
-                        "SortBy=SortName&SortOrder=Ascending&" +
-                        "StartIndex=0&Limit=1000"
-            } else {
-                "$baseUrl/Items?" +
-                        "ArtistIds=$artistId&" +
-                        "IncludeItemTypes=Audio&" +
-                        "Recursive=true&" +
-                        "fields=$fields&" +
-                        "UserId=$userId&" +
-                        "SortBy=SortName&SortOrder=Ascending&" +
-                        "StartIndex=0&Limit=1000"
+            // ⛔ fields 必须含 Artists / AlbumArtist / ArtistItems，否则 parseSongUnsafe 取不到
+            // song.artist ⇒ 上层 `containsArtistWithKey` 会把整批歌过滤掉（详情页空白）。
+            // 与 getSongs() 的 fields 保持同一口径。
+            val fields = "PrimaryImageAspectRatio,SortName,ParentId,RunTimeTicks,Album,AlbumArtist,Artists,ArtistItems,IndexNumber,ParentIndexNumber,ProductionYear,Genres"
+            val name = artistName?.takeIf { it.isNotBlank() }
+            val pageSize = 1000
+            val allSongs = mutableListOf<Song>()
+            var startIndex = 0
+            var pages = 0
+
+            // ⛔ 原先只请求 StartIndex=0&Limit=1000 且不翻页，>1000 首的歌手会被静默截断。
+            while (pages < MAX_PAGES) {
+                val url = if (name != null) {
+                    "$baseUrl/Items?" +
+                            "Artists=${java.net.URLEncoder.encode(name, "UTF-8")}&" +
+                            "IncludeItemTypes=Audio&Recursive=true&fields=$fields&UserId=$userId&" +
+                            "SortBy=SortName&SortOrder=Ascending&" +
+                            "StartIndex=$startIndex&Limit=$pageSize"
+                } else {
+                    "$baseUrl/Items?" +
+                            "ArtistIds=$artistId&IncludeItemTypes=Audio&Recursive=true&" +
+                            "fields=$fields&UserId=$userId&SortBy=SortName&SortOrder=Ascending&" +
+                            "StartIndex=$startIndex&Limit=$pageSize"
+                }
+
+                val json = executeJsonRequest(url) ?: break
+                val items = json.getAsJsonArray("Items") ?: break
+                allSongs.addAll(items.mapNotNull { jsonObjectToSong(it.asJsonObject, null) })
+
+                val total = json.numInt("TotalRecordCount") ?: -1
+                if (items.size() < pageSize || (total >= 0 && startIndex + items.size() >= total)) break
+                startIndex += items.size()
+                pages++
             }
 
-            val json = executeJsonRequest(url) ?: return@withContext emptyList<Song>()
-            val items = json.getAsJsonArray("Items") ?: return@withContext emptyList<Song>()
-            val songs = items.mapNotNull { jsonObjectToSong(it.asJsonObject, null) }
-            val label = if (artistName != null) "$artistId|$artistName" else artistId
-            AppLog.d("JellyfinAdapter", "getArtistSongs($label): items=${items.size()} songs=${songs.size}")
-            songs.take(3).forEach { s ->
+            val label = if (name != null) "$artistId|$name" else artistId
+            AppLog.d("JellyfinAdapter", "getArtistSongs($label): songs=${allSongs.size} pages=$pages")
+            allSongs.take(3).forEach { s ->
                 AppLog.d("JellyfinAdapter", "  -> artist='${s.artist}' title='${s.title}'")
             }
-            songs
+            allSongs
         } catch (e: Exception) {
             AppLog.e("JellyfinAdapter", "getArtistSongs failed", e)
             emptyList()

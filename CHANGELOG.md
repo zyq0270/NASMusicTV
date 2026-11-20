@@ -7,6 +7,26 @@
 >
 > 类型：`Added`（新增） | `Changed`（变更） | `Fixed`（修复） | `Removed`（移除）
 
+## [v2.39.23] - 2026-11-20
+
+> 同版收口两批修复：艺术家列表/详情链路 + 曲库专辑 Tab 全量列举链路。逐条根因见 `docs/technical-overview.md` §10.414。
+
+### Fixed
+
+- **艺术家列表/详情链路**：`artists` 的 `UiState.Loading/Error` 与 UI 断连（骨架屏不出现、失败显示「暂无艺术家」）；五个后端 `getArtists` 把异常吞成 `emptyList()`；Jellyfin 按名查询对同一人的多个 ID 重复请求且 `Limit=1000` 不翻页、fields 缺 `Artists/AlbumArtist`；Navidrome/Subsonic 的合辑 track artist 漏歌；详情页多源歌曲顺序不一致；每次进详情都重发五源（含 10-15s Meting）。
+- **专辑列表只取第一页（Daoliyu）**：`getAlbums` 固定 `page=1&limit=500`，超过 500 张静默丢失；改为按页循环 + 100 页安全上限，失败抛给上层。
+- **专辑加载失败被吞成空列表**：五个后端 `getAlbums` 均吞异常，`loadLibrary` 的 `UiState.Error(retry)` 不可达；统一契约「失败必须抛」，分页中任一页失败也不得返回半截结果。
+- **专辑骨架屏提前结束**：`_isLibraryLoading` 派发完异步即置 false，而 `getAlbums` 可能耗时数十秒；ALBUMS Tab 改由 `albums` 自己的 `UiState` 驱动骨架/错误/重试，NAS 关时按源开关防止历史 Loading 卡住骨架。
+- **同名专辑跨歌手被合并**：`mergeAlbums` 原按专辑名单一维度去重，两张不同歌手的同名专辑合成一张卡且播放时串歌；改用「专辑名 + 艺术家」口径，详情/播放按 artist 再过滤，同时把无 artist 的百度条目并入同名下曲目数最多的具名分组，保留 NAS + 百度同名专辑的既有合并行为（B20）。本地/百度派生 id 同步带艺术家，避免详情页缓存键串。
+
+### Added
+
+- 门禁 `ArtistsListFlowGateTest` / `ArtistDetailFlowGateTest` / `AlbumsListFlowGateTest`（源码文本断言 + 负自检），`MusicMergerTest` 新增 4 条专辑合并/派生 id 回归测试。
+
+### Changed
+
+- 版本号 `versionCode 207 → 208`，`versionName 2.39.22 → 2.39.23`。
+
 ## [v2.39.22] - 2026-11-18
 
 > 落实 2026-11-18 增量代码审查全部 14 条发现（4 High / 2 Medium / 8 Low）。逐条根因与证据见 `docs/technical-overview.md` §10.413。

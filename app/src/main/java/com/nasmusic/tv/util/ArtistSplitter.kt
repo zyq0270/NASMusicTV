@@ -63,6 +63,21 @@ object ArtistSplitter {
     }
 
     /**
+     * 专辑身份键：归一化「专辑名 + 艺术家」，供曲库合并与搜索聚合共用同一口径。
+     *
+     * - 同名不同歌手的专辑必须分成两张卡（如两张都叫《爱情》的专辑）；
+     * - artist 为空时退化为纯专辑名键，供上游把「艺术家元数据缺失」的同源条目归并。
+     *   ⚠️ `MusicMerger.mergeAlbums` 还会把无艺术家条目并入同名下曲目数最多的具名分组，
+     *   以保留 NAS + 百度同名专辑（百度侧常无 artist）的既有合并行为。
+     */
+    fun albumKey(name: String, artist: String): String {
+        val album = normalizeKey(name)
+        if (album.isBlank()) return ""
+        val artistKey = normalizeKey(artist)
+        return if (artistKey.isBlank()) album else "$album::$artistKey"
+    }
+
+    /**
      * 将原始 artist 字符串拆分为独立歌唱家列表。
      * 迭代拆分：先用第一个分隔符拆分，再对每个部分用后续分隔符继续拆分。
      * 如果无法拆分，返回包含原始字符串的单元素列表。

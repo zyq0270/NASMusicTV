@@ -129,10 +129,8 @@ internal fun NowPlayingBranch(
                             technicalInfo = viewModel.songTechnicalInfo.collectAsState(initial = null).value,
                             onLoadTechnicalInfo = { viewModel.loadSongTechnicalInfo() },
                             onSearchArtist = { keyword ->
-                                // 跳转到曲库 SEARCH Tab 并触发跨源搜索（NAS+网络+百度+Jamendo+本地）
-                                viewModel.selectLibraryTab(LibraryTab.SEARCH)
-                                viewModel.setLibrarySearchKeyword(keyword)
-                                viewModel.navVM.navigateTo(Screen.Library)
+                                // 统一入口：曲库内歌手进详情页；网络歌手等曲库外的名字仍走跨源搜索。
+                                viewModel.openArtistFromName(keyword)
                             },
                             onSearchSong = { keyword ->
                                 viewModel.selectLibraryTab(LibraryTab.SEARCH)
