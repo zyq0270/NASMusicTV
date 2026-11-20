@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
@@ -43,6 +44,12 @@ internal fun SongsTab(
     favoriteIds: Set<String> = emptySet(),
     songsPaging: SongsPagingState = SongsPagingState(),
     isSearching: Boolean = false,
+    /**
+     * 标题是否展示 NAS 分页的 `totalCount`（"共 N / M 首"）。
+     * 搜索结果模式下 `songs` 来自多源搜索、`songsPaging` 仍是 NAS 分页状态，
+     * 两者总数不同源，若展示会把「搜索结果数 / NAS 全库数」拼成误导性文案 ⇒ 传 false。
+     */
+    showTotalCount: Boolean = true,
     onLoadMore: () -> Unit = {},
     onPlaySong: (Song) -> Unit,
     queueSongIds: Set<String> = emptySet(),
@@ -51,9 +58,10 @@ internal fun SongsTab(
     onAddToPlaylist: (Song) -> Unit = {},
     downloadStates: Map<String, DownloadState> = emptyMap(),
     onDownloadSong: (Song) -> Unit = {},
-    onDeleteDownloadSong: ((Song) -> Unit)? = null
+    onDeleteDownloadSong: ((Song) -> Unit)? = null,
+    /** 由 LibraryScreen 注入并持有，用于跨 Tab 切换保留歌曲列表滚动位置（同 AlbumsTab/ArtistsTab） */
+    listState: LazyGridState = rememberLazyGridState()
 ) {
-    val listState = rememberLazyGridState()
     val firstItemFocusRequester = remember { FocusRequester() }
     val scope = rememberCoroutineScope()
     val listBackHandler = LocalListBackHandler.current
@@ -97,7 +105,7 @@ internal fun SongsTab(
         // 标题显示加载进度
         val titleText = if (isSearching) {
             stringResource(R.string.library_searching)
-        } else if (songsPaging.totalCount > 0) {
+        } else if (showTotalCount && songsPaging.totalCount > 0) {
             stringResource(R.string.library_songs_count_with_total, songs.size, songsPaging.totalCount)
         } else if (songsPaging.isLoading) {
             stringResource(R.string.library_songs_loading)

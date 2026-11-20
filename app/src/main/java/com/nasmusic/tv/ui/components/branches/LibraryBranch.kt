@@ -113,6 +113,8 @@ internal fun LibraryBranch(
                     val albumScrollOffset by viewModel.albumScrollOffset.collectAsState()
                     val artistScrollIndex by viewModel.artistScrollIndex.collectAsState()
                     val artistScrollOffset by viewModel.artistScrollOffset.collectAsState()
+                    val songScrollIndex by viewModel.songScrollIndex.collectAsState()
+                    val songScrollOffset by viewModel.songScrollOffset.collectAsState()
                     // ── DISCOVER Tab state ──
                     val browseSelections by viewModel.browseSelections.collectAsState(initial = emptyList())
                     val browseResultsState by viewModel.browseResults.collectAsState(initial = UiState.Success(emptyList()))
@@ -260,8 +262,11 @@ onDiscoverDimensionChanged = { dimIdx, optIdx ->
                         albumScrollOffset = albumScrollOffset,
                         artistScrollIndex = artistScrollIndex,
                         artistScrollOffset = artistScrollOffset,
+                        songScrollIndex = songScrollIndex,
+                        songScrollOffset = songScrollOffset,
                         onAlbumScrollPositionChange = { index, offset -> viewModel.saveAlbumScrollPosition(index, offset) },
                         onArtistScrollPositionChange = { index, offset -> viewModel.saveArtistScrollPosition(index, offset) },
+                        onSongScrollPositionChange = { index, offset -> viewModel.saveSongScrollPosition(index, offset) },
                         // ── 歌曲下载状态 ──
                         downloadStates = songDownloadStates,
                         onDownloadSong = { song -> viewModel.downloadVM.downloadSong(song) },

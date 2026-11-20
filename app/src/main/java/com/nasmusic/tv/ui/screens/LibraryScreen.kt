@@ -272,8 +272,11 @@ fun LibraryScreen(
     albumScrollOffset: Int = 0,
     artistScrollIndex: Int = 0,
     artistScrollOffset: Int = 0,
+    songScrollIndex: Int = 0,
+    songScrollOffset: Int = 0,
     onAlbumScrollPositionChange: (Int, Int) -> Unit = { _, _ -> },
     onArtistScrollPositionChange: (Int, Int) -> Unit = { _, _ -> },
+    onSongScrollPositionChange: (Int, Int) -> Unit = { _, _ -> },
     // ── 歌曲下载状态 ──
     downloadStates: Map<String, DownloadState> = emptyMap(),
     onDownloadSong: (Song) -> Unit = {},
@@ -338,6 +341,10 @@ fun LibraryScreen(
         initialFirstVisibleItemIndex = artistScrollIndex,
         initialFirstVisibleItemScrollOffset = artistScrollOffset
     )
+    val songListState = androidx.compose.foundation.lazy.grid.rememberLazyGridState(
+        initialFirstVisibleItemIndex = songScrollIndex,
+        initialFirstVisibleItemScrollOffset = songScrollOffset
+    )
 
     // 滚动位置变化时保存到 ViewModel。
     //
@@ -360,6 +367,14 @@ fun LibraryScreen(
             .collectLatest { pair: Pair<Int, Int> ->
                 delay(SCROLL_SAVE_DEBOUNCE_MS)
                 onArtistScrollPositionChange(pair.first, pair.second)
+            }
+    }
+    LaunchedEffect(songListState) {
+        snapshotFlow { songListState.firstVisibleItemIndex to songListState.firstVisibleItemScrollOffset }
+            .distinctUntilChanged()
+            .collectLatest { pair: Pair<Int, Int> ->
+                delay(SCROLL_SAVE_DEBOUNCE_MS)
+                onSongScrollPositionChange(pair.first, pair.second)
             }
     }
 
@@ -772,7 +787,10 @@ fun LibraryScreen(
                                 favoriteIds = favoriteIds,
                                 songsPaging = songsPaging,
                                 isSearching = isSearching,
+                                // 搜索结果数 ≠ NAS 全库数，标题只报结果数，不拼 totalCount
+                                showTotalCount = false,
                                 onLoadMore = onLoadSongsNextPage,
+                                listState = songListState,
                                 onPlaySong = onPlaySong,
                                 queueSongIds = queueSongIds,
                                 onToggleQueue = onToggleQueue,
@@ -858,6 +876,7 @@ fun LibraryScreen(
                                     songsPaging = songsPaging,
                                     isSearching = isSearching,
                                     onLoadMore = onLoadSongsNextPage,
+                                    listState = songListState,
                                     onPlaySong = onPlaySong,
                                     queueSongIds = queueSongIds,
                                     onToggleQueue = onToggleQueue,

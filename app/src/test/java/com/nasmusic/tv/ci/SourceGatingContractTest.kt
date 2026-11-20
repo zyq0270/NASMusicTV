@@ -162,6 +162,19 @@ class SourceGatingContractTest {
         )
     }
 
+    @Test
+    fun `NAS 关时 hasMore 必须为 false 以免空触发续页`() {
+        // 库存分页状态仍是「有下一页」——关闭 NAS 后这段旧值不能透给 UI，
+        // 否则本地/百度（一次性全量、无分页）滚到底会空触发 loadSongsNextPage。
+        val paging = SongsPagingState(
+            songs = listOf(nasSong()), totalCount = 100, hasMore = true, currentPage = 1
+        )
+        val on = vmVisiblePaging(paging, listOf(localSong()), emptyList(), visibility(nas = true))
+        val off = vmVisiblePaging(paging, listOf(localSong()), emptyList(), visibility(nas = false))
+        assertTrue("NAS 开时保留原 hasMore", on.hasMore)
+        assertFalse("NAS 关时 hasMore 必须为 false（本地/百度无分页）", off.hasMore)
+    }
+
     /**
      * 不变量 3 的**对照**：把「NAS 关时的 totalCount 口径」与「v2 的老口径（直接沿用库存 totalCount）」并排，
      * 钉住两者必须**不同** —— 否则说明平移出来的口径退化成了「照抄库存值」。
@@ -216,6 +229,10 @@ class SourceGatingContractTest {
             songs = merged,
             totalCount = (if (nasVisible) paging.totalCount else 0) +
                 localVisible.size + baiduVisibleSongs.size,
+            // 与 MainViewModel.visibleSongsPaging 保持一致：
+            // NAS 关时本地/百度是一次性全量（无分页），hasMore 必须为 false，
+            // 否则歌曲列表滚到底会空触发 loadSongsNextPage。
+            hasMore = nasVisible && paging.hasMore,
         )
     }
 

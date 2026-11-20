@@ -531,7 +531,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
             paging.copy(
                 songs = merged,
                 totalCount = (if (nasVisible) paging.totalCount else 0) +
-                    localSongs.size + baiduSongs.size
+                    localSongs.size + baiduSongs.size,
+                // NAS 关时 NAS 段已置空，hasMore 不能再沿用 NAS 的旧值：
+                // 本地/百度是一次性全量载入（无分页），此时没有「下一页」可拉。
+                // 否则 SongsTab.shouldLoadMore 会在滚到底时空触发 loadSongsNextPage
+                // （该函数虽有 NAS 关守卫会 return，但属无意义的重复调用）。
+                hasMore = nasVisible && paging.hasMore
             )
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), _songsPaging.value)
 
@@ -703,6 +708,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
     private val _artistScrollOffset = MutableStateFlow(0)
     val artistScrollOffset: StateFlow<Int> = _artistScrollOffset.asStateFlow()
 
+    private val _songScrollIndex = MutableStateFlow(0)
+    val songScrollIndex: StateFlow<Int> = _songScrollIndex.asStateFlow()
+
+    private val _songScrollOffset = MutableStateFlow(0)
+    val songScrollOffset: StateFlow<Int> = _songScrollOffset.asStateFlow()
+
     fun saveAlbumScrollPosition(index: Int, offset: Int) {
         _albumScrollIndex.value = index
         _albumScrollOffset.value = offset
@@ -711,6 +722,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
     fun saveArtistScrollPosition(index: Int, offset: Int) {
         _artistScrollIndex.value = index
         _artistScrollOffset.value = offset
+    }
+
+    fun saveSongScrollPosition(index: Int, offset: Int) {
+        _songScrollIndex.value = index
+        _songScrollOffset.value = offset
     }
 
     // --- 曲库页搜索关键词（跨导航记忆，切换页面后保留搜索框内容与结果） ---
