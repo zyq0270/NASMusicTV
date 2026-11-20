@@ -7,6 +7,26 @@
 >
 > 类型：`Added`（新增） | `Changed`（变更） | `Fixed`（修复） | `Removed`（移除）
 
+## [v2.39.25] - 2026-11-20
+
+> 修复曲库专辑详情「封面 + 曲目列表」链路的五项缺陷。逐条根因见 `docs/technical-overview.md` §10.416。
+
+### Fixed
+
+- **硬件返回键落回首页**：`AppRoot` 的导航 BACK handler 未列 `Screen.AlbumDetail`，落到 `else → Screen.Home`；屏内返回按钮却回曲库。现专辑详情 BACK（列表已滚时先回顶）统一回曲库。
+- **快速切换专辑串歌**：`loadAlbumSongs` 在协程执行时才读全局选中专辑快照，先发请求可能读到新专辑并把它的歌写进旧专辑的缓存键。改为在协程外捕获 `album` 与 `albumId`，参数化传入取数函数。
+- **详情曲目无加载/错误/空态**：新增按专辑 id 的 `albumDetailLoading` / `albumDetailErrors`，详情页复用现成 `LoadingIndicator` / `ErrorDisplay` / `EmptyState`；已有旧缓存时继续显示旧数据，不用三态覆盖。
+- **搜索态专辑无封面且取不到歌**：合成卡改用 `search_album_` 前缀 id + `sourceIds`，带上搜索结果封面，按「专辑名 + 艺术家」聚合；取歌从当前多源搜索结果按名反查，不再拿网络曲 id 请求 NAS 适配器。
+- **专辑卡「播放」文案点了只进详情**：移除与整卡共用点击区的展示型播放文案，播放入口统一收敛到详情页「播放全部」（TV 卡内不塞第二个焦点靶）。
+
+### Added
+
+- 门禁 `AlbumDetailFlowGateTest`（T1–T5，源码文本断言 + 负自检）。
+
+### Changed
+
+- 版本号 `versionCode 209 → 210`，`versionName 2.39.24 → 2.39.25`。
+
 ## [v2.39.24] - 2026-11-20
 
 > 修复播放窗口「点击播放/暂停」链路的四项缺陷（缓冲期无法暂停、图标与判据错位、MTV 抑制缺失、STOP 语义错误、未就绪静默）。逐条根因见 `docs/technical-overview.md` §10.415。

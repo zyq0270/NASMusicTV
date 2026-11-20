@@ -154,6 +154,7 @@ internal fun LetterGroupHeader(letter: Char) {
 
 @OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
+@Suppress("UNUSED_PARAMETER")
 internal fun AlbumCard(
     album: Album,
     onClick: () -> Unit,
@@ -196,10 +197,9 @@ internal fun AlbumCard(
                 Text(text = infoText, color = NasMusicColors.TextSecondary, fontSize = FontSize.caption(), maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
+                // ⛔ 不再画展示型播放文案：整卡进详情，播放统一走详情页的「播放全部」。
+                // TV 不在可聚焦卡内再塞第二个焦点靶，避免焦点顺序与门禁双份外壳参数漂移。
                 Text(text = album.artist.ifBlank { "—" }, color = LocalFocusableContentColor.current, fontSize = FontSize.small(), maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                if (onPlay != null) {
-                    Text(text = "▶" + stringResource(R.string.player_play), color = NasMusicColors.Primary, fontSize = FontSize.small(), modifier = Modifier.padding(start = BrowseTokens.inlineGap))
-                }
             }
         }
     }

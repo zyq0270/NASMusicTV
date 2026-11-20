@@ -189,6 +189,8 @@ fun AppRoot(
         val exitVisualizer: () -> Unit = { viewModel.visualizerVM.exitVisualizer() }
         val navSettings: () -> Unit = { viewModel.navVM.navigateTo(Screen.Settings) }
         val navigateMine: () -> Unit = { viewModel.navVM.navigateTo(Screen.Mine) }
+        // 曲库子页（专辑详情）BACK 与屏内 BackButton 同口径：回曲库，不落回首页
+        val navigateLibrary: () -> Unit = { viewModel.navVM.navigateTo(Screen.Library) }
         val closeSettingsSection: () -> Unit = { viewModel.navVM.closeSettingsSection() }
         val handler: (() -> Unit)? = when {
             isImmersiveMode.value -> exitImmersive
@@ -200,6 +202,8 @@ fun AppRoot(
             // v2.36.0 竖屏设置二级页：BACK 回设置列表（**必须放在 Screen.Settings 之前**，方案 §6.2）
             currentScreen == Screen.Settings && settingsSection != null -> closeSettingsSection
             currentScreen == Screen.NowPlaying -> if (isTV) null else navigateHome
+            // 专辑详情：列表已滚时由 Level 1.5 先回顶，到顶后走这里回曲库
+            currentScreen == Screen.AlbumDetail -> navigateLibrary
             currentScreen == Screen.Home -> null
             // ── 设置域子页面：BACK 返回设置主菜单（入口唯一：SettingsBranch）──
             // 修复：均衡器/播放统计此前落入 else 回首页，遥控器返回键无法回到设置

@@ -1314,6 +1314,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
     private val _albumSongsCache = MutableStateFlow<Map<String, List<Song>>>(emptyMap())
     val albumSongsCache: StateFlow<Map<String, List<Song>>> = _albumSongsCache.asStateFlow()
 
+    /** 正在加载曲目的专辑 id 集合（按 id 区分，快速切换专辑时互不串扰）。 */
+    private val _albumDetailLoading = MutableStateFlow<Set<String>>(emptySet())
+    val albumDetailLoading: StateFlow<Set<String>> = _albumDetailLoading.asStateFlow()
+
+    /** 专辑曲目加载错误（按 id 存，UI 据此展示错误态 + 重试）。 */
+    private val _albumDetailErrors = MutableStateFlow<Map<String, String>>(emptyMap())
+    val albumDetailErrors: StateFlow<Map<String, String>> = _albumDetailErrors.asStateFlow()
+
     // --- 歌唱家拆分映射 ---
     // songId → 拆分后的歌唱家列表（不含去重中间状态，直接展开后的结果）
     private val _songArtistMap = MutableStateFlow<Map<String, List<String>>>(emptyMap())
@@ -3149,6 +3157,14 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
                         collected += baiduIndexCache.songsByAlbumName(albumName, albumArtist)
                     }
                 }
+                src.startsWith("search_album_") -> {
+                    // 搜索态专辑是 UI 临时合成的卡片，曲目只能来自当前多源搜索结果。
+                    // ⛔ 不能拿 search_album_ 前缀 id 去请求 NAS 适配器 —— 那是网络曲的 id 口径。
+                    val candidates = searchVM.searchResults.value.dataOrNull()
+                        ?.filter { sourceVisibility.isVisible(it) }
+                        .orEmpty()
+                    collected += filterSongsByAlbumName(albumName, candidates, albumArtist)
+                }
                 else -> {
                     if (!nasVisible) {
                         // NAS 关 ⇒ 不请求该专辑（方案 §3.2.1 #11）
@@ -3181,17 +3197,37 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
         return result to nasError
     }
 
-    fun loadAlbumSongs(albumId: String) {
+    fun loadAlbumSongs(album: Album) {
+        // ⛔ albumId 必须在协程外捕获：旧实现在协程执行时才读全局选中专辑快照，
+        // 快速进出两张专辑时先发的请求会读到新快照，把 B 的歌写进 A 的缓存键。
+        val albumId = album.id
+        _albumDetailLoading.value = _albumDetailLoading.value + albumId
+        _albumDetailErrors.value = _albumDetailErrors.value - albumId
         viewModelScope.launch {
-            val album = _selectedAlbum.value
-            val (result, nasError) = collectAlbumSongsMultiSource(album, albumId)
-            val cache = _albumSongsCache.value.toMutableMap()
-            cache[albumId] = result
-            _albumSongsCache.value = cache
-            AppLog.d("NASMusic", "loadAlbumSongs multi-source: album=${album?.name}, ${result.size} songs")
-            if (nasError != null) {
-                AppLog.e("NASMusic", "loadAlbumSongs NAS source failed", nasError)
-                showError(getApplication<Application>().getString(R.string.load_album_songs_error, nasError.message?.take(50)))
+            try {
+                val (result, nasError) = collectAlbumSongsMultiSource(album, albumId)
+                val cache = _albumSongsCache.value.toMutableMap()
+                cache[albumId] = result
+                _albumSongsCache.value = cache
+                AppLog.d("NASMusic", "loadAlbumSongs multi-source: album=${album.name}, ${result.size} songs")
+                if (nasError != null) {
+                    AppLog.e("NASMusic", "loadAlbumSongs NAS source failed", nasError)
+                    val message = getApplication<Application>().getString(
+                        R.string.load_album_songs_error, nasError.message?.take(50)
+                    )
+                    _albumDetailErrors.value = _albumDetailErrors.value + (albumId to message)
+                    showError(message)
+                }
+            } catch (e: Exception) {
+                e.rethrowIfCancellation()
+                AppLog.e("NASMusic", "loadAlbumSongs failed", e)
+                val message = getApplication<Application>().getString(
+                    R.string.load_album_songs_error, e.message?.take(50)
+                )
+                _albumDetailErrors.value = _albumDetailErrors.value + (albumId to message)
+                showError(message)
+            } finally {
+                _albumDetailLoading.value = _albumDetailLoading.value - albumId
             }
         }
     }
@@ -3221,7 +3257,7 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
     // --- 详情页导航（A-1, A-2）---
     fun openAlbumDetail(album: Album) {
         _selectedAlbum.value = album
-        loadAlbumSongs(album.id)
+        loadAlbumSongs(album)
         navVM.navigateTo(Screen.AlbumDetail)
     }
 

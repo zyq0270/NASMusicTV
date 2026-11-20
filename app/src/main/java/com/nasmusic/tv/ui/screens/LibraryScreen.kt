@@ -407,18 +407,27 @@ fun LibraryScreen(
         derivedStateOf {
             if (filterQuery.isBlank()) albums
             else {
-                // 多源搜索结果中提取专辑（按 albumId 或 albumName 去重聚合）
+                // 多源搜索结果中提取专辑（按专辑名 + 艺术家去重聚合，与 MusicMerger 同口径）
                 val searchAlbums = searchResults
                     .filter { it.album.isNotBlank() }
-                    .groupBy { it.albumId ?: it.album.lowercase() }
-                    .map { (_, songs) ->
+                    // ⛔ 与 MusicMerger / T5 同口径：按「专辑名 + 艺术家」聚合，
+                    // 同名不同歌手必须是两张卡，否则点进去会把两人的歌混在一起。
+                    .groupBy { ArtistSplitter.albumKey(it.album, it.artist) }
+                    .map { (key, songs) ->
                         val first = songs.first()
+                        // 搜索态专辑由 UI 临时合成：用独立前缀 id + sourceIds 标明来源，
+                        // 详情/播放据此从当前搜索结果反查；⛔ 原实现用 albumId 当 id，
+                        // 会被 collectAlbumSongsMultiSource 当成 NAS 专辑 id 去请求后端。
+                        val searchAlbumId = "search_album_${key.replace(Regex("[\\s:]+"), "_")}"
                         Album(
-                            id = first.albumId ?: first.album,
+                            id = searchAlbumId,
                             name = first.album,
                             artist = first.artist,
+                            // 搜索结果自带封面时带进详情，避免合成卡永久显示占位符
+                            coverUrl = songs.firstOrNull { !it.coverUrl.isNullOrBlank() }?.coverUrl,
                             songCount = songs.size,
-                            year = first.year
+                            year = first.year,
+                            sourceIds = listOf(searchAlbumId)
                         )
                     }
                 // 合并本地过滤的专辑（可能有多源搜索未覆盖的本地专辑）

@@ -28925,3 +28925,23 @@ Jellyfin 按名查询只发一次请求、fields 补齐并分页；Navidrome/Sub
 **涉及文件**：`PlayerManager`、`PlayerViewModel`、`AppRoot`、`MediaKeyHandler`、`strings.xml`、`app/build.gradle.kts`、`CHANGELOG.md`、本章；新增 `PlayPauseFlowGateTest`，修改 `MediaKeyHandlerTest`。
 
 **验证边界**：本机（zyq02）无 JBR / Android SDK，`assembleRelease` 与 `testDebugUnitTest` 未实跑；已用 Python 等价源码文本门禁（17 条断言）与字符串剥离后的括号平衡检查，全部 PASS。CI 首次运行需重点看 `PlayPauseFlowGateTest` 与 `MediaKeyHandlerTest`。未 push；仅本地提交。
+
+### 10.416 专辑详情封面与曲目链路五项修复（v2.39.25 - 2026-11-20）
+
+**范围**：曲库 → 专辑 Tab → 专辑详情。封面与曲目是两条独立支线：封面走 `mergedAlbums` 实时对象（§10.72.3 冻结快照修复），曲目走 `albumSongsCache[id]`（§10.91 B20 多源修复）。本轮修的是这两条支线之外的五项行为缺陷，不回退上述修复。
+
+**根因与修复**：
+
+1. **硬件 BACK 与屏内返回键分家**：`AppRoot` 导航 handler 的 `when` 未列 `Screen.AlbumDetail`，落到 `else → Screen.Home`；屏内 `BackButton` 却回 `Screen.Library`。新增 `navigateLibrary` 与 `Screen.AlbumDetail -> navigateLibrary`。列表已滚时仍由 `MainActivity` 的 Level 1.5 先回顶，到顶后第二次 BACK 才回曲库。
+2. **快速切换专辑串歌**：`loadAlbumSongs(albumId)` 在协程执行时才读 `_selectedAlbum.value`。连续进入 A、B 时，先发的 A 请求可能读到 B 的快照，按 `title|artist|durationMs` 收集出 B 的歌却写进 `cache[A]`。改为 `loadAlbumSongs(album: Album)`，在协程外捕获 `val albumId = album.id`，把 album 显式传给 `collectAlbumSongsMultiSource`；`openAlbumDetail` 同步改为传对象。
+3. **详情曲目无三态**：跳详情先于取歌完成，`albumSongsCache` 首次为空时列表区一片空白；失败也没有重试入口。仿照艺术家详情新增 `albumDetailLoading: StateFlow<Set<String>>` 与 `albumDetailErrors: StateFlow<Map<String, String>>`（均按专辑 id 索引），`loadAlbumSongs` 用 try/catch/finally 维护并在 finally 清 loading；`AlbumDetailBranch` 收集后传给 `AlbumDetailScreen`，屏幕复用 `LoadingIndicator` / `ErrorDisplay` / `EmptyState`。⛔ 不清空旧缓存：已有曲目时继续显示旧数据，三态只在 `songs.isEmpty()` 时接管。
+4. **搜索态专辑无封面、取不到歌**：`LibraryScreen` 从搜索结果合成 `Album` 时以 `albumId ?: album名` 为 id，不带 `coverUrl` / `sourceIds`，且按 albumId 聚合导致同名不同歌手塌成一张卡；点进去后 `collectAlbumSongsMultiSource` 把它当 NAS 专辑 id 请求适配器。改为按 `ArtistSplitter.albumKey(name, artist)` 聚合、生成 `search_album_<key>` 前缀 id 并回填 `sourceIds`，封面取组内第一张非空 `coverUrl`；VM 新增 `search_album_` 分派，按源可见性过滤当前 `searchVM.searchResults`，再走与本地/百度共用的 `filterSongsByAlbumName(albumName, candidates, albumArtist)`。
+5. **专辑卡播放文案点了不播放**：`AlbumCard` 的「▶播放」只是文字，与整卡共用 `onClick`，点击仍然进详情。TV 卡内再嵌焦点靶会打乱焦点顺序，且 `LibraryBrowseCardStyleGateTest` 禁止卡片内自定义 `FocusableSurface` 参数块，故移除该展示型文案，播放入口统一收敛到详情页「播放全部」。
+
+**兼容性影响**：无存储 schema、无网络协议变更。搜索态专辑卡 id 由 `albumId` 改为 `search_album_` 前缀（仅作缓存键与来源标记，不落盘）；同名不同歌手的搜索结果由 1 张卡变 2 张卡，与 `MusicMerger` / `AlbumsListFlowGateTest` T5 口径一致。搜索态取歌依赖当前 `searchVM.searchResults`，清空搜索词后再进该详情会取不到歌——此时应回到曲库重新搜索，属预期。
+
+**涉及文件**：`AppRoot`、`MainViewModel`、`LibraryScreen`、`AlbumDetailBranch`、`AlbumDetailScreen`、`BrowseComponents`、`app/build.gradle.kts`、`CHANGELOG.md`、本章；新增 `AlbumDetailFlowGateTest`。
+
+**验证边界**：本机（zyq02）无 JBR / Android SDK，`assembleRelease` 与 `testDebugUnitTest` 未实跑；已用 `logs_temp/album_detail_flow_verify_2026-11-20.py` 做等价源码文本门禁（含负自检）与括号平衡检查。CI 首次运行需重点看 `AlbumDetailFlowGateTest` 与既有 `AlbumsListFlowGateTest` / `LibraryBrowseCardStyleGateTest`。未 push；仅本地提交。
+
+**版本号变更**：v2.39.24 → v2.39.25（versionCode 209 → 210）。

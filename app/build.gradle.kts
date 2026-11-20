@@ -260,9 +260,9 @@ android {
         applicationId = "com.nasmusic.tv"
         minSdk = 22
         targetSdk = 34
-        // versionCode 口径：= 185 + 次版本号（... / 2.39.22→207 / 2.39.23→208 / 2.39.24→209）。
-        versionCode = 209
-        versionName = "2.39.24"
+        // versionCode 口径：= 185 + 次版本号（... / 2.39.23→208 / 2.39.24→209 / 2.39.25→210）。
+        versionCode = 210
+        versionName = "2.39.25"
 
         // 洛雪宿主的引擎测试依赖 native 库，只能在设备上跑（见文件末尾 androidTestImplementation 注释）
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"

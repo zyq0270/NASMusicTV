@@ -35,9 +35,13 @@ internal fun AlbumDetailBranch(
                     val selectedAlbum by viewModel.selectedAlbum.collectAsState(initial = null)
                     val mergedAlbums by viewModel.mergedAlbums.collectAsState(initial = emptyList())
                     val albumSongsCache by viewModel.albumSongsCache.collectAsState(initial = emptyMap())
+                    val albumDetailLoading by viewModel.albumDetailLoading.collectAsState(initial = emptySet())
+                    val albumDetailErrors by viewModel.albumDetailErrors.collectAsState(initial = emptyMap())
                     // 用 mergedAlbums 中的实时专辑（含已异步解析封面），避免 openAlbumDetail 时冻结快照无封面
                     val liveAlbum = selectedAlbum?.let { sa -> mergedAlbums.firstOrNull { it.id == sa.id } ?: sa }
                     val albumSongs = liveAlbum?.let { albumSongsCache[it.id] } ?: emptyList()
+                    val isDetailLoading = liveAlbum?.id?.let { it in albumDetailLoading } ?: false
+                    val detailError = liveAlbum?.id?.let { albumDetailErrors[it] }
                     val favoriteIds by viewModel.favoriteIds.collectAsState(initial = emptySet())
                     if (liveAlbum != null) {
                         AlbumDetailScreen(
@@ -60,7 +64,10 @@ internal fun AlbumDetailBranch(
                             onAddToPlaylist = { song -> onPickSongForPlaylist(song) },
                             downloadStates = songDownloadStates,
                             onDownloadSong = { song -> viewModel.downloadVM.downloadSong(song) },
-                            onDeleteDownloadSong = { song -> viewModel.downloadVM.deleteDownload(song) }
+                            onDeleteDownloadSong = { song -> viewModel.downloadVM.deleteDownload(song) },
+                            isLoading = isDetailLoading,
+                            errorMessage = detailError,
+                            onRetry = { selectedAlbum?.let { viewModel.loadAlbumSongs(it) } }
                         )
                     }
 }
