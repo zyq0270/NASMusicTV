@@ -67,6 +67,8 @@ internal fun MineBranch(
                         },
                         onToggleFavorite = { song -> viewModel.toggleNetworkFavorite(song) },
                         onToggleQueue = { song -> viewModel.playerVM.toggleQueueSong(song) },
+                        // 批量「加入队列」只增不删；逐首 ☰/✓ 才走 toggleQueueSong。
+                        onAddSongsToQueue = { songs -> viewModel.playerVM.addSongsToQueue(songs) },
                     onCreatePlaylist = { name -> viewModel.playlistVM.createLocalPlaylist(name) },
                     onOpenServerPlaylists = {
                         // 服务端歌单与本地歌单是两个独立数据源：进入页面前显式拉一次，

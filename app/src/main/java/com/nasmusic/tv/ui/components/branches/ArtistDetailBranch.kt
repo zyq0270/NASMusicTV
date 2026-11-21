@@ -67,6 +67,8 @@ internal fun ArtistDetailBranch(
                             onBack = { viewModel.navVM.navigateTo(Screen.Library) },
                             queueSongIds = viewModel.queueSongIds.collectAsState(initial = emptySet()).value,
                             onToggleQueue = { song -> viewModel.playerVM.toggleQueueSong(song) },
+                            // 批量「加入队列」只增不删；逐首 ☰/✓ 才走 toggleQueueSong。
+                            onAddSongsToQueue = { songList -> viewModel.playerVM.addSongsToQueue(songList) },
                             favoriteIds = favoriteIds,
                             onToggleFavorite = { song -> viewModel.toggleNetworkFavorite(song) },
                             onAddToPlaylist = { song -> onPickSongForPlaylist(song) },

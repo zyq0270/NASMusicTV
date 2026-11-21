@@ -827,15 +827,21 @@ class PlayerManager(private val applicationContext: Context) {
     }
 
     /**
-     * 追加歌曲到队列末尾（用于随心听自动续播）。
+     * 追加歌曲到队列末尾（随心听续播 / 各页面批量「加入队列」）。
+     *
+     * 全仓唯一的入队去重口径在 [QueueAddition.compute]：按 id 跳过已在队列中的歌曲，
+     * 并对入参自身去重、保持原顺序。这样队列不产生重复 id，
+     * UI 的 `isInQueue` 布尔与 `removeSongFromQueue(indexOfFirst)` 才与实际内容一致。
+     * 只追加，不切换当前歌曲，不触发播放。
      */
     fun addToQueue(songs: List<Song>) {
         if (songs.isEmpty()) return
+        val currentQueue = _playerState.value.queue
+        val toAdd = QueueAddition.compute(currentQueue, songs)
+        if (toAdd.isEmpty()) return
+        _playerState.update { it.copy(queue = currentQueue + toAdd) }
         val p = player ?: return
-        val currentQueue = _playerState.value.queue.toMutableList()
-        currentQueue.addAll(songs)
-        _playerState.update { it.copy(queue = currentQueue) }
-        val mediaItems = songs.map { buildMediaItem(it, it.streamUrl ?: "") }
+        val mediaItems = toAdd.map { buildMediaItem(it, it.streamUrl ?: "") }
         try {
             p.addMediaItems(mediaItems)
         } catch (e: Exception) {
@@ -1191,15 +1197,24 @@ class PlayerManager(private val applicationContext: Context) {
         }
     }
 
+    /**
+     * 追加单曲到队尾，去重口径与 [addToQueue] 一致（按 id，见 [QueueAddition.compute]）。
+     *
+     * ⚠️ 旧实现要求 player 已有 currentMediaItem 才写 ExoPlayer ⇒
+     * 尚未起播、或 restoreQueue 因空 streamUrl 跳过 prepare 时，
+     * 歌曲只进 StateFlow 镜像、不进实际播放列表：队列页看得见却切歌切不到。
+     * 现在只要 player 存在就 addMediaItem（不会触发播放）；未 prepare 时该条目
+     * 会在后续 setMediaItems 中被整体覆盖，不会重复。
+     */
     fun addToQueue(song: Song) {
-        val currentQueue = _playerState.value.queue.toMutableList()
-        currentQueue.add(song)
-        _playerState.update { it.copy(queue = currentQueue) }
-
-        // Add to player queue if already playing
-        if (player?.currentMediaItem != null) {
-            val mediaItem = buildMediaItem(song, song.streamUrl ?: "")
-            player?.addMediaItem(mediaItem)
+        val currentQueue = _playerState.value.queue
+        if (QueueAddition.compute(currentQueue, listOf(song)).isEmpty()) return
+        _playerState.update { it.copy(queue = currentQueue + song) }
+        val p = player ?: return
+        try {
+            p.addMediaItem(buildMediaItem(song, song.streamUrl ?: ""))
+        } catch (e: Exception) {
+            AppLog.e("PlayerManager", "addToQueue(song) failed", e)
         }
     }
 

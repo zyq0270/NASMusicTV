@@ -98,6 +98,8 @@ fun MineScreen(
     onPlayAll: (List<Song>) -> Unit,
     onToggleFavorite: (Song) -> Unit,
     onToggleQueue: (Song) -> Unit,
+    /** 批量加入队列：只增不删。行内 ☰/✓ 仍走 onToggleQueue（单曲切换语义）。 */
+    onAddSongsToQueue: (List<Song>) -> Unit = {},
     onCreatePlaylist: (String) -> Unit,
     /** 打开 NAS 服务端歌单管理页（本地歌单与服务端歌单是两个独立数据源）。 */
     onOpenServerPlaylists: () -> Unit,
@@ -166,7 +168,7 @@ fun MineScreen(
                         ActionBar(
                             songCount = mergedFavorites.size,
                             onPlayAll = { onPlayAll(mergedFavorites) },
-                            onAddAllToQueue = { mergedFavorites.forEach { song -> onToggleQueue(song) } }
+                            onAddAllToQueue = { onAddSongsToQueue(mergedFavorites) }
                         )
                     }
                 }
@@ -329,6 +331,7 @@ fun MineScreen(
                 onPlaySong = onPlaySong,
                 onToggleFavorite = onToggleFavorite,
                 onToggleQueue = onToggleQueue,
+                onAddSongsToQueue = onAddSongsToQueue,
                 queueSongIds = queueSongIds,
                 onAddToPlaylist = { pickerSong = it },
                 downloadStates = downloadStates,
@@ -453,6 +456,7 @@ private fun FavoritesPane(
     onPlaySong: (Song) -> Unit,
     onToggleFavorite: (Song) -> Unit,
     onToggleQueue: (Song) -> Unit,
+    onAddSongsToQueue: (List<Song>) -> Unit = {},
     onAddToPlaylist: (Song) -> Unit,
     downloadStates: Map<String, DownloadState> = emptyMap(),
     onDownloadSong: (Song) -> Unit = {},
@@ -471,7 +475,7 @@ private fun FavoritesPane(
                 ActionBar(
                     songCount = songs.size,
                     onPlayAll = { onPlayAll(songs) },
-                    onAddAllToQueue = { songs.forEach { song -> onToggleQueue(song) } }
+                    onAddAllToQueue = { onAddSongsToQueue(songs) }
                 )
             }
         }
@@ -521,6 +525,7 @@ private fun RecentPane(
     onPlaySong: (Song) -> Unit,
     onToggleFavorite: (Song) -> Unit,
     onToggleQueue: (Song) -> Unit,
+    onAddSongsToQueue: (List<Song>) -> Unit = {},
     isFavorited: (Song) -> Boolean,
     downloadStates: Map<String, DownloadState> = emptyMap(),
     onDownloadSong: (Song) -> Unit = {},
@@ -539,7 +544,7 @@ private fun RecentPane(
                 ActionBar(
                     songCount = songs.size,
                     onPlayAll = { onPlayAll(songs) },
-                    onAddAllToQueue = { songs.forEach { song -> onToggleQueue(song) } }
+                    onAddAllToQueue = { onAddSongsToQueue(songs) }
                 )
             }
         }

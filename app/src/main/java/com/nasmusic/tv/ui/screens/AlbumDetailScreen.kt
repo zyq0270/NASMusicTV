@@ -67,6 +67,8 @@ fun AlbumDetailScreen(
     onBack: () -> Unit,
     queueSongIds: Set<String> = emptySet(),
     onToggleQueue: (Song) -> Unit = {},
+    /** 批量加入队列：只增不删。行内 ☰/✓ 仍走 onToggleQueue（单曲切换语义）。 */
+    onAddSongsToQueue: (List<Song>) -> Unit = {},
     favoriteIds: Set<String> = emptySet(),
     onToggleFavorite: (Song) -> Unit = {},
     onAddToPlaylist: (Song) -> Unit = {},
@@ -131,7 +133,7 @@ fun AlbumDetailScreen(
         }
         val addQueueButton: @Composable () -> Unit = {
             FocusableSurface(
-                onClick = { songs.forEach { song -> onToggleQueue(song) } },
+                onClick = { onAddSongsToQueue(songs) },
                 shape = RoundedCornerShape(8.dp),
                 focusedScale = 1.08f,
                 animationDurationMs = 150,

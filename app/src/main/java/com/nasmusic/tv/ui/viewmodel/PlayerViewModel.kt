@@ -667,13 +667,14 @@ class PlayerViewModel(
     }
 
     /**
-     * 批量加入队列（修复 M-8）：只增不删、按 id 去重并跳过已在队列中的歌曲。
-     * 用于曲库搜索/发现页的「全部加入队列」——原实现逐首 toggle 会把已入队歌曲反向移除。
+     * 批量加入队列：只增不删、按 id 去重并跳过已在队列中的歌曲。
+     * 原实现逐首 toggle 会把已入队歌曲反向移除（M-8）。
+     *
+     * 去重逻辑下沉到 `QueueAddition.compute`（经 PlayerManager.addToQueue），
+     * 此处不再另写一套过滤，避免与遥控/随心听等入口口径漂移。
      */
     fun addSongsToQueue(songs: List<Song>) {
-        val existingIds = playerManager.playerState.value.queue.map { it.id }.toHashSet()
-        val toAdd = songs.filter { it.id !in existingIds }.distinctBy { it.id }
-        if (toAdd.isNotEmpty()) playerManager.addToQueue(toAdd)
+        playerManager.addToQueue(songs)
     }
 
     /**
