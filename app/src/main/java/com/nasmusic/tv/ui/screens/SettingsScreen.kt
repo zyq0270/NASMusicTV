@@ -131,7 +131,6 @@ import com.nasmusic.tv.ui.theme.UiMode
 internal fun SettingsScreen(
     settings: AppSettings,
     onChangeThemeMode: (ThemeMode) -> Unit,
-    onToggleAnimations: (Boolean) -> Unit,
     onToggleAutoPlayNext: (Boolean) -> Unit,
     onChangePlayMode: (PlayMode) -> Unit,
     onToggleCacheLyrics: (Boolean) -> Unit,
@@ -610,7 +609,6 @@ var activeSection by remember { mutableStateOf(SettingsSection.GENERAL) }
                         actions = GeneralSettingsActions(
                             onChangeLanguage = onChangeLanguage,
                             onChangeThemeMode = onChangeThemeMode,
-                            onToggleAnimations = onToggleAnimations,
                             onChangeFontAdjustment = onChangeFontAdjustment,
                             onChangeScreenOrientation = onChangeScreenOrientation,
                             onChangeFocusHighlight = onChangeFocusHighlight,

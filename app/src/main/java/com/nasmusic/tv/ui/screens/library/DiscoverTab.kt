@@ -89,6 +89,9 @@ currentDimensionValues: Map<Int, Int> = emptyMap(),
     onPlayAll: () -> Unit = {},
     onShuffle: () -> Unit = {},
     onAddAllToQueue: () -> Unit = {},
+    /** 非空时展示错误态 + 重试按钮（问题1：失败不再静默显示空白） */
+    errorMessage: String? = null,
+    onRetry: () -> Unit = {},
     onPlaySong: (Song) -> Unit = {},
     onToggleFavorite: (Song) -> Unit = {},
     onToggleQueue: (Song) -> Unit = {},
@@ -145,6 +148,55 @@ currentDimensionValues: Map<Int, Int> = emptyMap(),
                             selectedValue = currentDimensionValues[dimension.dimIndex],
                             onSelected = { onDimensionChanged(dimension.dimIndex, it) }
                         )
+                    }
+                }
+
+                // 错误态（问题1）：维度行下方展示失败原因 + 重试，不再静默空白
+                if (!errorMessage.isNullOrBlank()) {
+                    item(key = "discover_error", span = { GridItemSpan(maxLineSpan) }) {
+                        Box(
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 28.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text(
+                                    text = errorMessage,
+                                    color = NasMusicColors.Danger,
+                                    fontSize = FontSize.body()
+                                )
+                                Spacer(modifier = Modifier.height(16.dp))
+                                FocusableSurface(
+                                    onClick = onRetry,
+                                    shape = RoundedCornerShape(10.dp),
+                                    focusedScale = 1.06f,
+                                    animationDurationMs = 200,
+                                    containerColor = NasMusicColors.Surface,
+                                    focusedContainerColor = NasMusicColors.Primary.copy(alpha = 0.2f),
+                                    contentColor = NasMusicColors.TextPrimary,
+                                    focusedContentColor = NasMusicColors.Primary
+                                ) {
+                                    Text(
+                                        text = stringResource(R.string.library_songs_retry),
+                                        modifier = Modifier.padding(horizontal = 28.dp, vertical = 12.dp),
+                                        fontSize = FontSize.button()
+                                    )
+                                }
+                            }
+                        }
+                    }
+                } else if (filteredSongs.isEmpty()) {
+                    // 空态（问题4）：全 ALL 无关键词或未命中时给出明确指引，而非纯空白
+                    item(key = "discover_empty", span = { GridItemSpan(maxLineSpan) }) {
+                        Box(
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 32.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = stringResource(R.string.discover_pick_dimension),
+                                color = NasMusicColors.TextSecondary,
+                                fontSize = FontSize.body()
+                            )
+                        }
                     }
                 }
 

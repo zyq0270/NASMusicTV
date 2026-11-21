@@ -1,6 +1,7 @@
 package com.nasmusic.tv.ui.viewmodel
 
 import android.app.Application
+import android.widget.Toast
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.nasmusic.tv.NasMusicApp
@@ -132,7 +133,14 @@ class DownloadViewModel(
             // P1-15: 补齐 downloadNow 中的安全检查（enqueue → executeDownload 会跳过这些）
             // 1. 总开关
             val settings = prefs.appSettings.first()
-            if (!settings.downloadEnabled) return@launch
+            if (!settings.downloadEnabled) {
+                Toast.makeText(
+                    getApplication<Application>(),
+                    R.string.settings_download_disabled_toast,
+                    Toast.LENGTH_SHORT
+                ).show()
+                return@launch
+            }
             // 2. 可下载性（本地歌曲 / 天气电台不可下载）
             if (!isDownloadableSong(song)) return@launch
 

@@ -166,6 +166,9 @@ internal fun PlayerSettingsSection(
                 fontSize = FontSize.button(),
                 modifier = Modifier.padding(start = 4.dp)
             )
+            if (state.qualityTier == QualityTiers.LOSSLESS && QualityTiers.isLosslessUnsupported()) {
+                SettingsHint(stringResource(R.string.settings_quality_lossless_unsupported))
+            }
             // v2.35.0 修复：改为**纵向列表**。
             //
             // 原实现把 5 个档位放在 `Row` 里，但 `SettingActionButton` 内部是
@@ -182,7 +185,7 @@ internal fun PlayerSettingsSection(
                     .padding(start = 16.dp, top = 4.dp)
             ) {
                 // 遍历单一真相源（含 192 档），避免"常量加了 UI 忘了加"的漂移
-                QualityTiers.all.forEach { tier ->
+                QualityTiers.uiTiers().forEach { tier ->
                     val label = stringResource(QualityTiers.labelResOf(tier))
                     SettingActionButton(
                         label = if (state.qualityTier == tier) "▶ $label" else label,

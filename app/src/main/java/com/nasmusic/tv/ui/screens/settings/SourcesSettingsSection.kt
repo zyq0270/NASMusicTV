@@ -236,7 +236,16 @@ internal fun SourcesSettingsSection(
             title = stringResource(R.string.settings_netdisk_group_baidu),
             description = stringResource(R.string.settings_netdisk_index_desc2),
         ) {
-            SettingSwitch(label = stringResource(R.string.settings_netdisk_enable), description = stringResource(R.string.settings_netdisk_enable_desc), checked = state.baiduEnabled, onClick = { actions.onToggleBaiduEnabled?.invoke(!state.baiduEnabled) })
+            SettingSwitch(
+                label = stringResource(R.string.settings_netdisk_enable),
+                description = when {
+                    !state.baiduEnabled -> stringResource(R.string.settings_netdisk_enable_desc)
+                    !state.baiduLoggedIn -> stringResource(R.string.settings_netdisk_enabled_not_logged_in)
+                    else -> stringResource(R.string.settings_netdisk_enable_active)
+                },
+                checked = state.baiduEnabled,
+                onClick = { actions.onToggleBaiduEnabled?.invoke(!state.baiduEnabled) },
+            )
 
             // 授权失败时，在登录按钮上方持续显示失败原因（即使对话框关闭也能看到）
             val baiduFailedState = state.baiduConnectionState as? NetworkMusicViewModel.BaiduConnectionState.Failed
@@ -365,9 +374,14 @@ internal fun SourcesSettingsSection(
             }
             SettingActionButton(
                 label = stringResource(R.string.settings_netdisk_index_rebuild),
-                description = if (state.baiduIndexScanning) stringResource(R.string.settings_netdisk_index_scanning_progress, state.baiduIndexScanned)
-                               else stringResource(R.string.settings_netdisk_index_rebuild_desc),
-                onClick = { if (!state.baiduIndexScanning) actions.onRebuildBaiduIndex?.invoke() }
+                description = when {
+                    !state.baiduEnabled -> stringResource(R.string.settings_netdisk_index_rebuild_need_enable)
+                    !state.baiduLoggedIn -> stringResource(R.string.settings_netdisk_index_rebuild_need_login)
+                    state.baiduIndexScanning -> stringResource(R.string.settings_netdisk_index_scanning_progress, state.baiduIndexScanned)
+                    else -> stringResource(R.string.settings_netdisk_index_rebuild_desc)
+                },
+                onClick = { if (!state.baiduIndexScanning) actions.onRebuildBaiduIndex?.invoke() },
+                enabled = state.baiduEnabled && state.baiduLoggedIn,
             )
         }
 
@@ -462,6 +476,25 @@ internal fun SourcesSettingsSection(
             description = stringResource(R.string.settings_default_source_desc),
         ) {
             val candidates = state.musicSources.filter { it.enabled && it.providesCatalog }
+            // 当前默认源始终可见：自愈可能把它切到百度 / Jamendo（不在候选里）
+            val defaultLabel = when (state.defaultNetworkSource) {
+                "meting" -> state.musicSources.firstOrNull { it.key == "meting" }?.title ?: "Meting"
+                "baidu" -> stringResource(R.string.settings_netdisk_group_baidu)
+                "jamendo" -> stringResource(R.string.settings_source_jamendo)
+                else -> state.defaultNetworkSource
+            }
+            SettingsInfoRow(
+                label = stringResource(R.string.settings_default_source_current),
+                value = defaultLabel,
+            )
+            if (candidates.isNotEmpty() && candidates.none { it.key == state.defaultNetworkSource }) {
+                Text(
+                    text = stringResource(R.string.settings_default_source_not_catalog, defaultLabel),
+                    color = NasMusicColors.Warning,
+                    fontSize = FontSize.body(),
+                    modifier = Modifier.padding(start = 4.dp, top = 4.dp, bottom = 8.dp),
+                )
+            }
             if (candidates.isEmpty()) {
                 // ⚠️ 两种「空」原因不同，文案不能共用：
                 //   - Meting 被关 ⇒ 说「歌单页与艺人页将没有数据」（这是用户自己关的）

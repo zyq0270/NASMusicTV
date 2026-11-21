@@ -90,13 +90,23 @@ internal fun DownloadSettingsSection(
                     color = NasMusicColors.TextPrimary,
                     fontSize = FontSize.button()
                 )
-                SettingsHint(stringResource(R.string.settings_auto_download_limit_desc))
+                val limitEnabled = state.downloadEnabled && state.autoDownloadOnPlay
+                SettingsHint(
+                    stringResource(
+                        if (limitEnabled) R.string.settings_auto_download_limit_desc
+                        else R.string.settings_auto_download_limit_disabled
+                    )
+                )
                 Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                    AdjustButton("-", onClick = {
+                    AdjustButton("-", enabled = limitEnabled, onClick = {
                         actions.onChangeAutoDownloadLimit?.invoke((state.autoDownloadLimit - 10).coerceAtLeast(1))
                     })
-                    Text(text = state.autoDownloadLimit.toString(), color = NasMusicColors.TextPrimary, fontSize = FontSize.title())
-                    AdjustButton("+", onClick = {
+                    Text(
+                        text = state.autoDownloadLimit.toString(),
+                        color = if (limitEnabled) NasMusicColors.TextPrimary else NasMusicColors.TextSecondary,
+                        fontSize = FontSize.title()
+                    )
+                    AdjustButton("+", enabled = limitEnabled, onClick = {
                         actions.onChangeAutoDownloadLimit?.invoke((state.autoDownloadLimit + 10).coerceAtMost(5000))
                     })
                 }

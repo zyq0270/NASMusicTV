@@ -55,6 +55,7 @@ import androidx.tv.material3.Text
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.nasmusic.tv.R
+import com.nasmusic.tv.backend.download.DownloadGate
 import com.nasmusic.tv.backend.download.model.DownloadState
 import com.nasmusic.tv.backend.download.model.isDownloadableSong
 import com.nasmusic.tv.data.model.Song
@@ -234,7 +235,9 @@ private fun SongRowModeRow(
     val actionButtons: @Composable () -> Unit = {
         Row(verticalAlignment = Alignment.CenterVertically) {
             // 下载按钮（None 不渲染；Idle ⬇ 下载 / Queued ⋯ / Downloading ⇣ / Completed ✓ 删除 / Failed ✕ 重试）
-            if (onDownload != null && effectiveDownloadState !is DownloadState.None) {
+            val gatedOut = !DownloadGate.enabled &&
+                (effectiveDownloadState is DownloadState.Idle || effectiveDownloadState is DownloadState.Failed)
+            if (onDownload != null && effectiveDownloadState !is DownloadState.None && !gatedOut) {
                 val button: Triple<String, Color, Boolean>? = when (effectiveDownloadState) {
                     DownloadState.Idle -> Triple("⬇", NasMusicColors.TextPrimary, true)
                     DownloadState.Queued -> Triple("⋯", NasMusicColors.TextSecondary, false)

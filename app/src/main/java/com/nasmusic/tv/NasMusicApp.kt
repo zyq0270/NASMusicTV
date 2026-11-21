@@ -1,6 +1,7 @@
 package com.nasmusic.tv
 
 import android.app.Application
+import coil.Coil
 import coil.ImageLoader
 import coil.ImageLoaderFactory
 import coil.disk.DiskCache
@@ -8,6 +9,8 @@ import coil.memory.MemoryCache
 import com.nasmusic.tv.backend.BackendRegistry
 import com.nasmusic.tv.backend.SearchAggregator
 import com.nasmusic.tv.backend.SourceVisibility
+import com.nasmusic.tv.backend.download.DownloadGate
+import com.nasmusic.tv.lyrics.LyricsCachePolicy
 import com.nasmusic.tv.backend.local.LocalMusicRepository
 import com.nasmusic.tv.backend.local.MusicScanner
 import com.nasmusic.tv.backend.local.StorageMonitor
@@ -458,6 +461,18 @@ val baiduOAuthClient: BaiduOAuthClient by lazy { BaiduOAuthClient(this, baiduOkH
         applicationScope.launch {
             appPreferences.display.focusHighlightEnabled.collect { FocusVisualPreference.update(it) }
         }
+        // 缓存/下载开关的进程级快照：供同步读方（ImageLoader / LyricsPersistentCache / 歌曲行）使用。
+        // ⚠️ cacheCover 变化时重建 ImageLoader —— Coil 的 diskCache 不能逐请求开关。
+        applicationScope.launch {
+            appPreferences.appSettings.collect { s ->
+                LyricsCachePolicy.enabled = s.cacheLyrics
+                DownloadGate.enabled = s.downloadEnabled
+                if (coverDiskCacheEnabled != s.cacheCover) {
+                    coverDiskCacheEnabled = s.cacheCover
+                    Coil.setImageLoader(buildImageLoader(s.cacheCover))
+                }
+            }
+        }
         // R-7（第一类）：语言镜像一次性迁移（老版本 DataStore 已有语言值，镜像为空时补写）
         appPreferences.migrateLanguageMirrorIfNeeded()
         // 启动时应用语言设置（读 SharedPreferences 镜像，零 IO）
@@ -482,7 +497,10 @@ val baiduOAuthClient: BaiduOAuthClient by lazy { BaiduOAuthClient(this, baiduOkH
             // ⭐ NAS 音乐源总开关的**实时读法**（方案 §3.2.4 / §3.2.1 第 19 项）。
             // 与 SearchAggregator 的 nasMusicEnabled 同形：构造期注入 lambda、调用时实时读
             // ⇒ 开关翻转后下一次生成批次立即生效（关 NAS ⇒ 电台完全不发 NAS 请求）。
-            nasMusicEnabled = { appPreferences.getNasMusicEnabledSync() }
+            nasMusicEnabled = { appPreferences.getNasMusicEnabledSync() },
+            // 本地 / Meting 同理：采集侧短路，关源后不再读本地库、不再请求 Meting 歌单
+            localMusicEnabled = { cachedLocalMusicEnabled },
+            metingEnabled = { appPreferences.isSourceEnabledSync(NetworkSongId.METING_SOURCE) }
         )
         // 模型下载管理器（HT-Demucs FT ONNX，与 APK 分离，设置页下载）
         modelDownloadManager = ModelDownloadManager(this) { appPreferences.getModelDownloadUrlSync() }
@@ -497,6 +515,11 @@ val baiduOAuthClient: BaiduOAuthClient by lazy { BaiduOAuthClient(this, baiduOkH
         // 不再是三次串行 runBlocking。注册语义不变（仍同步），需要异步注册是架构级改动。
         val boot = runBlocking { appPreferences.readBootSnapshot() }
         val bootSettings = boot.settings
+        // 缓存开关的启动期播种：ImageLoader / LyricsPersistentCache 可能在任何设置页打开前
+        // 就被首帧使用，不能等设置收集器异步跑第一轮。
+        LyricsCachePolicy.enabled = bootSettings.cacheLyrics
+        DownloadGate.enabled = bootSettings.downloadEnabled
+        coverDiskCacheEnabled = bootSettings.cacheCover
         val bootJamendoClientId = boot.jamendoClientId
         // 本地音乐总开关的运行期同步镜像（SourceVisibility 的 LOCAL 判据用）：
         // 启动期**直接读 DataStore** 播种（同上，镜像此刻可能还是编译期默认值）。
@@ -878,23 +901,41 @@ autoDownloadController = com.nasmusic.tv.backend.download.AutoDownloadController
     }
 
     /**
-     * Coil ImageLoader：注入百度 dlink UA 拦截器，使百度网盘封面图片可加载（否则 403）。
+     * 封面磁盘缓存开关的进程级快照。
+     *
+     * 单一写入者：`onCreate` 的播种 + `appSettings` 收集器；读方只有 [newImageLoader]。
+     * ⚠️ cacheCover 变化时必须重建 ImageLoader（[Coil.setImageLoader]）——
+     * Coil 的 `diskCache` 是 loader 级配置，无法逐请求开关。
      */
-    override fun newImageLoader(): ImageLoader {
-        return ImageLoader.Builder(this)
+    @Volatile
+    private var coverDiskCacheEnabled: Boolean = true
+
+    /**
+     * Coil ImageLoader：注入百度 dlink UA 拦截器，使百度网盘封面图片可加载（否则 403）。
+     *
+     * 磁盘缓存跟随设置页「自动缓存封面」：关闭时不配置 `diskCache`，
+     * 这样开关才有真实效果（此前是恒开 100MB 的假开关）。
+     */
+    override fun newImageLoader(): ImageLoader = buildImageLoader(coverDiskCacheEnabled)
+
+    private fun buildImageLoader(diskCacheEnabled: Boolean): ImageLoader =
+        ImageLoader.Builder(this)
             .okHttpClient(BaiduHttpDataSourceFactory.createOkHttpClientForCoil())
             .memoryCache {
                 MemoryCache.Builder(this).maxSizePercent(0.25).build()
             }
-            .diskCache {
-                DiskCache.Builder()
-                    .directory(cacheDir.resolve("image_cache"))
-                    .maxSizeBytes(100L * 1024 * 1024)
-                    .build()
+            .apply {
+                if (diskCacheEnabled) {
+                    diskCache(
+                        DiskCache.Builder()
+                            .directory(cacheDir.resolve("image_cache"))
+                            .maxSizeBytes(100L * 1024 * 1024)
+                            .build()
+                    )
+                }
             }
             .crossfade(true)
             .build()
-    }
 
     override fun onTerminate() {
         super.onTerminate()

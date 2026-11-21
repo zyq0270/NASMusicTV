@@ -72,6 +72,8 @@ class LyricsPersistentCache private constructor(context: Context) {
 
     /** 按 songId 查询缓存，返回完整条目（含 LRC 文本） */
     fun get(songId: String): LyricsCacheEntry? = synchronized(saveLock) {
+        // 设置页「自动缓存歌词」关闭 ⇒ 不读也不写（见 LyricsCachePolicy）。
+        if (!LyricsCachePolicy.enabled) return null
         val idx = index[songId]
         if (idx == null) {
             null
@@ -113,6 +115,8 @@ class LyricsPersistentCache private constructor(context: Context) {
      * 超过 [MAX_ENTRIES] 时自动淘汰最旧的条目，同时删除对应的 .lrc 文件。
      */
     fun put(entry: LyricsCacheEntry) {
+        // 设置页「自动缓存歌词」关闭 ⇒ 不写盘（见 LyricsCachePolicy）。
+        if (!LyricsCachePolicy.enabled) return
         synchronized(saveLock) {
             val now = System.currentTimeMillis()
             // 写 LRC 文件

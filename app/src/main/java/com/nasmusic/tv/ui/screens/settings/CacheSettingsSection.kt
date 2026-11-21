@@ -122,6 +122,7 @@ internal fun CacheSettingsSection(
                     }
                 )
             }
+            SettingsHint(stringResource(R.string.settings_cache_cover_group_hint))
             if (actions.onClearCoverCache != null) {
                 SettingActionButton(
                     label = stringResource(R.string.settings_clear_cover_cache),

@@ -98,7 +98,7 @@ internal fun LibraryBranch(
                     // 方案 §5.3：设置里被关闭的搜索源（此刻不参与搜索）—— chip 需据此显示为「已关」
                     val disabledSearchSources by viewModel.searchVM.disabledSearchSources.collectAsState()
                     // v2.39.8（方案 §7.7 第 3 条）：全部网络音乐源关闭时搜索页显示引导而非「无结果」
-                    val noNetworkSourceEnabled by viewModel.noNetworkSourceEnabled.collectAsState()
+                    val noMusicSourceEnabled by viewModel.noMusicSourceEnabled.collectAsState()
                     // 艺人全量方案 §3.5/§3.6：搜索页打标集合 + 艺人续页状态
                     val searchUnplayableIds by viewModel.searchVM.searchUnplayableIds.collectAsState()
                     val artistPaging by viewModel.searchVM.artistPaging.collectAsState()
@@ -120,6 +120,8 @@ internal fun LibraryBranch(
                     val browseResultsState by viewModel.browseResults.collectAsState(initial = UiState.Success(emptyList()))
                     val browseIsLoading by viewModel.isBrowseSearching.collectAsState(initial = false)
                     val browseResultsList = browseResultsState.dataOrNull() ?: emptyList()
+                    // 发现页错误态（问题1）：此前 dataOrNull 把 Error 压成空列表，失败原因对用户不可见。
+                    val browseErrorText = (browseResultsState as? UiState.Error)?.message
 // Build DiscoverTab-compatible dimensions from BrowseDimension enum
                     // (不带字符串，只带资源 ID——remember 块内不能调 composable stringResource，
                     // 渲染在 DiscoverTab 组合作用域做)
@@ -156,7 +158,7 @@ val discoverCurrentDimensionValues = remember(browseSelections) {
                         songsPaging = mergedSongsPaging,
                         searchResults = searchResultsList,
                         isSearching = isSearching,
-                        noNetworkSourceEnabled = noNetworkSourceEnabled,
+                        noMusicSourceEnabled = noMusicSourceEnabled,
                         searchUnplayableIds = searchUnplayableIds,
                         artistPaging = artistPaging,
                         onLoadMoreArtistSongs = { viewModel.searchVM.loadMoreArtistSongs() },
@@ -234,8 +236,9 @@ onDiscoverDimensionChanged = { dimIdx, optIdx ->
                             viewModel.selectBrowseOption(dimIdx, optIdx)
                         },
                         onDiscoverPlayAll = {
+                            // 走统一入口：跨源同曲去重 + 最多 30 首（与搜索页同口径，问题5）
                             if (browseResultsList.isNotEmpty()) {
-                                viewModel.playQueue(browseResultsList)
+                                viewModel.playAllBrowseSongs()
                                 viewModel.navVM.navigateTo(Screen.NowPlaying)
                             }
                         },
@@ -248,6 +251,10 @@ onDiscoverDimensionChanged = { dimIdx, optIdx ->
                         },
                         onDiscoverEnsureLoaded = {
                             viewModel.ensureBrowseLoaded()
+                        },
+                        discoverError = browseErrorText,
+                        onDiscoverRetry = {
+                            viewModel.refreshBrowseSongs()
                         },
                         // ── RADIO Tab ──
                         radioStations = radioStations,

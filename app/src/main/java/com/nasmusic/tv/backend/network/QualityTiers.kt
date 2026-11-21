@@ -36,6 +36,19 @@ object QualityTiers {
     val all: List<Int> = listOf(AUTO, STANDARD, GOOD, HIGH, LOSSLESS)
 
     /**
+     * 本机可选的档位：不支持 FLAC 解码的设备**不展示无损档**。
+     *
+     * 与 [clampForDevice] 的区别：后者是播放时的兜底，前者是 UI 的事前过滤。
+     * 两者必须同时存在——只兜底会让用户选了一个永远不生效的档位。
+     */
+    fun uiTiers(flacUnsafe: Boolean = DeviceAudioCaps.isFlacDecodeUnsafe()): List<Int> =
+        if (flacUnsafe) all.filterNot { it == LOSSLESS } else all
+
+    /** 本机是否不支持无损（用于设置页说明旧持久化值为何不生效） */
+    fun isLosslessUnsupported(flacUnsafe: Boolean = DeviceAudioCaps.isFlacDecodeUnsafe()): Boolean =
+        flacUnsafe
+
+    /**
      * 可用于探测与降级的真实码率档，**按码率降序**。
      * 不含 AUTO —— AUTO 无法"探测是否可用"（它只是不传 br）。
      */

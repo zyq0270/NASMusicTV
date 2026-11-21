@@ -897,6 +897,7 @@
     <string name="discover_add_queue">Add to Queue</string>
     <string name="discover_change_batch">Refresh ↻</string>
     <string name="discover_song_count">%d songs</string>
+    <string name="discover_pick_dimension">Select a filter above to start discovering music</string>
 
     <!-- Browse Dimension -->
     <string name="browse_dim_language">Language</string>
@@ -1709,4 +1710,16 @@
     <string name="feiniu_err_network">Cannot reach the server (%1$s). Check the network and address.</string>
     <string name="feiniu_err_no_token">Login succeeded but the response contained no userToken</string>
     <string name="server_config_start_failed">Local server failed to start (port may be in use)</string>
+
+    <!-- 2026-11-21 settings fixes -->
+    <string name="settings_netdisk_enabled_not_logged_in">Enabled but not signed in: Baidu is excluded from search and playback</string>
+    <string name="settings_netdisk_enable_active">Enabled and signed in: participates in search and playback</string>
+    <string name="settings_download_disabled_toast">Downloads are off. Turn them on in Settings → Downloads</string>
+    <string name="settings_quality_lossless_unsupported">This device cannot decode lossless audio; playing at 320 kbps</string>
+    <string name="settings_default_source_current">Current default source</string>
+    <string name="settings_default_source_not_catalog">%1$s provides no playlist/artist catalog; used only as the search fallback start</string>
+    <string name="settings_cache_cover_group_hint">The next three items all relate to covers: image cache / extracted cover files / cover URL index</string>
+    <string name="settings_netdisk_index_rebuild_need_enable">Enable Baidu Netdisk first</string>
+    <string name="settings_netdisk_index_rebuild_need_login">Sign in to Baidu Netdisk first</string>
+    <string name="settings_auto_download_limit_disabled">Has no effect while auto-download is off</string>
 </resources>

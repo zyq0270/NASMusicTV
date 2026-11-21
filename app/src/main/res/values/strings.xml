@@ -938,6 +938,7 @@
     <string name="discover_add_queue">加入队列</string>
     <string name="discover_change_batch">换一批 ↻</string>
     <string name="discover_song_count">%d 首</string>
+    <string name="discover_pick_dimension">选择上方的筛选条件，开始发现音乐</string>
 
     <!-- Browse Dimension -->
     <string name="browse_dim_language">语种</string>
@@ -1722,4 +1723,16 @@
     <string name="feiniu_err_network">无法连接服务器（%1$s），请检查网络与地址</string>
     <string name="feiniu_err_no_token">登录成功但响应中没有 userToken</string>
     <string name="server_config_start_failed">本地服务启动失败，扫码填入不可用（端口可能被占用）</string>
+
+    <!-- 2026-11-21 设置页缺陷修复 -->
+    <string name="settings_netdisk_enabled_not_logged_in">已启用，但未登录：百度暂不参与搜索与播放</string>
+    <string name="settings_netdisk_enable_active">已启用且已登录，参与搜索与播放</string>
+    <string name="settings_download_disabled_toast">下载已关闭，请到 设置 → 下载 开启</string>
+    <string name="settings_quality_lossless_unsupported">本机不支持无损解码，已按 320 kbps 播放</string>
+    <string name="settings_default_source_current">当前默认源</string>
+    <string name="settings_default_source_not_catalog">%1$s 不提供歌单/艺人目录，仅作为搜索 fallback 起点</string>
+    <string name="settings_cache_cover_group_hint">以下三项都与封面有关：图片缓存 / 提取封面文件 / 封面地址索引</string>
+    <string name="settings_netdisk_index_rebuild_need_enable">先启用百度网盘</string>
+    <string name="settings_netdisk_index_rebuild_need_login">先登录百度网盘</string>
+    <string name="settings_auto_download_limit_disabled">自动下载关闭时不生效</string>
 </resources>

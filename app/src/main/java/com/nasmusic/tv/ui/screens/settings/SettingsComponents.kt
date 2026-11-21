@@ -621,9 +621,10 @@ internal fun formatVersionInfo(v: com.nasmusic.tv.data.model.VersionInfo): Pair<
 
 @OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
-internal fun AdjustButton(text: String, onClick: () -> Unit) {
+internal fun AdjustButton(text: String, onClick: () -> Unit, enabled: Boolean = true) {
     SettingsTile(
         onClick = onClick,
+        enabled = enabled,
         // 48dp 在竖屏只有 39.4 物理 dp ❌ → §2.7 换算抬到 56dp（TV/横屏保持 48dp，B1）
         // ⚠️ 这个字面量是 `SmallTouchTargetScanTest` 的抓手，⛔ 不要令牌化（§4.7-⑥ 已说明）。
         modifier = Modifier.size(portraitTouchTarget(48.dp)),

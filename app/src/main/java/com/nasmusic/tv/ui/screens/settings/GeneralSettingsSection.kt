@@ -35,7 +35,6 @@ data class GeneralSettingsState(
 data class GeneralSettingsActions(
     val onChangeLanguage: ((String) -> Unit)?,
     val onChangeThemeMode: (ThemeMode) -> Unit,
-    val onToggleAnimations: (Boolean) -> Unit,
     val onChangeFontAdjustment: (Int) -> Unit,
     /** v2.36.0：改屏幕方向（L1 全局策略，唯一真相之源） */
     val onChangeScreenOrientation: ((String) -> Unit)? = null,
@@ -100,10 +99,8 @@ internal fun GeneralSettingsSection(
                     )
                 }
             }
-            SettingSwitch(label = stringResource(R.string.settings_animations), description = stringResource(R.string.settings_animations_desc), checked = state.settings.animationsEnabled, onClick = { actions.onToggleAnimations(!state.settings.animationsEnabled) })
             // v2.39.7：焦点高亮 —— 遥控器看不见焦点时的用户侧自救开关（所有者裁决：默认开）。
-            // ⚠️ 必须与动画开关同卡：`SettingsGroupCoverageTest` 只认落在 `SettingsGroupCard` 内的
-            // `SettingSwitch`，单独一条裸 Switch 会漏出卡片外。
+            // 2026-11-21：原「动画效果」开关已移除（无任何消费方，详见设置页审查 P0-1）。
             SettingSwitch(label = stringResource(R.string.settings_focus_highlight), description = stringResource(R.string.settings_focus_highlight_desc), checked = state.focusHighlightEnabled, onClick = { actions.onChangeFocusHighlight?.invoke(!state.focusHighlightEnabled) })
             // 字体字号调整（在当前Theme档位基础上增减）
             // 芯片/调整行的说明位走 SettingsHint（§4.5）—— 此前这行**没有任何说明**

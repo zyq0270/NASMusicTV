@@ -102,8 +102,8 @@ fun QualityPickerDialog(
                 )
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // 5 档单选（遍历单一真相源，含 192）
-                QualityTiers.all.forEach { tier ->
+                // 单选（遍历单一真相源，含 192；本机不支持 FLAC 时不展示无损档）
+                QualityTiers.uiTiers().forEach { tier ->
                     QualityOptionRow(
                         label = stringResource(QualityTiers.labelResOf(tier)),
                         description = if (tier == QualityTiers.AUTO) {

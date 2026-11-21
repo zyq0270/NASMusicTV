@@ -608,6 +608,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
     /** 浏览换一批已展示过的歌曲（歌手, 歌名）集合：跨批次去重，筛选条件变化时重置 */
     private val browseSeenKeys = mutableSetOf<Pair<String, String>>()
 
+    /**
+     * 发现页刷新并发闸门：保存最近一次刷新 Job，新刷新启动时先取消旧 Job。
+     * 配合 [browseRefreshGeneration] 保证「旧结果覆盖新结果」「旧 Job finally 提前清 loading」不会发生。
+     */
+    private var browseRefreshJob: Job? = null
+
+    /** 刷新代数：每次刷新自增，写结果/清 loading 前比对，仅当前代生效 */
+    private var browseRefreshGeneration = 0L
+
+    /** 发现页是否已执行过首次加载：避免全 ALL（空结果）时切回 Tab 反复触发刷新 */
+    private var browseLoadedOnce = false
+
     /** 换一批单次点击最多尝试的后缀数量（避免搜索结果长期重复时空转） */
     private val maxShuffleAttemptsPerClick = 6
 
@@ -1527,18 +1539,20 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
     )
 
     /**
-     * v2.39.8（方案 §7.7 第 3 条）：三个网络音乐源**全部关闭**。
+     * v2.39.8（方案 §7.7 第 3 条）：**全部音乐源**关闭（NAS / 本地 / 网络三源）。
      *
-     * 搜索页据此把「搜索无结果」换成「未启用任何音乐源，请到 设置 → 音乐来源 开启」——
-     * 前者会让用户以为网络坏了。判据与注册逻辑同一份语义（§7.5）：
-     * meting 开关 · baidu `isActive` · jamendo 开关且 clientId 非空。
+     * 搜索页据此把「搜索无结果」换成「未启用任何音乐源」——
+     * 前者会让用户以为网络坏了。判据必须覆盖聚合器实际参与搜索的五个源，
+     * ⛔ 只算网络三源会在「NAS 开着但没结果」时误报（2026-11-21 审查 P1-4）。
      */
-    val noNetworkSourceEnabled: StateFlow<Boolean> = combine(
+    val noMusicSourceEnabled: StateFlow<Boolean> = combine(
         prefs.appSettings,
         prefs.baidu.baiduConfigFlow,
         prefs.network.jamendoClientIdFlow,
     ) { s, baiduCfg, jamendoClientId ->
-        !s.metingEnabled && !baiduCfg.isActive && !(s.jamendoEnabled && jamendoClientId.isNotBlank())
+        !s.nasMusicEnabled && !s.localMusicEnabled &&
+            !s.metingEnabled && !baiduCfg.isActive &&
+            !(s.jamendoEnabled && jamendoClientId.isNotBlank())
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.Eagerly,
@@ -2357,31 +2371,31 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
      */
     fun selectBrowseOption(dimensionIndex: Int, optionIndex: Int) {
         val current = _browseSelections.value.toMutableList()
-        if (dimensionIndex in current.indices) {
-            // 筛选条件变化 = 新上下文，重置浏览已见集合（跨批次去重从头开始）
-            if (current[dimensionIndex] != optionIndex) {
-                browseSeenKeys.clear()
-            }
-            current[dimensionIndex] = optionIndex
-            _browseSelections.value = current
-        }
-        // 变更后自动刷新（如果有非 ALL 选项）
+        if (dimensionIndex !in current.indices) return
+        // 仅选中项真正变化时才重置去重集合并发起搜索；重复点同一 chip 不再触发跨源查找
+        if (current[dimensionIndex] == optionIndex) return
+        // 筛选条件变化 = 新上下文，重置浏览已见集合（跨批次去重从头开始）
+        browseSeenKeys.clear()
+        current[dimensionIndex] = optionIndex
+        _browseSelections.value = current
         refreshBrowseSongs()
     }
 
     /**
-     * 确保浏览结果已加载（幂等）：已有成功结果或正在加载中则跳过。
+     * 确保浏览结果已加载（幂等）：首次加载执行过即跳过。
      *
-     * 供"重新进入发现页面"触发：主tab/子tab切换回来时若结果仍在
-     * （跨导航暂存），不做无谓的重新搜索——与搜索页的 lastSearchedKeyword 缓存
-     * 逻辑一致，缓存判断放在 ViewModel 层而非依赖 UI collectAsState 初始值。
+     * 供"重新进入发现页面"触发：主tab/子tab切换回来时不重复搜索——与搜索页的
+     * lastSearchedKeyword 缓存逻辑一致，缓存判断放在 ViewModel 层而非依赖 UI
+     * collectAsState 初始值。用 [browseLoadedOnce] 而非"结果非空"判定，避免全 ALL
+     * 空结果时每次切回都重跑。失败态由 UI 的重试按钮显式触发，不走此入口。
      */
     fun ensureBrowseLoaded() {
-        val current = _browseResults.value
-        // 已有成功结果（暂存内容）→ 不重搜
-        if (current is UiState.Success && current.data.isNotEmpty()) return
+        // 首次加载已执行过（含全 ALL 空结果）→ 切页不再重复搜索。
+        // 空结果此前被误判为"未加载"，导致每次切回发现页都重跑一轮跨源搜索。
+        if (browseLoadedOnce) return
         // 正在搜索中 → 不重复触发
-        if (current is UiState.Loading) return
+        if (_browseResults.value is UiState.Loading) return
+        browseLoadedOnce = true
         refreshBrowseSongs()
     }
 
@@ -2392,6 +2406,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
      * 挑选新歌最多的批次展示，保证每次「换一批」只出新歌。
      */
     fun refreshBrowseSongs() {
+        // 并发闸门（问题2）：新刷新先取消在途刷新，代数自增使旧 Job 的写结果/清标志失效。
+        // 快速连点"换一批"或连续切维度时，只认最后一次请求的结果与 loading 状态。
+        browseRefreshJob?.cancel()
+        val generation = ++browseRefreshGeneration
+
         val dimensions = BrowseDimension.entries
         val selections = _browseSelections.value
 
@@ -2407,6 +2426,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
         }
 
         if (keywordList.isEmpty()) {
+            // 无任何筛选：清空结果，同时确保 loading 标志复位（旧 Job 的 finally 因代数失配不会清）
+            _isBrowseSearching.value = false
             _browseResults.value = UiState.Success(emptyList())
             return
         }
@@ -2414,7 +2435,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
         _isBrowseSearching.value = true
         _browseResults.value = UiState.Loading
 
-        viewModelScope.launch {
+        browseRefreshJob = viewModelScope.launch {
             try {
                 // 构建组合关键词（与"换一批"逻辑一致），但跨源聚合搜索
                 // 构建组合关键词（展开词，给网络/NAS/Jamendo 用，支持换一批多样性）
@@ -2468,27 +2489,41 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
                     },
                     songsOf = { it }
                 )
-                _browseResults.value = UiState.Success(shown)
+                // 仅当前代写入结果（旧请求即使跑完也不得覆盖新请求）
+                if (generation == browseRefreshGeneration) {
+                    _browseResults.value = UiState.Success(shown)
+                }
             } catch (e: Exception) {
                 e.rethrowIfCancellation()
-                AppLog.e("NASMusic", "refreshBrowseSongs failed: ${e.message}", e)
-                _browseResults.value = UiState.Error(
-                    message = getApplication<Application>().getString(R.string.browse_search_failed, e.message?.take(50))
-                )
+                if (generation == browseRefreshGeneration) {
+                    AppLog.e("NASMusic", "refreshBrowseSongs failed: ${e.message}", e)
+                    _browseResults.value = UiState.Error(
+                        message = getApplication<Application>().getString(R.string.browse_search_failed, e.message?.take(50))
+                    )
+                }
             } finally {
-                _isBrowseSearching.value = false
+                // 仅当前代清理 loading（旧请求被取消时不得提前结束新请求的加载态）
+                if (generation == browseRefreshGeneration) {
+                    _isBrowseSearching.value = false
+                }
             }
         }
     }
 
     /**
      * 播放全部浏览结果。
+     * 加入队列前按（歌手, 歌曲名）去重、最多取 [maxNetworkBatchPlayCount] 首——
+     * 与搜索页 [playAllSearchResults] 完全同口径（问题5：跨源同曲多版本 + 无限量）。
      * 不触发导航，由调用方（AppRoot）处理 navigateTo(NowPlaying)。
      */
     fun playAllBrowseSongs() {
         val results = _browseResults.value.dataOrNull() ?: return
         if (results.isEmpty()) return
-        playNetworkBatch(results, 0)
+        val deduped = results
+            .distinctBy { it.artist.trim() to it.title.trim() }
+            .take(maxNetworkBatchPlayCount)
+        if (deduped.isEmpty()) return
+        playNetworkBatch(deduped, 0)
     }
 
     /**
@@ -4188,10 +4223,6 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
     // --- 设置 ---
     fun updateThemeMode(mode: com.nasmusic.tv.data.model.ThemeMode) = viewModelScope.launch {
         prefs.player.setThemeMode(mode)
-    }
-
-    fun updateAnimationsEnabled(enabled: Boolean) = viewModelScope.launch {
-        prefs.player.setAnimationsEnabled(enabled)
     }
 
     /**

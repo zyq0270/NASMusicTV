@@ -246,7 +246,6 @@ internal fun SettingsBranch(
                         onChangeFocusHighlight = { viewModel.updateFocusHighlightEnabled(it) },
                         settings = settings,
                         onChangeThemeMode = { viewModel.updateThemeMode(it) },
-                        onToggleAnimations = { viewModel.updateAnimationsEnabled(it) },
                         onToggleAutoPlayNext = { viewModel.updateAutoPlayNext(it) },
                         onChangePlayMode = { viewModel.updateDefaultPlayMode(it) },
                         onToggleCacheLyrics = { viewModel.updateCacheLyrics(it) },

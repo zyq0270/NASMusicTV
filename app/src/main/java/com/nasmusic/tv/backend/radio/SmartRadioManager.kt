@@ -33,6 +33,10 @@ class SmartRadioManager(
     private val networkPlaylistIds: List<String> = emptyList(),
     /** F2-3 多源化：本地歌曲 provider（含下载歌曲） */
     private val localSongsProvider: (suspend () -> List<Song>)? = null,
+    /** 本地音乐总开关的实时读法：关 ⇒ loadLibrary 不读本地库。 */
+    private val localMusicEnabled: () -> Boolean = { true },
+    /** Meting 开关的实时读法：关 ⇒ 不请求网络歌单采样。 */
+    private val metingEnabled: () -> Boolean = { true },
     /**
      * ⭐ NAS 音乐源总开关的**实时读法**（同步 provider，方案 §3.2.1 第 19 项 / §3.2.4）。
      *
@@ -41,8 +45,8 @@ class SmartRadioManager(
      * ⛔ 不要改成构造期快照：`SmartRadioManager` 在 `NasMusicApp.onCreate` 建一次，
      * 快照会让开关永远停在启动时的值（`LocalMusicGateTest` 当初钉住的同一类缺陷）。
      *
-     * 关掉后的语义：[loadLibrary] **完全不发 NAS 请求**（不取流派池、不分页拉全量）；
-     * 本地与 Meting 采样照旧（关掉 NAS ≠ 关掉整个电台）。
+     * 关掉后的语义：[loadLibrary] **完全不发 NAS 请求**（不取流派池、不分页拉全量）。
+     * 本地 / Meting 各自另有开关，三者互不牵连（关掉 NAS ≠ 关掉整个电台）。
      * ⚠️ 批次侧（生成结果里不该出现 NAS 歌）由调用方按 `song.sourceType` 过滤，
      *    见 `MainViewModel.loadSmartRadioBatch` 的 `generateOnly` 回调（方案 §3.2.4）。
      */
@@ -76,6 +80,8 @@ class SmartRadioManager(
      * 重建一次。
      */
     @Volatile private var cachedLibraryNasVisible: Boolean? = null
+    @Volatile private var cachedLibraryLocalVisible: Boolean? = null
+    @Volatile private var cachedLibraryMetingVisible: Boolean? = null
 
     /**
      * F2-3 多源化：无种子启动（首页入口）——偏好加权随机（play_counts），不依赖当前播放。
@@ -286,13 +292,19 @@ class SmartRadioManager(
      * - 否则全量分页拉取（上限 [LIBRARY_HARD_CAP] 防大库拖垮）
      *
      * ⭐ NAS 音乐源总开关（方案 §3.2.1 第 19 项 / §3.2.4）：NAS 关 ⇒ **完全不发 NAS 请求**
-     * （既不取流派池，也不分页拉全量）；本地与 Meting 采样照旧。
+     * （既不取流派池，也不分页拉全量）。本地 / Meting 各有独立开关，同理短路。
      */
     private suspend fun loadLibrary(seed: Song?): List<Song> {
         val nasVisible = nasMusicEnabled()
+        val localVisible = localMusicEnabled()
+        val metingVisible = metingEnabled()
         synchronized(stateLock) {
             val cached = cachedLibrary
-            if (cached != null && cachedLibraryNasVisible == nasVisible) return cached
+            if (cached != null &&
+                cachedLibraryNasVisible == nasVisible &&
+                cachedLibraryLocalVisible == localVisible &&
+                cachedLibraryMetingVisible == metingVisible
+            ) return cached
         }
         // NAS 关 ⇒ 视作「没有 adapter」⇒ 下面两条 NAS 请求路径（getSongsByGenre / getSongs 分页）
         // 同时短路，关源时**一个 NAS 请求都不发**。分页循环内部逻辑保持原样。
@@ -323,15 +335,19 @@ class SmartRadioManager(
         } else emptyList()
 
         // F2-3 多源化：聚合 NAS + 本地歌曲 + Meting 网络歌单采样
-        val localSongs = try { localSongsProvider?.invoke() ?: emptyList() } catch (e: Exception) {
-            AppLog.w(TAG, "localSongs failed: ${e.message}"); emptyList()
-        }
-        val networkSongs = loadNetworkSamples()
+        val localSongs = if (localVisible) {
+            try { localSongsProvider?.invoke() ?: emptyList() } catch (e: Exception) {
+                AppLog.w(TAG, "localSongs failed: ${e.message}"); emptyList()
+            }
+        } else emptyList()
+        val networkSongs = if (metingVisible) loadNetworkSamples() else emptyList()
         val combined = (nasLibrary + localSongs + networkSongs).distinctBy { it.id }
         AppLog.d(TAG, "loadLibrary multi-source: nas=${nasLibrary.size} local=${localSongs.size} net=${networkSongs.size} combined=${combined.size}")
         synchronized(stateLock) {
             cachedLibrary = combined
             cachedLibraryNasVisible = nasVisible
+            cachedLibraryLocalVisible = localVisible
+            cachedLibraryMetingVisible = metingVisible
         }
         return combined
     }
