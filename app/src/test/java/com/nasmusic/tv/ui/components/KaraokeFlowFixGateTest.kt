@@ -11,38 +11,62 @@ import org.junit.Test
  *
  * Robolectric 不执行 Compose 的 LaunchedEffect 协程体，也不渲染按钮文案；
  * 沿用本工程 K 歌门禁既有做法（KaraokeFullscreenGateTest / KaraokePickerTvFocusScanTest）
- * 锁住源码结构。锁的是 5 项修复的**回归点**：
- *  - 冷启动恢复只走 VM 的 loadPitchSpeedFromPrefs（同步 VM 状态 + 播放器）
- *  - exitKaraoke 不再 resetPitch/resetSpeed（否则抹掉「全局记忆」的偏好）
+ * 锁住源码结构。当前锁的是 5 项修复的**回归点**：
+ *  - 升降调/变速是会话内效果：冷启动强制原调原速，不读历史值
+ *  - exitKaraoke 必须复位升降调与变速（退出即恢复原调原速）
+ *  - commit / reset 都不写持久化（不记忆）
  *  - 歌词插值锚点用 val（杜绝在循环里重设锚点的死代码回归）
  *  - 原唱/伴唱按钮显示当前态 + 转换中置灰 + onClick guard
  *
- * ⚠️ 断言一律**语句级**：源码注释里会解释旧实现（含被禁字面量），全文 `!contains` 会自伤。
+ * ⚠️ 断言一律**语句级**：源码注释里会解释旧实现，全文 `!contains` 会自伤。
  */
 class KaraokeFlowFixGateTest {
 
     @Test
-    fun `冷启动升降调变速恢复只走 VM 入口`() {
+    fun `冷启动强制原调原速且不读历史值`() {
         val source = readSource("com/nasmusic/tv/ui/viewmodel/MainViewModel.kt")
-        // 语句级：恢复调用必须是 vocalVM.loadPitchSpeedFromPrefs()
-        assertTrue(
-            "MainViewModel.init 必须调用 vocalVM.loadPitchSpeedFromPrefs() 以同步 VM 状态 + 播放器",
+        assertFalse(
+            "冷启动不得再调用历史恢复入口（升降调/变速不记忆）",
             "vocalVM.loadPitchSpeedFromPrefs()" in source
+        )
+        assertTrue(
+            "冷启动必须把播放器升降调复位为 0",
+            "playerManager.setPitch(0)" in source
+        )
+        assertTrue(
+            "冷启动必须把播放器速度复位为 1.0",
+            "playerManager.setSpeed(1.0f)" in source
         )
     }
 
     @Test
-    fun `退出 K 歌页不得重置升降调与变速`() {
+    fun `退出 K 歌页必须复位升降调与变速`() {
         val source = readSource("com/nasmusic/tv/ui/viewmodel/VocalSeparationViewModel.kt")
         val body = sliceBetween(source, "fun exitKaraoke()", "AppLog.d(\"VocalSeparationViewModel\", \"exitKaraoke:")
-        // 语句级：函数体内不含 resetPitch() / resetSpeed() 调用（注释里提到的旧名字不算）
-        assertFalse(
-            "exitKaraoke 不得调用 resetPitch()（会把 0 落盘，抹掉用户的升降调偏好）",
+        assertTrue(
+            "exitKaraoke 必须调用 resetPitch() 恢复原调",
             "resetPitch()" in body
         )
-        assertFalse(
-            "exitKaraoke 不得调用 resetSpeed()（会把 1.0 落盘，抹掉用户的变速偏好）",
+        assertTrue(
+            "exitKaraoke 必须调用 resetSpeed() 恢复原速",
             "resetSpeed()" in body
+        )
+    }
+
+    @Test
+    fun `升降调与变速的提交和重置都不写持久化`() {
+        val source = readSource("com/nasmusic/tv/ui/viewmodel/VocalSeparationViewModel.kt")
+        assertFalse(
+            "升降调不得写 DataStore（会话内临时效果）",
+            "prefs.player.setPitchSemitones(" in source
+        )
+        assertFalse(
+            "变速不得写 DataStore（会话内临时效果）",
+            "prefs.player.setPlaybackSpeed(" in source
+        )
+        assertFalse(
+            "VM 不得再提供历史恢复入口",
+            "fun loadPitchSpeedFromPrefs()" in source
         )
     }
 

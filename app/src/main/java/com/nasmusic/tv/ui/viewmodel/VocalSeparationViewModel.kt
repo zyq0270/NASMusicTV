@@ -13,7 +13,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -194,7 +193,7 @@ class VocalSeparationViewModel(
         _modelDownloaded.value = downloaded
     }
 
-    // --- K 歌页面：升降调 & 变速（全局记忆，重启恢复）---
+    // --- K 歌页面：升降调 & 变速（仅会话内生效，退出复位，不记忆）---
 
     private val _pitchSemitones = MutableStateFlow(0)
     val pitchSemitones: StateFlow<Int> = _pitchSemitones.asStateFlow()
@@ -202,23 +201,9 @@ class VocalSeparationViewModel(
     private val _playbackSpeed = MutableStateFlow(1.0)
     val playbackSpeed: StateFlow<Double> = _playbackSpeed.asStateFlow()
 
-    /** 从 AppPreferences 加载上次保存的 pitch/speed，并应用到 PlayerManager */
-    fun loadPitchSpeedFromPrefs() {
-        viewModelScope.launch {
-            val savedPitch = prefs.player.pitchSemitones.first()
-            val savedSpeed = prefs.player.playbackSpeed.first()
-            _pitchSemitones.value = savedPitch
-            _playbackSpeed.value = savedSpeed
-            // 应用到播放器（仅在 player 已初始化时生效）
-            playerManager.setPitch(savedPitch)
-            playerManager.setSpeed(savedSpeed.toFloat())
-            AppLog.d("VocalSeparationViewModel", "loadPitchSpeedFromPrefs: pitch=$savedPitch, speed=$savedSpeed")
-        }
-    }
-
     /**
-     * 预览升降调（半音 -12~+12）：只改播放器与页面状态，**不落盘**。
-     * K 歌步进弹窗换档时实时试听用（方案 §3-A3 / 决策 D2）；落盘由 [commitPitch] 负责。
+     * 预览升降调（半音 -12~+12）：只改播放器与页面状态，**不写 DataStore**。
+     * K 歌步进弹窗换档时实时试听用（方案 §3-A3 / 决策 D2）；[commitPitch] 也只做确认。
      */
     fun previewPitch(semitones: Int) {
         val clamped = semitones.coerceIn(-12, 12)
@@ -227,15 +212,14 @@ class VocalSeparationViewModel(
         AppLog.d("VocalSeparationViewModel", "previewPitch -> $clamped")
     }
 
-    /** 提交当前升降调值并持久化（弹窗「确定」） */
+    /** 确认当前升降调值（弹窗「确定」）：会话内已生效，**不写 DataStore**，退出 K 歌页复位 */
     fun commitPitch() {
         val value = _pitchSemitones.value
-        viewModelScope.launch { prefs.player.setPitchSemitones(value) }
-        AppLog.d("VocalSeparationViewModel", "commitPitch -> $value")
+        AppLog.d("VocalSeparationViewModel", "commitPitch -> $value (session only)")
     }
 
     /**
-     * 预览播放速度（0.5~2.0）：只改播放器与页面状态，**不落盘**。
+     * 预览播放速度（0.5~2.0）：只改播放器与页面状态，**不写 DataStore**。
      */
     fun previewSpeed(speed: Double) {
         val clamped = speed.coerceIn(0.5, 2.0)
@@ -244,26 +228,23 @@ class VocalSeparationViewModel(
         AppLog.d("VocalSeparationViewModel", "previewSpeed -> $clamped")
     }
 
-    /** 提交当前播放速度并持久化（弹窗「确定」） */
+    /** 确认当前播放速度（弹窗「确定」）：会话内已生效，**不写 DataStore**，退出 K 歌页复位 */
     fun commitSpeed() {
         val value = _playbackSpeed.value
-        viewModelScope.launch { prefs.player.setPlaybackSpeed(value) }
-        AppLog.d("VocalSeparationViewModel", "commitSpeed -> $value")
+        AppLog.d("VocalSeparationViewModel", "commitSpeed -> $value (session only)")
     }
 
-    /** 重置升降调到原调 */
+    /** 重置升降调到原调（只改播放器与页面状态，不写 DataStore） */
     fun resetPitch() {
         _pitchSemitones.value = 0
         playerManager.resetPitch()
-        viewModelScope.launch { prefs.player.setPitchSemitones(0) }
         AppLog.d("VocalSeparationViewModel", "resetPitch -> 0")
     }
 
-    /** 重置播放速度到原速 */
+    /** 重置播放速度到原速（只改播放器与页面状态，不写 DataStore） */
     fun resetSpeed() {
         _playbackSpeed.value = 1.0
         playerManager.resetSpeed()
-        viewModelScope.launch { prefs.player.setPlaybackSpeed(1.0) }
         AppLog.d("VocalSeparationViewModel", "resetSpeed -> 1.0")
     }
 
@@ -282,12 +263,12 @@ class VocalSeparationViewModel(
     }
 
     /**
-     * 退出 K 歌页面：仅关闭人声消除、恢复原唱，不改变播放队列或当前歌曲。
+     * 退出 K 歌页面：关闭人声消除、恢复原唱，并把升降调/播放速度复位为原调原速；
+     * 不改变播放队列或当前歌曲。
      *
-     * ⚠️ 不再重置升降调 / 变速：这两项是「全局记忆，重启恢复」的用户偏好（commit 时落盘、
-     * 冷启动由 [loadPitchSpeedFromPrefs] 恢复）。旧实现在这里 resetPitch/resetSpeed，而二者
-     * 都会把 0/1.0 **落盘** ⇒ 用户点「确定」保存的调/速在退出 K 歌页时被静默抹掉，与
-     * 「全局记忆」自相矛盾。需要归零时走步进弹窗的「重置」按钮（用户主动、明确）。
+     * 升降调/变速是**会话内临时效果**：preview/commit 只改播放器与 VM 状态、不写持久化；
+     * 冷启动也强制 0/1.0。因此退出必须无条件复位，否则用户退出 K 歌页后仍带着调/速，
+     * 与「退出即恢复原调原速」的语义相悖。
      */
     fun exitKaraoke() {
         _showKaraoke.value = false
@@ -295,7 +276,10 @@ class VocalSeparationViewModel(
         if (_vocalRemovalEnabled.value) {
             toggleVocalRemoval()
         }
-        AppLog.d("VocalSeparationViewModel", "exitKaraoke: vocalRemoval restored, pitch/speed kept")
+        // 恢复原调原速（无条件：VM 状态与播放器可能因外部路径失步）
+        resetPitch()
+        resetSpeed()
+        AppLog.d("VocalSeparationViewModel", "exitKaraoke: vocalRemoval, pitch, speed restored")
     }
 
     /** 清除全部分离产物与临时残留（设置页"缓存清理"手动清除用），返回释放的字节数 */

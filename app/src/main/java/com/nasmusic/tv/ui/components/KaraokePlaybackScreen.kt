@@ -931,7 +931,7 @@ private fun <T> KaraokeStepPickerDialog(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     FocusableSurface(
-                        // 重置是明确动作：立即生效并落盘（resetPitch/resetSpeed 自带持久化）
+                        // 重置是明确动作：立即生效（会话内），不写持久化
                         onClick = { keepValueOnDismiss = true; onReset(); onDismiss() },
                         modifier = Modifier
                             .weight(1f)

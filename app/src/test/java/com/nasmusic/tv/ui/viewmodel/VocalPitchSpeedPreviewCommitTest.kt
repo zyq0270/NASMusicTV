@@ -12,7 +12,6 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.setMain
-import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Before
@@ -22,26 +21,20 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 /**
- * K 歌升降调 / 变速的 preview 与 commit 分工（决策 D2，见
- * `docs/archive/karaoke-picker-tv-focus-fix-plan.md` §3-A3）。
+ * K 歌升降调 / 变速：**会话内临时效果**。
  *
- * 所有者反馈「调原调必须确定后才能生效，无法及时预览」——修复是步进弹窗每换一档就调
- * [VocalSeparationViewModel.previewPitch] / [previewSpeed]（即时改播放器 + 页面状态、
- * **不写 DataStore**），只有「确定」才 commit。落盘次数必须与按键次数解耦，
- * 否则 25 档步进 = 25 次磁盘写。
+ * 所有者裁定「退出 K 歌即恢复原调原速、不记忆」——preview / commit / reset 一律只改
+ * 播放器与 VM 状态、**不写 DataStore**；退出 K 歌页无条件复位为 0 / 1.0；冷启动强制
+ * 原调原速，不从存储恢复历史值。
  *
- * ⚠️ 协程调度：commit 走 `viewModelScope`（`Dispatchers.Main`），Robolectric 的主线程 Looper
- * 在 `runBlocking` 期间不会自己转 ⇒ 必须 `Dispatchers.setMain(UnconfinedTestDispatcher())`，
- * 否则在途协程永远醒不过来（表现为超时而不是断言失败）。等待一律轮询
- * （与 [ArtistExpansionGenerationGateTest] / `PlayModeToggleEventTest` 同法）。
+ * ⚠️ 协程调度：reset / exitKaraoke 走 `viewModelScope`（`Dispatchers.Main`），Robolectric
+ * 的主线程 Looper 在 `runBlocking` 期间不会自己转 ⇒ 必须
+ * `Dispatchers.setMain(UnconfinedTestDispatcher())`，否则在途协程永远醒不过来。
+ * 存储读取一律用挂起的 `first()`，不经 fire-and-forget。
  *
- * ⚠️ 存储实例：那两条同 `application = NasMusicApp::class` 的用例轮询的都是**内存态**，
- * 只有本案等**真实磁盘写**，所以必须给 VM 注入一个**独占临时目录**的 [AppPreferences]
- * （口径与 `AppPreferences` 自己的 `internal constructor` 注释一致：单测不共用进程单例）。
- * 两个坑都是实测踩出来的、[setUp] 里有完整说明：共用单例 ⇒ 写落到被 Robolectric 清掉的
- * 旧 dataDir（表现为 5s 超时，异常被 fire-and-forget 吞掉，全量跑随 worker 顺序时绿时红）；
- * 每条用例直接 `AppPreferences(app)` ⇒ 与同一条用例 onCreate 刚建好的单例**开在同一个文件**，
- * 撞 datastore 的 `There are multiple DataStores active for the same file`。
+ * ⚠️ 存储实例：本测试里的 prefs 用独占临时目录构造（原因见 [setUp]），既用于验证
+ * 「不写盘」确实成立，也避免撞 datastore 的 `There are multiple DataStores active for
+ * the same file`。
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], application = NasMusicApp::class)
@@ -61,16 +54,10 @@ class VocalPitchSpeedPreviewCommitTest {
     @Before
     fun setUp() {
         Dispatchers.setMain(UnconfinedTestDispatcher())
-        // 每条用例一个**独立的临时目录**，用它包一层 ContextWrapper 喂给 internal 构造器
-        // （AppPreferences.kt:117 直接读 `context.filesDir`，不经 applicationContext，
-        //  所以包装有效）。两个坑都实测踩过，都必须绕开：
-        // ① 用 `NasMusicApp.appPreferences` 进程单例 —— 它的文件属于**第一个**建它的 sandbox
-        //    的 dataDir，而 Robolectric 每个用例会把 dataDir 清掉重写 ⇒ 写永远落不到当前用例，
-        //    commit 的 fire-and-forget 又吞掉异常，只剩 5s 超时（全量跑随 worker 顺序时绿时红）。
-        // ② 直接 `AppPreferences(app)` 每条用例建新实例 —— 同一条用例内 onCreate 已经用
-        //    **同一个 dataDir** 建起了进程单例的 DataStore，两个实例开在同一个文件上，
-        //    撞上 datastore 的 `There are multiple DataStores active for the same file`。
-        // 独占目录同时解决两者：路径唯一 ⇒ 无多实例冲突；目录由本用例创建、不被 sandbox 清理 ⇒ 写必落盘。
+        // 每条用例一个独立临时目录，用它包一层 ContextWrapper 喂给 internal 构造器
+        // （AppPreferences.kt:117 直接读 `context.filesDir`，不经 applicationContext）。
+        // 两个坑都实测踩过：① 进程单例的文件属于第一个 sandbox 的 dataDir，写落不到当前
+        // 用例；② 直接 AppPreferences(app) 与 onCreate 建的单例开在同一文件，撞多实例检查。
         prefsDir = File(System.getProperty("java.io.tmpdir"), "nasmusictv-prefs-${System.nanoTime()}")
         prefsDir.mkdirs()
         val isolatedContext = object : android.content.ContextWrapper(app) {
@@ -86,16 +73,8 @@ class VocalPitchSpeedPreviewCommitTest {
         prefsDir.deleteRecursively()
     }
 
-    private suspend fun awaitPitchPersisted(expected: Int) = withTimeout(5_000) {
-        while (prefs.player.pitchSemitones.first() != expected) delay(20)
-    }
-
-    private suspend fun awaitSpeedPersisted(expected: Double) = withTimeout(5_000) {
-        while (prefs.player.playbackSpeed.first() != expected) delay(20)
-    }
-
     @Test
-    fun `preview 改状态但不落盘`() = runBlocking {
+    fun `preview 改状态但不写盘`() = runBlocking {
         val viewModel = vm()
         assertEquals("初始持久化应为原调", 0, prefs.player.pitchSemitones.first())
 
@@ -103,42 +82,37 @@ class VocalPitchSpeedPreviewCommitTest {
 
         assertEquals("preview 必须立即更新状态（按钮标签与弹窗档位跟着变）", 3, viewModel.pitchSemitones.value)
         delay(200)
-        assertEquals(
-            "preview 绝不能写 DataStore（步进一次写一次盘 = 25 次写）",
-            0,
-            prefs.player.pitchSemitones.first()
-        )
+        assertEquals("preview 绝不能写 DataStore", 0, prefs.player.pitchSemitones.first())
     }
 
     @Test
-    fun `commit 才把当前预览值落盘`() = runBlocking {
+    fun `commit 只确认当前值、不写持久化`() = runBlocking {
+        // 回归：旧实现在这里 viewModelScope.launch { setPitchSemitones(value) }，
+        // 与「退出即复位、不记忆」相悖；新语义下 commit 只是对试听值的明确确认。
         val viewModel = vm()
 
         viewModel.previewPitch(-5)
         assertEquals(-5, viewModel.pitchSemitones.value)
         viewModel.commitPitch()
+        delay(200)
 
-        awaitPitchPersisted(-5)
-        assertEquals(-5, prefs.player.pitchSemitones.first())
+        assertEquals(-5, viewModel.pitchSemitones.value)
+        assertEquals("确认操作也不得写盘", 0, prefs.player.pitchSemitones.first())
     }
 
     @Test
-    fun `速度 preview 与 commit 同样分离`() = runBlocking {
+    fun `速度 preview 与 commit 同样不写盘`() = runBlocking {
         val viewModel = vm()
 
         viewModel.previewSpeed(0.8)
         assertEquals(0.8, viewModel.playbackSpeed.value, 0.0)
         delay(200)
-        assertEquals(
-            "preview 不写盘：初始持久化仍是原速",
-            1.0,
-            prefs.player.playbackSpeed.first(),
-            0.0
-        )
+        assertEquals("preview 不写盘", 1.0, prefs.player.playbackSpeed.first(), 0.0)
 
         viewModel.commitSpeed()
-        awaitSpeedPersisted(0.8)
-        assertEquals(0.8, prefs.player.playbackSpeed.first(), 0.0)
+        delay(200)
+        assertEquals("确认操作也不得写盘", 1.0, prefs.player.playbackSpeed.first(), 0.0)
+        assertEquals(0.8, viewModel.playbackSpeed.value, 0.0)
     }
 
     @Test
@@ -157,49 +131,40 @@ class VocalPitchSpeedPreviewCommitTest {
     }
 
     @Test
-    fun `冷启动加载必须同时同步 VM 状态与播放器`() = runBlocking {
-        // 回归：旧实现在 MainViewModel.init 里只 setPitch/setSpeed 到播放器、不同步 VM，
-        // 导致播放器 +3 半音而 K 歌页按钮显示「原调」。loadPitchSpeedFromPrefs 是唯一恢复入口。
+    fun `冷启动 VM 初值恒为原调原速`() = runBlocking {
+        // 老版本可能把调/速写进过存储；即便有残留，新 VM 也必须从 0 / 1.0 起步。
         prefs.player.setPitchSemitones(3)
         prefs.player.setPlaybackSpeed(0.8)
+        assertEquals(3, prefs.player.pitchSemitones.first())
+
         val viewModel = vm()
 
-        viewModel.loadPitchSpeedFromPrefs()
-
-        // 该函数是 viewModelScope.launch 异步读盘 ⇒ 轮询等待（可能读到 3 / 0.8 需一次 DataStore 写）
-        withTimeout(5_000) {
-            while (viewModel.pitchSemitones.value != 3) delay(20)
-            while (viewModel.playbackSpeed.value != 0.8) delay(20)
-        }
-        assertEquals(3, viewModel.pitchSemitones.value)
-        assertEquals(0.8, viewModel.playbackSpeed.value, 0.0)
+        assertEquals("VM 不得从存储恢复升降调", 0, viewModel.pitchSemitones.value)
+        assertEquals("VM 不得从存储恢复变速", 1.0, viewModel.playbackSpeed.value, 0.0)
     }
 
     @Test
-    fun `退出 K 歌页不得抹掉已落盘的升降调与变速`() = runBlocking {
-        // 回归：旧 exitKaraoke 调 resetPitch/resetSpeed，二者会把 0/1.0 落盘，
-        // 用户点「确定」保存的偏好在退出 K 歌页时被静默清零，与「全局记忆」矛盾。
+    fun `退出 K 歌页必须复位原调原速且不写盘`() = runBlocking {
         val viewModel = vm()
         viewModel.previewPitch(3)
         viewModel.commitPitch()
-        awaitPitchPersisted(3)
         viewModel.previewSpeed(0.8)
         viewModel.commitSpeed()
-        awaitSpeedPersisted(0.8)
+        assertEquals(3, viewModel.pitchSemitones.value)
+        assertEquals(0.8, viewModel.playbackSpeed.value, 0.0)
 
         viewModel.exitKaraoke()
 
-        assertEquals("退出 K 歌页必须保留升降调偏好", 3, prefs.player.pitchSemitones.first())
-        assertEquals("退出 K 歌页必须保留变速偏好", 0.8, prefs.player.playbackSpeed.first(), 0.0)
-        assertEquals("退出后 VM 状态应与持久化一致", 3, viewModel.pitchSemitones.value)
-        assertEquals("退出后 VM 状态应与持久化一致", 0.8, viewModel.playbackSpeed.value, 0.0)
+        assertEquals("退出必须恢复原调", 0, viewModel.pitchSemitones.value)
+        assertEquals("退出必须恢复原速", 1.0, viewModel.playbackSpeed.value, 0.0)
+        assertEquals("退出不得把 0 写进存储", 0, prefs.player.pitchSemitones.first())
+        assertEquals("退出不得把 1.0 写进存储", 1.0, prefs.player.playbackSpeed.first(), 0.0)
     }
 
     @Test
     fun `本案的存储实例必须真的可写可读`() = runBlocking {
-        // 上面两条 commit 用例的前提。这一条**直接 await 挂起写**（不经 viewModelScope 的
-        // fire-and-forget），实例不可写时它会带着真实异常（IOException / DataStore 多实例检查）
-        // 红掉 —— 而不是只留一句 `Timed out waiting for 5000 ms` 让下一个人从头猜。
+        // 上面若干「不写盘」断言的前提：若实例坏了（IO 异常 / DataStore 多实例），
+        // 写会带着真实异常红掉，而不是让「不写盘」假绿。
         prefs.player.setPitchSemitones(-7)
         assertEquals(-7, prefs.player.pitchSemitones.first())
 
