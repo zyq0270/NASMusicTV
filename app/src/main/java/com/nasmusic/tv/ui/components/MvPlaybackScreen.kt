@@ -111,6 +111,8 @@ fun MvPlaybackScreen(
     onSearchBilibili: () -> Unit = {},
     onPreviousMv: () -> Unit = {},
     onNextMv: () -> Unit = {},
+    /** 单曲循环：自动播完时重播当前 MV，不推进歌曲队列（与主播放器 REPEAT_ONE 语义一致） */
+    repeatOne: Boolean = false,
     mvMessage: String? = null,
     remoteControlUrl: String? = null,
     modifier: Modifier = Modifier
@@ -227,9 +229,17 @@ fun MvPlaybackScreen(
                 }
 
                 if (playbackState == Player.STATE_ENDED && !endedHandled) {
-                    endedHandled = true
-                    AppLog.d(TAG, "MV playback ended -> advance to next song's MV")
-                    onPlaybackEnded()
+                    if (repeatOne) {
+                        // 单曲循环：重播当前 MV，不推进队列索引、不触发 onPlaybackEnded。
+                        // endedHandled 保持 false，seekTo(0) 后下一次 STATE_ENDED 仍可再次循环。
+                        AppLog.d(TAG, "MV ended in REPEAT_ONE -> replay current")
+                        exoPlayer.seekTo(0L)
+                        exoPlayer.play()
+                    } else {
+                        endedHandled = true
+                        AppLog.d(TAG, "MV playback ended -> advance to next song's MV")
+                        onPlaybackEnded()
+                    }
                 }
             }
 
@@ -560,6 +570,42 @@ private fun MiniIconButton(
 
 private const val TAG = "MvPlaybackScreen"
 
-/** 浏览器 UA（与 BilibiliMvService 一致，防盗链校验之一） */
-private const val BILIBILI_UA =
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+/**
+ * MTV 搜索中占位页。
+ *
+ * 切歌/重搜时 MV 状态短暂进入 Searching：此时 [showMv] 已为 true 但尚无 Ready 的 MV，
+ * 若回落到普通 NowPlayingScreen，主播放器因 suppressPlayback=true 处于暂停态，
+ * 会出现「无声的播放页」闪屏。本页保持全屏 MV 形态并显示搜索提示，
+ * 待 Ready 后切换回 [MvPlaybackScreen]；NotFound 由 AppRoot 自动 exitMvMode。
+ */
+@OptIn(ExperimentalTvMaterial3Api::class)
+@Composable
+fun MvSearchingScreen(
+    onExit: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    // BACK 由 AppRoot 的 navBackHandler 统一路由（showMv -> exitMvMode），此处不再重复消费按键。
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(Color.Black)
+            .focusable(),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(24.dp)
+        ) {
+            Text(
+                text = stringResource(R.string.mv_searching),
+                fontSize = FontSize.title(),
+                color = NasOverlayColors.OnArtwork
+            )
+            MiniIconButton(
+                onClick = onExit,
+                icon = Icons.AutoMirrored.Filled.ArrowBack,
+                contentDescription = "Back"
+            )
+        }
+    }
+}

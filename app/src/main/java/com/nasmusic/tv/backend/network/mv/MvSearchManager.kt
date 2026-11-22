@@ -40,7 +40,7 @@ class MvSearchManager(
         excludeBvids: Set<String> = emptySet(),
         minSimilarity: Float = 0.5f
     ): MvSearchResult? {
-        val key = buildCacheKey(song.title, song.artist)
+        val key = buildCacheKey(song.title, song.artist, song.networkSource)
         // 清理过期条目
         val now = System.currentTimeMillis()
         cache.entries.removeAll { (_, v) -> now - v.timestamp >= cacheTtlMs }
@@ -74,15 +74,31 @@ class MvSearchManager(
                     AppLog.d(TAG, "searchMvFor: trying service ${svc::class.java.simpleName} for '$key'")
                     val result = svc.searchMv(song.title, song.artist, excludeBvids, minSimilarity, song)
                     if (result != null) {
-                        cache[key] = CachedResult(result, now)
-                        // 存 bvid 到持久缓存（不存直链，直链会过期）
-                        persistentCache?.put(MvCacheEntry(
-                            songId = song.id, songTitle = song.title, songArtist = song.artist,
-                            bvid = result.mv.bvid, mvTitle = result.mv.title,
-                            lastPlayedAt = now, playCount = 0
-                        ))
-                        AppLog.d(TAG, "searchMvFor: success for '$key' -> ${result.mv.title} + ${result.alternatives.size} alternatives")
-                        return@withContext result
+                        // 本地源（如百度网盘 MV）首搜只给稳定的 bvid，videoUrl 留空占位，
+                        // 真实直链（dlink + access_token，有时效）必须按 bvid 现取。
+                        // 在返回前补齐，避免把空 URL 交给播放器导致首播必失败一次、
+                        // 只能靠 onMvPlaybackError 重搜兜底；解析不到则视该源不可用，继续 fallback。
+                        val playableResult = if (result.mv.videoUrl.isBlank()) {
+                            val resolved = resolveMv(result.mv.bvid)
+                            if (resolved != null) {
+                                AppLog.d(TAG, "searchMvFor: resolved blank videoUrl for bvid=${result.mv.bvid}")
+                                result.copy(mv = resolved)
+                            } else {
+                                AppLog.d(TAG, "searchMvFor: blank videoUrl unresolved for bvid=${result.mv.bvid}, try next service")
+                                null
+                            }
+                        } else result
+                        if (playableResult != null) {
+                            cache[key] = CachedResult(playableResult, now)
+                            // 存 bvid 到持久缓存（不存直链，直链会过期）
+                            persistentCache?.put(MvCacheEntry(
+                                songId = song.id, songTitle = song.title, songArtist = song.artist,
+                                bvid = playableResult.mv.bvid, mvTitle = playableResult.mv.title,
+                                lastPlayedAt = now, playCount = 0
+                            ))
+                            AppLog.d(TAG, "searchMvFor: success for '$key' -> ${playableResult.mv.title} + ${playableResult.alternatives.size} alternatives")
+                            return@withContext playableResult
+                        }
                     }
                 } catch (e: Exception) {
                     // 单个源失败不阻断其他源
@@ -169,11 +185,18 @@ class MvSearchManager(
         private const val DEFAULT_CACHE_TTL_MS = 45 * 60 * 1000L
 
         /**
-         * 构造缓存 key：歌曲名|歌手（首唱者），小写归一化。
+         * 构造缓存 key：`歌曲名|首唱者|来源`，小写归一化。
+         *
+         * 第三维 [source] 区分同一首歌在不同来源（NAS / 百度网盘 / meting）下的 MV：
+         * 不同来源可能配到不同的 MV，混用一个 key 会串味。默认空串保持旧两参数调用
+         * 与既有单测断言不变（仅在未提供来源时退化为旧格式）。
+         *
          * 供单测验证 key 组合逻辑。
          */
-        fun buildCacheKey(title: String, artist: String): String =
-            "${title.trim().lowercase()}|${artist.trim().split('/', '、', ',', '，', '&')[0].trim().lowercase()}"
+        fun buildCacheKey(title: String, artist: String, source: String? = null): String {
+            val base = "${title.trim().lowercase()}|${artist.trim().split('/', '、', ',', '，', '&')[0].trim().lowercase()}"
+            return if (source.isNullOrBlank()) base else "$base|${source.trim().lowercase()}"
+        }
     }
 
     private data class CachedResult(val result: MvSearchResult, val timestamp: Long)

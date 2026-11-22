@@ -1185,6 +1185,7 @@
     <string name="mv_bilibili_not_found">B站未找到匹配视频</string>
     <string name="mv_switch_failed_retry">切换失败，请重试</string>
     <string name="mv_searching_more">正在搜索更多视频…</string>
+    <string name="mv_searching">正在搜索 MV…</string>
     <string name="mv_found_new_videos">找到 %d 个新视频</string>
 
     <!-- BackupTransferServer HTML 页面 -->

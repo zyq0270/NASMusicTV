@@ -172,7 +172,18 @@ class MvSearchViewModel(
 
         val pending = pendingNextResult
         skipNextMvSearch = true // advanceIndexSilently 会更新 currentSong，跳过 collect 的 triggerMvSearch
-        playerManager.advanceIndexSilently(playMode)
+        val advancedSong = playerManager.advanceIndexSilently(playMode)
+        if (advancedSong == null) {
+            // 队列已无法推进（SEQUENTIAL/REPEAT_ONE 播到队尾，或队列为空）。
+            // 此时索引未变、currentSong 未变：不能置 mvAdvanced=true，否则 exitMvMode 会
+            // syncAndPlayCurrent() 从当前索引 position 0 重播最后一首音乐；应让它保持暂停状态。
+            skipNextMvSearch = false // 索引未推进，无需跳过 collect 的搜索
+            mvAdvanced = false
+            pendingNextResult = null
+            _mvState.value = MvAvailability.NotFound // 触发 AppRoot 自动 exitMvMode → resume() 从暂停位置续播原曲
+            AppLog.d("MvSearchViewModel", "onMvPlaybackEnded: queue end, resume from paused position (no rewind)")
+            return
+        }
         mvAdvanced = true
 
         if (pending != null) {

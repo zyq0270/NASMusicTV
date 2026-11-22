@@ -9,6 +9,7 @@ import com.nasmusic.tv.ui.viewmodel.MainViewModel
 import com.nasmusic.tv.data.model.*
 import com.nasmusic.tv.ui.screens.*
 import com.nasmusic.tv.ui.components.MvPlaybackScreen
+import com.nasmusic.tv.ui.components.MvSearchingScreen
 import com.nasmusic.tv.ui.screens.library.*
 import com.nasmusic.tv.ui.screens.settings.*
 import com.nasmusic.tv.ui.screens.netdisk.*
@@ -58,6 +59,7 @@ internal fun NowPlayingBranch(
                     // 原实现直读 isFavorite(song.id) 不订阅，点收藏后需切歌才刷新。
                     val favoriteIds by viewModel.favoriteIds.collectAsState(initial = emptySet())
                     val mvReady = mvState as? com.nasmusic.tv.ui.viewmodel.MvAvailability.Ready
+                    val mvSearching = mvState is com.nasmusic.tv.ui.viewmodel.MvAvailability.Searching
                     if (showMv && mvReady != null) {
                         // MTV 音乐视频全屏页（独立播放器，退出时 MainViewModel 恢复主播放器）
                         MvPlaybackScreen(
@@ -71,10 +73,16 @@ internal fun NowPlayingBranch(
                             onSearchBilibili = { viewModel.onSearchBilibili() },
                             onPreviousMv = { viewModel.onMvPrevious() },
                             onNextMv = { viewModel.onMvNext() },
+                            repeatOne = playMode == com.nasmusic.tv.data.model.PlayMode.REPEAT_ONE,
                             mvMessage = viewModel.mvVM.mvMessage.collectAsState().value,
                             // 手机端无需"手机遥控"二维码（自身即控制端）
                             remoteControlUrl = if (isTV) viewModel.remoteControlUrl.collectAsState().value else null
                         )
+                    } else if (showMv && mvSearching) {
+                        // Searching 态保持 MV 全屏形态：主播放器已被 suppressPlayback 暂停，
+                        // 回落到 NowPlayingScreen 会出现「无声的播放页」闪屏。搜索完成后
+                        // 由 Ready 切回播放页 / NotFound 由 AppRoot 自动退出。
+                        MvSearchingScreen(onExit = { viewModel.mvVM.exitMvMode() })
                     } else {
                         // F-2：progress/duration 在本分支内收集，播放期间的每秒重组
                         // 只影响 NowPlayingScreen，不再驱动 AppRoot 全树

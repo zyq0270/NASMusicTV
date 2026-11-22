@@ -33,7 +33,9 @@ class MvSearchManagerTest {
     private class FakeMvService(
         val name: String,
         var result: MvSearchResult? = null,
-        var error: Exception? = null
+        var error: Exception? = null,
+        /** 显式指定 resolveMv 返回值；null 时回退为 result.mv（既有测试语义） */
+        var resolveResult: MvInfo? = null
     ) : MvSearchService {
         var callCount = 0; private set
         var lastTitle: String? = null; private set
@@ -57,6 +59,7 @@ class MvSearchManagerTest {
         }
         override suspend fun resolveMv(bvid: String): MvInfo? {
             resolveCallCount++
+            if (resolveResult != null) return resolveResult
             return result?.takeIf { it.mv.bvid == bvid }?.mv
         }
     }
@@ -70,6 +73,54 @@ class MvSearchManagerTest {
         assertEquals("晴天|周杰伦", MvSearchManager.buildCacheKey("晴天", "周杰伦, 蔡依林"))
         assertEquals("晴天|周杰伦", MvSearchManager.buildCacheKey("晴天", "周杰伦，蔡依林"))
         assertEquals("晴天|周杰伦", MvSearchManager.buildCacheKey("晴天", "周杰伦 & 蔡依林"))
+    }
+
+    @Test
+    fun `buildCacheKey 带来源维度区分不同来源的 MV`() {
+        assertEquals("晴天|周杰伦|nas", MvSearchManager.buildCacheKey("晴天", "周杰伦", "nas"))
+        assertEquals("晴天|周杰伦|baidu", MvSearchManager.buildCacheKey("晴天", "周杰伦", "baidu"))
+        assertEquals("晴天|周杰伦|meting", MvSearchManager.buildCacheKey("晴天", "周杰伦", " meting "))
+        // 来源缺省时退化为旧两参数格式（兼容既有断言）
+        assertEquals("晴天|周杰伦", MvSearchManager.buildCacheKey("晴天", "周杰伦", null))
+        assertEquals("晴天|周杰伦", MvSearchManager.buildCacheKey("晴天", "周杰伦", "  "))
+    }
+
+    @Test
+    fun `searchMvFor 空直链首搜即解析真实直链`() = runTest {
+        // 模拟百度本地 MV：search 只给 bvid、videoUrl 为空占位，直链需按 bvid 现取
+        val blankMv = MvInfo("ntwk_baidu_mv_777", "晴天.mp4", null, "")
+        val resolvedMv = MvInfo("ntwk_baidu_mv_777", "晴天.mp4", null, "https://d.pcs.baidu.com/stream")
+        val svc = FakeMvService("baidu", result = MvSearchResult(blankMv, emptyList()), resolveResult = resolvedMv)
+        val manager = MvSearchManager(listOf(svc))
+        val result = manager.searchMvFor(song().copy(networkSource = "baidu"))
+        assertEquals("https://d.pcs.baidu.com/stream", result!!.mv.videoUrl)
+        assertEquals(1, svc.resolveCallCount)
+        // 命中内存缓存不再重复 search/resolve
+        val cached = manager.searchMvFor(song().copy(networkSource = "baidu"))
+        assertEquals(result.mv.videoUrl, cached!!.mv.videoUrl)
+        assertEquals(1, svc.callCount)
+        assertEquals(1, svc.resolveCallCount)
+    }
+
+    @Test
+    fun `searchMvFor 空直链且解析失败时 fallback 到下一源`() = runTest {
+        val blankMv = MvInfo("b1", "blank", null, "")
+        val baidu = FakeMvService("baidu", result = MvSearchResult(blankMv, emptyList()), resolveResult = null)
+        val bilibili = FakeMvService("bilibili", result = mvResult(bvid = "BV2"))
+        val manager = MvSearchManager(listOf(baidu, bilibili))
+        val result = manager.searchMvFor(song())
+        assertEquals("BV2", result!!.mv.bvid)
+        assertEquals(1, baidu.callCount)
+        assertEquals(1, bilibili.callCount)
+    }
+
+    @Test
+    fun `searchMvFor 不同来源的同名歌不共用缓存`() = runTest {
+        val svc = FakeMvService("svc", result = mvResult(bvid = "BV1"))
+        val manager = MvSearchManager(listOf(svc))
+        manager.searchMvFor(song().copy(networkSource = "nas"))
+        manager.searchMvFor(song().copy(networkSource = "baidu"))
+        assertEquals(2, svc.callCount)
     }
 
     @Test
