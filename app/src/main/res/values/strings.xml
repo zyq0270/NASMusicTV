@@ -764,6 +764,8 @@
     <!-- Queue -->
     <string name="queue_title">播放队列</string>
     <string name="queue_clear">清空</string>
+    <string name="queue_clear_confirm_title">清空播放队列</string>
+    <string name="queue_clear_confirm_message">将移除队列中的全部歌曲并停止播放，此操作不可撤销。</string>
     <string name="queue_empty">队列为空</string>
     <string name="queue_go_to_library">前往曲库添加歌曲</string>
 

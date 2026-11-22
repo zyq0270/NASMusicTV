@@ -29078,3 +29078,35 @@ Jellyfin 按名查询只发一次请求、fields 补齐并分页；Navidrome/Sub
 **涉及文件**：`ui/viewmodel/MainViewModel.kt`、`ui/viewmodel/WeatherRadioViewModel.kt`、`backend/weather/WeatherRadioManager.kt`、`data/model/HomeDashboardData.kt`、`ui/components/branches/{Home,Mine,Library,Netdisk}Branch.kt`、`app/src/test/.../HomeFlowFixGateTest.kt`（新增）、`CHANGELOG.md`、本章。
 
 **版本号**：同一效果的多轮修复不升版本号（所有者 2026-11-09 裁定），并入 v2.39.26。
+
+### 10.421 播放队列页六项流程缺陷修复（v2.39.26 同版增补 - 2026-11-22）
+
+**背景**：对播放队列页（QueueScreen / QueueBranch）的展示、增删改、播放控制与 BACK 分层做逐行审查，确认 1 个 P1、3 个 P2、2 个 P3 缺陷。均为「方法本身能跑、但判据/时序/语义错」的源码问题，新增源码门禁钉死。
+
+**P1**：
+
+1. **队列删空后持久化残留**：`MainViewModel` 的 `playerState` 采集器只在 `songs.isNotEmpty()` 时 `saveLastQueue`；经队列页 ✕ 移除最后一首后队列为空，采集器不写也不清，DataStore 保留旧队列 + 旧索引，重启 `restoreLastQueue()` 整队复活。修复：采集器改为「非空→空」转换检测（`hadQueue`），转换时 `clearLastQueue()`。⚠️ 不能用无条件 `else`：该采集器在 init 时立即收首帧空队列，早于 `restoreLastQueue()`，无条件清会抹掉待恢复队列。`clearQueue()` 里原有的显式 `clearLastQueue()` 保留（幂等）。
+
+**P2**：
+
+2. **清空队列挡不住在途首曲解析**：`PlayerViewModel.playQueue` 的 needsResolve 分支把 `songs` 整队快照留在协程里，仅用 `resolveGeneration` 防过期；`MainViewModel.clearQueue()` 既不取消 `resolveJob` 也不递增代数 ⇒ 点击行（目标空 URL）后迅速清空，解析完成时 `playerManager.playQueue(resolved, startIndex)` 用旧快照复活队列和播放。修复：新增 `PlayerViewModel.invalidatePendingResolves()`（代数++ + cancel Job + 置 null），`MainViewModel.clearQueue()` 与 `PlayerViewModel.clearQueue(onCleared)` 两条入口都调用。注：`resolveAndPlayByIndex` / `resolveAndPlayCurrentSong` 另有 id 校验与「按最新空队列写回」保护，不受本缺陷影响，故不在改动范围。
+
+3. **空 URL 预判与播放模式语义分叉**：`PlayerViewModel.next/previous` 用 `currentIndex±1` 无条件环绕猜目标并直调 `resolveAndPlayByIndex`，而 `PlayerManager.next/previous` 在 SHUFFLE 走 `playRandom()`、SEQUENTIAL 边界无动作、REPEAT_ONE 的 next 队尾回第一首、REPEAT_ALL 双向环绕。两处目标不一致时，空 URL 解析链会播错歌（随机模式播顺序邻曲、顺序边界绕过不回卷）。修复：新增纯函数 `PlayModeAdjacent.adjacentIndex(queueSize, currentIndex, playMode, previous): Int?`，逐条对齐上述分支；SHUFFLE 与顺序边界返回 null（不预判，交给底层 + onMediaItemTransition 解析链）。
+
+4. **BACK 恒回首页**：`NavigationViewModel` 只有 `currentScreen`，`AppRoot` 的 `else -> navigateHome` 覆盖 Queue，导致「正在播放 → 队列」按 BACK 回首页而非播放页。修复：navVM 新增 `queueOrigin` 状态，在 `navigateTo` 内部拦截「从非 Queue 进入 Queue」记录来源（一处覆盖全部入口，含 TV 顶栏/手机底栏的通用 onNavigate），消费后 `clearQueueOrigin()`；AppRoot 收集该状态、加入 LaunchedEffect key、when 增加 `currentScreen == Screen.Queue && queueOriginScreen != null -> backToQueueOrigin`。
+
+**P3**：
+
+5. **清空按钮无二次确认**：`QueueActionButton` 直接 onClick 全队清空且不可撤销。修复：页面层 `showClearConfirm` 状态 + `QueueClearConfirmDialog`，复用 `ConfirmDialog`（destructive=true 默认聚焦取消），按项目惯例包真 `Dialog` 且 `dismissOnBackPress=false`（BACK 由 ConfirmDialog 的 BackHandler 接管，不穿透 Level 1.5 回顶 / Level 2 退页）。横屏与竖屏共用列表面板，确认状态放页面层只渲染一次。
+
+6. **注释口径漂移**：`QueueScreen` 的 LazyColumn key 注释仍称「队列允许重复歌曲（addToQueue 不查重）」，与 `QueueAddition.compute` 按 id 去重的唯一口径矛盾。修复：改写注释说明「整队播放可装入歌单自带的重复 id，不经过入队去重」；key 拼 index 的实现保留（防 Compose "Key was already used"）。
+
+**核对后非缺陷、未改**：播放模式文本为展示态（切换在播放页）；竖屏顶部卡片只有播放/暂停与下一首（v2.36.0 §4.5 既定适配）；BACK 分层优先级（菜单 > 列表回顶 > 导航）经 MainActivity `onBackPressedDispatcher` 与 `RegisterDialogBackHandler` 核实正确；`QueueAddition.compute` 去重口径本身正确。
+
+**门禁**：新增 `QueueFlowFixGateTest`（T1–T6，语句级源码断言 + 负自检）；新增 `PlayModeAdjacentTest`（7 例真值表）；离线预检 `logs_temp/queue_flow_gate_2026-11-22/precheck.py`（43 条全绿，含 14 组模式真值表）。
+
+**编译/验证限制**：本机（zyq02）无 JDK17/JBR、无 Android SDK，`gradlew` 不可用 ⇒ 未跑 Gradle 编译与 JVM 单测；已完成括号配平对比（相对 HEAD 无新增失衡）、strings.xml XML 解析、离线预检全绿。待云端 CI 或所有者本机验证。
+
+**涉及文件**：`ui/viewmodel/{MainViewModel,PlayerViewModel,NavigationViewModel}.kt`、`player/PlayModeAdjacent.kt`（新增）、`ui/components/AppRoot.kt`、`ui/screens/QueueScreen.kt`、`app/src/main/res/values/strings.xml`、`app/src/test/.../{QueueFlowFixGateTest,PlayModeAdjacentTest}.kt`（新增）、`CHANGELOG.md`、本章。
+
+**版本号**：同一效果的多轮修复不升版本号（所有者 2026-11-09 裁定），并入 v2.39.26。

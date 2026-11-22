@@ -10,6 +10,7 @@ import com.nasmusic.tv.data.model.PlayMode
 import com.nasmusic.tv.data.model.Song
 import com.nasmusic.tv.player.PlayerManager
 import com.nasmusic.tv.player.PlayerState
+import com.nasmusic.tv.player.adjacentIndex
 import com.nasmusic.tv.backend.download.NetworkPlaybackResolver
 import com.nasmusic.tv.backend.network.ReplaceChain
 import com.nasmusic.tv.backend.network.ReplaceLayer
@@ -363,29 +364,47 @@ class PlayerViewModel(
         }
     }
 
+    /**
+     * 2026-11-22 队列页修复 P2：作废所有在途首曲解析。
+     *
+     * clearQueue 必须调用：playQueue 的 needsResolve 分支把整队快照留在协程里，
+     * 只用 resolveGeneration 防过期；清空时递增代数才会让旧快照写回被丢弃。
+     * 同时 cancel 掉 resolveJob 以省掉无谓的公网请求（只取消 Job，不动 Scope）。
+     */
+    fun invalidatePendingResolves() {
+        resolveGeneration++
+        resolveJob?.cancel()
+        resolveJob = null
+    }
+
     fun next() {
-        // 恢复队列后，下一首歌曲的 streamUrl 可能为空，需要先解析
-        val queueValue = playerState.value.queue
-        val nextIndex = playerState.value.currentIndex + 1
-        val targetIndex = if (nextIndex < queueValue.size) nextIndex else 0
-        val nextSong = queueValue.getOrNull(targetIndex)
-        if (nextSong != null && nextSong.streamUrl.isNullOrBlank()) {
-            // streamUrl 为空，先切换索引再解析播放
-            resolveAndPlayByIndex(targetIndex)
-            return
+        // 恢复队列后，下一首歌曲的 streamUrl 可能为空，需要先解析。
+        // 2026-11-22 队列页修复 P2：预判目标必须与播放模式语义一致——旧实现无条件
+        // `currentIndex+1` 环绕猜目标，在 SHUFFLE 会绕过 playRandom 直接播顺序邻曲，
+        // 在 SEQUENTIAL 末尾会绕过「不回卷」的无动作语义。目标索引统一交给纯函数
+        // [adjacentIndex]；返回 null 表示本次不预判（随机 / 顺序边界），交给 PlayerManager。
+        val state = playerState.value
+        val targetIndex = adjacentIndex(state.queue.size, state.currentIndex, _playMode.value, previous = false)
+        if (targetIndex != null) {
+            val nextSong = state.queue.getOrNull(targetIndex)
+            if (nextSong != null && nextSong.streamUrl.isNullOrBlank()) {
+                resolveAndPlayByIndex(targetIndex)
+                return
+            }
         }
         playerManager.next(_playMode.value)
     }
 
     fun previous() {
-        // 恢复队列后，上一首歌曲的 streamUrl 可能为空，需要先解析
-        val queueValue = playerState.value.queue
-        val prevIndex = playerState.value.currentIndex - 1
-        val targetIndex = if (prevIndex >= 0) prevIndex else queueValue.lastIndex
-        val prevSong = queueValue.getOrNull(targetIndex)
-        if (prevSong != null && prevSong.streamUrl.isNullOrBlank()) {
-            resolveAndPlayByIndex(targetIndex)
-            return
+        // 同 next：上一首的空 URL 预判走同款模式判据（SHUFFLE / 顺序边界不预判）。
+        val state = playerState.value
+        val targetIndex = adjacentIndex(state.queue.size, state.currentIndex, _playMode.value, previous = true)
+        if (targetIndex != null) {
+            val prevSong = state.queue.getOrNull(targetIndex)
+            if (prevSong != null && prevSong.streamUrl.isNullOrBlank()) {
+                resolveAndPlayByIndex(targetIndex)
+                return
+            }
         }
         playerManager.previous(_playMode.value)
     }
@@ -696,6 +715,7 @@ class PlayerViewModel(
     }
 
     fun clearQueue(onCleared: () -> Unit) {
+        invalidatePendingResolves()
         playerManager.clearQueue()
         viewModelScope.launch { prefs.queue.clearLastQueue() }
         onCleared()

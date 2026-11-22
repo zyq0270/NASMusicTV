@@ -117,6 +117,8 @@ fun AppRoot(
     val orientationScope = rememberCoroutineScope()
     // 竖屏设置二级页状态（归 navVM，BACK handler 需要读它，方案 §6.2 / K2）
     val settingsSection by viewModel.navVM.settingsSection.collectAsState(initial = null)
+    // 2026-11-22 队列页修复 P2：BACK 回到进入队列前的页面（来源由 NavigationViewModel 记录）
+    val queueOriginScreen by viewModel.navVM.queueOrigin.collectAsState(initial = null)
     // M38：顶层**只订 currentSong**。原先整体收集 playerState（queue / currentIndex /
     // currentSong 三元组），而 AppRoot 只用得到 currentSong ⇒ 往队列里加一首歌、播完一首换
     // currentIndex，都会驱动整棵 UI 树（导航栏 + 各 Screen 分支）重组。三元组本身仍保持
@@ -178,7 +180,10 @@ fun AppRoot(
     }
     // Level 2: 根据当前屏幕和沉浸模式动态设置导航 BACK 键处理函数
     val navBackHandler = LocalNavigateBackHandler.current
-    LaunchedEffect(currentScreen, isImmersiveMode.value, showMv, showKaraoke, showVisualizer, settingsSection) {
+    LaunchedEffect(
+        currentScreen, isImmersiveMode.value, showMv, showKaraoke, showVisualizer,
+        settingsSection, queueOriginScreen
+    ) {
         // C-2 修正说明：初版审查把 when/if-else 分支里的 {{ ... }} 误判为 no-op（lambda 内 lambda）。
         // 实测编译行为：when/if 分支的 { } 按“块”解析，{{ X }} = 块 + 尾部 lambda 表达式，
         // 分支值就是可用的 lambda——原实现功能正常，并非 bug。此处改用具名 lambda 仅作可读性清理。
@@ -191,6 +196,11 @@ fun AppRoot(
         val navigateMine: () -> Unit = { viewModel.navVM.navigateTo(Screen.Mine) }
         // 曲库子页（专辑详情）BACK 与屏内 BackButton 同口径：回曲库，不落回首页
         val navigateLibrary: () -> Unit = { viewModel.navVM.navigateTo(Screen.Library) }
+        // 2026-11-22 队列页修复 P2：从播放页/首页/我的进入队列，BACK 回来源而非恒回首页。
+        val backToQueueOrigin: () -> Unit = {
+            queueOriginScreen?.let { viewModel.navVM.navigateTo(it) }
+            viewModel.navVM.clearQueueOrigin()
+        }
         val closeSettingsSection: () -> Unit = { viewModel.navVM.closeSettingsSection() }
         val handler: (() -> Unit)? = when {
             isImmersiveMode.value -> exitImmersive
@@ -205,6 +215,7 @@ fun AppRoot(
             // 专辑/艺人详情：列表已滚时由 Level 1.5 先回顶，到顶后走这里回曲库
             // （与两页各自的 BackButton 同口径；缺 ArtistDetail 曾导致遥控返回直接落回首页）
             currentScreen == Screen.AlbumDetail, currentScreen == Screen.ArtistDetail -> navigateLibrary
+            currentScreen == Screen.Queue && queueOriginScreen != null -> backToQueueOrigin
             currentScreen == Screen.Home -> null
             // ── 设置域子页面：BACK 返回设置主菜单（入口唯一：SettingsBranch）──
             // 修复：均衡器/播放统计此前落入 else 回首页，遥控器返回键无法回到设置

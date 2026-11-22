@@ -1727,10 +1727,19 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
         }
 
         // 监听队列变化，自动持久化到 DataStore
+        // 2026-11-22 队列页修复 P1：队列「从非空变空」（移除最后一首 / clearQueue）也必须清持久化，
+        // 否则 DataStore 留着旧队列，重启后 restoreLastQueue 会让已删光的歌曲整队复活。
+        // ⚠️ 必须用「转换检测」而非无条件 else：本采集器 init 时立即收到首帧空队列，
+        // 那时 restoreLastQueue 尚未执行，无条件 clear 会把待恢复的队列提前抹掉。
         viewModelScope.launch {
+            var hadQueue = false
             playerVM.playerState.map { it.queue to it.currentIndex }.collect { (songs, index) ->
                 if (songs.isNotEmpty()) {
+                    hadQueue = true
                     prefs.queue.saveLastQueue(songs, index)
+                } else if (hadQueue) {
+                    hadQueue = false
+                    prefs.queue.clearLastQueue()
                 }
             }
         }
@@ -4057,6 +4066,9 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
     }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
     fun clearQueue() {
+        // 2026-11-22 队列页修复 P2：作废在途首曲解析。playQueue 的 needsResolve 分支持有
+        // 旧队列快照，仅靠代数守卫防过期；清空时不递增代数，解析完成后会把队列连同播放一起复活。
+        playerVM.invalidatePendingResolves()
         playerManager.clearQueue()
         _currentLyrics.value = null
         _lyricsAvailability.value = LyricsAvailability()

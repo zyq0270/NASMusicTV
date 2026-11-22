@@ -56,6 +56,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.nasmusic.tv.R
 import com.nasmusic.tv.ui.RegisterDialogBackHandler
 import androidx.tv.material3.Icon
@@ -63,6 +65,7 @@ import androidx.tv.material3.Text
 import com.nasmusic.tv.data.model.PlayMode
 import com.nasmusic.tv.data.model.Song
 import com.nasmusic.tv.ui.LocalListBackHandler
+import com.nasmusic.tv.ui.components.ConfirmDialog
 import com.nasmusic.tv.ui.components.CoverCarousel
 import com.nasmusic.tv.ui.components.FocusableSurface
 import com.nasmusic.tv.ui.components.LocalFocusableContentColor
@@ -103,6 +106,12 @@ fun QueueScreen(
     val firstItemFocusRequester = remember { FocusRequester() }
     val scope = rememberCoroutineScope()
     val listBackHandler = LocalListBackHandler.current
+    // 2026-11-22 队列页修复 P3：清空不可撤销，加二次确认。
+    // 状态放在页面层而非 QueueListPane：横屏/竖屏共用列表面板，弹窗只渲染一次。
+    var showClearConfirm by remember { mutableStateOf(false) }
+    val requestClearQueue: () -> Unit = { showClearConfirm = true }
+    val onClearConfirm: () -> Unit = { onClearQueue(); showClearConfirm = false }
+    val onClearDismiss: () -> Unit = { showClearConfirm = false }
 
     // Level 1.5: 队列列表已滚动时按 BACK 先回顶并聚焦第一个
     DisposableEffect(Unit) {
@@ -142,11 +151,12 @@ fun QueueScreen(
                 firstItemFocusRequester = firstItemFocusRequester,
                 onPlaySong = onPlaySong,
                 onRemoveSong = onRemoveSong,
-                onClearQueue = onClearQueue,
+                onClearQueue = requestClearQueue,
                 onMoveItem = onMoveItem,
                 modifier = Modifier.fillMaxWidth().weight(1f),
             )
         }
+        QueueClearConfirmDialog(showClearConfirm, onClearConfirm, onClearDismiss)
         return
     }
 
@@ -260,11 +270,12 @@ fun QueueScreen(
             firstItemFocusRequester = firstItemFocusRequester,
             onPlaySong = onPlaySong,
             onRemoveSong = onRemoveSong,
-            onClearQueue = onClearQueue,
+            onClearQueue = requestClearQueue,
             onMoveItem = onMoveItem,
             modifier = Modifier.fillMaxWidth().weight(1f).padding(start = 8.dp),
         )
     }
+    QueueClearConfirmDialog(showClearConfirm, onClearConfirm, onClearDismiss)
 }
 
 /**
@@ -315,8 +326,9 @@ private fun QueueListPane(
                 state = listState,
                 modifier = Modifier.fillMaxWidth().weight(1f)
             ) {
-                // 2026-09-25 审查修复（#2）：队列允许重复歌曲（addToQueue 不查重），key 用 song.id
-                // 会触发 Compose "Key was already used" 崩溃；队列操作本就按 index 语义，key 拼 index。
+                // key 必须拼 index：playQueue 可整队装入歌单本身自带的重复 id（入队路径
+                // QueueAddition.compute 虽已按 id 去重，但整队播放不经过它），只用 song.id
+                // 会触发 Compose "Key was already used" 崩溃；队列操作本就按 index 语义。
                 itemsIndexed(queue, key = { index, song -> "q_${index}_${song.id}" }) { index, song ->
                     val isCurrent = index == currentIndex
                     // 与 SongRow 相同的实现方式：
@@ -641,5 +653,37 @@ fun MiniIconButton(onClick: () -> Unit, icon: androidx.compose.ui.graphics.vecto
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Icon(imageVector = icon, contentDescription = null, tint = NasMusicColors.TextPrimary, modifier = Modifier.size(20.dp))
         }
+    }
+}
+
+/**
+ * 清空队列的二次确认。
+ *
+ * 与设置页/下载删除同款：真 [Dialog] 包裹 + dismissOnBackPress=false（BACK 由
+ * ConfirmDialog 内的 BackHandler 接管，不会穿透到 Level 1.5 列表回顶 / Level 2 退页）。
+ * destructive=true ⇒ 焦点默认落在「取消」，符合不可撤销操作的护栏。
+ */
+@Composable
+private fun QueueClearConfirmDialog(
+    show: Boolean,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    if (!show) return
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(
+            dismissOnBackPress = false,
+            dismissOnClickOutside = false,
+            usePlatformDefaultWidth = false
+        )
+    ) {
+        ConfirmDialog(
+            title = stringResource(R.string.queue_clear_confirm_title),
+            message = stringResource(R.string.queue_clear_confirm_message),
+            onConfirm = onConfirm,
+            onDismiss = onDismiss,
+            destructive = true
+        )
     }
 }

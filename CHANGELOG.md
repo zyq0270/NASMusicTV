@@ -63,6 +63,18 @@
 - **冗余数据模型**：删除 `HomeDashboardData.recentSongs` 死字段（全仓零读写）。
 - 门禁 `HomeFlowFixGateTest`（T1–T7，含负自检）；离线预检 `logs_temp/home_flow_gate_2026-11-22/precheck.py`（22 条全绿）。
 
+### 同版增补（2026-11-22，播放队列页六项流程缺陷）
+
+> 同一效果的多轮修复不升版本号（所有者 2026-11-09 裁定），并入 v2.39.26。逐条根因见 `docs/technical-overview.md` §10.421。
+
+- **移除最后一首歌后持久化不清**：`playerState` 采集器只在队列非空时写回，删光后 DataStore 残留旧队列，重启 `restoreLastQueue` 会整队复活。现改为「非空→空」转换检测时 `clearLastQueue()`；启动首帧空队列不触发，避免抹掉待恢复队列。
+- **清空队列挡不住在途首曲解析**：`playQueue` 的 needsResolve 分支把整队旧快照留在协程里，仅靠代数守卫；清空不递增代数 ⇒ 解析完成后队列连同播放一起复活。新增 `PlayerViewModel.invalidatePendingResolves()`（代数递增 + 取消 Job），两个 clear 入口都调用。
+- **播放模式语义被空 URL 预判绕过**：`next/previous` 无条件按 `currentIndex±1` 环绕猜目标，SHUFFLE 会播顺序邻曲、顺序边界会绕过「不回卷」的无动作语义。新增纯函数 `PlayModeAdjacent.adjacentIndex` 与 `PlayerManager` 的模式分支逐条对齐，SHUFFLE 与边界不预判。
+- **队列页 BACK 恒回首页**：导航器无返回栈。现 `NavigationViewModel` 在 `navigateTo` 内记录进入 Queue 的来源（覆盖顶栏/底栏/播放页/首页/我的所有入口），AppRoot 的 BACK 优先回来源；handler key 含来源以防状态漂移。
+- **清空按钮无二次确认**：误按 OK 即全队丢失且不可撤销。现复用 `ConfirmDialog` + 真 `Dialog`（destructive 默认聚焦取消，BACK 只关弹窗，不穿透到列表回顶/退页）。
+- **注释口径漂移**：`QueueScreen` key 拼 index 的注释仍称「addToQueue 不查重」，与 `QueueAddition.compute` 的去重口径矛盾；现说明整队播放可绕过入队去重，key 拼 index 仍然必要。
+- 门禁 `QueueFlowFixGateTest`（T1–T6，含负自检）+ 纯 JVM 单测 `PlayModeAdjacentTest`（7 例）；离线预检 `logs_temp/queue_flow_gate_2026-11-22/precheck.py`（43 条全绿）。
+
 ## [v2.39.25] - 2026-11-20
 
 > 修复曲库专辑详情「封面 + 曲目列表」链路的五项缺陷。逐条根因见 `docs/technical-overview.md` §10.416。

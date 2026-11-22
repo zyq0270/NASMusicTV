@@ -21,8 +21,26 @@ class NavigationViewModel(app: Application) : AndroidViewModel(app) {
     private val _currentScreen = MutableStateFlow(Screen.Home)
     val currentScreen: StateFlow<Screen> = _currentScreen.asStateFlow()
 
+    /**
+     * 2026-11-22 队列页修复 P2：记录进入队列页的来源，BACK 时回到来源页。
+     *
+     * 放在 navigateTo 内部拦截而不是改 3 个 Branch 调用点：顶部导航也走同一个
+     * navigateTo，改调用点会漏掉 TV 顶栏 / 手机底栏。仅「从非 Queue 进入 Queue」
+     * 才覆盖来源，页面内重复点队列 Tab 不会把来源改成自己。
+     */
+    private val _queueOrigin = MutableStateFlow<Screen?>(null)
+    val queueOrigin: StateFlow<Screen?> = _queueOrigin.asStateFlow()
+
     fun navigateTo(screen: Screen) {
+        if (screen == Screen.Queue && _currentScreen.value != Screen.Queue) {
+            _queueOrigin.value = _currentScreen.value
+        }
         _currentScreen.value = screen
+    }
+
+    /** BACK 消费完来源后清空，避免残留影响下一次进入 */
+    fun clearQueueOrigin() {
+        _queueOrigin.value = null
     }
 
     // =====================================================================
