@@ -32,8 +32,10 @@ internal fun NetdiskBranch(
                     com.nasmusic.tv.ui.screens.netdisk.NetdiskScreen(
                         viewModel = viewModel,
                         onPlaySong = { song ->
-                            viewModel.playNetworkSong(song)
-                            viewModel.navVM.navigateTo(Screen.NowPlaying)
+                            // P1 修复：网盘歌同属网络歌，解析成功后再跳页
+                            viewModel.playNetworkSong(song) {
+                                viewModel.navVM.navigateTo(Screen.NowPlaying)
+                            }
                         },
                         onPlayAllSongs = { songs ->
                             viewModel.playQueue(songs, 0)

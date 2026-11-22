@@ -48,6 +48,21 @@
 - **网络艺人卡片与详情头像都无封面**：网络源合成卡片（`search_artist_*`）的 `coverUrl` 恒为 null，又不在 `_mergedArtists` 中 ⇒ 在线兜底解析扫不到它；但名下歌曲（艺人全量展开）自带封面。现卡片与详情头像在自身无封面时就地回退到第一首有封面歌曲的封面，与专辑卡/本地艺术家同口径；不碰 ViewModel 与缓存，无新增网络请求。根因与修复见 `docs/technical-overview.md` §10.419。
 - 门禁 `ArtistsListFlowGateTest` / `ArtistDetailFlowGateTest` 各新增 T7（含负自检）；离线预检 `logs_temp/artist_cover_fallback_2026-11-21/verify.py` 同步。
 
+### 同版增补（2026-11-22，首页流程九项缺陷）
+
+> 同一效果的多轮修复不升版本号（所有者 2026-11-09 裁定），并入 v2.39.26。逐条根因见 `docs/technical-overview.md` §10.420。
+
+- **随心听自动续播整段是死代码**：续播标志在 `playQueue` 之前置位，被 `playQueue` 内部无条件复位，续播循环一次都不进。现把置位挪到 `playQueue` 之后。
+- **智能电台"换一批"失败后永久失效**：重入布尔只在成功回调复位，Manager 的 6 条失败提前返回不回调 ⇒ 标志卡死；且跨线程非 volatile。现改用 Manager 的 `state`（StateFlow 判据），失败会置 `Exhausted` 自动解除。
+- **网络歌点播先跳页后播放**：Home/Mine/Library/Netdisk 四处立即导航，直链解析异步失败时用户困在空播放页。现 `playNetworkSong` 新增成功回调，导航移入回调，失败留在原页面。
+- **`playQueue(emptyList())` 崩溃**：起始下标钳制在空表时抛异常，入口补空列表早退。
+- **天气电台并发结果覆盖**：`fetchWeather` 多次并发旧结果覆盖新结果，加代数闸门。
+- **天气电台适配器快照固化**：首次进首页未连 NAS 则 manager 的 adapter 恒 null，之后连上也不补。现 `updateAdapter` + 每次构建前用实时 registry 刷新。
+- **`loadRecentSongs` 并发无代数保护**：加代数闸门，旧结果不覆盖新结果。
+- **专辑详情重复取数**：`openAlbumDetail` 加缓存命中短路（与 `openArtistDetail` 对齐）。
+- **冗余数据模型**：删除 `HomeDashboardData.recentSongs` 死字段（全仓零读写）。
+- 门禁 `HomeFlowFixGateTest`（T1–T7，含负自检）；离线预检 `logs_temp/home_flow_gate_2026-11-22/precheck.py`（22 条全绿）。
+
 ## [v2.39.25] - 2026-11-20
 
 > 修复曲库专辑详情「封面 + 曲目列表」链路的五项缺陷。逐条根因见 `docs/technical-overview.md` §10.416。

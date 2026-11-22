@@ -21,9 +21,20 @@ import kotlinx.coroutines.coroutineScope
  */
 class WeatherRadioManager(
     /** NAS 后端适配器（可能为 null — 未连接时从网络端匹配歌曲） */
-    private val backendAdapter: BackendAdapter?,
+    @Volatile private var backendAdapter: BackendAdapter?,
     private val networkMusicManager: NetworkMusicManager
 ) {
+    /**
+     * P2 修复（2026-11-22）：适配器快照固化。
+     *
+     * Manager 采用"可空延迟创建"——若首次进首页时还没连 NAS，构造时拿到 null，
+     * 之后连上 NAS 也不会更新 ⇒ 天气电台永远缺 NAS 段。改为可变字段 + 每次构建前
+     * 由 VM 用实时 registry 刷新（不违反 W0 的"延后创建、允许无后端工作"契约）。
+     */
+    fun updateAdapter(adapter: BackendAdapter?) {
+        backendAdapter = adapter
+    }
+
     companion object {
         private const val TAG = "WeatherRadioManager"
         /** 天气电台每次构建的歌曲总数 */

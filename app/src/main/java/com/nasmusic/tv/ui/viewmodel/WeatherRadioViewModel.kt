@@ -89,6 +89,19 @@ class WeatherRadioViewModel(
     /** mood 世代号（M33）：每次清空/重建 +1，旧世代的构建结果不得写回 */
     private var moodGeneration = 0
 
+    /**
+     * P2 修复（2026-11-22）：取 Manager 时刷新 NAS 适配器。
+     * 保留 W0「可空延迟创建」语义（不在构造期固定依赖，无 NAS 也能工作），
+     * 但每次构建前都把实时 adapter 注入——首次进首页未连 NAS（构造时 null）、
+     * 之后连上也能补回 NAS 段，不再固化成空。
+     */
+    private fun weatherRadioManagerRefreshed(): WeatherRadioManager {
+        val adapter = backendRegistry.getAdapter()
+        return (weatherRadioManager ?: WeatherRadioManager(adapter, networkMusicManager).also {
+            weatherRadioManager = it
+        }).also { it.updateAdapter(adapter) }
+    }
+
     /** 换一批统一逻辑的参数（与 MainViewModel.pickBestFreshBatch 对齐） */
     private val maxShuffleAttemptsPerClick = 6
     private val minNewResultsForShuffle = 5
@@ -103,10 +116,15 @@ class WeatherRadioViewModel(
         ++moodGeneration
     }
 
+    // P2 修复（2026-11-22）：fetch 代数。每次进首页都会 fetchWeather，多次并发时旧请求
+    // 的天气/预报/错误态不得覆盖新请求的结果（队列写回另有 moodGeneration 守卫，两者独立）。
+    private var weatherFetchGeneration = 0
+
     /**
      * 获取当前天气并构建天气电台
      */
     fun fetchWeather() {
+        val fetchGen = ++weatherFetchGeneration
         viewModelScope.launch {
             _weatherLoading.value = true
             _weatherError.value = null
@@ -117,6 +135,7 @@ class WeatherRadioViewModel(
                     openWeatherMapApiKey = apiKey.ifBlank { null },
                     tencentMapKey = tencentKey
                 )
+                if (fetchGen != weatherFetchGeneration) return@launch
                 if (weather != null) {
                     _weatherData.value = weather
                     // 获取天气图标代码（从 OpenWeatherMap）
@@ -125,23 +144,18 @@ class WeatherRadioViewModel(
                     // 获取天气预报（需要 API Key）
                     if (apiKey.isNotBlank()) {
                         val forecast = weatherApi.fetchForecast(apiKey.ifBlank { null }, tencentKey)
-                        _weatherForecast.value = forecast
+                        if (fetchGen == weatherFetchGeneration) _weatherForecast.value = forecast
                     }
 
-                    // 延迟初始化 WeatherRadioManager（需要 BackendAdapter 和 NetworkMusicManager）
-                    val adapter = backendRegistry.getAdapter()
-                    if (weatherRadioManager == null) {
-                        weatherRadioManager = WeatherRadioManager(adapter, networkMusicManager)
-                    }
-                    weatherRadioManager?.let { mgr ->
-                        // 天气变化 = 新上下文，重置电台已见集合（跨构建去重从头开始）
-                        val generation = startNewMoodGeneration()
-                        val queue = buildWeatherRadioDeduped(mgr, WeatherMood.fromWeather(weather), weather)
-                        // M33：期间 mood 又被切走 ⇒ 本次结果作废，不得覆盖新队列
-                        if (generation == moodGeneration) {
-                            _weatherRadioQueue.value = queue
-                            _currentWeatherMood.value = queue.mood
-                        }
+                    // 延迟初始化 + 适配器实时刷新（见 weatherRadioManagerRefreshed）
+                    val mgr = weatherRadioManagerRefreshed()
+                    // 天气变化 = 新上下文，重置电台已见集合（跨构建去重从头开始）
+                    val generation = startNewMoodGeneration()
+                    val queue = buildWeatherRadioDeduped(mgr, WeatherMood.fromWeather(weather), weather)
+                    // M33：期间 mood 又被切走 ⇒ 本次结果作废，不得覆盖新队列
+                    if (generation == moodGeneration) {
+                        _weatherRadioQueue.value = queue
+                        _currentWeatherMood.value = queue.mood
                     }
                 } else {
                     _weatherError.value = if (apiKey.isBlank()) {
@@ -155,11 +169,13 @@ class WeatherRadioViewModel(
             } catch (e: Exception) {
                 e.rethrowIfCancellation()
                 AppLog.e("WeatherRadioViewModel", "fetchWeather failed", e)
-                _weatherError.value = getApplication<Application>().getString(R.string.weather_fetch_failed, e.message?.take(50) ?: "")
-                // 即使天气获取失败，仍按默认心情（阳光）加载歌曲
-                loadRadioForDefaultMood()
+                if (fetchGen == weatherFetchGeneration) {
+                    _weatherError.value = getApplication<Application>().getString(R.string.weather_fetch_failed, e.message?.take(50) ?: "")
+                    // 即使天气获取失败，仍按默认心情（阳光）加载歌曲
+                    loadRadioForDefaultMood()
+                }
             } finally {
-                _weatherLoading.value = false
+                if (fetchGen == weatherFetchGeneration) _weatherLoading.value = false
             }
         }
     }
@@ -175,11 +191,8 @@ class WeatherRadioViewModel(
             try {
                 // mood 变化 = 新上下文，重置电台已见集合（跨构建去重从头开始）
                 val generation = startNewMoodGeneration()
-                // 延迟初始化（可能在无后端连接时通过 fetchWeather() 创建）
-                val mgr = weatherRadioManager ?: run {
-                    val adapter = backendRegistry.getAdapter()
-                    WeatherRadioManager(adapter, networkMusicManager).also { weatherRadioManager = it }
-                }
+                // 延迟初始化 + 适配器实时刷新（见 weatherRadioManagerRefreshed）
+                val mgr = weatherRadioManagerRefreshed()
                 val queue = buildWeatherRadioDeduped(mgr, mood, _weatherData.value)
                 // M33：世代校验（连点两个 mood 时，先发的构建不得覆盖后发的结果）
                 if (generation == moodGeneration) _weatherRadioQueue.value = queue
@@ -234,10 +247,7 @@ class WeatherRadioViewModel(
         viewModelScope.launch {
             try {
                 val generation = startNewMoodGeneration()
-                val mgr = weatherRadioManager ?: run {
-                    val adapter = backendRegistry.getAdapter()
-                    WeatherRadioManager(adapter, networkMusicManager).also { weatherRadioManager = it }
-                }
+                val mgr = weatherRadioManagerRefreshed()
                 // 天气获取失败也走同一套跨构建去重：反复「换一批」仍只出新歌
                 val queue = buildWeatherRadioDeduped(mgr, WeatherMood.SUNNY, null)
                 if (generation == moodGeneration) {

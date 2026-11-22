@@ -11,6 +11,7 @@ data class HomeDashboardData(
     val totalArtists: Int = 0,
     val totalPlaylists: Int = 0,
     val recentlyAddedAlbums: List<Album> = emptyList(),
-    val favoriteSongs: List<Song> = emptyList(),
-    val recentSongs: List<Song> = emptyList()
+    val favoriteSongs: List<Song> = emptyList()
+    // P2 清理（2026-11-22）：删除 recentSongs 死字段。最近播放由 MainViewModel.recentSongs
+    // 独立 StateFlow 提供（HomeBranch → HomeScreen 参数），本字段构造时从未赋值、全仓无读取点。
 )

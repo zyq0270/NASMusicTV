@@ -62,9 +62,16 @@ internal fun HomeBranch(
                         currentSong = currentSong,
                         coverCandidates = coverCandidates,
                         onPlaySong = { song ->
-                            if (song.isNetworkSong) viewModel.playNetworkSong(song)
-                            else viewModel.playQueue(listOf(song))
-                            viewModel.navVM.navigateTo(Screen.NowPlaying)
+                            if (song.isNetworkSong) {
+                                // P1 修复：网络歌直链解析异步——只在真正开始播放后才跳页，
+                                // 解析失败留在首页看 toast，避免困在空播放页。
+                                viewModel.playNetworkSong(song) {
+                                    viewModel.navVM.navigateTo(Screen.NowPlaying)
+                                }
+                            } else {
+                                viewModel.playQueue(listOf(song))
+                                viewModel.navVM.navigateTo(Screen.NowPlaying)
+                            }
                         },
                         onPlayAlbum = { album ->
                             viewModel.playAlbumMultiSource(album)

@@ -29048,3 +29048,33 @@ Jellyfin 按名查询只发一次请求、fields 补齐并分页；Navidrome/Sub
 **涉及文件**：`ui/screens/library/browse/ArtistList.kt`、`ui/screens/ArtistDetailScreen.kt`、`app/src/test/.../ArtistsListFlowGateTest.kt`（新增 T7）、`ArtistDetailFlowGateTest.kt`（新增 T7）、`logs_temp/artist_cover_fallback_2026-11-21/verify.py`、`CHANGELOG.md`、本章。
 
 **版本号**：同一效果的多轮修复不升版本号（所有者 2026-11-09 裁定），并入 v2.39.26。
+
+### 10.420 首页流程九项缺陷修复（v2.39.26 同版增补 - 2026-11-22）
+
+**背景**：对首页（HomeScreen/HomeBranch）的组装、数据加载与全部回调链做逐行审查，确认 2 个 P0、3 个 P1、4 个 P2 缺陷。均为源码逻辑问题，常规单测覆盖不到（方法本身"能跑"，只是调用顺序/判据/时序错），故新增源码门禁钉死。
+
+**P0**：
+
+1. **随心听自动续播整段是死代码**：`playRandomSongs` 先 `_isShufflePlaying = true` 再调 `playQueue`，而 `playQueue`（L3702）无条件置 false 并取消 refill job ⇒ `startShuffleRefill` 的 `while (_isShufflePlaying)` 一次都不进。修复：置位挪到 `playQueue` 之后（顺序即语义，不在 playQueue 里"顺手"保留 shuffle，避免普通点歌意外开启续播）。
+2. **智能电台"换一批"失败后会话内永久失效**：`loadSmartRadioBatch` 的布尔重入标志只在成功回调里复位，而 `SmartRadioManager` 的空库/耗尽/异常等 6 条提前返回路径都不调回调 ⇒ 标志永久卡 true；且该布尔在 IO 线程写、主线程读，非 volatile。修复：废弃布尔，改用 `SmartRadioManager.state`（StateFlow、线程安全）——`Generating` 表示生成中（防重入），失败置 `Exhausted`、成功置 `Playing`，标志必然解除。
+
+**P1**：
+
+3. **网络歌点播"先跳页后播放"**：四处分支（Home/Mine/Library/Netdisk）调 `playNetworkSong` 后立即 navigate，但直链解析是异步的，解析失败只剩 toast，用户困在空播放页。修复：`MainViewModel.playNetworkSong` 新增可选 `onPlayed` 成功回调（在 netVM 的 `onPlaySong` 中、真正开播后触发），四个分支把导航移入回调；失败不跳页，留在原页面看提示。默认 null 保持其它调用点源码兼容。
+4. **`playQueue(emptyList())` 崩溃**：`MainViewModel.playQueue` 缺空表早退，`startIndex` 钳制在 `lastIndex == -1` 时抛 `IllegalArgumentException`（下游两层都有早退，唯独此层缺）。修复：入口加 `if (songs.isEmpty()) return`。
+5. **天气电台短时并发**：`fetchWeather` 多次并发时旧请求的天气/预报/错误态会覆盖新结果。修复：新增 `weatherFetchGeneration` 代数闸门（与既有 `moodGeneration` 队列守卫独立），旧代数结果不写回。
+
+**P2**：
+
+6. `HomeDashboardData.recentSongs` 死字段（全仓零读写，最近播放走 `MainViewModel.recentSongs` 独立 StateFlow）——删除。
+7. `loadRecentSongs` 并发无代数保护——新增 `recentSongsGeneration` 闸门。
+8. `WeatherRadioManager.backendAdapter` 构造期快照固化：首次进首页未连 NAS 则 manager 拿到 null，之后连上也不更新，天气电台永远缺 NAS 段。修复：改为 `@Volatile var` + `updateAdapter`，VM 侧新增 `weatherRadioManagerRefreshed()` 在每次构建前用实时 registry 刷新（保留 W0"可空延迟创建"契约）。
+9. `openAlbumDetail` 无缓存短路：每次进详情重跑五源取数，快速反复进出并发多次——与 `openArtistDetail` 对齐加缓存命中短路；⚠️ 签名 `fun openAlbumDetail(album: Album)` 逐字保留（`AlbumDetailFlowGateTest` T2 的 region 起点）。
+
+**核对后非缺陷、未改**：统计数字进首页不刷新（`loadLibrary` 的专辑/歌曲加载完成后 L1942/L1757 会重算 `loadHomeDashboard`，自愈）；智能电台点卡片不导航（随心听式浏览为产品设计取舍，不改）；`HomeScreen` 各区块显示条件（竖屏/横屏分支为既定适配）。
+
+**门禁**：新增 `HomeFlowFixGateTest`（T1–T7，源码文本断言 + 语句级判据 + 负自检）；离线预检 `logs_temp/home_flow_gate_2026-11-22/precheck.py`（22 条断言，全绿）。既有门禁逐条核对无回归（`AlbumDetailFlowGateTest` T2 / `SourceGatingGateTest` 关源分支字面量均保留）。
+
+**涉及文件**：`ui/viewmodel/MainViewModel.kt`、`ui/viewmodel/WeatherRadioViewModel.kt`、`backend/weather/WeatherRadioManager.kt`、`data/model/HomeDashboardData.kt`、`ui/components/branches/{Home,Mine,Library,Netdisk}Branch.kt`、`app/src/test/.../HomeFlowFixGateTest.kt`（新增）、`CHANGELOG.md`、本章。
+
+**版本号**：同一效果的多轮修复不升版本号（所有者 2026-11-09 裁定），并入 v2.39.26。

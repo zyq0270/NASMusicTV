@@ -166,13 +166,15 @@ val discoverCurrentDimensionValues = remember(browseSelections) {
                             viewModel.playAlbumMultiSource(album)
                         },
                         onPlaySong = { song ->
-                            // 网络歌曲需要先解析播放链接，本地歌曲直接播放
+                            // 网络歌曲需要先解析播放链接（成功后才跳页），本地歌曲直接播放
                             if (song.isNetworkSong) {
-                                viewModel.playNetworkSong(song)
+                                viewModel.playNetworkSong(song) {
+                                    viewModel.navVM.navigateTo(Screen.NowPlaying)
+                                }
                             } else {
                                 viewModel.playQueue(listOf(song))
+                                viewModel.navVM.navigateTo(Screen.NowPlaying)
                             }
-                            viewModel.navVM.navigateTo(Screen.NowPlaying)
                         },
                         onPlaySongs = { songListParam ->
                             viewModel.playQueue(songListParam)

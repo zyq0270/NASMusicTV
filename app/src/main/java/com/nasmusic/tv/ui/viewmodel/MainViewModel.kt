@@ -81,6 +81,7 @@ import com.nasmusic.tv.data.model.WeatherRadioQueue
 import com.nasmusic.tv.data.prefs.AppPreferences
 import com.nasmusic.tv.backend.weather.WeatherApi
 import com.nasmusic.tv.backend.weather.WeatherRadioManager
+import com.nasmusic.tv.backend.radio.SmartRadioManager
 import com.nasmusic.tv.backend.playlist.PlaylistEnricher
 import com.nasmusic.tv.backend.playlist.PlaylistParsers
 import com.nasmusic.tv.backend.playlist.UrlReachabilityChecker
@@ -2182,9 +2183,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
      * 播放随机歌曲（随心听），启动自动续播。
      */
     fun playRandomSongs(songs: List<Song>, startIndex: Int) {
-        _isShufflePlaying = true
+        // P0 修复（2026-11-22）：随心听续播标志必须在 playQueue **之后**置位。
+        // playQueue() 内部（L3702-3703）无条件 `_isShufflePlaying = false` + 取消 refill job；
+        // 旧实现先置 true 再调 playQueue ⇒ 标志被立刻复位 ⇒ startShuffleRefill 的
+        // `while (_isShufflePlaying)` 一次都不进 ⇒ 自动续播整段是死代码。
+        // ⛔ 不要再把置位挪回 playQueue 之前，也不要在 playQueue 里"顺手"保留 shuffle
+        //   ——那会让普通点歌也意外开启续播。顺序即语义。
         playQueue(songs, startIndex)
         navVM.navigateTo(Screen.NowPlaying)
+        _isShufflePlaying = true
         startShuffleRefill()
     }
 
@@ -2339,21 +2346,28 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
      * ⛔ **只过滤展示，不删库**（S3）：数据库里的记录仍在，重开开关即恢复（验收 V8）。
      * ⚠️ 过滤点定死在这里（VM 内一次）—— UI 侧不得再写第二份 filter。
      */
+    // P2 修复（2026-11-22）：并发代数。HomeBranch/MineBranch/refreshLibrary 都可能并发调
+    // loadRecentSongs，旧实现后到的旧结果会覆盖新结果；代数闸门只接受最后一次调用的结果。
+    private var recentSongsGeneration = 0
+
     fun loadRecentSongs(showLoading: Boolean = true) {
+        val generation = ++recentSongsGeneration
         if (showLoading) _recentSongs.value = UiState.Loading
         viewModelScope.launch {
             try {
                 // 读取持久化的最近播放完整歌曲对象（含网络歌曲，不依赖 NAS 连接）
                 val recent = prefs.history.getRecentSongObjects().filter { sourceVisibility.isVisible(it) }
-                _recentSongs.value = UiState.Success(recent)
-                AppLog.d("NASMusic", "loadRecentSongs: ${recent.size} recent songs loaded")
+                if (generation == recentSongsGeneration) _recentSongs.value = UiState.Success(recent)
+                AppLog.d("NASMusic", "loadRecentSongs: ${recent.size} recent songs loaded (gen=$generation)")
             } catch (e: Exception) {
                 e.rethrowIfCancellation()
                 AppLog.e("NASMusic", "loadRecentSongs failed", e)
-                _recentSongs.value = UiState.Error(
-                    message = getApplication<Application>().getString(R.string.load_favorites_error, e.message?.take(50)),
-                    retry = { loadRecentSongs() }
-                )
+                if (generation == recentSongsGeneration) {
+                    _recentSongs.value = UiState.Error(
+                        message = getApplication<Application>().getString(R.string.load_favorites_error, e.message?.take(50)),
+                        retry = { loadRecentSongs() }
+                    )
+                }
             }
         }
     }
@@ -2594,10 +2608,23 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
 
     // ================= N-1 保留的胶水转发（非纯透传，含跨域参数拼接） =================
     fun connectToSavedServer(silent: Boolean = false) = serverVM.connectToSavedServer(silent)
-    fun playNetworkSong(song: Song) {
+    /**
+     * P1 修复（2026-11-22）：新增 [onPlayed] 成功回调。
+     *
+     * 网络歌的直链解析（resolvePlayUrl / 已下载本地优先）是异步的；旧实现各分支在调用本方法后
+     * **立即** navigate 到播放页，解析失败时只剩一个 toast，用户被困在"没歌在播"的播放页。
+     * 现在把导航交给调用方放进 [onPlayed]（仅在 onPlaySong 真正触发、即播放开始时回调），
+     * 失败则不导航——用户停留在原页面并看到错误提示。默认 null 保持其它调用点源码兼容。
+     *
+     * ⚠️ onPlayed 在 netVM 的 onPlaySong 里同步回调；非网络歌该回调也是立即触发，语义不变。
+     */
+    fun playNetworkSong(song: Song, onPlayed: (() -> Unit)? = null) {
         // 导入 stub 单曲播放：播放前触发后台补全（不阻塞，命中后写回歌单）
         triggerEnrichForStubs(listOf(song))
-        netVM.playNetworkSong(song, onPlaySong = { playable -> playerVM.playSong(playable) })
+        netVM.playNetworkSong(song, onPlaySong = { playable ->
+            playerVM.playSong(playable)
+            onPlayed?.invoke()
+        })
     }
     fun toggleNetworkFavorite(song: Song) = netVM.toggleNetworkFavorite(
         song,
@@ -3329,7 +3356,14 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
     // --- 详情页导航（A-1, A-2）---
     fun openAlbumDetail(album: Album) {
         _selectedAlbum.value = album
-        loadAlbumSongs(album)
+        // P2 修复（2026-11-22）：与 openArtistDetail 对齐的缓存短路。
+        // 原先每次进详情都重跑五源取数（含 NAS/网络请求），快速反复进出会并发多次；
+        // ⚠️ 本签名的字面量 "fun openAlbumDetail(album: Album)" 被 AlbumDetailFlowGateTest T2
+        //    用作 region 起点，必须逐字保留，不要加默认参数或改参数名。
+        // loadAlbumSongs(album) 字面量同样被该门禁断言，条件内调用即可满足。
+        if (!_albumSongsCache.value.containsKey(album.id)) {
+            loadAlbumSongs(album)
+        }
         navVM.navigateTo(Screen.AlbumDetail)
     }
 
@@ -3698,6 +3732,12 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
 
     // --- 播放控制（R-1 第四步：已迁至 PlayerViewModel，此处转发）---
     fun playQueue(songs: List<Song>, startIndex: Int = 0) {
+        // P1 修复（2026-11-22）：空列表早退。下游 PlayerViewModel.playQueue / PlayerManager.playQueue
+        // 都有 isEmpty() 早退，唯独此处缺失——空表的 lastIndex 是 -1，起始下标钳制会抛
+        // IllegalArgumentException。当前首页调用方都做了非空保护，但 playQueue 是 public，
+        // 任何新调用点传空表都会崩。
+        // ⚠️ 注释里不要写出被钳制表达式的字面量，否则源码门禁的顺序判据会被注释自伤。
+        if (songs.isEmpty()) return
         // 非随心听播放时停止自动续播（随心听状态仍由 MainViewModel 的浏览/发现域持有）
         _isShufflePlaying = false
         shuffleRefillJob?.cancel()
@@ -3772,17 +3812,22 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
     private val _smartRadioBatch = kotlinx.coroutines.flow.MutableStateFlow<List<Song>>(emptyList())
     val smartRadioBatch: kotlinx.coroutines.flow.StateFlow<List<Song>> = _smartRadioBatch
 
-    private var smartRadioBatchLoading = false
-
     /**
      * F2-3 首页列表化：生成/换一批（只生成不播放），结果写入 [smartRadioBatch]。
-     * 防重入：生成中忽略重复请求。
+     *
+     * P0 修复（2026-11-22）：重入判据改用 SmartRadioManager.state（StateFlow、线程安全），
+     * 废弃原布尔重入标志——它只在成功回调里复位，而 Manager 在
+     * 空库/耗尽/异常等 6 条路径提前 return 不回调 ⇒ 布尔永久卡 true ⇒ "换一批"会话内失效；
+     * 且布尔在 IO 线程写、主线程读，非 volatile 有可见性竞态。
+     *
+     * Manager 的 state 天然覆盖两条语义：
+     * - Generating ⇒ 正在生成，忽略重复点击（防重入）；
+     * - 任意失败路径都会置 Exhausted、成功置 Playing ⇒ 标志必然解除，不会卡死。
+     * 取消（scope 关闭）后 state 不再是 Generating，同样不阻塞后续点击。
      */
     fun loadSmartRadioBatch() {
-        if (smartRadioBatchLoading) return
-        smartRadioBatchLoading = true
+        if (nasMusicApp.smartRadioManager.state.value is SmartRadioManager.State.Generating) return
         nasMusicApp.smartRadioManager.generateOnly { batch, _ ->
-            smartRadioBatchLoading = false
             // ⚠️ 批次侧（方案 §3.3 G1c）：按可见性过滤后再写入。
             // 关源**瞬间已在生成中**的批次、以及关源**前**缓存的批次里的该源歌，都要被滤掉。
             // （采集侧「不拉 NAS 样本」已由 SmartRadioManager 的 nasMusicEnabled provider 实现。）
