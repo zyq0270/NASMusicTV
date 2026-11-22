@@ -27,7 +27,10 @@ internal fun NowPlayingBranch(
     isImmersiveMode: androidx.compose.runtime.MutableState<Boolean>,
     currentSong: Song?,
     qualityTier: Int,
+    /** 播放按钮图标真相源（用户意图，BUFFERING 时仍 true） */
     isPlaying: Boolean,
+    /** 真实出声状态（BUFFERING / IDLE 时为 false）；仅供逐字歌词插值时钟使用，避免缓冲期空转 */
+    actualPlaying: Boolean,
     playMode: com.nasmusic.tv.data.model.PlayMode,
     coverCandidates: List<String>,
     coverFilterEnabled: Boolean,
@@ -94,6 +97,7 @@ internal fun NowPlayingBranch(
                         NowPlayingScreen(
                             currentSong = currentSong,
                             isPlaying = isPlaying,
+                            actualPlaying = actualPlaying,
                             playMode = playMode,
                             progressMs = progressState,
                             durationMs = duration,

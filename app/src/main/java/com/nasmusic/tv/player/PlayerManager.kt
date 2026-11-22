@@ -485,6 +485,12 @@ class PlayerManager(private val applicationContext: Context) {
                 // seek 完成，立即清除 pending 状态恢复进度轮询；移除兜底 timeout 避免重复清除
                 seekPending = false
                 progressHandler.removeCallbacks(seekTimeoutRunnable)
+            } else if (reason == Player.DISCONTINUITY_REASON_AUTO_TRANSITION) {
+                // 2026-11-22：自动切歌（一首播完进下一首）此前不写进度，只能等 1Hz 轮询
+                // ⇒ 切歌瞬间进度条短暂保留上一首末尾的进度（最多滞后 1 秒）。
+                // 这里在过渡回调里同步到新位置（通常是新曲 0），不改变 seekPending 语义
+                // （AUTO 与用户 seek 无关，不能误清 pending 或移除 timeout）。
+                _progress.value = newPosition.positionMs
             }
         }
 

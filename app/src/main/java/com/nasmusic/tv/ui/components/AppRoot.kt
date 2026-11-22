@@ -297,6 +297,9 @@ fun AppRoot(
                             // v2.35.0 多码率：当前生效档位（单曲覆盖 ?: 全局默认，方案 §5.1）
                             qualityTier = qualityTier,
                             isPlaying = wantsToPlay,
+                            // 逐字歌词时钟用真实出声状态：BUFFERING 时 wantsToPlay=true 但音频未推进，
+                            // 逐字插值会空跑到下一秒锚点才被拉回；这里传真实 isPlaying 修正。
+                            actualPlaying = isPlaying,
                             playMode = playMode,
                             coverCandidates = coverCandidates,
                             coverFilterEnabled = coverFilterEnabled,

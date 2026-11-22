@@ -1389,6 +1389,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
      *
      * _favoriteIds 仍保留私有，供 toggleNetworkFavorite 的 NAS 分支读取"当前是否已收藏"。
      */
+    // 2026-11-22：id 命名空间隔离契约——网络歌 id 恒以 "ntwk_" 开头（NetworkSongId.forNetworkSong），
+    // 本地歌以 "local_" 开头（LocalMusicRepository），NAS id 不带这两种前缀。
+    // 故 nas + net 按裸 id 合并不会串味；toggleNetworkFavorite 另加类型守卫双重保险。
     val favoriteIds: StateFlow<Set<String>> = combine(_favoriteIds, networkFavoriteIds) { nas, net ->
         nas + net
     }.stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
@@ -2628,7 +2631,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
     }
     fun toggleNetworkFavorite(song: Song) = netVM.toggleNetworkFavorite(
         song,
-        isNasFavorite = song.id in _favoriteIds.value,
+        // 2026-11-22：加来源类型守卫。网络/本地歌曲的 id 有独占前缀（ntwk_/local_），
+        // 绝不应按裸 id 去 NAS 收藏集合里判定"当前是否已收藏"——即便 NAS 后端未来返回
+        // 同形 id 也不会误走 NAS 分支。非网络非本地才查 NAS 集合。
+        isNasFavorite = !song.isNetworkSong && !song.isLocalSong && song.id in _favoriteIds.value,
         onNasToggle = { nasSong, isFav -> toggleNasFavorite(nasSong, isFav) }
     )
     fun searchSongsOnServer(query: String, force: Boolean = false) = searchVM.searchSongsOnServer(query, force)

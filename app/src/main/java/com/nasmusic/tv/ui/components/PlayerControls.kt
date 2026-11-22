@@ -107,6 +107,9 @@ fun ProgressSection(
     val latestDurationMs by rememberUpdatedState(durationMs)
     val latestIsLive by rememberUpdatedState(isLive)
     val latestOnSeek by rememberUpdatedState(onSeek)
+    // 2026-11-22：tap 与 drag 分处两个 pointerInput 节点，理论上快速轻扫可能同时触发。
+    // 用标志做互斥：drag 消费手势后置位，tap 回调读到即跳过，避免一次手势两次 onSeek。
+    var dragConsumedGesture by remember { mutableStateOf(false) }
 
     Row(
         modifier = modifier
@@ -169,6 +172,10 @@ fun ProgressSection(
                     // pointerInput(Unit) 终身只执行一次，首组合时 durationMs=0 会让手势 seek 永久失效。
                     // 必须在手势回调内直接读委托（动态取最新值）。
                     detectTapGestures { offset ->
+                        if (dragConsumedGesture) {
+                            dragConsumedGesture = false
+                            return@detectTapGestures
+                        }
                         val duration = latestDurationMs
                         val live = latestIsLive
                         if (duration > 0 && !live) {
@@ -181,6 +188,7 @@ fun ProgressSection(
                 .pointerInput(Unit) {
                     detectDragGestures(
                         onDragStart = { offset ->
+                            dragConsumedGesture = true
                             val duration = latestDurationMs
                             if (duration > 0 && !latestIsLive) {
                                 latestOnSeek((offset.x / size.width * duration).toLong().coerceIn(0, duration))

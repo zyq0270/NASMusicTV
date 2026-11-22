@@ -36,7 +36,15 @@ class SleepTimerController(
 ) {
     sealed interface State {
         data object Off : State
-        data class Running(val endsAtMs: Long, val totalMinutes: Int) : State
+        /**
+         * [remainingMinutes] 随计时推进周期性更新（详见 [start] 的 UI tick 协程）。
+         *
+         * ⚠️ 2026-11-22 修复：此前只有 endsAtMs/totalMinutes 两个固定字段 ⇒ StateFlow 在
+         * start 之后到到期之前**不再 emit**，而 M26 优化后播放页不再每秒重组 ⇒ 按钮上的
+         * 「剩余 N 分钟」冻结在启动那一刻。携带一个会变化的值让 collectAsState 收到新状态，
+         * UI 自然重算显示（单一真相源，不改播放页的重组边界）。
+         */
+        data class Running(val endsAtMs: Long, val totalMinutes: Int, val remainingMinutes: Int) : State
         data object Finished : State
     }
 
@@ -45,6 +53,14 @@ class SleepTimerController(
 
     /** 在途的到期调度（P1#4：以 Job 承载取消语义，替代原 Handler + AtomicLong 令牌） */
     private var expiryJob: Job? = null
+
+    /** 在途的 UI 分钟 tick（与到期调度分离，取消一个不影响另一个） */
+    private var tickJob: Job? = null
+
+    companion object {
+        /** UI 分钟刷新的粒度：30 秒足够让向上取整的分钟显示及时变化，又不至于刷屏 */
+        private const val UI_TICK_INTERVAL_MS = 30_000L
+    }
 
     /** 剩余毫秒（未运行返回 0） */
     fun remaining(): Long = when (val s = _state.value) {
@@ -60,10 +76,23 @@ class SleepTimerController(
         cancel()
         if (minutes <= 0) return
         val endsAt = nowMsProvider() + minutes * 60_000L
-        _state.value = State.Running(endsAt, minutes)
+        _state.value = State.Running(endsAt, minutes, minutes)
         expiryJob = scope.launch {
             delay(minutes * 60_000L)
             tickExpired()
+        }
+        // UI 分钟 tick：定期重算剩余分钟并 emit 新状态，让订阅者（播放页/通知）重绘。
+        // 到期后 tickExpired 把状态置为 Finished，本协程下一轮读到非 Running 自动退出。
+        tickJob = scope.launch {
+            while (true) {
+                delay(UI_TICK_INTERVAL_MS)
+                val current = _state.value as? State.Running ?: break
+                val remain = ((current.endsAtMs - nowMsProvider() + 59_999) / 60_000)
+                    .toInt().coerceAtLeast(1)
+                if (remain != current.remainingMinutes) {
+                    _state.value = current.copy(remainingMinutes = remain)
+                }
+            }
         }
     }
 
@@ -82,6 +111,8 @@ class SleepTimerController(
     fun cancel() {
         expiryJob?.cancel()
         expiryJob = null
+        tickJob?.cancel()
+        tickJob = null
         _state.value = State.Off
     }
 
@@ -95,7 +126,15 @@ class SleepTimerController(
  * （可注入时钟版）发生口径漂移。本顶层扩展与 controller 版逐位同义（向上取整），
  * 并补 UI 所需下限 1（显示层不出现「0 分钟」，到期前最后一分钟仍显示 1）。
  * ⚠️ 必须是**文件顶层**扩展（类内成员扩展跨文件不可见，首次实现曾因此编译失败）。
+ *
+ * 2026-11-22：默认读 [SleepTimerController.State.Running.remainingMinutes]（由 tick 协程
+ * 按同一公式每 30 秒刷新），保证「UI 显示」与「状态 emit」同源；仍保留 [nowMs] 参数供
+ * 单测/特殊场景按指定时钟精算。
  */
 fun SleepTimerController.State.Running.remainingMinutesDisplay(
-    nowMs: Long = System.currentTimeMillis()
-): Int = ((endsAtMs - nowMs + 59_999) / 60_000).toInt().coerceAtLeast(1)
+    nowMs: Long? = null
+): Int = if (nowMs == null) {
+    remainingMinutes.coerceAtLeast(1)
+} else {
+    ((endsAtMs - nowMs + 59_999) / 60_000).toInt().coerceAtLeast(1)
+}

@@ -101,7 +101,10 @@ import com.nasmusic.tv.ui.theme.NasOverlayColors
 @Composable
 fun NowPlayingScreen(
     currentSong: Song?,
+    /** 播放按钮图标真相源（用户意图，BUFFERING 时仍 true） */
     isPlaying: Boolean,
+    /** 真实出声状态；仅传给逐字歌词插值时钟，默认与 isPlaying 一致以兼容其它调用点 */
+    actualPlaying: Boolean = isPlaying,
     playMode: PlayMode,
     // M26：进度以 **State** 形式传入，本函数自身**不读值** ⇒ 1Hz 进度 tick 不会让
     // 这个 2300 行的播放页整体重组；只有真正读 `.value` 的叶子（时间标签 / 进度细线）会。
@@ -252,6 +255,7 @@ fun NowPlayingScreen(
         NowPlayingPortrait(
             currentSong = currentSong,
             isPlaying = isPlaying,
+            actualPlaying = actualPlaying,
             playMode = playMode,
             progressMs = progressMs,
             durationMs = durationMs,
@@ -475,11 +479,12 @@ fun NowPlayingScreen(
                         Spacer(modifier = Modifier.width(6.dp))
                         SourceTag(
                             label = stringResource(com.nasmusic.tv.data.model.LyricsSource.LOCAL_FILE.displayNameRes),
-                            available = currentSource == com.nasmusic.tv.data.model.LyricsSource.LOCAL_FILE,
+                            // 2026-11-22：本地歌词可由用户主动切换（LyricsManager.getLyricsFromSource
+                            // 的 LOCAL_FILE 分支会读同目录 .lrc；无文件时按既有逻辑回退）。
+                            // 原 available 仅当前来源为本地才 true + onClick=null ⇒ 用户永远切不到。
+                            available = true,
                             selected = currentSource == com.nasmusic.tv.data.model.LyricsSource.LOCAL_FILE,
-                            // L11 修复（2026-10-06）：纯展示元素——传 null 使其不可聚焦，
-                            // 原 onClick = { } 会让 D-Pad 停在一个无行为的焦点上
-                            onClick = null
+                            onClick = { onSwitchLyricsSource(com.nasmusic.tv.data.model.LyricsSource.LOCAL_FILE) }
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         SourceTag(
@@ -513,13 +518,8 @@ fun NowPlayingScreen(
                         Spacer(modifier = Modifier.width(6.dp))
                         // 歌词字体大小切换
                         val fontLabels = listOf("A", "A+", "A++", "A+++")
-                        val fontScaleIdx = when (lyricsFontScale) {
-                            0.7f -> 0
-                            1.0f -> 1
-                            1.3f -> 2
-                            1.6f -> 3
-                            else -> 1
-                        }
+                        // 2026-11-22：与竖屏共用容差归档函数，避免非精确浮点静默回退到默认档
+                        val fontScaleIdx = lyricsFontIndex(lyricsFontScale)
                         SourceTag(
                             label = fontLabels[fontScaleIdx],
                             available = true,
@@ -557,6 +557,7 @@ fun NowPlayingScreen(
                     // F2-2b：睡眠定时弹窗（输入框 -/+ 步进 + 15/30 快捷档 + 取消）
                     if (showSleepTimerDialog) {
                         SleepTimerPickerDialog(
+                            initialMinutes = (sleepTimerState as? com.nasmusic.tv.player.SleepTimerController.State.Running)?.remainingMinutesDisplay() ?: 30,
                             onStart = { min ->
                                 showSleepTimerDialog = false
                                 onSleepTimerStart(min)
@@ -610,7 +611,8 @@ fun NowPlayingScreen(
                                 lyrics = lyrics,
                                 currentTimeMs = progressMs,
                                 highlightMode = highlightMode,
-                                isPlaying = isPlaying,
+                                // 逐字时钟用真实出声状态，缓冲期不空转
+                                isPlaying = actualPlaying,
                                 fontSizeMultiplier = lyricsFontScale,
                                 onSeekToLine = onSeek,
                                 // 沉浸模式歌词区为纯黑底 → 渐隐遮罩同色，避免出现深蓝渐变边
@@ -1221,11 +1223,13 @@ private fun SourceTag(
 @OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
 private fun SleepTimerPickerDialog(
+    initialMinutes: Int = 30,
     onStart: (Int) -> Unit,
     onCancel: () -> Unit,
     onDismiss: () -> Unit
 ) {
-    var minutes by remember { mutableStateOf(30) }
+    // 2026-11-22：初次进入用当前剩余分钟（定时运行中重开弹窗不再重置为 30）。
+    var minutes by remember { mutableIntStateOf(initialMinutes.coerceIn(5, 300)) }
     androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
         Column(
             modifier = Modifier
@@ -1351,12 +1355,22 @@ internal enum class SwipeDirection { LEFT, RIGHT, NONE }
 /** 歌词字号档位（与现状 A/A+/A++/A+++ 一致） */
 private val LYRICS_FONT_SCALES = listOf(0.7f, 1.0f, 1.3f, 1.6f)
 
-private fun lyricsFontIndex(scale: Float): Int = when (scale) {
-    0.7f -> 0
-    1.0f -> 1
-    1.3f -> 2
-    1.6f -> 3
-    else -> 1
+/**
+ * 字号档位索引（2026-11-22 修复）：用「取最近档」代替精确 `when` 浮点比较。
+ * DataStore JSON 反序列化 / 浮点累加可能得到 0.6999999f 之类的非精确值，
+ * 精确比较会静默回退到默认档位 1；这里按最小差值归档，容差内即命中。
+ */
+private fun lyricsFontIndex(scale: Float): Int {
+    var best = 1
+    var bestDiff = Float.MAX_VALUE
+    LYRICS_FONT_SCALES.forEachIndexed { index, candidate ->
+        val diff = kotlin.math.abs(candidate - scale)
+        if (diff < bestDiff) {
+            bestDiff = diff
+            best = index
+        }
+    }
+    return best
 }
 
 /** 歌词来源循环顺序（D2：4 个来源标签合并为 1 个循环 Chip） */
@@ -1403,6 +1417,8 @@ private const val PORTRAIT_SWIPE_SETTLE_MS = 220
 private fun NowPlayingPortrait(
     currentSong: Song?,
     isPlaying: Boolean,
+    /** 真实出声状态；仅供逐字歌词插值时钟使用 */
+    actualPlaying: Boolean = isPlaying,
     playMode: PlayMode,
     progressMs: androidx.compose.runtime.State<Long>,
     durationMs: Long,
@@ -1487,6 +1503,7 @@ private fun NowPlayingPortrait(
         PortraitImmersiveLyrics(
             currentSong = currentSong,
             isPlaying = isPlaying,
+            actualPlaying = actualPlaying,
             isRadio = isRadio,
             progressMs = progressMs,
             durationMs = durationMs,
@@ -1798,7 +1815,8 @@ private fun NowPlayingPortrait(
                                         val usable = when (next) {
                                             com.nasmusic.tv.data.model.LyricsSource.EMBEDDED -> lyricsAvailability.hasBackend
                                             com.nasmusic.tv.data.model.LyricsSource.CACHED -> lyricsAvailability.hasCached
-                                            com.nasmusic.tv.data.model.LyricsSource.LOCAL_FILE -> false
+                                            // 2026-11-22：本地歌词纳入循环（VM 与 LyricsManager 均已支持）
+                                            com.nasmusic.tv.data.model.LyricsSource.LOCAL_FILE -> true
                                             else -> true
                                         }
                                         if (usable) {
@@ -1877,7 +1895,7 @@ private fun NowPlayingPortrait(
                                 lyrics = lyrics,
                                 currentTimeMs = progressMs,
                                 highlightMode = highlightMode,
-                                isPlaying = isPlaying,
+                                isPlaying = actualPlaying,
                                 fontSizeMultiplier = lyricsFontScale,
                                 onSeekToLine = onSeek,
                                 // 手机竖屏：长按进入歌词跳转模式（规避与横滑切页的轴向手势冲突）
@@ -1970,6 +1988,7 @@ private fun NowPlayingPortrait(
 
         if (showSleepTimerDialog) {
             SleepTimerPickerDialog(
+                initialMinutes = (sleepTimerState as? com.nasmusic.tv.player.SleepTimerController.State.Running)?.remainingMinutesDisplay() ?: 30,
                 onStart = { min ->
                     showSleepTimerDialog = false
                     onSleepTimerStart(min)
@@ -2029,6 +2048,8 @@ private const val PORTRAIT_IMMERSIVE_FADE_BAND_RATIO = 0.5f
 private fun PortraitImmersiveLyrics(
     currentSong: Song?,
     isPlaying: Boolean,
+    /** 真实出声状态；仅供逐字歌词插值时钟使用 */
+    actualPlaying: Boolean = isPlaying,
     isRadio: Boolean,
     progressMs: androidx.compose.runtime.State<Long>,
     durationMs: Long,
@@ -2189,7 +2210,7 @@ private fun PortraitImmersiveLyrics(
                     lyrics = lyrics,
                     currentTimeMs = progressMs,
                     highlightMode = highlightMode,
-                    isPlaying = isPlaying,
+                    isPlaying = actualPlaying,
                     fontSizeMultiplier = lyricsFontScale,
                     // 纯黑底 → 上下渐隐用同色遮罩，边缘与背景无缝
                     fadeMaskColor = Color.Black,
