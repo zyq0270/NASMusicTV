@@ -28,6 +28,7 @@ import com.nasmusic.tv.backend.local.EmbeddedCoverExtractor
 import com.nasmusic.tv.backend.local.MusicMerger
 import com.nasmusic.tv.backend.local.StorageMonitor
 import com.nasmusic.tv.backend.network.NetworkSongId
+import com.nasmusic.tv.backend.network.NetworkArtistDetailFetcher
 import com.nasmusic.tv.backend.network.QualityScope
 import com.nasmusic.tv.backend.network.QualityTiers
 import com.nasmusic.tv.backend.network.mv.MvSearchManager
@@ -1004,6 +1005,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
                 _randomSongs.value = _randomSongs.value.filter {
                     it.sourceType != MusicSourceType.NETWORK_MUSIC
                 }
+                // 艺术家详情缓存按名字存的是五源混合结果，关源后必须去掉网络段，
+                // 否则「关了网络源再进赵传详情」仍显示关源前的旧网络歌（openArtistDetail 命中
+                // containsKey 直接短路、不会再加载）。用 filterValues 去掉变空的 key，让下次
+                // 进入重新走门控后的加载；非空 key 保留 NAS/本地/百度段。
+                _artistDetailSongsCache.value = _artistDetailSongsCache.value
+                    .mapValues { (_, songs) ->
+                        songs.filterNot { it.networkSource == NetworkSongId.METING_SOURCE }
+                    }
+                    .filterValues { it.isNotEmpty() }
             }
             // Jamendo 没有独立的缓存流（条目走 services map + 聚合器）
             AppPreferences.SOURCE_JAMENDO -> Unit
@@ -3351,6 +3361,19 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
         }
     }
 
+    /**
+     * 网络源艺人详情取数器：netease 走艺人全量 API，其他平台 / 未命中回退关键词搜索。
+     * ⛔ 无状态、按名字索引由本 VM 的 _artistDetailSongsCache 负责，与 SearchViewModel 的
+     *    NetworkArtistExpansion（单艺人状态件）互不复用。
+     */
+    private val networkArtistDetailFetcher = NetworkArtistDetailFetcher(
+        findArtist = { name -> nasMusicApp.networkMusicManager.findArtist(name) },
+        getArtistSongs = { id, offset, limit ->
+            nasMusicApp.networkMusicManager.getArtistSongs(id, offset, limit)
+        },
+        search = { keyword -> nasMusicApp.networkMusicManager.search(keyword) }
+    )
+
     private val _artistDetailSongsCache = MutableStateFlow<Map<String, List<Song>>>(emptyMap())
     val artistDetailSongsCache: StateFlow<Map<String, List<Song>>> = _artistDetailSongsCache.asStateFlow()
 
@@ -3435,13 +3458,20 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
                     }
 
                     // 慢源2: 网络音乐源（Meting-API 等，最慢，10-15s）
+                    // ⛔ 显式判 NETWORK_MUSIC 可见性：与 SearchAggregator 网络分支同口径。
+                    //    关掉 Meting 后本分支不再发请求（即便 services map 里还留着别的服务），
+                    //    且 fetcher 内部只保留 networkSource==meting，避免百度/Jamendo 跨标签重复。
                     val networkDeferred = async(Dispatchers.IO) {
-                        try {
-                            nasMusicApp.networkMusicManager.search(artistName)
-                        } catch (e: Exception) {
-                            e.rethrowIfCancellation()
-                            AppLog.w("NASMusic", "loadArtistSongs: network search failed: ${e.message?.take(50)}")
+                        if (!sourceVisibility.isVisible(MusicSourceType.NETWORK_MUSIC)) {
                             emptyList()
+                        } else {
+                            try {
+                                networkArtistDetailFetcher.fetch(artistName)
+                            } catch (e: Exception) {
+                                e.rethrowIfCancellation()
+                                AppLog.w("NASMusic", "loadArtistSongs: network fetch failed: ${e.message?.take(50)}")
+                                emptyList()
+                            }
                         }
                     }
 

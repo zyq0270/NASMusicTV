@@ -36,6 +36,18 @@
 
 - 版本号 `versionCode 210 → 211`，`versionName 2.39.25 → 2.39.26`。
 
+### 同版增补（2026-11-21，网络艺人详情）
+
+> 同一效果的多轮修复不升版本号（所有者 2026-11-09 裁定），并入 v2.39.26。
+
+- **网络艺人卡片有歌、详情页 0 首**：卡片数字来自统一搜索的 `findArtist + getArtistSongs` 全量展开，详情页却只调 `search(artistName)`（`nativeFirst=false` 的 Meting 端点泛化搜索）再按歌手名全等过滤，端点结果 artist 常为空/带后缀即整批丢弃，空列表又写进缓存被短路。现新增无状态 `NetworkArtistDetailFetcher`：netease 走 `findArtist→getArtistSongs` 分页拉全量（每页 100，硬上限 5000），未命中/取数失败/零命中一律回退关键词搜索——非 netease 平台（QQ/酷狗/酷我/咪咕）行为与修复前一致，不会退化成 0 首。
+- **详情页网络分支缺可见性门控**：与 `SearchAggregator` 口径分叉，关掉 Meting 仍发请求且会把 fallback 的百度/Jamendo 歌混进网络标签。现补 `NETWORK_MUSIC` 显式门控 + 只认 `networkSource==meting` 归属过滤；关源时同步清 `artistDetailSongsCache` 的网络段。
+- **歌手名全等过滤漏掉带后缀变体**：`ArtistSplitter` 新增 `matchKey`（有界后缀归一化），只剥白名单内以括号/短横线界定的演出/版本标记（Live/现场/伴奏/Remix 等），保持拆分后全等——「周」不会命中「周杰伦」，白名单外的 `(精选)` 仍视为独立名字。`normalizeKey` 身份口径不变，不影响专辑/去重 Map 键。
+- **空态无重试入口**：网络首屏零命中走 `EmptyState` 而非错误态，用户只能反复进出（每次重发五源含 10-15s Meting）。现 EmptyState 挂 `onAction=onRetry`，走原有 `forceReload=true`。
+- 门禁 `ArtistDetailFlowGateTest` 新增 T6（门控/兜底/归属/有界匹配/空态重试，含负自检）；离线预检 `logs_temp/artist_detail_flow_verify.py` 同步；新增纯 JVM 单测 `NetworkArtistDetailFetcherTest`（T1–T8）、`ArtistSplitterTest` 有界后缀三例。
+- **网络艺人卡片与详情头像都无封面**：网络源合成卡片（`search_artist_*`）的 `coverUrl` 恒为 null，又不在 `_mergedArtists` 中 ⇒ 在线兜底解析扫不到它；但名下歌曲（艺人全量展开）自带封面。现卡片与详情头像在自身无封面时就地回退到第一首有封面歌曲的封面，与专辑卡/本地艺术家同口径；不碰 ViewModel 与缓存，无新增网络请求。根因与修复见 `docs/technical-overview.md` §10.419。
+- 门禁 `ArtistsListFlowGateTest` / `ArtistDetailFlowGateTest` 各新增 T7（含负自检）；离线预检 `logs_temp/artist_cover_fallback_2026-11-21/verify.py` 同步。
+
 ## [v2.39.25] - 2026-11-20
 
 > 修复曲库专辑详情「封面 + 曲目列表」链路的五项缺陷。逐条根因见 `docs/technical-overview.md` §10.416。

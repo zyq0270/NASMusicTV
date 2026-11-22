@@ -12,7 +12,8 @@ import java.io.File
  * 2. Jellyfin Limit=1000 无分页 ⇒ 大歌手静默截断；
  * 3. 同一人的多个原始 ID 对按名查询的后端产生 N 条完全相同的请求；
  * 4. 两条后端路径排序口径不同，多源拼接后顺序混乱；详情页无加载/空/错误态；
- * 5. NowPlaying 点歌手名只跳搜索，与曲库卡片进详情的语义不一致。
+ * 5. NowPlaying 点歌手名只跳搜索，与曲库卡片进详情的语义不一致；
+ * 6. 网络艺人详情：卡片有歌但详情 0 首（门控缺失 + 裸 search + 全等过滤 + 空态无重试）。
  *
  * 与 ArtistsListFlowGateTest 同款源码文本门（Composable 行为测试本仓库跑不了），
  * 门内带负自检防止判据恒真。读文件显式 UTF-8（源码含中文注释，本机 JVM 默认 CP936）。
@@ -132,6 +133,97 @@ class ArtistDetailFlowGateTest {
             "T5：onSearchArtist 仍保留直接跳搜索 Tab 的旧逻辑",
             !artistEntry.contains("selectLibraryTab")
         )
+    }
+
+    @Test
+    fun `T6 网络艺人详情必须门控 有界匹配 全量兜底 空态重试`() {
+        // (1) 网络分支必须显式判可见性 + 走 fetcher（⛔ 不能再裸调 search）
+        val vm = flatten(mainSourceFile("ui/viewmodel/MainViewModel.kt"))
+        val load = methodRegion(vm, "fun loadArtistSongs(", "fun isFavorite(")
+        assertTrue(
+            "T6（门控）：详情页网络分支没判 NETWORK_MUSIC 可见性 ——\n" +
+                "关掉 Meting 后仍发请求，与 SearchAggregator 口径分叉。",
+            load.contains("!sourceVisibility.isVisible(MusicSourceType.NETWORK_MUSIC)")
+        )
+        assertTrue(
+            "T6（取数）：详情页没有走 NetworkArtistDetailFetcher ——\n" +
+                "仍是裸 search(artistName)，非 netease / 搜索页同口径全量能力接不上。",
+            load.contains("networkArtistDetailFetcher.fetch(artistName)")
+        )
+        assertTrue(
+            "T6（清缓存）：关 Meting 源时没清 artistDetailSongsCache ——\n" +
+                "关源后重新进详情仍显示旧网络歌（containsKey 直接短路）。",
+            vm.contains("songs.filterNot { it.networkSource == NetworkSongId.METING_SOURCE }") &&
+                vm.contains(".filterValues { it.isNotEmpty() }")
+        )
+
+        // (2) fetcher 必须有兜底 + 归属过滤 + 分页上限
+        val fetcher = flatten(mainSourceFile("backend/network/NetworkArtistDetailFetcher.kt"))
+        assertTrue("T6 空转自证：读到的不是 NetworkArtistDetailFetcher", fetcher.contains("class NetworkArtistDetailFetcher"))
+        assertTrue(
+            "T6（兜底）：findArtist 为 null 时没有回退关键词搜索 ——\n" +
+                "非 netease 平台会退化成 0 首。",
+            fetcher.contains("?: return keywordFallback()")
+        )
+        assertTrue(
+            "T6（归属）：兜底没有只留 meting ——\n" +
+                "manager.search 的跨源 fallback 会把百度/Jamendo 混进网络标签。",
+            fetcher.contains("it.networkSource == NetworkSongId.METING_SOURCE")
+        )
+        assertTrue("T6（分页）：缺分页循环", fetcher.contains("while (hasMore && pages < maxPages)"))
+
+        // (3) 有界后缀归一化：用 find（不是 match）+ 白名单，且两边都过 matchKey
+        val splitter = flatten(mainSourceFile("util/ArtistSplitter.kt"))
+        assertTrue("T6（matchKey）：ArtistSplitter 缺 matchKey", splitter.contains("fun matchKey(name: String): String"))
+        assertTrue(
+            "T6（find）：尾部后缀误用 Regex.match ——\n" +
+                "Regex.match 要求整串匹配，带前缀的名字（赵传(Live)）永远剥不到。",
+            splitter.contains("bracketedTag.find(stripped)") && !splitter.contains("bracketedTag.match(stripped)")
+        )
+        assertTrue("T6（白名单）：knownTags 未定义", splitter.contains("private val knownTags = setOf("))
+        assertTrue(
+            "T6（比较口径）：containsArtistWithKey 没用 matchKey ——\n" +
+                "带 (Live) 后缀的网络歌仍被全等过滤丢弃。",
+            methodRegion(splitter, "fun containsArtistWithKey(", "}")
+                .contains("matchKey(it) == key")
+        )
+
+        // (4) 空态必须挂重试（⛔ 不能靠删缓存 key 重试）
+        val screen = flatten(mainSourceFile("ui/screens/ArtistDetailScreen.kt"))
+        assertTrue(
+            "T6（空态重试）：EmptyState 没挂 onAction ——\n" +
+                "网络首屏零命中时用户无显式重试入口，只能反复进出（每次重发五源）。",
+            screen.contains("actionText = stringResource(R.string.list_retry)") &&
+                screen.contains("onAction = onRetry")
+        )
+
+        // 负自检：把门控判据抹掉必须判负
+        assertTrue("T6 护栏失效：无门控仍被判正", !load.replace(
+            "!sourceVisibility.isVisible(MusicSourceType.NETWORK_MUSIC)", ""
+        ).contains("!sourceVisibility.isVisible(MusicSourceType.NETWORK_MUSIC)"))
+    }
+
+    @Test
+    fun `T7 详情头像必须在 artist 为 null 或无封面时借歌曲列表封面`() {
+        val src = flatten(mainSourceFile("ui/screens/ArtistDetailScreen.kt"))
+        // 网络艺人不在 mergedArtists ⇒ artist==null，但详情歌曲已由 fetcher 全量拉取且带封面。
+        // 两处头像（竖屏/横屏）都必须用派生出的 detailCoverUrl，不能各自读 artist?.coverUrl。
+        assertTrue(
+            "T7（派生）：没有从 artist 或 songs 派生 detailCoverUrl ——\n" +
+                "网络艺人详情头像恒为 ♫ 占位符。",
+            src.contains("val detailCoverUrl = artist?.coverUrl ?: songs.firstOrNull { !it.coverUrl.isNullOrBlank() }?.coverUrl")
+        )
+        val uses = "coverUrl = detailCoverUrl,"
+        assertTrue("T7（两处头像）：竖屏/横屏未都用 detailCoverUrl（应出现 2 次）", src.split(uses).size - 1 == 2)
+        assertTrue(
+            "T7（残留）：仍有 CoverImage 直接读 artist?.coverUrl ——\n" +
+                "该分支拿不到网络艺人封面。",
+            !src.contains("coverUrl = artist?.coverUrl")
+        )
+        // 负自检：抹掉派生行后判据必须判负
+        assertTrue("T7 护栏失效：去掉派生行仍被判正", !src.replace(
+            "val detailCoverUrl = artist?.coverUrl ?: songs.firstOrNull { !it.coverUrl.isNullOrBlank() }?.coverUrl", ""
+        ).contains("val detailCoverUrl = artist?.coverUrl"))
     }
 
     // ─────────────────── 辅助 ───────────────────

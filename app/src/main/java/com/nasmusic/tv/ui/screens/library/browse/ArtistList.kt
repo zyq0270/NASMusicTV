@@ -159,7 +159,11 @@ internal fun ArtistsTab(
                                 Box(Modifier.onFocusChanged { if (it.isFocused) focusedGridIndex = index }) {
                                     ArtistCard(
                                         artist = artist.name,
-                                        coverUrl = artist.coverUrl,
+                                        // 封面兜底：网络源合成卡片（search_artist_*）的 coverUrl 恒为 null，
+                                        // 但名下歌曲（艺人全量展开 getArtistSongs）自带封面。与专辑卡
+                                        // （LibraryScreen.kt:430）同口径，就地取第一首有封面歌的封面。
+                                        coverUrl = artist.coverUrl
+                                            ?: artistSongs.firstOrNull { !it.coverUrl.isNullOrBlank() }?.coverUrl,
                                         songCount = songCount,
                                         albumCount = albumCountForArtist,
                                         primaryGenre = primaryGenreForArtist,

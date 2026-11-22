@@ -219,8 +219,13 @@ fun ArtistDetailScreen(
                     onRetry = onRetry,
                     modifier = m
                 )
+                // ⛔ 空态必须给显式重试入口：网络艺人详情首屏取数失败/零命中时走 EmptyState
+                //    （不是 error，不写 error 态），此前没有 onAction ⇒ 用户只能反复进出详情页，
+                //    而每次重进都重发五源（含 10-15s Meting）。重试仍走 forceReload=true。
                 songs.isEmpty() -> EmptyState(
                     message = stringResource(R.string.library_no_songs),
+                    actionText = stringResource(R.string.list_retry),
+                    onAction = onRetry,
                     modifier = m
                 )
                 else -> LazyColumn(
@@ -251,11 +256,17 @@ fun ArtistDetailScreen(
             }
         }
 
+        // 头像封面兜底：网络艺人不在 mergedArtists 中（artist==null），但 §10.418 已让详情
+        // 歌曲列表走 NetworkArtistDetailFetcher 全量拉取，歌曲自带封面。与卡片页同口径，
+        // 取第一首有封面歌的封面，避免网络艺人详情头像恒为 ♫ 占位符。
+        val detailCoverUrl = artist?.coverUrl
+            ?: songs.firstOrNull { !it.coverUrl.isNullOrBlank() }?.coverUrl
+
         if (isPhonePortrait) {
             // 竖屏：圆形头像置顶（160dp 已在 §2.7 口径内，触摸场景够大）
             Column(modifier = Modifier.fillMaxWidth().weight(1f)) {
                 CoverImage(
-                    coverUrl = artist?.coverUrl,
+                    coverUrl = detailCoverUrl,
                     contentDescription = artistName,
                     size = 160.dp,
                     cornerRadius = 80.dp
@@ -267,7 +278,7 @@ fun ArtistDetailScreen(
             Row(modifier = Modifier.fillMaxWidth().weight(1f)) {
                 // 左侧：歌手头像
                 CoverImage(
-                    coverUrl = artist?.coverUrl,
+                    coverUrl = detailCoverUrl,
                     contentDescription = artistName,
                     size = 160.dp,
                     cornerRadius = 80.dp

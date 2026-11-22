@@ -1,6 +1,7 @@
 package com.nasmusic.tv.util
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -116,5 +117,36 @@ class ArtistSplitterTest {
         assertEquals(true, ArtistSplitter.containsArtist("古天乐", "古天乐"))
         // 未拆分的合唱名不应被当成独立艺术家匹配到歌曲
         assertEquals(false, ArtistSplitter.containsArtist("古天乐/萱萱", "古天乐/萱萱"))
+    }
+
+    // ---- 有界后缀归一化（网络艺人详情 2026-11-21）----
+
+    @Test
+    fun `matchKey strips bounded known tags`() {
+        val base = ArtistSplitter.matchKey("赵传")
+        assertEquals(base, ArtistSplitter.matchKey("赵传(Live)"))
+        assertEquals(base, ArtistSplitter.matchKey("赵传（现场）"))
+        assertEquals(base, ArtistSplitter.matchKey("赵传 [Live]"))
+        assertEquals(base, ArtistSplitter.matchKey("赵传 - Remix"))
+        assertEquals(base, ArtistSplitter.matchKey("赵传 (Live) (伴奏)"))
+        assertEquals(base, ArtistSplitter.matchKey("赵传(inst.)"))
+    }
+
+    @Test
+    fun `matchKey keeps unknown tags and never opens substring matching`() {
+        // 白名单外的括号内容是独立名字，不能被剥
+        assertTrue(ArtistSplitter.matchKey("周杰伦(精选)") != ArtistSplitter.matchKey("周杰伦"))
+        // ⛔ 绝不开无边界包含：「周」不能命中「周杰伦」
+        assertEquals(false, ArtistSplitter.containsArtist("周杰伦", "周"))
+        assertEquals(false, ArtistSplitter.containsArtistWithKey("周杰伦", ArtistSplitter.normalizeKey("周")))
+        assertTrue(ArtistSplitter.matchKey("Live").isNotBlank())
+    }
+
+    @Test
+    fun `matchKey is idempotent and containsArtist accepts tagged variants`() {
+        val tagged = ArtistSplitter.matchKey("赵传(Live)")
+        assertEquals(tagged, ArtistSplitter.matchKey(tagged))
+        assertEquals(true, ArtistSplitter.containsArtist("赵传(Live)", "赵传"))
+        assertEquals(true, ArtistSplitter.containsArtistWithKey("赵传(Live)", ArtistSplitter.normalizeKey("赵传")))
     }
 }

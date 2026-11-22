@@ -28993,3 +28993,58 @@ Jellyfin 按名查询只发一次请求、fields 补齐并分页；Navidrome/Sub
 **验证边界**：本机（zyq02）无 JBR / Android SDK，`assembleRelease` 与 `testDebugUnitTest` 均**未实跑**。已用 `logs_temp/pinyin_search_verify_2026-11-20.py` 做门禁等价预检（27 条源码文本断言，与 `PinyinSearchGateTest` 同判据，27/27 通过）与字符串剥离后的括号平衡检查，全部 PASS。CI 首跑需重点看 `PinyinSearchGateTest` / `PinyinUtilsTest` / `SearchQueryTest`；`PinyinUtilsTest` 里依赖 TinyPinyin 字典的断言用 `assumeTrue` 守护（字典不可用时跳过而非判红）。
 
 **版本号变更**：v2.39.25 → v2.39.26（versionCode 210 → 211）。
+
+---
+
+### 10.418 网络艺人详情「卡片有歌、详情 0 首」链路修复（v2.39.26 同版增补 - 2026-11-21）
+
+**现象**：只连网络歌曲源（Meting）时，艺术家 Tab 搜「赵传」能出卡片，显示「46 专辑 / 100 首」，但点进详情页歌曲列表为空。
+
+**根因（两条数据管道分叉）**：
+
+1. **卡片数字来自统一搜索的艺人全量展开**：`LibraryScreen.filteredArtists` 用 `MusicMerger.buildArtistsFromSongs(searchResults)` 从搜索命中反推 Artist（`songCount = 命中数`、`albumCount = 不同专辑名数`）；而 `searchResults` 来自 `SearchViewModel`，经 `NetworkArtistExpansion` 用 `findArtist("赵传") + getArtistSongs(artistId, 0, 100)` 按网易艺人 id 拉全量 —— 「100 首」正是 `pageSize`，「46 专辑」是这 100 首的不同专辑名数。这两个数字只反映那次搜索拉到的条数，**不是歌手曲库总量**。
+2. **详情页走的是另一条降级搜索**：`MainViewModel.loadArtistSongs` 网络分支裸调 `networkMusicManager.search(artistName)`（`nativeFirst=false`，Meting 端点 `type=search` 泛化搜索），随后用 `ArtistSplitter.containsArtistWithKey` 按歌手名全等过滤。Meting 端点结果的 `artist` 常为空/带后缀，整批被过滤丢弃 → `finalSongs` 为 0；空列表又写进 `_artistDetailSongsCache`，`openArtistDetail` 命中 `containsKey` 直接短路 ⇒ 再点永远空白。
+3. **详情页从未接艺人全量 API**：`findArtist` / `getArtistSongs` 全工程只接在 `SearchViewModel`。且这两个方法在 `MetingApiService` 有平台闸门（只认 netease）、`NetworkMusicManager` 不做 fallback，直接让详情页改用会有「非 netease 平台退化成 0 首」的多源风险。
+4. **附带缺口**：详情页网络分支无 `NETWORK_MUSIC` 可见性门控（与 `SearchAggregator` 分叉，关源仍发请求且会把 fallback 的百度/Jamendo 混进网络标签）；关 Meting 时不清 `_artistDetailSongsCache`；EmptyState 没有重试入口，用户只能反复进出（每次重发五源含 10-15s Meting）。
+
+**修复（四层，追加而非替代）**：
+
+- 新增无状态 `backend/network/NetworkArtistDetailFetcher.kt`：netease 平台先 `findArtist(name)`（名字用 `matchKey` 判一致）→ `getArtistSongs` 分页拉全量（每页 100 = `NeteaseOpenApi.MAX_LIMIT`，50 页硬上界），按 id 去重；**未命中 / 取数失败 / 零命中一律回退 `search(name)`**，且兜底只留 `networkSource == meting`。非 netease（QQ/酷狗/酷我/咪咕）与 baidu/jamendo 因为 `findArtist` 在闸门处零请求返回 null，行为与修复前逐字节一致 —— 不把多源支持收窄成网易单平台。⛔ 不复用 `NetworkArtistExpansion`：那是单艺人状态件（换词 reset），详情页要按名字缓存多个歌手。
+- `MainViewModel.loadArtistSongs` 网络分支补 `sourceVisibility.isVisible(NETWORK_MUSIC)` 显式门控 + 改走 fetcher；`clearSourceScopedCaches(METING)` 同步按 `networkSource` 过滤 `_artistDetailSongsCache` 并删掉变空的 key（下次进入重新走门控加载）。
+- `ArtistSplitter` 新增 `matchKey(name)`：在 `normalizeKey` 基础上剥**有界**演出/版本后缀（白名单 Live/现场/伴奏/Remix/inst 等，且必须以括号或短横线界定），只用于 `containsArtist` / `containsArtistWithKey` 的相等判定。⛔ 不开无边界子串（「周」不会命中「周杰伦」，白名单外 `(精选)` 仍是独立名字）；`normalizeKey` 身份口径不动，专辑/去重 Map 键不受影响。⚠️ 用 `Regex.find` 尾部匹配，不是 `match`（后者要求整串匹配）。
+- `ArtistDetailScreen` 的 `EmptyState` 挂 `actionText = list_retry` + `onAction = onRetry`（沿用 `forceReload = true`），空结果不删缓存 key（保住短路、避免回归 §10.104）。
+
+**兼容性影响**：
+
+- netease 平台艺人详情由「关键词泛化搜索 + 全等过滤（常 0 首）」变为「艺人全量分页（可达数百首）」，条数与卡片「100 首」不再相等是预期（卡片只计那次搜索命中数）。
+- 其他 Meting 平台、百度、Jamendo、NAS、本地的行为不变；关掉 Meting 后详情页不再显示旧网络歌。
+- 带 `(Live)` / `(现场)` 等后缀的歌手名现在能匹配到无后缀歌曲；仅匹配口径变化，不改变曲库里艺术家的身份/合并（albumKey 与 Map 键仍走 `normalizeKey`）。
+
+**涉及文件**：`backend/network/NetworkArtistDetailFetcher.kt`（新增）、`util/ArtistSplitter.kt`、`ui/viewmodel/MainViewModel.kt`、`ui/screens/ArtistDetailScreen.kt`、`app/src/test/.../NetworkArtistDetailFetcherTest.kt`（新增 T1–T8）、`ArtistSplitterTest.kt`、`ArtistDetailFlowGateTest.kt`（新增 T6）、`logs_temp/artist_detail_flow_verify.py`、`CHANGELOG.md`、本章。
+
+**版本号**：同一效果的多轮修复不升版本号（所有者 2026-11-09 裁定），并入 v2.39.26。
+
+### 10.419 网络艺人封面：卡片与详情借歌曲封面兜底（v2.39.26 同版增补 - 2026-11-21）
+
+**现象**：只连网络歌曲源（Meting）时，艺术家 Tab 搜「赵传」能出卡片、详情有歌曲列表（§10.418 已修），但**卡片和详情头像都没有封面**。
+
+**根因（数据与展示之间的两处断链，非数据缺失）**：
+
+1. 网络源没有常驻 `Artist` 对象。搜索态卡片由 `LibraryScreen.filteredArtists` 用 `MusicMerger.buildArtistsFromSongs(searchResults, "search_artist_")` 临时合成（`derivedStateOf` 列表，非 StateFlow），默认 `useSongCover=false` ⇒ `coverUrl` 恒为 `null`。
+2. 该合成卡片不在 `_mergedArtists`（只含 NAS+本地+百度三源，见 `mergeArtists`），因此 `resolveArtistCoversAsync` 的 `pending`（`MainViewModel.kt:2923`）扫不到它——网易/酷狗/iTunes/P4 四级在线兜底**一级都没跑**；`allSongs`（L2942-2946）也无 `NETWORK_MUSIC` 段。
+3. 详情页 `ArtistDetailBranch` 按名字在 `mergedArtists` find，「赵传」不在其中 ⇒ `artist=null` ⇒ `CoverImage(null)` 只能显示 ♫ 占位符。
+
+**数据其实存在**（用户观察「界面上网络歌曲都有封面」得到印证）：网易艺人全量 `getArtistSongs` 的 `album.picUrl` 实测 566/566 带封面（`NeteaseArtistSongsParseTest`），Meting 端点 `parseSongs` 从 JSON `pic` 字段取封面。仅网易 `type=1` 泛化搜索 0/100 无封面（§2 C.1）。
+
+**修复（展示层就地兜底，复用既有 P4 口径 `songs.firstOrNull { coverUrl 非空 }`）**：
+
+- `ui/screens/library/browse/ArtistList.kt`：`ArtistCard` 的 `coverUrl` 改为 `artist.coverUrl ?: artistSongs.firstOrNull { !it.coverUrl.isNullOrBlank() }?.coverUrl`。`artistSongs` 来自 `artistSongsMap`（搜索态下 `displayArtistSongsMap` 已合并带封面的展开歌曲），就地在卡片渲染层取第一首有封面歌的封面。
+- `ui/screens/ArtistDetailScreen.kt`：派生 `val detailCoverUrl = artist?.coverUrl ?: songs.firstOrNull { !it.coverUrl.isNullOrBlank() }?.coverUrl`，竖屏/横屏两处 `CoverImage` 统一用它。§10.418 已让详情 `songs` 走 `NetworkArtistDetailFetcher` 全量拉取且带封面，故此兜底对网络艺人有效。
+- ⛔ 不碰 ViewModel / 解析链 / `resolvedArtistCovers` 缓存：避免重新引入「按不稳定 id（`search_artist_*`）缓存封面」的复杂度；两条管道各自从当前可见歌曲兜底，天然同步。
+- 口径与既有专辑卡（`LibraryScreen.kt:430`）、`MusicMerger.buildLocalArtists/buildBaiduArtists` 的歌曲封面兜底完全一致。
+
+**兼容性影响**：封面只增不减——仅当 `artist.coverUrl` 为空时才借歌曲封面；`type=1` 泛化搜索未命中艺人展开时名下歌曲仍无封面，退回首字母/♫ 占位（与修复前一致，不产生回归）。NAS / 本地 / 百度 / 其他 Meting 平台的艺术家若自身已有封面则完全不受影响。
+
+**涉及文件**：`ui/screens/library/browse/ArtistList.kt`、`ui/screens/ArtistDetailScreen.kt`、`app/src/test/.../ArtistsListFlowGateTest.kt`（新增 T7）、`ArtistDetailFlowGateTest.kt`（新增 T7）、`logs_temp/artist_cover_fallback_2026-11-21/verify.py`、`CHANGELOG.md`、本章。
+
+**版本号**：同一效果的多轮修复不升版本号（所有者 2026-11-09 裁定），并入 v2.39.26。

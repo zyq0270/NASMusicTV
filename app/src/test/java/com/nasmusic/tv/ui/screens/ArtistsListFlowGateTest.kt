@@ -148,6 +148,21 @@ class ArtistsListFlowGateTest {
         )
     }
 
+    @Test
+    fun `T7 艺术家卡片必须在自身无封面时借名下第一首有封面歌曲的封面`() {
+        val src = flatten(mainSourceFile(artistListPath))
+        // 网络源合成卡片（search_artist_*）的 coverUrl 恒为 null，名下歌曲却有封面
+        // （艺人全量展开带 album.picUrl）。兜底必须就地取，不能只传 artist.coverUrl。
+        val fallback = "coverUrl = artist.coverUrl ?: artistSongs.firstOrNull { !it.coverUrl.isNullOrBlank() }?.coverUrl,"
+        assertTrue(
+            "T7：ArtistCard 仍只传 artist.coverUrl ——\n" +
+                "网络源合成艺术家卡片将恒显示首字母占位，即使名下歌曲有封面。",
+            src.contains(fallback)
+        )
+        // 负自检：抹掉兜底后判据必须判负，防止恒真
+        assertTrue("T7 护栏失效：去掉兜底仍被判正", !src.replace(fallback, "coverUrl = artist.coverUrl,").contains(fallback))
+    }
+
     // ─────────────────── 辅助 ───────────────────
 
     private fun flatten(text: String): String = text.replace(Regex("\\s+"), " ")

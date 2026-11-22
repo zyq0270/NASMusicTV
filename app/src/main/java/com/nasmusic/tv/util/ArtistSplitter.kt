@@ -24,6 +24,19 @@ object ArtistSplitter {
 
     private val whitespace = Regex("\\s+")
 
+    /**
+     * 有界后缀标记：只认白名单里的演出/版本词，且必须以括号或短横线明确界定。
+     * ⛔ 绝不做无边界 `contains` / `substringBefore` —— 那会让「周」命中「周杰伦」。
+     */
+    private val bracketedTag = Regex("""\s*[（(【\[]\s*([^）)】\]]{1,24})\s*[）)】\]]\s*$""")
+    private val dashedTag = Regex("""\s+[-–—]\s*([^\s]{1,24})\s*$""")
+    private val knownTags = setOf(
+        "live", "现场", "演唱会", "concert", "acoustic", "不插电",
+        "伴奏", "inst", "instrumental", "纯音乐", "karaoke", "ktv",
+        "remix", "remastered", "重制版", "cover", "翻唱",
+        "explicit", "clean", "radio edit", "studio"
+    )
+
     private val delimiters = listOf(
         Regex("\\s+feat\\.?", RegexOption.IGNORE_CASE),
         Regex("\\s+ft\\.", RegexOption.IGNORE_CASE),
@@ -60,6 +73,35 @@ object ArtistSplitter {
         return cleaned.replace(whitespace, " ")
             .trim()
             .lowercase()
+    }
+
+    /**
+     * 匹配键：在 [normalizeKey] 基础上剥离**有界**的演出/版本后缀，供歌手名相等判定使用。
+     *
+     * - 只剥白名单里明确界定的后缀：`(Live)` / `（现场）` / `[inst.]` / ` - Remix`；
+     * - ⛔ 不剥白名单外的括号内容（`赵传(精选)` 仍是独立名字）；
+     * - ⛔ 剥完为空则保留原值（艺名本身叫 `Live` 时不能被剥成空串）；
+     * - 幂等：可安全对预计算 key 再调用一次。
+     *
+     * 该函数只用于 [containsArtist] / [containsArtistWithKey] 的相等判定。
+     * ⛔ 不要改 [normalizeKey] 本身：它是 albumKey / 去重 / Map 键的身份口径，
+     *    动它会让「赵传」与「赵传(Live)」在曲库里合并成一张卡。
+     */
+    fun matchKey(name: String): String {
+        val normalized = normalizeKey(name)
+        if (normalized.isBlank()) return ""
+        var stripped = normalized
+        while (true) {
+            // ⛔ 用 find 不用 match：Regex.match 要求整串匹配，而这里只匹配尾部后缀。
+            val match = bracketedTag.find(stripped) ?: dashedTag.find(stripped)
+            if (match == null) break
+            val tag = match.groupValues[1].trim().trim('.')
+            if (tag !in knownTags) break
+            val candidate = stripped.substring(0, match.range.first).trim()
+            if (candidate.isBlank()) break
+            stripped = candidate
+        }
+        return stripped
     }
 
     /**
@@ -117,9 +159,9 @@ object ArtistSplitter {
      * artistName = "古天乐/萱萱"（未拆分的合唱名）→ false，调用方应先拆分再入库。
      */
     fun containsArtist(rawArtistField: String, artistName: String): Boolean {
-        val key = normalizeKey(artistName)
+        val key = matchKey(artistName)
         if (key.isBlank()) return false
-        return split(rawArtistField).any { normalizeKey(it) == key }
+        return split(rawArtistField).any { matchKey(it) == key }
     }
 
     /**
@@ -135,6 +177,10 @@ object ArtistSplitter {
     fun containsArtistWithKey(rawArtistField: String, artistKey: String): Boolean {
         if (artistKey.isBlank()) return false
         if (rawArtistField.isBlank()) return false
-        return split(rawArtistField).any { normalizeKey(it) == artistKey }
+        // 两边都过 matchKey：调用方可能传 normalizeKey 结果（仍带 (Live)），
+        // matchKey 幂等，重复调用不会改变纯名字的 key。
+        val key = matchKey(artistKey)
+        if (key.isBlank()) return false
+        return split(rawArtistField).any { matchKey(it) == key }
     }
 }
