@@ -471,9 +471,18 @@ fun KaraokePlaybackScreen(
                 Spacer(Modifier.width(16.dp))
 
                 // 原唱/伴唱切换（只切换音频，不退出页面）
+                // label 显示**当前态**：vocalRemovalEnabled=true 表示正在消人声 = 伴唱中 ⇒ 显示「伴唱」。
+                // 旧实现显示目标态（伴唱中却写「原唱」），与同栏的升降调/变速按钮显示当前值不一致，
+                // 进入页自动开伴唱后用户看到「原唱」按钮会误以为当前已是原唱。
+                // 转换中（isSeparating）时 VM 的 toggleVocalRemoval 会静默 return，这里同步置灰 +
+                // onClick guard，避免按钮看起来可点却毫无反应。
                 VocalToggleButton(
-                    label = if (vocalRemovalEnabled) stringResource(R.string.karaoke_original_vocal) else stringResource(R.string.karaoke_accompaniment),
-                    onClick = { activateControls(); onToggleVocalRemoval() }
+                    label = if (vocalRemovalEnabled) stringResource(R.string.karaoke_accompaniment) else stringResource(R.string.karaoke_original_vocal),
+                    dimmed = isSeparating,
+                    onClick = {
+                        activateControls()
+                        if (!isSeparating) onToggleVocalRemoval()
+                    }
                 )
                 Spacer(Modifier.width(10.dp))
 

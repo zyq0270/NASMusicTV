@@ -282,8 +282,12 @@ class VocalSeparationViewModel(
     }
 
     /**
-     * 退出 K 歌页面：清除人声消除 + 升降调 + 播放速度，恢复原唱状态。
-     * 仅清理音频效果，不改变播放队列或当前歌曲。
+     * 退出 K 歌页面：仅关闭人声消除、恢复原唱，不改变播放队列或当前歌曲。
+     *
+     * ⚠️ 不再重置升降调 / 变速：这两项是「全局记忆，重启恢复」的用户偏好（commit 时落盘、
+     * 冷启动由 [loadPitchSpeedFromPrefs] 恢复）。旧实现在这里 resetPitch/resetSpeed，而二者
+     * 都会把 0/1.0 **落盘** ⇒ 用户点「确定」保存的调/速在退出 K 歌页时被静默抹掉，与
+     * 「全局记忆」自相矛盾。需要归零时走步进弹窗的「重置」按钮（用户主动、明确）。
      */
     fun exitKaraoke() {
         _showKaraoke.value = false
@@ -291,15 +295,7 @@ class VocalSeparationViewModel(
         if (_vocalRemovalEnabled.value) {
             toggleVocalRemoval()
         }
-        // 重置升降调
-        if (_pitchSemitones.value != 0) {
-            resetPitch()
-        }
-        // 重置播放速度
-        if (_playbackSpeed.value != 1.0) {
-            resetSpeed()
-        }
-        AppLog.d("VocalSeparationViewModel", "exitKaraoke: reset vocalRemoval, pitch, speed")
+        AppLog.d("VocalSeparationViewModel", "exitKaraoke: vocalRemoval restored, pitch/speed kept")
     }
 
     /** 清除全部分离产物与临时残留（设置页"缓存清理"手动清除用），返回释放的字节数 */

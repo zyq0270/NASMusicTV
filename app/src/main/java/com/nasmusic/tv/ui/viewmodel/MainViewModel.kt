@@ -1615,12 +1615,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
             val settings = prefs.appSettings.first()
             playerVM.initPlayModeFromSettings(settings.defaultPlayMode)
 
-            // 初始化升降调/变速（从 AppPreferences 恢复）——R-1 后委托 VocalSeparationViewModel
-            val savedPitch = prefs.player.pitchSemitones.first()
-            val savedSpeed = prefs.player.playbackSpeed.first()
-            playerManager.setPitch(savedPitch)
-            playerManager.setSpeed(savedSpeed.toFloat())
-            AppLog.d("MainViewModel", "init: pitch=$savedPitch, speed=$savedSpeed")
+            // 初始化升降调/变速（从 AppPreferences 恢复）——R-1 后委托 VocalSeparationViewModel。
+            // ⛔ 必须走 vocalVM.loadPitchSpeedFromPrefs() 而不是在这里直接读 prefs 只 setPitch/setSpeed：
+            // 后者只把值写进播放器、不同步 VM 的 _pitchSemitones/_playbackSpeed ⇒ 冷启动后播放器
+            // 实际是 +N 半音/0.8 倍速，K 歌页按钮却显示「原调/原速」、弹窗档位也从 0 起算。
+            // loadPitchSpeedFromPrefs 同时更新 VM 状态 + 播放器，是这两者的唯一恢复入口。
+            vocalVM.loadPitchSpeedFromPrefs()
             // ⛔ 连接提示只在接线区 checkSavedConfigOnStart() 触发一次；这里不再读 serverConfig
             // （旧代码读完后是空 if 块，既不触发连接也误导读者以为有第二处入口）。
         }

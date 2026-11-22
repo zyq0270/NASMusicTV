@@ -157,6 +157,45 @@ class VocalPitchSpeedPreviewCommitTest {
     }
 
     @Test
+    fun `冷启动加载必须同时同步 VM 状态与播放器`() = runBlocking {
+        // 回归：旧实现在 MainViewModel.init 里只 setPitch/setSpeed 到播放器、不同步 VM，
+        // 导致播放器 +3 半音而 K 歌页按钮显示「原调」。loadPitchSpeedFromPrefs 是唯一恢复入口。
+        prefs.player.setPitchSemitones(3)
+        prefs.player.setPlaybackSpeed(0.8)
+        val viewModel = vm()
+
+        viewModel.loadPitchSpeedFromPrefs()
+
+        // 该函数是 viewModelScope.launch 异步读盘 ⇒ 轮询等待（可能读到 3 / 0.8 需一次 DataStore 写）
+        withTimeout(5_000) {
+            while (viewModel.pitchSemitones.value != 3) delay(20)
+            while (viewModel.playbackSpeed.value != 0.8) delay(20)
+        }
+        assertEquals(3, viewModel.pitchSemitones.value)
+        assertEquals(0.8, viewModel.playbackSpeed.value, 0.0)
+    }
+
+    @Test
+    fun `退出 K 歌页不得抹掉已落盘的升降调与变速`() = runBlocking {
+        // 回归：旧 exitKaraoke 调 resetPitch/resetSpeed，二者会把 0/1.0 落盘，
+        // 用户点「确定」保存的偏好在退出 K 歌页时被静默清零，与「全局记忆」矛盾。
+        val viewModel = vm()
+        viewModel.previewPitch(3)
+        viewModel.commitPitch()
+        awaitPitchPersisted(3)
+        viewModel.previewSpeed(0.8)
+        viewModel.commitSpeed()
+        awaitSpeedPersisted(0.8)
+
+        viewModel.exitKaraoke()
+
+        assertEquals("退出 K 歌页必须保留升降调偏好", 3, prefs.player.pitchSemitones.first())
+        assertEquals("退出 K 歌页必须保留变速偏好", 0.8, prefs.player.playbackSpeed.first(), 0.0)
+        assertEquals("退出后 VM 状态应与持久化一致", 3, viewModel.pitchSemitones.value)
+        assertEquals("退出后 VM 状态应与持久化一致", 0.8, viewModel.playbackSpeed.value, 0.0)
+    }
+
+    @Test
     fun `本案的存储实例必须真的可写可读`() = runBlocking {
         // 上面两条 commit 用例的前提。这一条**直接 await 挂起写**（不经 viewModelScope 的
         // fire-and-forget），实例不可写时它会带着真实异常（IOException / DataStore 多实例检查）

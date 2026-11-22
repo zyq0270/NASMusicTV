@@ -103,17 +103,18 @@ private fun KaraokeLyricsViewInner(
     var lyricTickMs by remember(lyrics) { mutableLongStateOf(progressMs) }
     LaunchedEffect(progressMs, isPlaying, lyrics) {
         if (isPlaying) {
-            var anchorProgress = progressMs
-            var anchorSystemMs = System.currentTimeMillis()
+            // progressMs 是本 effect 的 key：播放器每次推进（1Hz）都会取消旧协程、用新
+            // progressMs 重新起锚，所以循环内闭包捕获的 progressMs 与锚点恒等。
+            // 旧实现在循环内又写了一段「检测到 progressMs 变化就重设锚点」的分支，那是永不
+            // 进入的死代码 —— 真正让锚点跟随播放器的是 key 变化触发的协程重启，已删除。
+            // 用 val 声明锚点：编译期即杜绝「在循环里重设锚点」回归。
+            val anchorProgress = progressMs
+            val anchorSystemMs = System.currentTimeMillis()
             lyricTickMs = anchorProgress
             while (true) {
                 delay(50)
                 val elapsed = System.currentTimeMillis() - anchorSystemMs
                 lyricTickMs = anchorProgress + elapsed
-                if (progressMs != anchorProgress) {
-                    anchorProgress = progressMs
-                    anchorSystemMs = System.currentTimeMillis()
-                }
             }
         } else {
             lyricTickMs = progressMs
