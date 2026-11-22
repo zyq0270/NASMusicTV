@@ -90,9 +90,14 @@ class SearchViewModel(
     // --- 按需加载：搜索结果（服务端搜索）---
     private val _searchResults = MutableStateFlow<UiState<List<Song>>>(UiState.Success(emptyList()))
     val searchResults: StateFlow<UiState<List<Song>>> = _searchResults.asStateFlow()
-    /** 上次搜索的关键词：同词 + 同 searchType + 结果已成功时不重复搜索（跨导航暂存搜索结果） */
+    /** 上次搜索的关键词：同词 + 同 searchType + 同源集合 + 结果已成功时不重复搜索（跨导航暂存搜索结果） */
     private var lastSearchedKeyword: String? = null
     private var lastSearchType: SearchType = SearchType.SONG_NAME_OR_ARTIST
+    /**
+     * 上次搜索参与的有效点亮源集合。设置里关闭某源后 effectiveEnabledSearchSources 会变，
+     * 缓存键随之失配 ⇒ 同词同维度也会重搜，已关闭源的结果不再残留（原来缓存仅含词+维度）。
+     */
+    private var lastSearchedSources: Set<MusicSourceType> = emptySet()
 
     // --- 艺人全量展开（艺人全量方案 §3.5；状态在 NetworkArtistExpansion，VM 只做接线） ---
     private val artistExpansion = NetworkArtistExpansion(
@@ -203,8 +208,9 @@ class SearchViewModel(
         if (source in current) current.remove(source) else current.add(source)
         _enabledSearchSources.value = current
         // 有活动关键词时按新来源范围立即重新搜索（force 跳过缓存）
+        // recordHistory=false：切来源点亮不是用户"搜了一次"，与切 Tab 同口径，避免刷高热门榜计数
         val kw = librarySearchKeywordProvider()
-        if (kw.isNotBlank()) searchSongsOnServer(kw, force = true)
+        if (kw.isNotBlank()) searchSongsOnServer(kw, force = true, recordHistory = false)
     }
 
     /**
@@ -224,8 +230,9 @@ class SearchViewModel(
         if (_enabledSearchSources.value == target) return
         _enabledSearchSources.value = target
         // 有活动关键词时按全部来源重新搜索（force 跳过缓存）
+        // recordHistory=false：与切来源点亮/切 Tab 同口径，不污染搜索历史
         val kw = librarySearchKeywordProvider()
-        if (kw.isNotBlank()) searchSongsOnServer(kw, force = true)
+        if (kw.isNotBlank()) searchSongsOnServer(kw, force = true, recordHistory = false)
     }
 
     /**
@@ -250,7 +257,11 @@ class SearchViewModel(
             com.nasmusic.tv.ui.screens.LibraryTab.SONGS -> SearchType.SONG_NAME_OR_ARTIST
             else -> SearchType.SONG_NAME_OR_ARTIST
         }
-        if (!force && query == lastSearchedKeyword && currentSearchType == lastSearchType) {
+        // 缓存键含有效点亮源集合：设置里关闭某源后集合变化，同词同维度也重新搜索，
+        // 避免已关闭源的结果继续显示（切来源点亮的 force 重搜仍照常跳过缓存）。
+        val currentSources = effectiveEnabledSearchSources.value
+        if (!force && query == lastSearchedKeyword && currentSearchType == lastSearchType &&
+            currentSources == lastSearchedSources) {
             val cached = _searchResults.value
             if (cached is UiState.Success) {
                 AppLog.d("SearchViewModel", "searchSongsOnServer: cached result for '$query' (${cached.data.size} rows)")
@@ -259,6 +270,7 @@ class SearchViewModel(
         }
         lastSearchedKeyword = query
         lastSearchType = currentSearchType
+        lastSearchedSources = currentSources
         val gen = ++searchGeneration
         _searchResults.value = UiState.Loading
         // P2：先取消上一次同域搜索（含其艺人展开请求），再起新的；与代数闸门双保险。
@@ -369,6 +381,9 @@ class SearchViewModel(
         searchJob?.cancel()
         searchJob = null
         lastSearchedKeyword = null
+        // 三处缓存键状态一并复位，避免与 keyword 不对称（虽然 keyword=null 已不会误命中）
+        lastSearchType = SearchType.SONG_NAME_OR_ARTIST
+        lastSearchedSources = emptySet()
         artistExpansion.reset()
         lastNonNetworkSongs = emptyList()
         _searchUnplayableIds.value = emptySet()

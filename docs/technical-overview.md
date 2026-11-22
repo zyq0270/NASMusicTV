@@ -6216,7 +6216,7 @@ Phase 1-6 代码已全部落地并编译通过。Phase 7（测试与文档）新
 
 3. **PinyinUtils 扩展**：
    - 新增 `toPinyin(text)`：完整拼音转换（"周杰伦" → "zhoujielun"）
-   - `getInitials()` 重命名为 `toPinyinInitials()`（保留 `getInitials()` 兼容别名）
+   - `getInitials()` 重命名为 `toPinyinInitials()`（2026-11-22 清理：兼容别名已无调用点，随死代码一并删除）
    - `matches()` 内部调用同步更新
 
 4. **SearchAggregator 改造**：
@@ -6339,7 +6339,7 @@ E/CryptoUtils: java.security.NoSuchAlgorithmException: KeyGenerator AES implemen
 
 **修改**（`MineScreen.kt`）：
 - 移除手机布局的「最近播放」标题块（`item(key = "recent_header")` 至 recent `items(...)`，含 `section_divider_2`）；
-- 移除 TV 布局的 `RecentPane(...)` 调用点（位于 `FavoritesPane` 与 `PlaylistsPane` 之间）；`RecentPane` 函数定义保留（仅 warning，无调用）。
+- 移除 TV 布局的 `RecentPane(...)` 调用点（位于 `FavoritesPane` 与 `PlaylistsPane` 之间）；2026-11-22 死代码清理：`RecentPane` 函数定义与 `MineScreen.recentSongs` 死参数、`MineBranch` 的对应传参一并删除（最近播放仍由首页呈现，`MainViewModel.recentSongs` StateFlow 保留）。
 - 现保留「收藏」+「本地歌单」两栏并列。
 
 **验证结果**：TV 端两栏布局，宽度充足。
@@ -17422,7 +17422,7 @@ K 歌并恢复导航栏。
 
 **留档未做（供后续批次裁决）**：
 - 专辑 / 艺术家两个 Tab 的网格脚手架（Level 1.5 返回、A-Z 分组、右边缘焦点、索引条接线约 120 行）仍是两份逐行重复 —— 抽成一个 `LetterGroupedGrid` 才是「永不分家」的根因修法，但触及焦点与返回行为，需要单独一轮真机回归。
-- `ui/components/album/UnifiedAlbumCard.kt` 与 `ui/components/artist/UnifiedArtistCard.kt` 零调用（注释仍写「替代 LibraryScreen 中的卡片」），与本次统一方向重复，属 tracked source，删除需所有者确认。
+- `ui/components/album/UnifiedAlbumCard.kt` 与 `ui/components/artist/UnifiedArtistCard.kt` 零调用（注释仍写「替代 LibraryScreen 中的卡片」），与本次统一方向重复，属 tracked source，删除需所有者确认。**（2026-11-22 更新：所有者已裁定清理，两文件已删除）**
 - `EmptyHint` 的「重试」按钮与 `ButtonChip` 仍是各自手抄的参数块（不是「块」，本次未动）；公共 `SourceBadge` 的文字色仍是裸 `Color.White`（浅色主题下压在浅蓝 NAS 源色上对比偏低），改它影响 4 个调用点，留给浅色主题批次。
 
 ### 10.269 v2.39.6 补丁 — 遥控器焦点高亮在用户盒子上消失：判据补源 + 窗口层兜底 + 「调试」日志档（2026-10-21）

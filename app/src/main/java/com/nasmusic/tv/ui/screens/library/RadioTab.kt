@@ -20,7 +20,6 @@ import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -72,9 +71,8 @@ fun RadioTab(
     var showSearchDialog by remember { mutableStateOf(false) }
     val listState = androidx.compose.foundation.lazy.grid.rememberLazyGridState()
 
-    LaunchedEffect(Unit) {
-        onLoadDefault()
-    }
+    // 默认榜加载统一由 LibraryScreen 的 LaunchedEffect(activeTab) 触发（onLoadRadioDefault），
+    // 这里不再重复调用 onLoadDefault —— 消除首次进入 RADIO 的冗余触发。
 
     // v2.36.0 竖屏（方案 §2.4 / P0-23）：340dp 搜索框与 N 个 preset tag 同行 → tag 被推出屏幕且滑不到
     val isPhonePortrait = LocalUiMode.current == UiMode.PhonePortrait
@@ -110,7 +108,7 @@ fun RadioTab(
         val radioSearchField: @Composable (Modifier) -> Unit = { m ->
             SearchField(
                 query = radioActiveQuery,
-                placeholder = stringResource(R.string.network_search_hint),
+                placeholder = stringResource(R.string.network_radio_search_hint),
                 onOpenSearch = { showSearchDialog = true },
                 onClear = { onLoadDefault() },
                 modifier = m

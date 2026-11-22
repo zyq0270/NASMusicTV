@@ -202,8 +202,9 @@ fun AppRoot(
             // v2.36.0 竖屏设置二级页：BACK 回设置列表（**必须放在 Screen.Settings 之前**，方案 §6.2）
             currentScreen == Screen.Settings && settingsSection != null -> closeSettingsSection
             currentScreen == Screen.NowPlaying -> if (isTV) null else navigateHome
-            // 专辑详情：列表已滚时由 Level 1.5 先回顶，到顶后走这里回曲库
-            currentScreen == Screen.AlbumDetail -> navigateLibrary
+            // 专辑/艺人详情：列表已滚时由 Level 1.5 先回顶，到顶后走这里回曲库
+            // （与两页各自的 BackButton 同口径；缺 ArtistDetail 曾导致遥控返回直接落回首页）
+            currentScreen == Screen.AlbumDetail, currentScreen == Screen.ArtistDetail -> navigateLibrary
             currentScreen == Screen.Home -> null
             // ── 设置域子页面：BACK 返回设置主菜单（入口唯一：SettingsBranch）──
             // 修复：均衡器/播放统计此前落入 else 回首页，遥控器返回键无法回到设置

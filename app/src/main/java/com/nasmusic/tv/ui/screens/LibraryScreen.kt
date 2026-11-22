@@ -683,8 +683,8 @@ fun LibraryScreen(
             // 页面位置由连续索引 `tabPageFraction` 唯一决定 —— 拖动中当前页与相邻页
             // **同时组合**并实时平移（当前页划走、相邻页跟进），松手后吸附到最近页。
             // ⚠️ 相邻页常驻组合的代价：最多同时组合 2 个 Tab 子树。各 Tab 的
-            // LaunchedEffect 加载均幂等（loadRadioDefault / loadJamendoHot /
-            // onDiscoverEnsureLoaded 有暂存跳过；SONGS/ARTISTS/YEARS 首页加载可重复触发）。
+            // LaunchedEffect 加载均幂等（loadRadioDefault / onDiscoverEnsureLoaded
+            // 有暂存跳过；SONGS/ARTISTS/YEARS 首页加载可重复触发）。
             // ⚠️ 页内容 lambda 必须用 `LibraryTab.entries[pageIdx]`（连续索引）而非
             // 外层 `activeTab`，否则拖动中相邻页会渲染成当前页内容。
             // fraction 读取器：拖动中 = 起始页索引 − 累积位移/页宽（左滑增大）；非拖动 = Animatable 当前值。

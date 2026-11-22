@@ -2629,14 +2629,20 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
             onPlayed?.invoke()
         })
     }
-    fun toggleNetworkFavorite(song: Song) = netVM.toggleNetworkFavorite(
-        song,
-        // 2026-11-22：加来源类型守卫。网络/本地歌曲的 id 有独占前缀（ntwk_/local_），
-        // 绝不应按裸 id 去 NAS 收藏集合里判定"当前是否已收藏"——即便 NAS 后端未来返回
-        // 同形 id 也不会误走 NAS 分支。非网络非本地才查 NAS 集合。
-        isNasFavorite = !song.isNetworkSong && !song.isLocalSong && song.id in _favoriteIds.value,
-        onNasToggle = { nasSong, isFav -> toggleNasFavorite(nasSong, isFav) }
-    )
+    fun toggleNetworkFavorite(song: Song) {
+        // 天气电台对 NAS 歌曲打了 nas_/nasf_ 合成前缀（命中/补齐分类依赖前缀），
+        // 若按合成 id 记账，收藏集合里会存一个永远匹配不上展示id（`strip` 后）的幽灵条目，
+        // 心形点了也不亮。与 recordPlay 同口径在此入口剥离，全路径统一真实 id。
+        val normalized = song.stripSyntheticRadioPrefix()
+        netVM.toggleNetworkFavorite(
+            normalized,
+            // 2026-11-22：加来源类型守卫。网络/本地歌曲的 id 有独占前缀（ntwk_/local_），
+            // 绝不应按裸 id 去 NAS 收藏集合里判定"当前是否已收藏"——即便 NAS 后端未来返回
+            // 同形 id 也不会误走 NAS 分支。非网络非本地才查 NAS 集合。
+            isNasFavorite = !normalized.isNetworkSong && !normalized.isLocalSong && normalized.id in _favoriteIds.value,
+            onNasToggle = { nasSong, isFav -> toggleNasFavorite(nasSong, isFav) }
+        )
+    }
     fun searchSongsOnServer(query: String, force: Boolean = false) = searchVM.searchSongsOnServer(query, force)
     fun addAllSearchResultsToQueue() = searchVM.addAllSearchResultsToQueue(
         existingQueueKeysProvider = {
@@ -5041,91 +5047,16 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
     }
 
     // --- Jamendo ---
-    private val _jamendoState = MutableStateFlow<UiState<List<Song>>>(UiState.Success(emptyList()))
-    val jamendoState: StateFlow<UiState<List<Song>>> = _jamendoState.asStateFlow()
-    private val _jamendoActiveTag = MutableStateFlow("")
-    val jamendoActiveTag: StateFlow<String> = _jamendoActiveTag.asStateFlow()
-
-    /** 是否已配置 Jamendo Client ID（未配置时 Jamendo 显示引导卡） */
-    val jamendoConfigured: Boolean
-        get() = prefs.network.getJamendoClientIdSync().isNotBlank()
-
-    /** 加载 Jamendo 热门榜（幂等：已有数据则不重复请求） */
-    fun loadJamendoHot() {
-        // ⚠️ Jamendo 关 ⇒ **不请求**（方案 §3.2.1 #14）。
-        // ⛔ `jamendoConfigured`（只查 clientId）**不等于** `jamendoEnabled` —— 别混用。
-        if (!sourceVisibility.isVisible(MusicSourceType.JAMENDO)) {
-            AppLog.d("Jamendo", "loadJamendoHot: Jamendo 已关闭，跳过请求")
-            _jamendoState.value = UiState.Success(emptyList())
-            return
-        }
-        if (_jamendoActiveTag.value.isBlank() && _jamendoState.value.dataOrNull()?.isNotEmpty() == true) return
-        _jamendoActiveTag.value = ""
-        viewModelScope.launch {
-            _jamendoState.value = UiState.Loading
-            try {
-                val songs = nasMusicApp.jamendoService.hotTracks(limit = 30)
-                _jamendoState.value = UiState.Success(songs)
-            } catch (e: Exception) {
-                e.rethrowIfCancellation()
-                AppLog.e("Jamendo", "loadJamendoHot failed: ${e.message}", e)
-                _jamendoState.value = UiState.Error(message = getApplication<Application>().getString(R.string.jamendo_load_failed))
-            }
-        }
-    }
-
-    /** 按风格标签加载 Jamendo */
-    fun loadJamendoTag(tag: String) {
-        // ⚠️ Jamendo 关 ⇒ **不请求**（方案 §3.2.1 #14）
-        if (!sourceVisibility.isVisible(MusicSourceType.JAMENDO)) {
-            AppLog.d("Jamendo", "loadJamendoTag: Jamendo 已关闭，跳过请求")
-            _jamendoState.value = UiState.Success(emptyList())
-            return
-        }
-        if (_jamendoActiveTag.value == tag && _jamendoState.value.dataOrNull()?.isNotEmpty() == true) return
-        _jamendoActiveTag.value = tag
-        viewModelScope.launch {
-            _jamendoState.value = UiState.Loading
-            try {
-                val songs = nasMusicApp.jamendoService.tracksByTag(tag, limit = 30)
-                _jamendoState.value = UiState.Success(songs)
-            } catch (e: Exception) {
-                e.rethrowIfCancellation()
-                AppLog.e("Jamendo", "loadJamendoTag failed: ${e.message}", e)
-                _jamendoState.value = UiState.Error(message = getApplication<Application>().getString(R.string.jamendo_load_failed))
-            }
-        }
-    }
-
-    /** 搜索 Jamendo 音乐 */
-    fun searchJamendo(keyword: String) {
-        // ⚠️ Jamendo 关 ⇒ **不请求**（方案 §3.2.1 #14）
-        if (!sourceVisibility.isVisible(MusicSourceType.JAMENDO)) {
-            AppLog.d("Jamendo", "searchJamendo: Jamendo 已关闭，跳过请求")
-            _jamendoState.value = UiState.Success(emptyList())
-            return
-        }
-        _jamendoActiveTag.value = ""
-        viewModelScope.launch {
-            _jamendoState.value = UiState.Loading
-            try {
-                val songs = nasMusicApp.jamendoService.search(keyword, limit = 30)
-                _jamendoState.value = UiState.Success(songs)
-            } catch (e: Exception) {
-                e.rethrowIfCancellation()
-                AppLog.e("Jamendo", "searchJamendo failed: ${e.message}", e)
-                _jamendoState.value = UiState.Error(message = getApplication<Application>().getString(R.string.jamendo_load_failed))
-            }
-        }
-    }
+    // 独立 JamendoTab（UI + 榜单/标签/搜索 VM 方法）已删除：该 Tab 全链零调用。
+    // ⭐ Jamendo **作为搜索源仍然活着**：注册进 NetworkMusicManager.services 并参与
+    //    SearchAggregator 五源聚合，受 SOURCE_JAMENDO 开关 + clientId 非空控制。
+    //    这里只保留设置页仍在用的 Client ID 更新入口。
 
     /** 更新 Jamendo Client ID 并动态注册/注销服务（生效 = 开关 **且** clientId 非空，§7.5） */
     fun updateJamendoClientId(id: String) {
         viewModelScope.launch {
             prefs.network.setJamendoClientId(id)
             nasMusicApp.refreshJamendoServiceRegistration()
-            _jamendoState.value = UiState.Success(emptyList())
-            _jamendoActiveTag.value = ""
         }
     }
 

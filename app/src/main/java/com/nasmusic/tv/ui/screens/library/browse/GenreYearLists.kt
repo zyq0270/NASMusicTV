@@ -12,8 +12,11 @@ import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -42,6 +45,8 @@ internal fun GenresTab(
     val firstItemFocusRequester = remember { FocusRequester() }
     val scope = rememberCoroutineScope()
     val listBackHandler = LocalListBackHandler.current
+    // 空结果反馈：取歌为空时给一条可见提示，不再静默无反应
+    var emptyHint by remember { mutableStateOf(false) }
 
     // Level 1.5: 列表已滚动时按 BACK 先回顶并聚焦第一个
     DisposableEffect(Unit) {
@@ -69,6 +74,14 @@ internal fun GenresTab(
             fontSize = FontSize.subtitle(),
             modifier = Modifier.padding(bottom = BrowseTokens.headerCountGap)
         )
+        if (emptyHint) {
+            Text(
+                text = stringResource(R.string.library_style_no_songs),
+                color = NasMusicColors.Warning,
+                fontSize = FontSize.caption(),
+                modifier = Modifier.padding(bottom = BrowseTokens.headerCountGap)
+            )
+        }
         if (genres.isEmpty()) {
             Text(
                 text = stringResource(R.string.library_no_genres),
@@ -89,7 +102,12 @@ internal fun GenresTab(
                         onClick = {
                             if (onSongsByGenre != null) {
                                 onSongsByGenre(genre.name) { songs ->
-                                    if (songs.isNotEmpty()) onPlaySongs(songs)
+                                    if (songs.isNotEmpty()) {
+                                        emptyHint = false
+                                        onPlaySongs(songs)
+                                    } else {
+                                        emptyHint = true
+                                    }
                                 }
                             }
                         },
@@ -131,6 +149,8 @@ internal fun YearsTab(
     val firstItemFocusRequester = remember { FocusRequester() }
     val scope = rememberCoroutineScope()
     val listBackHandler = LocalListBackHandler.current
+    // 空结果反馈：取歌为空时给一条可见提示，不再静默无反应
+    var emptyHint by remember { mutableStateOf(false) }
 
     // Level 1.5: 列表已滚动时按 BACK 先回顶并聚焦第一个
     DisposableEffect(Unit) {
@@ -158,6 +178,14 @@ internal fun YearsTab(
             fontSize = FontSize.subtitle(),
             modifier = Modifier.padding(bottom = BrowseTokens.headerCountGap)
         )
+        if (emptyHint) {
+            Text(
+                text = stringResource(R.string.library_style_no_songs),
+                color = NasMusicColors.Warning,
+                fontSize = FontSize.caption(),
+                modifier = Modifier.padding(bottom = BrowseTokens.headerCountGap)
+            )
+        }
         if (years.isEmpty()) {
             Text(
                 text = stringResource(R.string.library_no_years),
@@ -179,7 +207,12 @@ internal fun YearsTab(
                             // 点击年份时按需加载该年份歌曲
                             if (onSongsByYear != null) {
                                 onSongsByYear(year, year) { songs ->
-                                    if (songs.isNotEmpty()) onPlaySongs(songs)
+                                    if (songs.isNotEmpty()) {
+                                        emptyHint = false
+                                        onPlaySongs(songs)
+                                    } else {
+                                        emptyHint = true
+                                    }
                                 }
                             }
                         },

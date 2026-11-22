@@ -24,10 +24,6 @@ sealed interface LibraryEvent {
     data class PlayRequested(val songs: List<Song>, val startIndex: Int) : LibraryEvent  // 浏览页播放入口 → PlayerViewModel
 }
 
-sealed interface WeatherRadioEvent {
-    data class PlayRequested(val songs: List<Song>) : WeatherRadioEvent  // 电台播放 → PlayerViewModel
-}
-
 sealed interface PlayerEvent {
     data class SongStarted(val song: Song) : PlayerEvent        // 播放记录上报 → PlayHistoryViewModel
     data class ModeChanged(val playMode: PlayMode) : PlayerEvent // 播放模式持久化 → AppPreferences（经 PlayerViewModel 内部）

@@ -1,7 +1,6 @@
 package com.nasmusic.tv.ui.components.branches
 
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -33,13 +32,7 @@ internal fun MineBranch(
                     val songDownloadStates by viewModel.songDownloadStates.collectAsState(initial = emptyMap())
                     val favoriteSongsState by viewModel.favoriteSongs.collectAsState(initial = UiState.Success(emptyList()))
                     val networkFavoriteSongs by viewModel.networkFavoriteSongs.collectAsState(initial = emptyList())
-                    val recentSongsState by viewModel.recentSongs.collectAsState(initial = UiState.Success(emptyList()))
-                    val recentSongsList = recentSongsState.dataOrNull() ?: emptyList()
                     val localPlaylists by viewModel.playlistVM.localPlaylists.collectAsState(initial = emptyList())
-                    // 进入"我的"页时刷新最近播放（首次进入/从播放页返回时更新）
-                    LaunchedEffect(Unit) {
-                        viewModel.loadRecentSongs()
-                    }
                     val queueSongIds by viewModel.queueSongIds.collectAsState(initial = emptySet())
                     // 歌单导入（阶段5）：URL 失效标记 / 补全进度（「我的」页徽标与按钮数据源）
                     val songReachability by viewModel.playlistImportVM.songReachability.collectAsState(initial = emptyMap())
@@ -47,7 +40,6 @@ internal fun MineBranch(
                     MineScreen(
                         favoriteSongsState = favoriteSongsState,
                         networkFavoriteSongs = networkFavoriteSongs,
-                        recentSongs = recentSongsList,
                         localPlaylists = localPlaylists,
                         queueSongIds = queueSongIds,
                         onPlaySong = { song ->

@@ -88,8 +88,6 @@ fun MineScreen(
     // 左栏：收藏数据
     favoriteSongsState: UiState<List<Song>>,
     networkFavoriteSongs: List<Song>,
-    // 最近播放
-    recentSongs: List<Song>,
     // 右栏：本地歌单数据
     localPlaylists: List<LocalPlaylist>,
     // 通用
@@ -503,74 +501,6 @@ private fun FavoritesPane(
                         isInQueue = song.id in queueSongIds,
                         onToggleQueue = { onToggleQueue(song) },
                         onAddToPlaylist = { onAddToPlaylist(song) },
-                        downloadState = downloadStates.stateOfSong(song),
-                        onDownload = { onDownloadSong(song) },
-                        onDeleteDownload = onDeleteDownloadSong?.let { cb -> { cb(song) } }
-                    )
-                }
-            }
-        }
-    }
-}
-
-/**
- * 最近播放 Pane：标题行（含全部播放）+ 最近播放歌曲列表（单列 SongRow）
- */
-@OptIn(ExperimentalTvMaterial3Api::class)
-@Composable
-private fun RecentPane(
-    songs: List<Song>,
-    queueSongIds: Set<String>,
-    onPlayAll: (List<Song>) -> Unit,
-    onPlaySong: (Song) -> Unit,
-    onToggleFavorite: (Song) -> Unit,
-    onToggleQueue: (Song) -> Unit,
-    onAddSongsToQueue: (List<Song>) -> Unit = {},
-    isFavorited: (Song) -> Boolean,
-    downloadStates: Map<String, DownloadState> = emptyMap(),
-    onDownloadSong: (Song) -> Unit = {},
-    onDeleteDownloadSong: ((Song) -> Unit)? = null,
-    modifier: Modifier = Modifier
-) {
-    Column(modifier = modifier) {
-        Column(modifier = Modifier.fillMaxWidth()) {
-            Text(
-                text = stringResource(R.string.mine_recent),
-                color = NasMusicColors.TextPrimary,
-                fontSize = FontSize.display(),
-                modifier = Modifier.padding(bottom = 4.dp)
-            )
-            if (songs.isNotEmpty()) {
-                ActionBar(
-                    songCount = songs.size,
-                    onPlayAll = { onPlayAll(songs) },
-                    onAddAllToQueue = { onAddSongsToQueue(songs) }
-                )
-            }
-        }
-        Spacer(modifier = Modifier.height(16.dp))
-        if (songs.isEmpty()) {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text(
-                    text = stringResource(R.string.library_no_recent),
-                    color = NasMusicColors.TextSecondary,
-                    fontSize = FontSize.button()
-                )
-            }
-        } else {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                itemsIndexed(songs, key = { index, song -> "recent_${index}_${song.id}" }) { _, song ->
-                    UnifiedSongRow(
-                        song = song,
-                        mode = SongRowMode.MODE_ROW,
-                        onClick = { onPlaySong(song) },
-                        isFavorited = isFavorited(song),
-                        onToggleFavorite = { onToggleFavorite(song) },
-                        isInQueue = song.id in queueSongIds,
-                        onToggleQueue = { onToggleQueue(song) },
                         downloadState = downloadStates.stateOfSong(song),
                         onDownload = { onDownloadSong(song) },
                         onDeleteDownload = onDeleteDownloadSong?.let { cb -> { cb(song) } }

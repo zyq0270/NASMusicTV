@@ -58,6 +58,7 @@
     <string name="library_no_genres">暂无风格数据</string>
     <string name="library_no_years">暂无年代数据</string>
     <string name="library_no_recent">暂无播放记录</string>
+    <string name="library_style_no_songs">该分类下暂无歌曲</string>
 
     <!-- Network Music -->
     <string name="network_search_hint">输入歌曲名或歌手名搜索网络音乐</string>

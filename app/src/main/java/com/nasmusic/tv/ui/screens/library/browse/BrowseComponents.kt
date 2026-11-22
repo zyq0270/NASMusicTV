@@ -209,7 +209,7 @@ internal fun AlbumCard(
  * 艺术家卡片 —— 与 [AlbumCard] 同结构：方形封面 + 右上角数量徽标 + 左对齐三行文字。
  *
  * 行的语义对应关系：标题=艺术家名，副信息行=`N专辑`（专辑卡在同类位置是「年份 · 流派」），
- * 末行=主要流派 + 播放（专辑卡同类位置是艺术家名 + 播放）。
+ * 末行=主要流派（专辑卡同类位置是艺术家名）。整卡进详情，播放统一走详情页，卡内不放第二焦点靶。
  */
 @OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
@@ -220,7 +220,6 @@ internal fun ArtistCard(
     albumCount: Int = 0,
     primaryGenre: String? = null,
     onClick: () -> Unit,
-    onPlay: (() -> Unit)? = null,
     focusRequester: FocusRequester? = null
 ) {
     MediaCardShell(onClick = onClick, focusRequester = focusRequester) {
@@ -254,6 +253,8 @@ internal fun ArtistCard(
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 // Task 10: 主要流派（与专辑卡末行「艺术家名」同位）
+                // ⛔ 不画"▶播放"字样：整卡进详情、播放统一走详情页的「播放全部」（与 AlbumCard 同口径）。
+                // 原实现让 onPlay 只作显示判据、文本却非独立焦点靶，点它会落回卡片 onClick 进详情 = 误导。
                 Text(
                     text = primaryGenre ?: "—",
                     color = LocalFocusableContentColor.current,
@@ -262,9 +263,6 @@ internal fun ArtistCard(
                     overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f)
                 )
-                if (onPlay != null) {
-                    Text(text = "▶" + stringResource(R.string.player_play), color = NasMusicColors.Primary, fontSize = FontSize.small(), modifier = Modifier.padding(start = BrowseTokens.inlineGap))
-                }
             }
         }
     }

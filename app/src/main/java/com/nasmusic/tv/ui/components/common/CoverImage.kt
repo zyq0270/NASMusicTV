@@ -24,7 +24,7 @@ import com.nasmusic.tv.ui.theme.NasMusicColors
  * 统一专辑封面组件
  *
  * 封装 Coil 异步加载 + 加载失败时显示音乐符号 fallback + 加载中骨架占位。
- * 支持自定义尺寸和圆角，供 UnifiedSongRow、UnifiedAlbumCard 等组件复用。
+ * 支持自定义尺寸和圆角，供 UnifiedSongRow 等组件复用。
  *
  * @param coverUrl 封面 URL（null 或空白时直接显示 fallback）
  * @param contentDescription 无障碍描述

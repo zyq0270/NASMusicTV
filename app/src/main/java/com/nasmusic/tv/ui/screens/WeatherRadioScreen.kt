@@ -120,11 +120,12 @@ fun WeatherRadioScreen(
         Spacer(modifier = Modifier.height(16.dp))
 
         // ===== 天气信息(1/3) + 心情按钮(2/3) 并列 =====
-        if (weatherData != null) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
+        // 天气获取失败时 VM 仍按默认 mood 构建了歌曲队列，mood 切换按钮必须始终可用；
+        // 旧实现把整行包在 `weatherData != null` 内 ⇒ 有歌却看不到任何 mood 按钮。
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
                 // 左侧：天气信息条（占 1/3 宽度）
                 FocusableSurface(
                     onClick = {},
@@ -151,13 +152,17 @@ fun WeatherRadioScreen(
                         Spacer(modifier = Modifier.width(10.dp))
                         Column {
                             Text(
-                                text = "${weatherData.temperature.toInt()}\u00B0C",
+                                text = if (weatherData != null) "${weatherData.temperature.toInt()}\u00B0C" else "--\u00B0C",
                                 fontSize = FontSize.title(),
                                 fontWeight = FontWeight.Bold,
                                 color = NasMusicColors.TextPrimary
                             )
                             Text(
-                                text = if (weatherData.cityName.isBlank()) stringResource(R.string.weather_unknown_location) else "${weatherData.cityName}  \u00B7  ${weatherData.description}",
+                                text = if (weatherData == null || weatherData.cityName.isBlank()) {
+                                    stringResource(R.string.weather_unknown_location)
+                                } else {
+                                    "${weatherData.cityName}  \u00B7  ${weatherData.description}"
+                                },
                                 fontSize = FontSize.small(),
                                 color = LocalFocusableContentColor.current
                             )
@@ -195,10 +200,9 @@ fun WeatherRadioScreen(
                         }
                     }
                 }
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
         }
+
+        Spacer(modifier = Modifier.height(16.dp))
 
         // ===== 电台歌曲列表（占满宽度）=====
         if (isLoading && (weatherRadioQueue == null || weatherRadioQueue.songs.isEmpty())) {

@@ -100,11 +100,6 @@ object PinyinUtils {
     }
 
     /**
-     * @deprecated Use [toPinyinInitials] instead. Kept for backward compatibility.
-     */
-    fun getInitials(text: String): String = toPinyinInitials(text)
-
-    /**
      * 判断**单段文本**是否匹配查询词（宽口径，三条路径任一命中即可）。
      * 匹配规则：
      * 1. 文本本身包含查询子串（不区分大小写）

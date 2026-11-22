@@ -16,11 +16,8 @@ import com.nasmusic.tv.data.model.WeatherRadioQueue
 import com.nasmusic.tv.player.PlayerManager
 import com.nasmusic.tv.util.AppLog
 import com.nasmusic.tv.util.rethrowIfCancellation
-import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -66,10 +63,6 @@ class WeatherRadioViewModel(
 
     private val _weatherIconCode = MutableStateFlow<String?>(null)
     val weatherIconCode: StateFlow<String?> = _weatherIconCode.asStateFlow()
-
-    // ---- 跨域事件（W0 冻结契约）----
-    private val _events = MutableSharedFlow<WeatherRadioEvent>(extraBufferCapacity = 8)
-    val events: SharedFlow<WeatherRadioEvent> = _events.asSharedFlow()
 
     /** 天气电台「换一批」已展示歌曲（歌手, 歌名）集合：跨构建去重，mood 变化时重置 */
     private val weatherSeenKeys = mutableSetOf<Pair<String, String>>()
@@ -204,15 +197,6 @@ class WeatherRadioViewModel(
                 _weatherLoading.value = false
             }
         }
-    }
-
-    /**
-     * 播放天气电台全部歌曲（经事件路由到 PlayerViewModel，导航由消费方处理）
-     */
-    fun playWeatherRadioAll() {
-        val songs = _weatherRadioQueue.value?.songs ?: return
-        if (songs.isEmpty()) return
-        _events.tryEmit(WeatherRadioEvent.PlayRequested(songs))
     }
 
     /**
