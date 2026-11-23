@@ -222,7 +222,7 @@ fun AppRoot(
             currentScreen == Screen.NowPlaying -> if (isTV) null else navigateHome
             // 专辑/艺人详情：列表已滚时由 Level 1.5 先回顶，到顶后回**进入前的页面**
             // （首页「最近添加」卡 / 播放页歌手名 / 曲库都能进入；缺来源时回曲库兜底）
-            currentScreen == Screen.AlbumDetail, currentScreen == Screen.ArtistDetail -> backToDetailOrigin
+            currentScreen == Screen.AlbumDetail || currentScreen == Screen.ArtistDetail -> backToDetailOrigin
             currentScreen == Screen.Queue && queueOriginScreen != null -> backToQueueOrigin
             currentScreen == Screen.Home -> null
             // ── 设置域子页面：BACK 返回设置主菜单（入口唯一：SettingsBranch）──

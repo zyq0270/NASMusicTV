@@ -135,6 +135,8 @@ class LyricsManager(
     }
 
     companion object {
+        private const val TAG = "LyricsManager"
+
         /** 搜索变异后缀，候选耗尽时依次尝试获取新候选 */
         private val variantSuffixes = listOf("", "歌词", "完整版", "原唱", "歌曲", "lyrics")
     }

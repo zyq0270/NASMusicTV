@@ -706,7 +706,7 @@ class SongDownloadManager(
         return runCatching {
             // G4-03：必须与写入侧共用同一规则（多艺术家取首位）。旧实现用整串 sanitize，
             // 对 "古天乐/萱萱" 这类会算出不同目录名 ⇒ 恢复恒 miss、完整文件成孤儿。
-            val artist = DownloadPathBuilder.artistDirName(entity.artist)
+            val artist = paths.artistDirName(entity.artist)
             val album = DownloadPathBuilder.sanitize(entity.album.ifBlank { DownloadPathBuilder.DEFAULT_ALBUM }).ifBlank { DownloadPathBuilder.DEFAULT_ALBUM }
             if (entity.title.isBlank()) return null
             // §10.411：切换过下载位置后，旧文件可能仍在另一个根 —— 两个根都找。
