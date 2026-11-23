@@ -86,6 +86,8 @@ class SongDownloadManager(
 ) {
     companion object {
         private const val TAG = "SongDownloadManager"
+        /** G4-04：内嵌进行中标记后缀（崩溃恢复据此丢弃可能被截断的文件）。 */
+        private const val INCOMPLETE_SUFFIX = ".incomplete"
         private const val PROGRESS_STEP = 512 * 1024          // 每 512KB 更新进度
         private const val MAX_RETRY = 3
         private val RETRY_DELAYS = longArrayOf(2000, 8000, 30_000)  // 2s / 8s / 30s
@@ -276,8 +278,23 @@ class SongDownloadManager(
                 }
                 return result
             }
-            if (result is DownloadResult.QuotaExceeded || result is DownloadResult.Disabled) return result
-            if (result is DownloadResult.StorageFull || result is DownloadResult.NotDownloadable) return result
+            // G4-02：终态早返回必须清理内存状态 —— 循环开头已写入 Downloading(0)，
+            // 直接 return 会让该曲永久停在 ⇣（且 enqueueManual 判成「已下载」）。
+            // StorageFull 在建 DB 行之前返回，cancelAll 按 getUnfinished() 也清不到它。
+            if (result is DownloadResult.QuotaExceeded || result is DownloadResult.Disabled) {
+                _downloadStates.update { it - key }
+                return result
+            }
+            if (result is DownloadResult.StorageFull || result is DownloadResult.NotDownloadable) {
+                val reason = if (result is DownloadResult.StorageFull) {
+                    context.getString(R.string.download_storage_full)
+                } else {
+                    "不可下载"
+                }
+                repo.updateStatus(key, DownloadStatus.FAILED, 0, reason)
+                _downloadStates.update { it + (key to DownloadState.Failed(reason)) }
+                return result
+            }
 
             // P1-5：cancelAll 已置位 → 不再重试，直接落 FAILED
             if (isCancelRequested()) {
@@ -421,7 +438,17 @@ class SongDownloadManager(
             // 8. 元数据内嵌（失败走旁路）
             val fileExt = p.finalFile.extension.lowercase()
             AppLog.d(TAG, "embed: file=${p.finalFile.name}, ext=$fileExt, supportsEmbed=${MediaTagWriter.supportsEmbedding(p.finalFile)}, coverBytes=${coverBytes?.size}, lrc=${lrc?.take(50)}")
-            embedded = tagWriter.embed(p.finalFile, song, coverBytes, lrc)
+            // G4-04：embed 是**原地改写同一文件**。若在 embed 中被杀/断电，最终路径上会留下
+            // 长度 > 0 的坏文件，而 DB 仍是 DOWNLOADING ⇒ 崩溃恢复按 length>0 认领成
+            // COMPLETED，用户拿到坏文件且永不重下。用 .incomplete 标记把「写坏」与「写完」分开：
+            // 恢复侧见到标记就丢弃文件；正常路径（含 embed 抛异常）一定在 finally 删标记。
+            val incompleteMarker = File(p.albumDir, p.finalFile.name + INCOMPLETE_SUFFIX)
+            runCatching { incompleteMarker.writeText("embedding", Charsets.UTF_8) }
+            embedded = try {
+                tagWriter.embed(p.finalFile, song, coverBytes, lrc)
+            } finally {
+                runCatching { incompleteMarker.delete() }
+            }
             AppLog.d(TAG, "embed: result=$embedded, coverPath will be=${if (!embedded) "sidecar" else "null"}")
             if (!embedded) {
                 // 内嵌失败才写 sidecar
@@ -677,13 +704,23 @@ class SongDownloadManager(
      */
     private fun recoverFinalPathOrNull(entity: com.nasmusic.tv.backend.download.db.DownloadSongEntity): String? {
         return runCatching {
-            val artist = DownloadPathBuilder.sanitize(entity.artist.ifBlank { "未知歌手" }).ifBlank { "未知歌手" }
+            // G4-03：必须与写入侧共用同一规则（多艺术家取首位）。旧实现用整串 sanitize，
+            // 对 "古天乐/萱萱" 这类会算出不同目录名 ⇒ 恢复恒 miss、完整文件成孤儿。
+            val artist = DownloadPathBuilder.artistDirName(entity.artist)
             val album = DownloadPathBuilder.sanitize(entity.album.ifBlank { DownloadPathBuilder.DEFAULT_ALBUM }).ifBlank { DownloadPathBuilder.DEFAULT_ALBUM }
             if (entity.title.isBlank()) return null
             // §10.411：切换过下载位置后，旧文件可能仍在另一个根 —— 两个根都找。
             val relativeAlbumDir = "$artist/$album"
             val root = allRootsProvider().firstOrNull { File(it, relativeAlbumDir).exists() } ?: return null
             val albumDir = File(root, relativeAlbumDir)
+            // G4-04：清理「内嵌中被杀」留下的坏文件 —— 带 .incomplete 标记说明该文件
+            // 可能被 embed 截断，不能认领为完成，直接删除让用户重下。
+            albumDir.listFiles { f -> f.isFile && f.name.endsWith(INCOMPLETE_SUFFIX) }?.forEach { marker ->
+                val target = File(marker.parentFile, marker.name.removeSuffix(INCOMPLETE_SUFFIX))
+                AppLog.w(TAG, "recover: discard file left mid-embed: ${target.name}")
+                runCatching { target.delete() }
+                runCatching { marker.delete() }
+            }
             // P2 修复（2026-09-22 审查）：原候选名只拼 "title.ext"，与实际命名规则
             // baseNameWithQuality（"%02d - "曲号前缀 + " (128/192/320)"档位后缀）+
             // uniqueFile（" (2)"去重序号）不符——曲号>0 或非 AUTO 档的孤儿文件恢复

@@ -119,6 +119,8 @@ fun AppRoot(
     val settingsSection by viewModel.navVM.settingsSection.collectAsState(initial = null)
     // 2026-11-22 队列页修复 P2：BACK 回到进入队列前的页面（来源由 NavigationViewModel 记录）
     val queueOriginScreen by viewModel.navVM.queueOrigin.collectAsState(initial = null)
+    // G7-01：详情页来源（首页卡 / 播放页歌手名 / 曲库都可能进入详情）
+    val detailOriginScreen by viewModel.navVM.detailOrigin.collectAsState(initial = null)
     // M38：顶层**只订 currentSong**。原先整体收集 playerState（queue / currentIndex /
     // currentSong 三元组），而 AppRoot 只用得到 currentSong ⇒ 往队列里加一首歌、播完一首换
     // currentIndex，都会驱动整棵 UI 树（导航栏 + 各 Screen 分支）重组。三元组本身仍保持
@@ -182,7 +184,7 @@ fun AppRoot(
     val navBackHandler = LocalNavigateBackHandler.current
     LaunchedEffect(
         currentScreen, isImmersiveMode.value, showMv, showKaraoke, showVisualizer,
-        settingsSection, queueOriginScreen
+        settingsSection, queueOriginScreen, detailOriginScreen
     ) {
         // C-2 修正说明：初版审查把 when/if-else 分支里的 {{ ... }} 误判为 no-op（lambda 内 lambda）。
         // 实测编译行为：when/if 分支的 { } 按“块”解析，{{ X }} = 块 + 尾部 lambda 表达式，
@@ -201,6 +203,12 @@ fun AppRoot(
             queueOriginScreen?.let { viewModel.navVM.navigateTo(it) }
             viewModel.navVM.clearQueueOrigin()
         }
+        // G7-01：详情页 BACK 回来源（缺来源时退回曲库，保持旧行为）
+        val backToDetailOrigin: () -> Unit = {
+            val origin = detailOriginScreen
+            if (origin != null) viewModel.navVM.navigateTo(origin) else navigateLibrary()
+            viewModel.navVM.clearDetailOrigin()
+        }
         val closeSettingsSection: () -> Unit = { viewModel.navVM.closeSettingsSection() }
         val handler: (() -> Unit)? = when {
             isImmersiveMode.value -> exitImmersive
@@ -212,9 +220,9 @@ fun AppRoot(
             // v2.36.0 竖屏设置二级页：BACK 回设置列表（**必须放在 Screen.Settings 之前**，方案 §6.2）
             currentScreen == Screen.Settings && settingsSection != null -> closeSettingsSection
             currentScreen == Screen.NowPlaying -> if (isTV) null else navigateHome
-            // 专辑/艺人详情：列表已滚时由 Level 1.5 先回顶，到顶后走这里回曲库
-            // （与两页各自的 BackButton 同口径；缺 ArtistDetail 曾导致遥控返回直接落回首页）
-            currentScreen == Screen.AlbumDetail, currentScreen == Screen.ArtistDetail -> navigateLibrary
+            // 专辑/艺人详情：列表已滚时由 Level 1.5 先回顶，到顶后回**进入前的页面**
+            // （首页「最近添加」卡 / 播放页歌手名 / 曲库都能进入；缺来源时回曲库兜底）
+            currentScreen == Screen.AlbumDetail, currentScreen == Screen.ArtistDetail -> backToDetailOrigin
             currentScreen == Screen.Queue && queueOriginScreen != null -> backToQueueOrigin
             currentScreen == Screen.Home -> null
             // ── 设置域子页面：BACK 返回设置主菜单（入口唯一：SettingsBranch）──

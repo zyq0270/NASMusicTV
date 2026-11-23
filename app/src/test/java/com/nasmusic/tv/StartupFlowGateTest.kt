@@ -128,9 +128,12 @@ class StartupFlowGateTest {
             src.contains("serviceScope 未捕获异常")
         )
         assertTrue(
-            "T5（sleepTimer）：定时状态收集仍无 try/catch 兜底。",
-            src.contains("try { (application as NasMusicApp).playerManager.sleepTimer.state.collect") &&
-                src.contains("sleepTimer state collect failed")
+            "T5（sleepTimer）：定时状态收集仍无异常兜底。",
+            src.contains("sleepTimer.state.collect") &&
+                src.contains("sleepTimer state refresh failed") &&
+                // G1-06：try/catch 必须在 collect **内层**，包在外层时 catch 一执行
+                // 协程就结束，订阅仍会永久消失（旧形态必须判负）。
+                !src.contains("try { (application as NasMusicApp).playerManager.sleepTimer.state.collect")
         )
         assertTrue(
             "T5（前台化）：startForeground 失败未 stopSelf，仍可能拖到 5 秒超时 ANR。",

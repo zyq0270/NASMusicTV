@@ -3,6 +3,7 @@ package com.nasmusic.tv.backend.network.lx
 import com.nasmusic.tv.data.prefs.AppPreferences
 import com.nasmusic.tv.util.AppLog
 import com.nasmusic.tv.util.NetAddressGuard
+import com.nasmusic.tv.util.readBodyLimited
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -139,15 +140,11 @@ internal class LxScriptRepo(
         client.newCall(request).execute().use { response ->
             if (!response.isSuccessful) throw IOException("HTTP ${response.code}")
             // 上限 2 MB：真脚本最大 ~400 KB；超过就是下到了 HTML/错误页
-            // C25：旧实现 read(limited, MAX) 会把超限正文**静默截断**成半截脚本，
-            // 半截脚本仍可能含 @name 从而通过校验被执行 ⇒ 多读 1 字节判定是否超限。
-            val limited = okio.Buffer()
+            // C25 + G3-01：⛔ 不能只 read 一次 —— okio 每次至多搬一个 segment（8 KiB），
+            // 只读一次再判上限恒为假，得到的是半截脚本，而半截脚本仍可能含 @name 通过校验被执行。
             val body = response.body ?: throw IOException("空响应体")
-            val read = body.source().read(limited, MAX_SCRIPT_BYTES + 1)
-            if (read > MAX_SCRIPT_BYTES) {
-                throw IOException("脚本正文超过 ${MAX_SCRIPT_BYTES / 1024 / 1024} MB 上限，已拒绝")
-            }
-            return limited.readUtf8()
+            return readBodyLimited(body.source(), MAX_SCRIPT_BYTES)
+                ?: throw IOException("脚本正文超过 ${MAX_SCRIPT_BYTES / 1024 / 1024} MB 上限或读取失败，已拒绝")
         }
     }
 

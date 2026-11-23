@@ -444,6 +444,12 @@ class PlayerManager(private val applicationContext: Context) {
             _buffering.value = playbackState == Player.STATE_BUFFERING
             val dur = player?.duration ?: 0
             if (dur > 0) _duration.value = dur
+            if (playbackState == Player.STATE_ENDED) {
+                // G1-03：播到队尾（SEQUENTIAL/REPEAT_MODE_OFF）时 ExoPlayer **不会**把
+                // playWhenReady 复位。不同步清掉意图态，播放键会一直显示「暂停」而实际已无声，
+                // 且与通知栏（读 isPlaying=false）矛盾。
+                _wantsToPlay.value = false
+            }
             // 播放器就绪后启动 PCM 频谱通道
             if (playbackState == Player.STATE_READY) {
                 playerEqualizer.initSpectrumAnalyzer()
@@ -840,19 +846,26 @@ class PlayerManager(private val applicationContext: Context) {
      * UI 的 `isInQueue` 布尔与 `removeSongFromQueue(indexOfFirst)` 才与实际内容一致。
      * 只追加，不切换当前歌曲，不触发播放。
      */
-    fun addToQueue(songs: List<Song>) {
-        if (songs.isEmpty()) return
+    /**
+     * @return 实际追加的条数（去重后）。G1-07：随心听续播依赖它区分「加了」与
+     *         「全部已在队列中」，否则小曲库时会每 5 秒白拉一次 20 首。
+     */
+    fun addToQueue(songs: List<Song>): Int {
+        if (songs.isEmpty()) return 0
         val currentQueue = _playerState.value.queue
         val toAdd = QueueAddition.compute(currentQueue, songs)
-        if (toAdd.isEmpty()) return
+        if (toAdd.isEmpty()) return 0
         _playerState.update { it.copy(queue = currentQueue + toAdd) }
-        val p = player ?: return
+        val p = player ?: return toAdd.size
+        // G1-01：同上 —— 播放器未装载队列时只更新镜像，避免索引错位。
+        if (p.mediaItemCount == 0 && currentQueue.isNotEmpty()) return toAdd.size
         val mediaItems = toAdd.map { buildMediaItem(it, it.streamUrl ?: "") }
         try {
             p.addMediaItems(mediaItems)
         } catch (e: Exception) {
             AppLog.e("PlayerManager", "addToQueue failed", e)
         }
+        return toAdd.size
     }
 
     /**
@@ -1217,6 +1230,12 @@ class PlayerManager(private val applicationContext: Context) {
         if (QueueAddition.compute(currentQueue, listOf(song)).isEmpty()) return
         _playerState.update { it.copy(queue = currentQueue + song) }
         val p = player ?: return
+        // G1-01：播放器尚未装载队列时（mediaItemCount == 0 而镜像队列非空 —— 冷启动恢复
+        // 队列因空 streamUrl 跳过 prepare 时的常态），⛔ 不要单独 addMediaItem：
+        // 向空播放列表加第一项会让 currentMediaItemIndex 变 0 并触发
+        // onMediaItemTransition，把 currentIndex 覆盖成 0、与镜像队列索引错位。
+        // 该条目会随后续 setMediaItems 整队装载。
+        if (p.mediaItemCount == 0 && currentQueue.isNotEmpty()) return
         try {
             p.addMediaItem(buildMediaItem(song, song.streamUrl ?: ""))
         } catch (e: Exception) {
@@ -1499,8 +1518,13 @@ class PlayerManager(private val applicationContext: Context) {
     }
 
     private fun updateCurrentSongFromPlayer() {
-        val currentIndex = player?.currentMediaItemIndex ?: 0
+        val p = player ?: return
         val st = _playerState.value
+        // G1-01：播放器列表长度与镜像队列不一致时，两者的下标不是同一坐标系
+        // （队列已恢复但未 prepare、或只额外追加了若干条）。此时用播放器索引覆盖
+        // currentIndex 会把当前曲无端跳到第 0 首，并让 playAt/切歌越界。
+        if (st.queue.isNotEmpty() && p.mediaItemCount != st.queue.size) return
+        val currentIndex = p.currentMediaItemIndex
         val song = if (currentIndex in st.queue.indices) st.queue[currentIndex] else st.currentSong
         // T3：索引与当前歌曲同帧发布（索引越界时保留原 currentSong）
         _playerState.update { it.copy(currentIndex = currentIndex, currentSong = song) }

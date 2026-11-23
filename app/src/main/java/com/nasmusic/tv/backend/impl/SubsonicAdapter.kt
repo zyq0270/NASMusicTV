@@ -172,9 +172,11 @@ class SubsonicAdapter : BackendAdapter {
                 val json = executeRequest(url)
                     ?: throw IllegalStateException("Subsonic getAlbums 第 ${offset / pageSize + 1} 页无响应")
                 val subsonic = json.getAsJsonObject("subsonic-response")
+                // G2-02：`albumList2` 缺失才是协议错误；它存在但没有 `album` 键是合法空页
+                //（空曲库 / 总数恰为 pageSize 整数倍时的末页）。旧实现把空页当失败抛异常。
                 val albumList = subsonic?.getAsJsonObject("albumList2")
-                val albums = albumList?.getAsJsonArray("album")
                     ?: throw IllegalStateException("Subsonic getAlbums 缺少 albumList2")
+                val albums = albumList.getAsJsonArray("album") ?: break
 
                 if (albums.size() == 0) break
 

@@ -200,7 +200,11 @@ fun ProgressSection(
                             if (duration > 0 && !latestIsLive) {
                                 latestOnSeek((change.position.x / size.width * duration).toLong().coerceIn(0, duration))
                             }
-                        }
+                        },
+                        // G1-02：拖动已 consume，tap 回调不会触发，标志必须在这里复位；
+                        // 否则它会永久停在 true，把拖动后的第一次点击吞掉（要点两次才能定位）。
+                        onDragEnd = { dragConsumedGesture = false },
+                        onDragCancel = { dragConsumedGesture = false }
                     )
                 }
         ) {

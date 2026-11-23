@@ -248,18 +248,19 @@ class PlaybackService : MediaLibraryService() {
         // 把「启动/取消/到期」统一收敛到这里：任一入口改变状态都强制刷新通知与系统媒体
         // 卡片，并启停分钟轮询，避免 UI 侧操作后通知/卡片文案不刷新。
         serviceScope.launch {
-            try {
-                (application as NasMusicApp).playerManager.sleepTimer.state.collect {
+            // G1-06：try/catch 必须在 collect 的 lambda **内部**。包在 collect 外层时，
+            // catch 一执行协程就结束，订阅依然永久消失（只是从静默变成留一条日志）——
+            // 表现为 UI 已改定时器而通知/媒体卡片此后再不刷新。
+            (application as NasMusicApp).playerManager.sleepTimer.state.collect {
+                try {
                     lastNotificationState = null
                     updateNotification()
                     refreshSessionCustomLayout()
                     restartSleepMinuteTick()
+                } catch (e: Exception) {
+                    e.rethrowIfCancellation()
+                    AppLog.e("PlaybackService", "sleepTimer state refresh failed", e)
                 }
-            } catch (e: Exception) {
-                e.rethrowIfCancellation()
-                // 通知刷新/自定义布局偶发异常不能让定时状态订阅永久消失（此前会静默失效，
-                // 表现为 UI 已改定时器而通知/媒体卡片不刷新）。
-                AppLog.e("PlaybackService", "sleepTimer state collect failed", e)
             }
         }
 

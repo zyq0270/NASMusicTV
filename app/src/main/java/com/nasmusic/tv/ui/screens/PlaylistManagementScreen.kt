@@ -44,6 +44,7 @@ import com.nasmusic.tv.ui.components.BackButton
 import com.nasmusic.tv.ui.components.FocusableSurface
 import com.nasmusic.tv.ui.components.LocalFocusableContentColor
 import com.nasmusic.tv.ui.components.song.SongRowMode
+import com.nasmusic.tv.ui.components.common.ErrorDisplay
 import com.nasmusic.tv.ui.components.song.UnifiedSongRow
 import com.nasmusic.tv.ui.screens.library.browse.ButtonChip
 import kotlinx.coroutines.launch
@@ -59,6 +60,10 @@ fun PlaylistManagementScreen(
     playlists: List<Playlist>,
     selectedPlaylistSongs: List<Song>,
     isLoading: Boolean,
+    /** B2-03：加载失败必须可见（此前调用点把 UiState.Error 折成空列表 ⇒ 只显示「暂无歌单」） */
+    errorMessage: String? = null,
+    songsErrorMessage: String? = null,
+    onRetry: (() -> Unit)? = null,
     onSelectPlaylist: (Playlist) -> Unit,
     onCreatePlaylist: (String) -> Unit,
     onDeletePlaylist: (Playlist) -> Unit,
@@ -169,6 +174,12 @@ fun PlaylistManagementScreen(
                         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                             Text(text = stringResource(R.string.common_loading), color = NasMusicColors.TextSecondary, fontSize = FontSize.button())
                         }
+                    } else if (errorMessage != null && playlists.isEmpty()) {
+                        ErrorDisplay(
+                            message = errorMessage,
+                            onRetry = onRetry ?: {},
+                            modifier = Modifier.fillMaxSize()
+                        )
                     } else if (playlists.isEmpty()) {
                         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                             Text(text = stringResource(R.string.playlist_empty), color = NasMusicColors.TextSecondary, fontSize = FontSize.button())
@@ -256,7 +267,13 @@ fun PlaylistManagementScreen(
 
                     Spacer(modifier = Modifier.height(12.dp))
 
-                    if (selectedPlaylistSongs.isEmpty()) {
+                    if (songsErrorMessage != null && selectedPlaylistSongs.isEmpty()) {
+                        ErrorDisplay(
+                            message = songsErrorMessage,
+                            onRetry = onRetry ?: {},
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    } else if (selectedPlaylistSongs.isEmpty()) {
                         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                             Text(
                                 text = stringResource(R.string.playlist_select_hint),

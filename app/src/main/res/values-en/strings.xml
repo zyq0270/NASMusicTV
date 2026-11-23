@@ -761,6 +761,7 @@
     <!-- Download management (§8.7.3) -->
     <string name="download_cleared">All downloads cleared (%1$s)</string>
     <string name="download_deleted">Deleted: %1$s</string>
+    <string name="download_delete_not_found">No download record found for this song</string>
     <string name="download_delete_title">Delete Download</string>
     <string name="download_delete_message">Delete the downloaded file for "%1$s"?</string>
 
@@ -1117,6 +1118,7 @@
     <!-- Resolve URL (MainViewModel) -->
     <string name="resolve_url_failed_retry">Unable to resolve playback URL, please retry later</string>
     <string name="resolve_url_endpoint_failed">Unable to resolve playback URL, network music endpoint connection failed</string>
+    <string name="play_url_unresolved">Unable to get a playback URL, playback stopped</string>
     <string name="resolve_url_auto_skip_with_title">Unable to resolve playback URL, auto-skipping «%s»</string>
 
     <!-- Play (MainViewModel) -->
@@ -1722,4 +1724,10 @@
     <string name="settings_netdisk_index_rebuild_need_enable">Enable Baidu Netdisk first</string>
     <string name="settings_netdisk_index_rebuild_need_login">Sign in to Baidu Netdisk first</string>
     <string name="settings_auto_download_limit_disabled">Has no effect while auto-download is off</string>
+    <!-- G8-05：补齐本窗口新增 key 的英文串（此前只有中文，英文界面中英混排） -->
+    <string name="library_style_no_songs">No songs in this category</string>
+    <string name="mv_searching">Searching for MV…</string>
+    <string name="player_not_ready">Player is not ready yet, please try again later</string>
+    <string name="queue_clear_confirm_title">Clear play queue</string>
+    <string name="queue_clear_confirm_message">This will remove all songs from the queue and stop playback. This action cannot be undone.</string>
 </resources>

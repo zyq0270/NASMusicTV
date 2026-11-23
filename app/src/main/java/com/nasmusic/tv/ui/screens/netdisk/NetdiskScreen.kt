@@ -184,7 +184,13 @@ val downloadStates by viewModel.songDownloadStates.collectAsState(initial = empt
             }
             // 搜索结果优先展示
             searchKeyword.isNotBlank() -> {
-                if (searchResults.isEmpty()) {
+                // B2-01：搜索期间必须显示加载态，不能直接报「未找到相关结果」
+                // （弱网下会被当成搜不到；目录分支一直是这么处理的）。
+                if (isLoading && searchResults.isEmpty()) {
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text(stringResource(R.string.netdisk_loading_files), color = NasMusicColors.TextSecondary, fontSize = FontSize.button())
+                    }
+                } else if (searchResults.isEmpty()) {
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Text(stringResource(R.string.search_no_results), color = NasMusicColors.TextSecondary, fontSize = FontSize.button())
                     }

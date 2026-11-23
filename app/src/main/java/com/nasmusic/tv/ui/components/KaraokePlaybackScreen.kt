@@ -96,7 +96,13 @@ import kotlinx.coroutines.withContext
 @Composable
 fun KaraokePlaybackScreen(
     currentSong: Song?,
+    /** 播放按钮图标真相源（用户意图，BUFFERING 时仍 true） */
     isPlaying: Boolean,
+    /**
+     * 真实出声状态（G7-03）。逐字歌词插值必须用它：缓冲/卡顿时 progressMs 冻结而
+     * wantsToPlay 仍为 true，用意图态会让歌词按墙上时钟继续前进、恢复后一次性跳回。
+     */
+    actualPlaying: Boolean = isPlaying,
     lyrics: Lyrics?,
     coverCandidates: List<String>,
     coverFilterEnabled: Boolean = false,
@@ -373,7 +379,7 @@ fun KaraokePlaybackScreen(
                 KaraokeLyricsView(
                     lyrics = lyrics,
                     progressMs = progressMs,
-                    isPlaying = isPlaying,
+                    isPlaying = actualPlaying,
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(vertical = 36.dp)

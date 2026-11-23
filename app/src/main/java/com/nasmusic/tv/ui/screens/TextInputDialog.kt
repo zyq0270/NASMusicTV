@@ -336,12 +336,17 @@ fun TextInputDialog(
                                 contentAlignment = Alignment.CenterStart
                             ) {
                                 Text(
+                                    // B2-08：固定高度的显示框必须限单行 —— 否则长服务器地址 / Token
+                                    // 换行后被裁掉尾部，用户看不到最后几个字符、无法核对输错。
+                                    // 这里显示尾部窗口（保留最近 40 个字符），保证「刚输入的部分」始终可见。
                                     text = if (text.isEmpty()) hint
-                                           else if (masked) "*".repeat(text.length)
-                                           else text,
+                                           else if (masked) "*".repeat(text.length.coerceAtMost(40))
+                                           else text.takeLast(40),
                                     color = if (text.isEmpty()) NasMusicColors.TextSecondary
                                             else NasMusicColors.TextPrimary,
                                     fontSize = FontSize.button(),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
                                     modifier = Modifier.padding(horizontal = 12.dp)
                                 )
                             }

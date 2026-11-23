@@ -63,7 +63,14 @@ fun QualityPickerDialog(
     onConfirm: (tier: Int, scope: QualityScope) -> Unit,
     onDismiss: () -> Unit
 ) {
-    var selected by remember(currentTier) { mutableIntStateOf(currentTier) }
+    // G7-04：列表按设备能力过滤（FLAC 不安全时不含 999），初始选中必须收敛到同一集合。
+    // 否则「持久化 999 + 本机不支持 FLAC」时弹窗没有任何选中行，点确定又把 999 写回。
+    val tiers = QualityTiers.uiTiers()
+    var selected by remember(currentTier, tiers) {
+        mutableIntStateOf(
+            if (currentTier in tiers) currentTier else QualityTiers.clampForDevice(currentTier)
+        )
+    }
     var scope by remember { mutableStateOf(QualityScope.ALL) }
 
     BackHandler { onDismiss() }
@@ -103,7 +110,7 @@ fun QualityPickerDialog(
                 Spacer(modifier = Modifier.height(16.dp))
 
                 // 单选（遍历单一真相源，含 192；本机不支持 FLAC 时不展示无损档）
-                QualityTiers.uiTiers().forEach { tier ->
+                tiers.forEach { tier ->
                     QualityOptionRow(
                         label = stringResource(QualityTiers.labelResOf(tier)),
                         description = if (tier == QualityTiers.AUTO) {

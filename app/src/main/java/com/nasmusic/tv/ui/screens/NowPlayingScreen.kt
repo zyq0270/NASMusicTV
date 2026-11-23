@@ -211,6 +211,7 @@ fun NowPlayingScreen(
             KaraokePlaybackScreen(
                 currentSong = currentSong,
                 isPlaying = isPlaying,
+                actualPlaying = actualPlaying,
                 lyrics = lyrics,
                 coverCandidates = coverCandidates,
                 coverFilterEnabled = coverFilterEnabled,

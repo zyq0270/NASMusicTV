@@ -118,7 +118,14 @@ class HqSeparationOrchestrator(
         .callTimeout(5, java.util.concurrent.TimeUnit.MINUTES)  // 整体超时，防止卡死
         .build()
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    // B1-02：必须带 CoroutineExceptionHandler —— finally 里的缓存写盘（copyTo）没有 try/catch，
+    // 磁盘满/目录不可写时会抛到线程默认处理器直接**崩溃进程**（与 applicationScope 同一根因）。
+    private val scope = CoroutineScope(
+        SupervisorJob() + Dispatchers.Main +
+            kotlinx.coroutines.CoroutineExceptionHandler { _, e ->
+                AppLog.e("HqSeparation", "uncaught exception in separation scope", e)
+            }
+    )
 
     private var demucsSeparator: DemucsSeparator? = null
     private var accompanimentCache: AccompanimentCache? = null
@@ -638,7 +645,9 @@ class HqSeparationOrchestrator(
                     // M03：⛔ 只有本轮真正分离成功才缓存原声 —— 失败/取消时的输入可能是
                     // 下载了一半的临时文件，缓存下来会被当成永久原声（且后续成功也不覆盖）。
                     if (separationSucceeded && inputPath != null && songId != null) {
-                        accompanimentCache?.saveOriginalFile(songId, inputPath)
+                        // B1-02：缓存原唱是「有则更好」的副作用，失败不能杀掉进程。
+                        runCatching { accompanimentCache?.saveOriginalFile(songId, inputPath) }
+                            .onFailure { AppLog.w("HqSeparation", "saveOriginalFile failed", it) }
                     }
                     // 清理临时下载文件
                     cleanupTempFile(tempInputPath)

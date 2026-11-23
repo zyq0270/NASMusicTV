@@ -236,9 +236,20 @@ class PlayerViewModel(
                     else -> firstSong
                 }
                 // 检查第一首歌是否仍然无法解析
-                if (resolvedFirst.isNetworkSong && resolvedFirst.streamUrl.isNullOrBlank()) {
-                    AppLog.w("PlayerViewModel", "playQueue: failed to resolve URL for ${resolvedFirst.title}")
-                    showMessage?.invoke(getApplication<Application>().getString(R.string.resolve_url_endpoint_failed))
+                // G1-05：不能只覆盖网络歌 —— NAS 未连、本地 path 为空同样会静默空播。
+                // 解析彻底失败时直接返回，⛔ 不要用空 URL 调 playQueue（只会让 ExoPlayer 进错误态）。
+                if (resolvedFirst.streamUrl.isNullOrBlank()) {
+                    AppLog.w(
+                        "PlayerViewModel",
+                        "playQueue: unresolved streamUrl for ${resolvedFirst.title} (network=${resolvedFirst.isNetworkSong})"
+                    )
+                    showMessage?.invoke(
+                        getApplication<Application>().getString(
+                            if (resolvedFirst.isNetworkSong) R.string.resolve_url_endpoint_failed
+                            else R.string.play_url_unresolved
+                        )
+                    )
+                    return@launch
                 }
                 // 补全成功后持久化写回歌单（避免下次播放再补全一遍）
                 if (resolvedFirst.id != firstSong.id && firstSong.id.startsWith("imported_")) {
@@ -344,6 +355,16 @@ class PlayerViewModel(
 
                 AppLog.d("PlayerViewModel", "resolveAndPlayCurrentSong: resolved ${song.title} → $playUrl")
                 // 更新队列中当前歌曲的 streamUrl，然后播放
+                // G1-04：解析窗口内用户可能已切歌 —— next()/previous() 走「目标曲已有 URL」
+                // 分支时不会自增代数，只靠 generation 挡不住。回写前必须确认当前曲仍是
+                // 本次解析的那首，否则会把 A 的直链写到 B 的下标上。
+                if (playerState.value.currentSong?.id != song.id) {
+                    AppLog.d(
+                        "PlayerViewModel",
+                        "resolveAndPlayCurrentSong: current song changed (${playerState.value.currentSong?.title} != ${song.title}), drop result"
+                    )
+                    return@launch
+                }
                 val currentQueue = playerState.value.queue
                 val currentIndexValue = playerState.value.currentIndex
                 val updatedQueue = currentQueue.mapIndexed { index, s ->
@@ -392,6 +413,8 @@ class PlayerViewModel(
                 return
             }
         }
+        // G1-04：目标切换时作废在途的首曲解析（旧结果不得写到新下标上）。
+        invalidatePendingResolves()
         playerManager.next(_playMode.value)
     }
 
@@ -406,6 +429,8 @@ class PlayerViewModel(
                 return
             }
         }
+        // G1-04：同上，作废在途的首曲解析。
+        invalidatePendingResolves()
         playerManager.previous(_playMode.value)
     }
 

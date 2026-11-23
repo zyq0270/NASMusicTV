@@ -326,7 +326,11 @@ class SpectrumAnalyzer {
      * 该数据的唯一消费方（NowPlaying 48dp 小条）已随全屏舞台上线移除，故整条通道删除。
      */
     private fun emit() {
-        repository?.onFrame(displayBuf, linearBuf, waveBuf, android.os.SystemClock.uptimeMillis())
+        // B1-01：waveBuf 的唯一生产者（系统 Visualizer 的 fillWaveform）已随 v2.37.6
+        // 「PCM 唯一通道」删除，analyze() 从不写它、只有清零。继续传「非空全 0 数组」会让
+        // 照片墙「波形擦除」既不进无数据退化分支、又画出笔直边界 ⇒ 与线性擦除等价。
+        // 传 null 让它走已有的退化路径。
+        repository?.onFrame(displayBuf, linearBuf, null, android.os.SystemClock.uptimeMillis())
     }
 
     /**

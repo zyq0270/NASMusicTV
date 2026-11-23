@@ -430,18 +430,44 @@ object LogStore {
             diags.takeLast(DIAG_KEEP_LINES))
             .sortedBy { it.first }
             .map { it.second }
+        // G5-06：上限按**字节**、保留量按**行数**，两者没有约束关系；而 encode() 会把
+        // 整份堆栈塞进一行（2–8 KB/条）⇒ 保留集可能仍 > 256KB，此后每写一行都会触发
+        // 一次整文件重读 + 临时文件重写。这里从最新往回按字节裁到上限的一半（留增长空间）。
+        val byteBudget = (MAX_BYTES / 2).toLong()
+        val bounded = ArrayList<String>(kept.size)
+        var usedBytes = 0L
+        for (i in kept.indices.reversed()) {
+            val line = kept[i]
+            val lineBytes = line.toByteArray(Charsets.UTF_8).size.toLong() + 1L
+            if (bounded.isNotEmpty() && usedBytes + lineBytes > byteBudget) break
+            bounded.add(line)
+            usedBytes += lineBytes
+        }
+        bounded.reverse()
         val tmp = File(file.parentFile, "$FILE_NAME.tmp")
         runCatching {
-            tmp.writeText(kept.joinToString("\n", postfix = "\n"), Charsets.UTF_8)
+            tmp.writeText(bounded.joinToString("\n", postfix = "\n"), Charsets.UTF_8)
             // I1-01：已彻底移除 NIO 的 Files.move（API26+）。minSdk=22 在 API22-25
             // 设备上执行到那一行会抛 NoClassDefFoundError，被 runCatching 静默吞掉 →
             // 日志轮转永久失效、文件无限膨胀、分级配额与 256KB 上限全部失效。
-            // 现改为纯 java.io：同目录内先 renameTo（原子替换，API1 起可用），失败再
-            // copyTo(overwrite=true) 原地覆盖。⚠️ 绝不先 file.delete()：否则第二步一旦失败
-            // 会把已保留的 E 级日志整批删掉（§10.401 旧实现踩过的坑）。
+            // 现改为纯 java.io：同目录内先 renameTo（原子替换，API1 起可用）。
             if (!tmp.renameTo(file)) {
-                tmp.copyTo(file, overwrite = true)
-                tmp.delete()
+                // G5-05：⛔ 不能用 copyTo(overwrite = true) —— 它在 kotlin.io 内部就是
+                // 「先 target.delete() 再拷贝」，复制中途失败会把已保留的 E 级日志整批删掉
+                //（正是旧注释声称要避免的事故）。改为 bak 中转 + 原子改名，任一失败都回滚。
+                val bak = File(file.parentFile, "$FILE_NAME.bak")
+                runCatching { bak.delete() }
+                val hadOriginal = file.exists()
+                if (!hadOriginal || file.renameTo(bak)) {
+                    if (tmp.renameTo(file)) {
+                        runCatching { bak.delete() }
+                    } else {
+                        if (hadOriginal) runCatching { bak.renameTo(file) }
+                        runCatching { tmp.delete() }
+                    }
+                } else {
+                    runCatching { tmp.delete() }
+                }
             }
         }.onFailure { runCatching { tmp.delete() } }
     }

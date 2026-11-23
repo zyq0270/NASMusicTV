@@ -703,7 +703,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
                     // 平台快照回填：收藏时存下的平台在回放时交给洛雪增强器按原平台取链，
                     // 避免切换全局平台后收藏歌曲解析失败（老数据为 null ⇒ 回退当前平台）。
                     networkPlatform = item.networkPlatform,
-                    isLocalSong = isLocal
+                    isLocalSong = isLocal,
+                    // G6-01：storageType 决定 sourceType（DOWNLOAD 优先于 LOCAL）。
+                    // 不回填时已下载收藏会被判成纯本地歌，关闭「本地音乐」后从收藏消失。
+                    storageType = item.storageType
                 )
                 song.takeIf { sourceVisibility.isVisible(it) }
             }
@@ -996,10 +999,25 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
                 _artistSongsMap.value = _artistSongsMap.value.mapValues { (_, songs) ->
                     songs.filter { it.sourceType != MusicSourceType.NAS }
                 }
+                // G6-02：详情缓存原先**零失效** —— 关掉 NAS 后再进已打开过的专辑/歌手，
+                // 旧 NAS 歌照常列出并可播放。按源过滤（空 key 丢弃，下次进入重新加载）。
+                _albumSongsCache.value = _albumSongsCache.value
+                    .mapValues { (_, songs) -> songs.filter { it.sourceType != MusicSourceType.NAS } }
+                    .filterValues { it.isNotEmpty() }
+                _artistDetailSongsCache.value = _artistDetailSongsCache.value
+                    .mapValues { (_, songs) -> songs.filter { it.sourceType != MusicSourceType.NAS } }
+                    .filterValues { it.isNotEmpty() }
             }
             AppPreferences.SOURCE_BAIDU -> {
                 // 百度独有，仅由 baiduIndexCache 填充，UI 直读
                 _baiduIndexedSongs.value = emptyList()
+                // G6-02：同样要清掉详情缓存里的百度段
+                _albumSongsCache.value = _albumSongsCache.value
+                    .mapValues { (_, songs) -> songs.filter { it.sourceType != MusicSourceType.BAIDU_PAN } }
+                    .filterValues { it.isNotEmpty() }
+                _artistDetailSongsCache.value = _artistDetailSongsCache.value
+                    .mapValues { (_, songs) -> songs.filter { it.sourceType != MusicSourceType.BAIDU_PAN } }
+                    .filterValues { it.isNotEmpty() }
             }
             NetworkSongId.METING_SOURCE -> {
                 // 同上：只去掉网络歌，保留 NAS 段
@@ -1011,6 +1029,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
                 // containsKey 直接短路、不会再加载）。用 filterValues 去掉变空的 key，让下次
                 // 进入重新走门控后的加载；非空 key 保留 NAS/本地/百度段。
                 _artistDetailSongsCache.value = _artistDetailSongsCache.value
+                    .mapValues { (_, songs) ->
+                        songs.filterNot { it.networkSource == NetworkSongId.METING_SOURCE }
+                    }
+                    .filterValues { it.isNotEmpty() }
+                // G6-02：专辑详情缓存同样要清掉网络段，否则关网络源后旧歌复活。
+                _albumSongsCache.value = _albumSongsCache.value
                     .mapValues { (_, songs) ->
                         songs.filterNot { it.networkSource == NetworkSongId.METING_SOURCE }
                     }
@@ -2233,7 +2257,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
                     try {
                         val newSongs = adapter.getRandomSongs(20)
                         if (newSongs.isNotEmpty()) {
-                            playerManager.addToQueue(newSongs)
+                            val added = playerManager.addToQueue(newSongs)
+                            // G1-07：全部已在队列中（小曲库 / 单专辑）时不能每 5 秒继续拉 ——
+                            // 退避 30 秒，给用户切歌或换源的时间。
+                            if (added == 0) {
+                                delay(30000)
+                                continue
+                            }
                         }
                     } catch (e: Exception) {
                         e.rethrowIfCancellation()
@@ -2721,6 +2751,10 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
         _artists.value = UiState.Success(emptyList())
         _years.value = UiState.Success(emptyList())
         _recentSongs.value = UiState.Success(emptyList())
+        // G6-02：刷新曲库必须让详情缓存一起失效，否则新下载/新入库的曲目不会出现在
+        // 已打开过的专辑详情里，旧结果会一直留到杀进程。
+        _albumSongsCache.value = emptyMap()
+        _artistDetailSongsCache.value = emptyMap()
         searchVM.clearSearch()
         loadLibrary()
     }
@@ -3382,7 +3416,9 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
         // ⚠️ 本签名的字面量 "fun openAlbumDetail(album: Album)" 被 AlbumDetailFlowGateTest T2
         //    用作 region 起点，必须逐字保留，不要加默认参数或改参数名。
         // loadAlbumSongs(album) 字面量同样被该门禁断言，条件内调用即可满足。
-        if (!_albumSongsCache.value.containsKey(album.id)) {
+        // G6-02：搜索态专辑的键（search_album_<名字+歌手>）跨关键词稳定，命中缓存会
+        // 直接显示上一次搜索的结果 ⇒ 这类专辑**不短路**，每次按当前搜索结果重取。
+        if (album.id.startsWith("search_album_") || !_albumSongsCache.value.containsKey(album.id)) {
             loadAlbumSongs(album)
         }
         navVM.navigateTo(Screen.AlbumDetail)
@@ -4784,6 +4820,15 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
             val imageLoader = Coil.imageLoader(context)
             imageLoader.memoryCache?.clear()
             imageLoader.diskCache?.clear()
+            // G8-01：关掉「自动缓存封面」后 buildImageLoader 不再配置 diskCache，
+            // 此时 diskCache?.clear() 直接跳过 —— 但 image_cache 目录仍在、占用清单
+            // 也仍在统计它 ⇒ 清除按钮变成空操作、占用永远清不掉。
+            // 无条件再删一次目录（失败只记日志，不影响内存缓存已清空的结果）。
+            val imageCacheDir = java.io.File(context.cacheDir, "image_cache")
+            if (imageCacheDir.exists()) {
+                runCatching { imageCacheDir.deleteRecursively() }
+                    .onFailure { AppLog.w("MainViewModel", "clearCoverCache: delete image_cache failed", it) }
+            }
             AppLog.d("MainViewModel", "clearCoverCache: cache cleared")
             postLocalConnectMessage(
                 getApplication<Application>().getString(R.string.status_cover_cache_cleared))
@@ -4974,6 +5019,10 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
     val radioActiveTag: StateFlow<String?> = _radioActiveTag.asStateFlow()
     private val _radioActiveQuery = MutableStateFlow("")
     val radioActiveQuery: StateFlow<String> = _radioActiveQuery.asStateFlow()
+    // G6-03：电台搜索在拼音兜底后变成两次串行请求，必须有 Job 取消 + 代数守卫，
+    // 否则先发的慢请求会覆盖新关键词的结果（与 browseRefresh / SearchViewModel 同款）。
+    private var radioLoadJob: Job? = null
+    private var radioLoadGeneration = 0L
 
     /**
      * 加载默认电台列表（中文电台热门）。幂等：当前无筛选且已有数据则跳过。
@@ -5018,8 +5067,12 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
         pinyinFallback: Boolean = false,
         limit: Int = 50
     ) {
-        viewModelScope.launch {
-            _radioStations.value = UiState.Loading
+        radioLoadJob?.cancel()
+        val generation = ++radioLoadGeneration
+        // G8-03：同步置 Loading（不能等 launch 调度），否则首帧会先看到
+        // Success(emptyList()) 对应的「加载失败」文案。
+        _radioStations.value = UiState.Loading
+        radioLoadJob = viewModelScope.launch {
             try {
                 val client = nasMusicApp.radioBrowserClient
                 val direct = client.searchStations(
@@ -5035,11 +5088,15 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
                 } else {
                     emptyList()
                 }
+                // G6-03：代数失配 ⇒ 已有更新的搜索在跑，旧结果直接丢弃
+                if (generation != radioLoadGeneration) return@launch
                 _radioStations.value = UiState.Success((direct + fallback).distinctBy { it.uuid })
             } catch (e: Exception) {
                 e.rethrowIfCancellation()
                 AppLog.e("Radio", "loadRadioStations failed: ${e.message}", e)
-                _radioStations.value = UiState.Error(message = getApplication<Application>().getString(R.string.radio_load_failed))
+                if (generation == radioLoadGeneration) {
+                    _radioStations.value = UiState.Error(message = getApplication<Application>().getString(R.string.radio_load_failed))
+                }
             }
         }
     }

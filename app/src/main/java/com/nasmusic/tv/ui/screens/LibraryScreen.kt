@@ -896,6 +896,9 @@ fun LibraryScreen(
                                     favoriteIds = favoriteIds,
                                     songsPaging = songsPaging,
                                     isSearching = isSearching,
+                                    // G8-02：有搜索词时结果数 ≠ NAS 全库数。另一个搜索分支
+                                    // 已传 false，这里漏传导致「共 0 / 5000 首」的误导标题。
+                                    showTotalCount = filterQuery.isBlank(),
                                     onLoadMore = onLoadSongsNextPage,
                                     listState = songListState,
                                     onPlaySong = onPlaySong,

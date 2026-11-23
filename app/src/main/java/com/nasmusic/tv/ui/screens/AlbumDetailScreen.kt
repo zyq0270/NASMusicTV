@@ -252,8 +252,13 @@ fun AlbumDetailScreen(
                         onRetry = onRetry,
                         modifier = m
                     )
+                    // G7-02：空态必须给重试入口 —— openAlbumDetail 命中缓存短路、
+                    // loadAlbumSongs 会把 0 首结果写进缓存，一次空结果会让该专辑永久
+                    // 停在「暂无歌曲」，退出重进也不会重取（歌手详情早有重试）。
                     songs.isEmpty() -> EmptyState(
                         message = stringResource(R.string.library_no_songs),
+                        actionText = stringResource(R.string.list_retry),
+                        onAction = onRetry,
                         modifier = m
                     )
                     else -> LazyColumn(

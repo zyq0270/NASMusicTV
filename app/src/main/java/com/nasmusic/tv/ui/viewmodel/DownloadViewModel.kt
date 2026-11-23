@@ -312,8 +312,21 @@ class DownloadViewModel(
         viewModelScope.launch {
             val app = nasMusicApp
             val repo = app.downloadRepository
-            val key = song.downloadKey
-            val entity = repo.get(key) ?: return@launch
+            // G4-01：手动下载的网络曲恒落在带档位的键（`ntwk_<src>_<id>:q<quality>`），
+            // 用无档位键 `song.downloadKey` 查库恒为 null ⇒ 旧实现静默 return，
+            // 用户点 ✓ → 二次确认 → 什么都没发生（文件/DB/✓/提示全不动）。
+            // 改为按 songId 取该曲全部已完成档位记录，逐条删除。
+            val targets = repo.downloadedQualitiesOf(song.id)
+                .filter { it.status == DownloadStatus.COMPLETED.name }
+                .toMutableList()
+            repo.get(song.downloadKey)
+                ?.takeIf { it.status == DownloadStatus.COMPLETED.name }
+                ?.let { legacy -> if (targets.none { it.songKey == legacy.songKey }) targets.add(legacy) }
+            if (targets.isEmpty()) {
+                AppLog.w("DownloadViewModel", "deleteDownload: no completed record for ${song.title}")
+                showMessage(getApplication<Application>().getString(R.string.download_delete_not_found))
+                return@launch
+            }
 
             // 1. 如果当前正在播放此歌 → 暂停
             val current = playerManager.playerState.value.currentSong
@@ -321,22 +334,24 @@ class DownloadViewModel(
                 playerManager.pause()
             }
 
-            // 2. 删除文件
-            entity.audioPath?.let { path ->
-                val f = java.io.File(path)
-                if (f.exists()) {
-                    f.delete()
+            targets.forEach { entity ->
+                // 2. 删除文件
+                entity.audioPath?.let { path ->
+                    val f = java.io.File(path)
+                    if (f.exists()) {
+                        f.delete()
+                    }
                 }
-            }
-            entity.coverPath?.let { java.io.File(it).delete() }
-            entity.lyricPath?.let { java.io.File(it).delete() }
+                entity.coverPath?.let { java.io.File(it).delete() }
+                entity.lyricPath?.let { java.io.File(it).delete() }
 
-            // 3. 删除 download_songs 记录
-            repo.delete(key)
+                // 3. 删除 download_songs 记录
+                repo.delete(entity.songKey)
 
-            // 4. 从 local_songs 移除（path 存的是 "file://..." URI，需加前缀匹配）
-            entity.audioPath?.let { path ->
-                app.localMusicRepository.removeByPaths(listOf("file://$path"))
+                // 4. 从 local_songs 移除（path 存的是 "file://..." URI，需加前缀匹配）
+                entity.audioPath?.let { path ->
+                    app.localMusicRepository.removeByPaths(listOf("file://$path"))
+                }
             }
 
             // 5. 刷新内存

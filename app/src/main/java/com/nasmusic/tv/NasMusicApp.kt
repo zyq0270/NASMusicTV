@@ -444,6 +444,7 @@ val baiduOAuthClient: BaiduOAuthClient by lazy { BaiduOAuthClient(this, baiduOkH
         }
     )
 
+    @OptIn(coil.annotation.ExperimentalCoilApi::class)
     override fun onCreate() {
         super.onCreate()
         // v2.39.4：运行日志落盘（设置页「日志」tab）+ 崩溃留痕。
@@ -469,7 +470,12 @@ val baiduOAuthClient: BaiduOAuthClient by lazy { BaiduOAuthClient(this, baiduOkH
                 DownloadGate.enabled = s.downloadEnabled
                 if (coverDiskCacheEnabled != s.cacheCover) {
                     coverDiskCacheEnabled = s.cacheCover
+                    // G5-03：Coil.setImageLoader 不会关闭旧 loader —— 旧 DiskCache 的
+                    // journal 句柄、OkHttp 线程池/连接池与内存缓存都会泄漏，
+                    // 同一 image_cache 目录还会短暂出现两个 DiskCache。
+                    val previous = runCatching { coil.Coil.imageLoader(this@NasMusicApp) }.getOrNull()
                     Coil.setImageLoader(buildImageLoader(s.cacheCover))
+                    runCatching { previous?.shutdown() }
                 }
             }
         }
@@ -513,7 +519,19 @@ val baiduOAuthClient: BaiduOAuthClient by lazy { BaiduOAuthClient(this, baiduOkH
         //    会把用户已关掉的源错误地注册回来（症状：关了还在搜索里出现）。
         // v2.39.23：三条 Flow 合并成一次 readBootSnapshot() ⇒ 主线程只等一次 DataStore 读，
         // 不再是三次串行 runBlocking。注册语义不变（仍同步），需要异步注册是架构级改动。
-        val boot = runBlocking { appPreferences.readBootSnapshot() }
+        // G5-02：读设置失败不能阻断启动（否则 preferences_pb 损坏即崩溃循环）。
+        // DataStore 侧已配 ReplaceFileCorruptionHandler 自愈；这里兜住其它 IO 异常，
+        // 退化为默认设置启动（用户重新连接/设置即可，不会丢应用数据）。
+        val boot = try {
+            runBlocking { appPreferences.readBootSnapshot() }
+        } catch (e: Exception) {
+            AppLog.e("NasMusicApp", "readBootSnapshot failed, fall back to defaults", e)
+            com.nasmusic.tv.data.prefs.AppPreferences.BootSnapshot(
+                settings = com.nasmusic.tv.data.model.AppSettings(),
+                jamendoClientId = "",
+                baiduActive = false
+            )
+        }
         val bootSettings = boot.settings
         // 缓存开关的启动期播种：ImageLoader / LyricsPersistentCache 可能在任何设置页打开前
         // 就被首帧使用，不能等设置收集器异步跑第一轮。

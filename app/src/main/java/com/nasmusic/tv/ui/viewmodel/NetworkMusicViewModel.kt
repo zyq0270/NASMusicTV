@@ -103,6 +103,8 @@ class NetworkMusicViewModel(app: Application) : AndroidViewModel(app) {
                     // 平台快照随收藏落盘：搜索解析时 Song 已带 networkPlatform，
                     // 回放时据此按原平台取链（洛雪增强器读 Song.networkPlatform）。
                     networkPlatform = song.networkPlatform,
+                    // G6-01：已下载歌曲要保住 storageType，否则重建后 sourceType 落回 LOCAL
+                    storageType = song.storageType,
                     addedAtMs = System.currentTimeMillis()
                 )
                 prefs.history.toggleNetworkFavorite(item)

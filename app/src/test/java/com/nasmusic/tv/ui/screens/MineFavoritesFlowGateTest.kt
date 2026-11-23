@@ -86,9 +86,12 @@ class MineFavoritesFlowGateTest {
             "T2（入口回调）：MineBranch 未传 onOpenServerPlaylists。",
             src.contains("onOpenServerPlaylists = {")
         )
+        // G8-06：拉数据统一由 PlaylistManagementBranch 的 LaunchedEffect 负责；
+        // ⛔ MineBranch 不得再直接调 —— 两处都调会发两个相同请求，第二次的 Loading
+        // 还会把已到的列表瞬时压成「暂无歌单」。
         assertTrue(
-            "T2（拉数据）：首次进入不 loadPlaylists() ⇒ 歌单列表恒空（此前只在重开 NAS 源时调）。",
-            src.contains("viewModel.loadPlaylists()")
+            "T2（重复拉取）：MineBranch 不应再直接 loadPlaylists（分支已负责）。",
+            !src.contains("viewModel.loadPlaylists()")
         )
         assertTrue(
             "T2（导航）：未跳 Screen.PlaylistManagement ⇒ 服务端歌单页仍不可达。",

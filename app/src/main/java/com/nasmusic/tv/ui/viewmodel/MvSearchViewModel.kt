@@ -230,7 +230,17 @@ class MvSearchViewModel(
         val pending = pendingNextResult
         if (pending != null) {
             skipNextMvSearch = true
-            playerManager.advanceIndexSilently(playMode)
+            val advancedSong = playerManager.advanceIndexSilently(playMode)
+            if (advancedSong == null) {
+                // G3-04：与 onMvPlaybackEnded 同口径 —— 索引未推进时不能置 mvAdvanced=true，
+                // 否则 exitMvMode 会 syncAndPlayCurrent() 从 0 重播当前曲。
+                skipNextMvSearch = false
+                mvAdvanced = false
+                pendingNextResult = null
+                _mvState.value = MvAvailability.NotFound
+                AppLog.d("MvSearchViewModel", "onMvNext: queue end, resume from paused position (no rewind)")
+                return
+            }
             mvAdvanced = true
             _mvState.value = MvAvailability.Ready(pending.mv, pending.alternatives)
             pendingNextResult = null

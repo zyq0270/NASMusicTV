@@ -208,6 +208,7 @@ class DaoliyuAdapter : BackendAdapter {
             val allAlbums = mutableListOf<Album>()
             var page = 1
             var maxPages = MAX_ALBUM_PAGES
+            var fetched = 0
             while (maxPages-- > 0) {
                 // 无响应 = 本次请求失败，不是「这一页没有专辑」：吞掉会把失败伪装成空曲库。
                 val json = executeGet("$baseUrl/api/albums?page=$page&limit=$PAGE_SIZE")
@@ -216,7 +217,16 @@ class DaoliyuAdapter : BackendAdapter {
                     ?: throw IllegalStateException("Daoliyu getAlbums 第 $page 页缺少 data")
                 if (data.size() == 0) break
                 allAlbums.addAll(data.mapNotNull { parseAlbum(it.asJsonObject) })
-                if (data.size() < PAGE_SIZE) break
+                fetched += data.size()
+                // G2-08：优先用信封 total 判末页。⛔ 只用「短页即末页」时，服务端若把
+                // limit 压得更小（如 100/页），第一页就会被误判为末页、专辑静默只剩前 100 张。
+                val total = json.get("total")?.takeIf { it.isJsonPrimitive }?.asInt
+                val reachedEnd = if (total != null && total > 0) {
+                    fetched >= total
+                } else {
+                    data.size() < PAGE_SIZE
+                }
+                if (reachedEnd) break
                 page++
             }
             allAlbums
@@ -242,19 +252,44 @@ class DaoliyuAdapter : BackendAdapter {
 
     // ==================== 歌手 ====================
 
-    /** ⚠️ INFERRED: GET /api/artists?page=1&limit=500 */
+    /** ⚠️ INFERRED: GET /api/artists?page=N&limit=500 —— 与 getAlbums 同款全量分页 */
     override suspend fun getArtists(): List<Artist> = withContext(Dispatchers.IO) {
         try {
-            // 无响应 = 请求失败，不是「没有艺术家」；交给上层产生 UiState.Error
-            val json = executeGet("$baseUrl/api/artists?page=1&limit=$PAGE_SIZE")
-                ?: throw IllegalStateException("Daoliyu getArtists 无响应")
-            val data = json.getAsJsonArray("data") ?: json.getAsJsonArray("artists") ?: return@withContext emptyList()
-            data.mapNotNull { parseArtist(it.asJsonObject) }
+            val allArtists = mutableListOf<Artist>()
+            var page = 1
+            var maxPages = MAX_ALBUM_PAGES
+            var fetched = 0
+            while (maxPages-- > 0) {
+                // 无响应 = 请求失败，不是「没有艺术家」；交给上层产生 UiState.Error
+                val json = executeGet("$baseUrl/api/artists?page=$page&limit=$PAGE_SIZE")
+                    ?: throw IllegalStateException("Daoliyu getArtists 第 $page 页无响应")
+                val data = json.getAsJsonArray("data") ?: json.getAsJsonArray("artists")
+                    ?: throw IllegalStateException("Daoliyu getArtists 第 $page 页缺少 data")
+                if (data.size() == 0) break
+                allArtists.addAll(data.mapNotNull { parseArtist(it.asJsonObject) })
+                fetched += data.size()
+                // G2-07 / G2-08：原先只取第一页（>500 艺术家静默截断），且只用短页判末页。
+                val total = json.get("total")?.takeIf { it.isJsonPrimitive }?.asInt
+                val reachedEnd = if (total != null && total > 0) {
+                    fetched >= total
+                } else {
+                    data.size() < PAGE_SIZE
+                }
+                if (reachedEnd) break
+                page++
+            }
+            allArtists
         } catch (e: Exception) {
             AppLog.e(TAG, "getArtists failed", e)
             throw e
         }
     }
+
+    /**
+     * G2-09：本实现带 `?name=` 过滤（见下方 getArtistSongs），按 BackendAdapter 契约
+     * 必须覆盖此标记，否则调用方会为「同一人的多个原始 ID」发出 N 条相同名字的请求。
+     */
+    override val queriesArtistSongsByName: Boolean = true
 
     /** ⚠️ INFERRED: GET /api/artists/{id}/songs */
     override suspend fun getArtistSongs(artistId: String, artistName: String?): List<Song> = withContext(Dispatchers.IO) {

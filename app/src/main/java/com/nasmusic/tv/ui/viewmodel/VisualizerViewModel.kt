@@ -444,6 +444,14 @@ class VisualizerViewModel(
             prefs.appSettings.collect { s ->
                 latestSettings = s
                 _theme.value = s.visualizerTheme
+                // B2-02：兜住历史非法存档（主题与画质互不支持，例如从支持 FLAC/高预算的
+                // 设备备份恢复）。回落默认并持久化，否则每次启动都停在不可用效果上。
+                if (s.visualizerTheme != VisualizerTheme.Default &&
+                    !s.visualizerQuality.supports(s.visualizerTheme)
+                ) {
+                    _theme.value = VisualizerTheme.Default
+                    persist()
+                }
                 _quality.value = s.visualizerQuality
                 val available = PhotoWallAvailability.isAvailable(
                     galleryEnabled = s.photoWallGalleryEnabled,
@@ -552,9 +560,12 @@ fun nextTheme() = step(+1)
 
     fun setQuality(q: VisualQuality) {
         _quality.value = q
-        // 降档后当前效果可能不再支持 → 回落到默认
+        // 降档后当前效果可能不再支持 → 回落到默认。
+        // B2-02：必须**持久化**回落结果 —— 写画质会让同一 DataStore 再发一次快照，
+        // settings 收集器随即用持久化主题覆盖回来，重效果会在 LOW 档继续跑。
         if (!q.supports(_theme.value)) {
             _theme.value = VisualizerTheme.Default
+            persist()
         }
         viewModelScope.launch { prefs.setVisualizerQuality(q) }
     }
@@ -576,6 +587,9 @@ fun nextTheme() = step(+1)
      *
      * ⚠️ 无论哪条路都**不写任何「已授权」标志**（§9.4）。
      */
+    /** B2-04：是否已拉起过一次系统相册权限对话框（区分「从未申请」与「被永久拒绝」）。 */
+    private var galleryPermissionRequested = false
+
     fun setGallerySourceEnabled(enabled: Boolean) {
         if (!enabled) {
             viewModelScope.launch { prefs.photoWall.setGalleryEnabled(false) }
@@ -602,7 +616,29 @@ fun nextTheme() = step(+1)
             _photoAccessNotice.tryEmit(PhotoAccessNotice.GALLERY_DENIED)
             return
         }
+        // B2-04：Android 11+ 两次拒绝后系统不再弹框（回调全 false），反复申请只会让开关
+        // 闪一下又弹回。首次申请走系统对话框；之后再被拒就直接打开应用详情页，
+        // 给用户一条可自查、可恢复的路径。
+        if (galleryPermissionRequested &&
+            PermissionHelper.photoPermissionState(app) == PermissionHelper.PhotoPermissionState.DENIED
+        ) {
+            _photoAccessNotice.tryEmit(PhotoAccessNotice.GALLERY_DENIED)
+            openAppSettings()
+            return
+        }
+        galleryPermissionRequested = true
         launcher.invoke()
+    }
+
+    /** 打开本应用的系统设置页（B2-04：权限永久拒绝后的唯一恢复入口） */
+    private fun openAppSettings() {
+        runCatching {
+            val intent = android.content.Intent(
+                android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                android.net.Uri.fromParts("package", app.packageName, null)
+            ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            app.startActivity(intent)
+        }.onFailure { AppLog.w("VisualizerViewModel", "open app settings failed", it) }
     }
 
     /**

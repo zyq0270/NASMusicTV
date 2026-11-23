@@ -20,6 +20,7 @@ import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -71,8 +72,11 @@ fun RadioTab(
     var showSearchDialog by remember { mutableStateOf(false) }
     val listState = androidx.compose.foundation.lazy.grid.rememberLazyGridState()
 
-    // 默认榜加载统一由 LibraryScreen 的 LaunchedEffect(activeTab) 触发（onLoadRadioDefault），
-    // 这里不再重复调用 onLoadDefault —— 消除首次进入 RADIO 的冗余触发。
+    // G8-03：RADIO 页在 pager 里会被**提前组合**，而 LibraryScreen 的 activeTab 要等
+    // 入场动画（260ms）结束才提交 ⇒ 组合期状态仍是初值 Success(emptyList())，
+    // 空态文案会显示「电台加载失败」。这里补一次幂等触发（VM 侧非空即短路）；
+    // VM 在发起加载时同步置 Loading，因此首帧就是「加载中」。
+    LaunchedEffect(Unit) { onLoadDefault() }
 
     // v2.36.0 竖屏（方案 §2.4 / P0-23）：340dp 搜索框与 N 个 preset tag 同行 → tag 被推出屏幕且滑不到
     val isPhonePortrait = LocalUiMode.current == UiMode.PhonePortrait

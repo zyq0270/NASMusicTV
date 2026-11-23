@@ -358,10 +358,13 @@ enum class SearchType {
         val localDeferred = async {
             // ⚠️ 旧条件为 `MusicSourceType.LOCAL in sources && localMusicRepository != null && localMusicEnabled()`；
             // 那样会把「关闭本地」变成「已下载也消失」，与 SourceVisibility 的
-            //「关 = 只显示已下载」自相矛盾。现在分支恒进、由 localOn 决定保留范围：
+            //「关 = 只显示已下载」自相矛盾。
+            // G2-01：调用点传的 sources 恰好是用**同一个** localMusicEnabled 开关减出来的，
+            // 因此 `LOCAL in sources` 与 localOn 恒等价，`!localOn` 分支永远不可达。
+            // 现在分支只判 repository 是否存在，由 localOn 决定保留范围：
             // 关闭时只保留 storageType=DOWNLOAD，并把它标成 DOWNLOAD 分支，
             // 让结果层的 `visible(it.source)` 仍成立（不必放宽全局过滤）。
-            if (MusicSourceType.LOCAL in sources && localMusicRepository != null) {
+            if (localMusicRepository != null) {
                 val localOn = localMusicEnabled()
                 try {
                     val rank: (Song) -> RankedSong = { song ->

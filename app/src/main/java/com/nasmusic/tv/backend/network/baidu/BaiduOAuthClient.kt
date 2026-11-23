@@ -104,25 +104,30 @@ class BaiduOAuthClient(
                     return@use null
                 }
                 // 检查百度返回的 error 字段（即使 HTTP 200 也可能带 error）
-                val error = json.get("error")?.asString
+                // G3-05：JsonNull/JsonObject/JsonArray 不是 JsonPrimitive，裸 .asString 会抛
+                // UnsupportedOperationException（被外层 catch 吞成「授权失败」并弹原始异常文本）。
+                val error = json.get("error")?.takeIf { it.isJsonPrimitive }?.asString
                 if (error != null) {
-                    val desc = json.get("error_description")?.asString ?: error
+                    val desc = json.get("error_description")?.takeIf { it.isJsonPrimitive }?.asString ?: error
                     AppLog.w(TAG, "requestDeviceCode: API error='$error' desc='$desc'")
                     return@use null
                 }
-                val deviceCode = json.get("device_code")?.asString ?: run {
+                val deviceCode = json.get("device_code")?.takeIf { it.isJsonPrimitive }?.asString ?: run {
                     AppLog.w(TAG, "requestDeviceCode: missing device_code in response, keys=${json.keySet()}")
                     return@use null
                 }
                 DeviceCodeResult(
                     deviceCode = deviceCode,
-                    userCode = json.get("user_code")?.asString ?: "",
-                    verificationUrl = json.get("verification_url")?.asString
+                    userCode = json.get("user_code")?.takeIf { it.isJsonPrimitive }?.asString ?: "",
+                    verificationUrl = json.get("verification_url")?.takeIf { it.isJsonPrimitive }?.asString
                         ?: BaiduNetdiskConfig.VERIFICATION_URL,
                     // 校验为完整 http(s) URL，避免接口返回相对路径导致二维码不可扫描
-                    qrcodeUrl = json.get("qrcode_url")?.asString?.takeIf { it.startsWith("http://") || it.startsWith("https://") },
-                    expiresIn = json.get("expires_in")?.asInt ?: BaiduNetdiskConfig.DEVICE_CODE_EXPIRE_SEC,
-                    interval = json.get("interval")?.asInt ?: BaiduNetdiskConfig.DEFAULT_POLL_INTERVAL_SEC
+                    qrcodeUrl = json.get("qrcode_url")?.takeIf { it.isJsonPrimitive }?.asString
+                        ?.takeIf { it.startsWith("http://") || it.startsWith("https://") },
+                    expiresIn = json.get("expires_in")?.takeIf { it.isJsonPrimitive }?.asInt
+                        ?: BaiduNetdiskConfig.DEVICE_CODE_EXPIRE_SEC,
+                    interval = json.get("interval")?.takeIf { it.isJsonPrimitive }?.asInt
+                        ?: BaiduNetdiskConfig.DEFAULT_POLL_INTERVAL_SEC
                 )
             }
         } catch (e: Exception) {
@@ -188,14 +193,15 @@ class BaiduOAuthClient(
                     AppLog.i(TAG, "device code auth success, scope='$grantedScope'")
                     return@use PollResult.Success(tokens)
                 }
-                // 错误码判定
-                val error = json.get("error")?.asString
+                // 错误码判定（G3-05：同样只接受 JsonPrimitive）
+                val error = json.get("error")?.takeIf { it.isJsonPrimitive }?.asString
                 when (error) {
                     "authorization_pending" -> PollResult.Pending
                     "authorization_declined" -> PollResult.Declined
                     "slow_down" -> PollResult.SlowDown(BaiduNetdiskConfig.DEFAULT_POLL_INTERVAL_SEC * 2)
                     else -> {
-                        val desc = json.get("error_description")?.asString ?: error ?: body.take(100)
+                        val desc = json.get("error_description")?.takeIf { it.isJsonPrimitive }?.asString
+                            ?: error ?: body.take(100)
                         AppLog.w(TAG, "pollDeviceToken error: $desc")
                         PollResult.Failed(desc)
                     }

@@ -19,6 +19,9 @@ package com.nasmusic.tv.data.model
  *   避免用户切换全局平台后 collect 的歌因平台错配而解析失败。
  *   ⚠️ 可空 + 默认值：历史收藏 JSON 无此字段，Gson 反序列化后为 null ⇒ 增强器回退当前全局平台，
  *   与旧行为一致（不迁移、不丢数据）。
+ * @param storageType 收藏时的本地存储类型（"DOWNLOAD" 等）。G6-01：`Song.sourceType` 的
+ *   第一判据是 `storageType == "DOWNLOAD"`，不存这一列时已下载收藏会被重建成 LOCAL，
+ *   关闭「本地音乐」后从收藏里消失、心形也点不亮。可空 + 默认值兼容历史 JSON。
  * @param addedAtMs 收藏时间戳（毫秒）
  */
 data class NetworkFavoriteItem(
@@ -30,5 +33,6 @@ data class NetworkFavoriteItem(
     val networkSource: String,
     val networkId: String,
     val networkPlatform: String? = null,
+    val storageType: String? = null,
     val addedAtMs: Long
 )

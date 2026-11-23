@@ -150,7 +150,8 @@ class BackendRegistry(private val appContext: Context? = null) {
             synchronized(lock) {
                 if (generation == initGeneration) lastErrorDetail = detail
             }
-            false
+            // B1-04：此处已释放过一次 adapter；直接返回，⛔ 不要落到底部 else 再 release 一次
+            return@withContext false
         }
 
         if (success) {

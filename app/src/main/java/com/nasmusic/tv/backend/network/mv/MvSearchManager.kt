@@ -43,13 +43,16 @@ class MvSearchManager(
         val key = buildCacheKey(song.title, song.artist, song.networkSource)
         // 清理过期条目
         val now = System.currentTimeMillis()
-        cache.entries.removeAll { (_, v) -> now - v.timestamp >= cacheTtlMs }
 
-        if (!forceRefresh) {
+        // G3-03：本段原先在主线程执行 —— MvPersistentCache.get() 首次会同步读盘并解析
+        // 最多 5000 条 JSON，remove() 会同步整表重写并落盘。全部调用方是 viewModelScope。
+        val cachedResult: MvSearchResult? = withContext(Dispatchers.IO) {
+            cache.entries.removeAll { (_, v) -> now - v.timestamp >= cacheTtlMs }
+            if (forceRefresh) return@withContext null
             // 1. 内存缓存命中（45min TTL，含直链）
             cache[key]?.let {
                 AppLog.d(TAG, "searchMvFor: memory cache hit for '$key'")
-                return it.result
+                return@withContext it.result
             }
 
             // 2. 持久缓存命中 -> 按 bvid 拿新鲜直链（省搜索请求）
@@ -59,13 +62,15 @@ class MvSearchManager(
                 if (mv != null) {
                     val result = MvSearchResult(mv, emptyList())
                     cache[key] = CachedResult(result, now)
-                    return result
+                    return@withContext result
                 }
                 // resolveMv 失败（视频被删/风控）-> 删旧条目，继续走搜索
                 AppLog.d(TAG, "searchMvFor: persistent bvid=${entry.bvid} resolve failed, removing")
                 persistentCache.remove(song.id)
             }
+            null
         }
+        if (cachedResult != null) return cachedResult
 
         // 3. 搜索 API（forceRefresh=true 时跳过缓存直接搜）
         return withContext(Dispatchers.IO) {

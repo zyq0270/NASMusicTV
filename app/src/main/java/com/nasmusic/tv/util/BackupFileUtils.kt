@@ -78,6 +78,19 @@ object BackupFileUtils {
         return "$FILE_PREFIX$ts$FILE_SUFFIX"
     }
 
+    /** 同秒冲突时追加 `_1`、`_2`…（B2-06：API&lt;29 分支直写同名文件会覆盖前一份备份） */
+    private fun uniqueBackupFile(dir: File, fileName: String): File {
+        var candidate = File(dir, fileName)
+        if (!candidate.exists()) return candidate
+        val base = fileName.removeSuffix(FILE_SUFFIX)
+        var index = 1
+        while (candidate.exists()) {
+            candidate = File(dir, "${base}_$index$FILE_SUFFIX")
+            index++
+        }
+        return candidate
+    }
+
     /**
      * 导出备份 JSON 到 Downloads/NASMusic/
      *
@@ -109,9 +122,18 @@ object BackupFileUtils {
                 val collection = MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
                 val uri = context.contentResolver.insert(collection, values)
                     ?: return Result.failure(Exception(context.getString(R.string.backup_util_create_failed)))
-                context.contentResolver.openOutputStream(uri)?.use { out ->
-                    out.write(bytes)
-                } ?: return Result.failure(Exception(context.getString(R.string.backup_util_write_failed)))
+                val out = context.contentResolver.openOutputStream(uri)
+                if (out == null) {
+                    // B2-06：写失败必须回滚已插入的 MediaStore 行 —— 否则备份列表里会留下
+                    // 一条 0 字节的「备份」，用户点开恢复才发现是空的。
+                    runCatching { context.contentResolver.delete(uri, null, null) }
+                    return Result.failure(Exception(context.getString(R.string.backup_util_write_failed)))
+                }
+                val writeFailure = runCatching { out.use { it.write(bytes) } }.exceptionOrNull()
+                if (writeFailure != null) {
+                    runCatching { context.contentResolver.delete(uri, null, null) }
+                    return Result.failure(writeFailure)
+                }
                 Result.success(fileName)
             } else {
                 // 主备份：应用内部存储（/data 真闪存，断电不丢）
@@ -119,17 +141,19 @@ object BackupFileUtils {
                 if (!internalDir.exists() && !internalDir.mkdirs()) {
                     return Result.failure(Exception(context.getString(R.string.backup_util_mkdir_failed)))
                 }
-                File(internalDir, fileName).writeBytes(bytes)
+                // B2-06：文件名只到秒，同秒二次导出会覆盖前一份 ⇒ 冲突时追加序号
+                val internalFile = uniqueBackupFile(internalDir, fileName)
+                internalFile.writeBytes(bytes)
                 // 辅助副本：公共 Downloads（普通 ROM 上文件管理器可访问；RAM 盘 ROM 上尽力而为）
                 try {
                     val publicDir = publicBackupDir()
                     if (publicDir.exists() || publicDir.mkdirs()) {
-                        File(publicDir, fileName).writeBytes(bytes)
+                        File(publicDir, internalFile.name).writeBytes(bytes)
                     }
                 } catch (e: Exception) {
                     AppLog.w(TAG, "public backup copy failed", e)
                 }
-                Result.success(fileName)
+                Result.success(internalFile.name)
             }
         } catch (e: Exception) {
             AppLog.e(TAG, "export failed", e)

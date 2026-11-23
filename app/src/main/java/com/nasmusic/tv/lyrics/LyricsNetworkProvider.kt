@@ -226,7 +226,18 @@ class LyricsNetworkProvider(
      */
     private suspend fun getLyricsByHash(hash: String): String? {
         return try {
-            val lyricUrl = "${kugouLrcUrl.trimEnd('/')}/search?ver=1&man=yes&client=mobi&keyword=&duration=&hash=$hash&album_audio_id="
+            // B1-06：hash 来自第三方响应，⛔ 不能手拼 query（含 &/#/空格会注入或截断），
+            // 与 parseKugouLyrics 的 M18 修法同口径。
+            val lyricUrl = "${kugouLrcUrl.trimEnd('/')}/search".toHttpUrlOrNull()
+                ?.newBuilder()
+                ?.addQueryParameter("ver", "1")
+                ?.addQueryParameter("man", "yes")
+                ?.addQueryParameter("client", "mobi")
+                ?.addQueryParameter("keyword", "")
+                ?.addQueryParameter("duration", "")
+                ?.addQueryParameter("hash", hash)
+                ?.addQueryParameter("album_audio_id", "")
+                ?.build() ?: return null
             AppLog.d(TAG, "Kugou lyrics by hash: $hash")
 
             val lyricRequest = Request.Builder()
@@ -325,7 +336,15 @@ class LyricsNetworkProvider(
      */
     private suspend fun getLyricsBySongId(songId: String): String? {
         return try {
-            val lyricUrl = "${neteaseBaseUrl.trimEnd('/')}/api/song/lyric?os=pc&id=$songId&lv=-1&kv=-1&tv=-1"
+            // B1-06：songId 同样来自第三方响应，改为逐参数编码
+            val lyricUrl = "${neteaseBaseUrl.trimEnd('/')}/api/song/lyric".toHttpUrlOrNull()
+                ?.newBuilder()
+                ?.addQueryParameter("os", "pc")
+                ?.addQueryParameter("id", songId)
+                ?.addQueryParameter("lv", "-1")
+                ?.addQueryParameter("kv", "-1")
+                ?.addQueryParameter("tv", "-1")
+                ?.build() ?: return null
             AppLog.d(TAG, "Netease lyrics by songId: $songId")
 
             val lyricRequest = Request.Builder()

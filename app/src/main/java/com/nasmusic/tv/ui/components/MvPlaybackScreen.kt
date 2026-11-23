@@ -585,10 +585,15 @@ fun MvSearchingScreen(
     modifier: Modifier = Modifier
 ) {
     // BACK 由 AppRoot 的 navBackHandler 统一路由（showMv -> exitMvMode），此处不再重复消费按键。
+    // G7-05：与 Ready 页一致地显式取初始焦点；只挂 focusable() 时 TV 上搜索态没有焦点节点，
+    // 方向键/OK 难以落到返回按钮（搜索可能持续数秒到十几秒）。
+    val screenFocusRequester = remember { FocusRequester() }
+    LaunchedEffect(Unit) { runCatching { screenFocusRequester.requestFocus() } }
     Box(
         modifier = modifier
             .fillMaxSize()
             .background(Color.Black)
+            .focusRequester(screenFocusRequester)
             .focusable(),
         contentAlignment = Alignment.Center
     ) {

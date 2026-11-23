@@ -65,9 +65,9 @@ internal fun MineBranch(
                         onAddSongsToQueue = { songs -> viewModel.playerVM.addSongsToQueue(songs) },
                     onCreatePlaylist = { name -> viewModel.playlistVM.createLocalPlaylist(name) },
                     onOpenServerPlaylists = {
-                        // 服务端歌单与本地歌单是两个独立数据源：进入页面前显式拉一次，
-                        // 否则 loadPlaylists() 只在重开 NAS 源时被调用 ⇒ 首次进入页面为空。
-                        viewModel.loadPlaylists()
+                        // G8-06：⛔ 不要在这里拉歌单 —— PlaylistManagementBranch 的
+                        // LaunchedEffect(Unit) 已覆盖所有入口，两处都调会发两个相同请求，
+                        // 第二次的 Loading 还会把已到的列表瞬时压成「暂无歌单」。
                         viewModel.navVM.navigateTo(Screen.PlaylistManagement)
                     },
                     onRenamePlaylist = { id, newName -> viewModel.playlistVM.renameLocalPlaylist(id, newName) },

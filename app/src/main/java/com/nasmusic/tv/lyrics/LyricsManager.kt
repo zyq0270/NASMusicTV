@@ -8,6 +8,7 @@ import com.nasmusic.tv.data.model.LyricsAvailability
 import com.nasmusic.tv.data.model.LyricsSource
 import com.nasmusic.tv.data.model.Song
 import com.nasmusic.tv.util.AppLog
+import com.nasmusic.tv.util.rethrowIfCancellation
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -76,8 +77,18 @@ class LyricsManager(
      */
     private val candidateVariantRound = ConcurrentHashMap<String, Int>()
 
-    /** 后台 IO 作用域：歌词缓存落盘等磁盘写操作不得阻塞主线程（否则掉帧/ANR） */
-    private val backgroundScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    /**
+     * 后台 IO 作用域：歌词缓存落盘等磁盘写操作不得阻塞主线程（否则掉帧/ANR）。
+     *
+     * B1-03：必须带 CoroutineExceptionHandler —— 缓存写入（`tmp.writeText`）没有保护，
+     * 磁盘满时异常会从 launch 逃逸到线程默认处理器 ⇒ 切歌即崩，且崩溃点与用户操作无关联。
+     */
+    private val backgroundScope = CoroutineScope(
+        SupervisorJob() + Dispatchers.IO +
+            kotlinx.coroutines.CoroutineExceptionHandler { _, e ->
+                AppLog.w(TAG, "uncaught exception in lyrics background scope", e)
+            }
+    )
 
     /**
      * L17：候选拉取的**单飞登记表** —— key = `"songId|round"`。
@@ -311,7 +322,11 @@ class LyricsManager(
                         if (!text.isNullOrBlank() && LrcParser.isValidLrc(text)) {
                             LrcParser.parse(text, song.id).copy(source = LyricsSource.EMBEDDED)
                         } else null
-                    } catch (e: Exception) { null }
+                    } catch (e: Exception) {
+                        // B1-08：⛔ 不能把 CancellationException 当成「没有歌词」吞掉
+                        e.rethrowIfCancellation()
+                        null
+                    }
                 } else null
             }
             LyricsSource.LOCAL_FILE -> getLocalLrcFile(song)
@@ -420,7 +435,11 @@ class LyricsManager(
         )
         // 写 .lrc 文件 + 全量索引 JSON 序列化（最多 2000 条）属阻塞 IO，
         // 调用方在切歌回调（主线程）上，必须切到 IO 作用域执行，避免掉帧/ANR
-        backgroundScope.launch { persistentCache.put(entry) }
+        backgroundScope.launch {
+            // B1-03：缓存写入失败（磁盘满 / 目录不可写）只记日志，不上抛杀进程
+            runCatching { persistentCache.put(entry) }
+                .onFailure { AppLog.w("LyricsManager", "commitPendingNetworkLyrics: cache write failed", it) }
+        }
         AppLog.d("LyricsManager", "commitPendingNetworkLyrics: queued '${song.title}' by ${song.artist}, id=${song.id}")
     }
 

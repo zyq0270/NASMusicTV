@@ -72,17 +72,17 @@ class LyricsPersistentCache private constructor(context: Context) {
 
     /** 按 songId 查询缓存，返回完整条目（含 LRC 文本） */
     fun get(songId: String): LyricsCacheEntry? = synchronized(saveLock) {
-        // 设置页「自动缓存歌词」关闭 ⇒ 不读也不写（见 LyricsCachePolicy）。
-        if (!LyricsCachePolicy.enabled) return null
+        // G5-04：设置页文案是「匹配到的歌词**自动保存**到本地」——开关只应门控写。
+        // 关闭后仍读已有缓存（否则弱网/断网明明有缓存却显示无歌词，每次播放都重新请求）。
         val idx = index[songId]
         if (idx == null) {
             null
         } else {
             val lrcFile = lrcFile(songId)
             if (!lrcFile.exists()) {
-                // .lrc 文件丢失，清理索引
+                // .lrc 文件丢失，清理索引（关闭自动缓存时不在读路径落盘）
                 index.remove(songId)
-                saveIndex()
+                if (LyricsCachePolicy.enabled) saveIndex()
                 null
             } else {
                 val lrcText = lrcFile.readText()
@@ -104,6 +104,8 @@ class LyricsPersistentCache private constructor(context: Context) {
 
     /** 命中若干次后落盘一次索引（内存中的 lastPlayedAt 已即时更新，此处只做持久化节流） */
     private fun maybePersistTouch() {
+        // G5-04：关闭「自动缓存歌词」时读路径不落盘（读仍可用，只是不刷新 LRU 时间）
+        if (!LyricsCachePolicy.enabled) return
         if (touchCounter.incrementAndGet() >= TOUCH_SAVE_INTERVAL) {
             touchCounter.set(0)
             saveIndex()

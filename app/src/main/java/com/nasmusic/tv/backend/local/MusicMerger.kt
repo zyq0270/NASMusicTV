@@ -159,18 +159,41 @@ object MusicMerger {
     fun buildLocalAlbums(localSongs: List<Song>): List<Album> =
         localSongs
             .filter { it.album.isNotBlank() }
-            // 同名不同歌手必须分成两张卡，id 也要不同，否则详情页缓存键会串。
-            .groupBy { ArtistSplitter.albumKey(it.album, it.artist) }
-            .map { (_, songs) ->
-                val first = songs.first()
-                Album(
-                    id = generatedAlbumId("local_album_", first.album, first.artist),
-                    name = first.album,
-                    artist = first.artist,
-                    coverUrl = songs.firstOrNull { it.coverUrl != null }?.coverUrl,
-                    songCount = songs.size,
-                    durationMs = songs.sumOf { it.durationMs }
-                )
+            // 先按专辑名归堆（G2-05）：⛔ 不能直接用曲目级 artist 分组 ——
+            // 合辑/群星/`A feat. B` 的每首 track artist 都不同，会把同一张专辑
+            // 拆成 N 张同名卡、songCount 被拆散，而同一专辑来自 NAS 时仍是一张。
+            .groupBy { ArtistSplitter.normalizeKey(it.album) }
+            .values
+            .flatMap { sameName ->
+                // 堆内出现次数最多的 artist 视作 albumartist（Song 没有 albumArtist 字段）。
+                // 判「合辑」需同时满足：主 artist 至少 2 首、严格多于次多者、且过半。
+                // ⛔ 只看「过半」不够：两张同名专辑各 1 首（不同歌手）会被错并成一张
+                //（MusicMergerTest 已钉住该场景）。
+                val counts = sameName.groupingBy { it.artist }.eachCount()
+                val sorted = counts.entries.sortedByDescending { it.value }
+                val topCount = sorted.firstOrNull()?.value ?: 0
+                val secondCount = sorted.getOrNull(1)?.value ?: 0
+                val albumArtist = sorted.firstOrNull()?.key ?: sameName.first().artist
+                val isCompilation = sameName.size >= 3 &&
+                    topCount >= 2 &&
+                    topCount > secondCount &&
+                    topCount * 2 >= sameName.size
+                val groups = if (isCompilation) {
+                    listOf(albumArtist to sameName)
+                } else {
+                    sameName.groupBy { it.artist }.map { (artist, songs) -> artist to songs }
+                }
+                groups.map { (artist, songs) ->
+                    val first = songs.first()
+                    Album(
+                        id = generatedAlbumId("local_album_", first.album, artist),
+                        name = first.album,
+                        artist = artist.ifBlank { first.artist },
+                        coverUrl = songs.firstOrNull { it.coverUrl != null }?.coverUrl,
+                        songCount = songs.size,
+                        durationMs = songs.sumOf { it.durationMs }
+                    )
+                }
             }
 
     /**

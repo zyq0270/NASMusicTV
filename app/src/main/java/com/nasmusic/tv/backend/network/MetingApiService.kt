@@ -7,6 +7,7 @@ import com.nasmusic.tv.data.model.Song
 import com.nasmusic.tv.util.AppLog
 import com.nasmusic.tv.util.EncodingUtils
 import com.nasmusic.tv.util.NetAddressGuard
+import com.nasmusic.tv.util.readBodyLimited
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl
@@ -160,6 +161,15 @@ class MetingApiService(
         private const val MIN_REQUEST_BUDGET_MS = 600L
         // 默认公共 Meting-API 端点
         const val DEFAULT_BASE_URL = "https://meting.api.redcha.cn/api"
+
+        /** 搜索响应上限（8 MB 足够；超限按本次端点失败，见 G3-01 的循环读取） */
+        private const val MAX_BODY_BYTES_SEARCH = 8L * 1024 * 1024
+        /** 播放直链 JSON 响应上限 */
+        private const val MAX_BODY_BYTES_PLAY_URL = 64L * 1024
+        /** 歌词正文上限 */
+        private const val MAX_BODY_BYTES_LYRICS = 1L * 1024 * 1024
+        /** 歌单正文上限 */
+        private const val MAX_BODY_BYTES_PLAYLIST = 2L * 1024 * 1024
 
         /**
          * 预设公共 Meting-API 端点列表（供设置页选择）
@@ -326,22 +336,18 @@ class MetingApiService(
                 .build()
             client.newCall(request).execute().use { response ->
                 // I4-02：搜索响应可能是整页 HTML 错误页/超大正文，body?.string() 无上限读入会 OOM。
-                // 参照 LxScriptRepo.download 的 okio.Buffer + MAX+1 限量读取（8 MB 足够搜索结果），
-                // 超限按本次端点失败返回（上层会 fallback 其它端点）。限长后的字符串复用给
-                // parseSongs，其下游 MetingJsonShape.preview 也只处理这一份限长正文。
-                val maxBodyBytes = 8L * 1024 * 1024
+                // G3-01：限量读取必须**循环读满** —— okio 的 source.read(buf, n) 每次至多搬一个
+                // segment（8 KiB）就返回，只调用一次再用返回值判超限恒为假，拿到的是半截 JSON。
                 val source = response.body?.source()
                 if (source == null) {
                     AppLog.d(DIAG, "searchWithEndpoint: failed code=${response.code} bodyEmpty=true")
                     return@use emptyList()
                 }
-                val limited = okio.Buffer()
-                val read = source.read(limited, maxBodyBytes + 1)
-                if (read > maxBodyBytes) {
-                    AppLog.w(DIAG, "searchWithEndpoint: body 超过 ${maxBodyBytes / 1024 / 1024} MB 上限（read=$read），按失败返回")
+                val body = readBodyLimited(source, MAX_BODY_BYTES_SEARCH)
+                if (body == null) {
+                    AppLog.w(DIAG, "searchWithEndpoint: body 超过 ${MAX_BODY_BYTES_SEARCH / 1024 / 1024} MB 上限或读取失败，按失败返回")
                     return@use emptyList()
                 }
-                val body = limited.readUtf8()
                 AppLog.d(DIAG, "searchWithEndpoint: response code=${response.code} bodyLen=${body.length}")
                 if (!response.isSuccessful || body.isBlank()) {
                     AppLog.d(DIAG, "searchWithEndpoint: failed code=${response.code} bodyEmpty=${body.isBlank()}")
@@ -427,7 +433,10 @@ class MetingApiService(
                             AppLog.w(DIAG, "fetchPlayUrl: reject 302 location ($reject)")
                         }
                     }
-                    code == 200 -> found = response.body?.string()?.let { extractUrlFromJson(it) }
+                    // G3-06：同样限量读取，避免错误页/投毒响应按体积分配内存
+                    code == 200 -> found = response.body?.source()
+                        ?.let { readBodyLimited(it, MAX_BODY_BYTES_PLAY_URL) }
+                        ?.let { extractUrlFromJson(it) }
                     code in 300..399 && !location.isNullOrBlank() -> {
                         // 相对 Location 按**实际请求的 URL**解析（端点链里已带 query）
                         val candidate = response.request.url.resolve(location)
@@ -593,7 +602,8 @@ class MetingApiService(
                 val url = "$endpoint?server=${enc(server)}&type=lrc&id=${URLEncoder.encode(netId, "UTF-8")}"
                 val request = Request.Builder().url(url).build()
                 client.newCall(request).execute().use { response ->
-                    val text = response.body?.string()
+                    // G3-06：限量读取（歌词正文正常远小于 1 MB）
+                    val text = response.body?.source()?.let { readBodyLimited(it, MAX_BODY_BYTES_LYRICS) }
                     if (!text.isNullOrBlank()) {
                         AppLog.d(TAG, "resolveLyrics: resolved via '$endpoint' for netId=$netId, len=${text.length}")
                         return@withContext text
@@ -663,7 +673,8 @@ class MetingApiService(
                     .build()
                 var songs: List<Song>? = null
                 client.newCall(request).execute().use { response ->
-                    val body = response.body?.string()
+                    // G3-06：限量读取（歌单正文按 2 MB 封顶）
+                    val body = response.body?.source()?.let { readBodyLimited(it, MAX_BODY_BYTES_PLAYLIST) }
                     AppLog.d(DIAG, "getPlaylist: code=${response.code} bodyLen=${body?.length ?: 0}")
                     if (response.isSuccessful && !body.isNullOrBlank()) {
                         songs = parseSongs(body)

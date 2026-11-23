@@ -366,7 +366,14 @@ class ArtistCoverResolver(
                 val info = data.optJSONArray("info") ?: return null
                 if (info.length() == 0) return null
                 val first = info.getJSONObject(0)
-                val avatar = first.optString("img", null) ?: first.optString("singer_img", null)
+                // B1-07：`optString(name, null)` 对 JSON null 返回字符串 "null"
+                // （JSON.toString(JSONObject.NULL)），既让 `?:` 兜底永不执行，又会把
+                // "null" 当成封面 URL 且挡住后续「用歌曲封面兜底」。
+                fun str(key: String): String? =
+                    if (first.has(key) && !first.isNull(key)) {
+                        first.optString(key, "").takeIf { it.isNotBlank() && it != "null" }
+                    } else null
+                val avatar = str("img") ?: str("singer_img")
                 if (avatar.isNullOrBlank()) return null
                 // 确保 HTTPS
                 if (avatar.startsWith("http://")) avatar.replace("http://", "https://") else avatar

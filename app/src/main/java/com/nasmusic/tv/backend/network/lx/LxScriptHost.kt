@@ -200,7 +200,7 @@ internal class LxScriptHost(
 
     // ─────────────────────────── 启动 ───────────────────────────
 
-    private fun bootRuntime() {
+    private suspend fun bootRuntime() {
         val rt = QuickJS.createRuntimeWithEventQueue()
         runtime = rt
 
@@ -226,7 +226,9 @@ internal class LxScriptHost(
                 ready.countDown()
             }
         }
-        if (!ready.await(BOOT_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
+        // B1-05：用 runInterruptible 让阻塞等待可被协程取消打断（CPU 线程中断即可打断 await），
+        // 否则 withTimeoutOrNull 只能改 Job 状态，线程仍要等满超时。
+        if (!kotlinx.coroutines.runInterruptible { ready.await(BOOT_TIMEOUT_MS, TimeUnit.MILLISECONDS) }) {
             throw IllegalStateException("运行时启动超时（${BOOT_TIMEOUT_MS} ms）")
         }
         failure[0]?.let { throw it }
@@ -252,7 +254,7 @@ internal class LxScriptHost(
      *
      * 必须是**非主线程**调用：库的 native 调用会阻塞调用方。
      */
-    private fun postAndAwait(timeoutMs: Long, block: () -> Any?): Any? {
+    private suspend fun postAndAwait(timeoutMs: Long, block: () -> Any?): Any? {
         val rt = runtime ?: return null
         check(Looper.myLooper() != Looper.getMainLooper()) { "洛雪宿主禁止在主线程调用" }
         if (Thread.currentThread() === runtimeThread) return block()
@@ -269,7 +271,8 @@ internal class LxScriptHost(
                 latch.countDown()
             }
         }
-        if (!latch.await(timeoutMs, TimeUnit.MILLISECONDS)) {
+        // B1-05：可取消的阻塞等待（协程取消 → 中断 → await 抛 InterruptedException）
+        if (!kotlinx.coroutines.runInterruptible { latch.await(timeoutMs, TimeUnit.MILLISECONDS) }) {
             throw IllegalStateException("JS 线程无响应（${timeoutMs} ms）")
         }
         failure[0]?.let { throw it }

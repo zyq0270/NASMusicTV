@@ -598,12 +598,16 @@ class FeiniuAdapter(private val appContext: Context? = null) : BackendAdapter {
     override suspend fun getAlbums(): List<Album> = withContext(Dispatchers.IO) {
         // 与 getArtists / getSongs 同口径：失败必须抛，⛔ 不能吞成空列表让 UI 误判「没有专辑」。
         lastFailure = null
+        var pageFailed = false
         val result = runCatchingSuspend {
-            fetchAllPages("album/list", "sort" to "newTrackAddedAt,desc") { parseAlbum(it) }
+            fetchAllPages(
+                "album/list",
+                "sort" to "newTrackAddedAt,desc",
+                onFailure = { pageFailed = true }
+            ) { parseAlbum(it) }
         }.onFailure { AppLog.e(TAG, "getAlbums failed", it) }.getOrThrow()
-        // fetchPageEnvelope 失败时内部 break 并返回半截列表：只要有失败记录就抛，
-        // 不能把半截结果当完整曲库（分页中任一页失败都必须让上层看到错误）。
-        if (lastFailure != null) {
+        // G2-04：用本次调用的本地失败标记判定（不再读可能被并发请求覆盖的 lastFailure）。
+        if (pageFailed) {
             throw IllegalStateException("Feiniu getAlbums 失败：$lastErrorDetail")
         }
         result
@@ -629,12 +633,17 @@ class FeiniuAdapter(private val appContext: Context? = null) : BackendAdapter {
     override suspend fun getArtists(): List<Artist> = withContext(Dispatchers.IO) {
         // 与 getSongs 同口径：取数前清掉上次失败，避免旧原因被当成这次的错误
         lastFailure = null
+        var pageFailed = false
         val result = runCatchingSuspend {
-            fetchAllPages("artist/list", "sort" to "trackCount,desc") { parseArtist(it) }
+            fetchAllPages(
+                "artist/list",
+                "sort" to "trackCount,desc",
+                onFailure = { pageFailed = true }
+            ) { parseArtist(it) }
         }.onFailure { AppLog.e(TAG, "getArtists failed", it) }.getOrThrow()
-        // fetchPageEnvelope 失败时内部 break 并返回空列表：不发信号的话失败会被
-        // 上层当成 Success(emptyList())，艺术家页只显示「暂无艺术家」。
-        if (result.isEmpty() && lastFailure != null) {
+        // G2-03 / G2-04：中途翻页失败必须抛（不再要求 result 为空，也不再用实例字段判定）；
+        // 否则艺术家页会静默少一截，上层连错误态都拿不到。
+        if (pageFailed) {
             throw IllegalStateException("Feiniu getArtists 失败：$lastErrorDetail")
         }
         result
@@ -1119,6 +1128,10 @@ class FeiniuAdapter(private val appContext: Context? = null) : BackendAdapter {
         page: Int = 1,
         size: Int = DEFAULT_PAGE_SIZE,
         singlePage: Boolean = false,
+        // G2-04：调用方需要的「本次调用是否中途翻页失败」必须**本地**回传。
+        // 实例字段 lastFailure 会被并发请求互相覆盖（启动时 albums/artists/… 五路并行）：
+        // 他人失败会让本次误抛，他人成功清位又会让本次真实失败被擦掉。
+        onFailure: () -> Unit = {},
         parse: (JsonObject) -> T?
     ): List<T> {
         val result = ArrayList<T>()
@@ -1129,7 +1142,12 @@ class FeiniuAdapter(private val appContext: Context? = null) : BackendAdapter {
             // 原实现只用 `items.size() < size` 判末页——服务端某页因限流/过滤少发几条时
             // 会被误判为末页，后续页被静默截断（收藏/全量搜索少歌且无任何日志）。
             // 现在优先以 `data.total` 判定。
-            val data = fetchPageEnvelope(path, currentPage, size, *extra) ?: break
+            val data = fetchPageEnvelope(path, currentPage, size, *extra)
+            if (data == null) {
+                // 列表端点的 data 为 null 只可能是请求失败/信封错误（空页是 data.list=[]）
+                onFailure()
+                break
+            }
             // T1（2026-10-18）：`getAsJsonArray` 在 `list` 类型异常时抛
             // IllegalStateException（整页崩），改安全访问器后按「空页」处理。
             val items = data.get("list")?.takeIf { it.isJsonArray }?.asJsonArray ?: break

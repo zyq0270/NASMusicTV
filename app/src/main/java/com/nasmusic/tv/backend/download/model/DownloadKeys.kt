@@ -87,7 +87,17 @@ fun Map<String, DownloadState>.stateOfSong(song: Song): DownloadState {
  * 从而漏掉本该下载的另一首歌（回归：v2.39.26 审查）。
  */
 val Song.dedupeKey: String
-    get() = listOf(title, artist)
+    get() = dedupeKeyOf(title, artist)
+
+/**
+ * 跨源去重键的唯一实现（G4-05）。
+ *
+ * ⚠️ **写入与 `reindexFromDisk` 必须共用本函数** —— 两处口径分叉时
+ * （历史上一边折叠空白、一边删除空白），重建索引产出的行与存量行永不相等，
+ * 跨源去重会把已下载歌曲判成未下载而重复下载。
+ */
+fun dedupeKeyOf(title: String, artist: String): String =
+    listOf(title, artist)
         .joinToString("|") { it.trim().lowercase().replace(Regex("\\s+"), " ") }
 
 /**

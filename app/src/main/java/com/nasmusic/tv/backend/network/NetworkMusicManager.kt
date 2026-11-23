@@ -88,14 +88,17 @@ class NetworkMusicManager(
     private val deadProbeCache = ConcurrentHashMap<String, Long>()
 
     /**
-     * 播放直链缓存 key：`networkSource:networkId:quality`。
+     * 播放直链缓存 key：`networkSource:networkPlatform:networkId:quality`。
      *
      * 音质参与缓存键，切档位不会串用旧直链（修 G1）。
+     * ⚠️ G3-02：**平台也必须参与** —— 同一 `networkSource=meting` 下各平台的 networkId
+     * 是平台自己的数字 id，netease/kuwo/migu 撞号即会命中同一条缓存（播放成另一首），
+     * 负面探测也会串台把歌判死。取链本身已按 `song.networkPlatform` 快照（:517）。
      * 注意此处用冒号分隔，与下载主键 `ntwk_<source>_<id>:q<quality>`
      * （下划线 + 后缀）属于两个独立命名空间，不要试图统一。
      */
     private fun playUrlKey(song: Song, quality: Int): String =
-        "${song.networkSource}:${song.networkId}:$quality"
+        "${song.networkSource}:${song.networkPlatform ?: "-"}:${song.networkId}:$quality"
 
     /**
      * 有效档位解析（两级模型）：单曲覆盖优先，回退全局默认。

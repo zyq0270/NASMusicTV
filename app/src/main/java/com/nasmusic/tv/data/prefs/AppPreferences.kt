@@ -141,7 +141,15 @@ class AppPreferences internal constructor(private val context: Context) {
     }
 
     private val dataStore: androidx.datastore.core.DataStore<androidx.datastore.preferences.core.Preferences> by lazy {
-        PreferenceDataStoreFactory.create {
+        // G5-02：必须给 corruptionHandler。默认行为是读到损坏的 preferences_pb 就抛
+        // CorruptionException，而启动路径（NasMusicApp.readBootSnapshot）一旦抛出
+        // 就会每次启动都崩，用户只能清应用数据（连接、收藏、设置全丢）。
+        // ReplaceFileCorruptionHandler 会丢弃损坏文件并用空设置继续启动（自愈）。
+        PreferenceDataStoreFactory.create(
+            corruptionHandler = androidx.datastore.core.handlers.ReplaceFileCorruptionHandler {
+                androidx.datastore.preferences.core.emptyPreferences()
+            }
+        ) {
             File(context.filesDir, "datastore/nas_music_tv.preferences_pb")
         }
     }

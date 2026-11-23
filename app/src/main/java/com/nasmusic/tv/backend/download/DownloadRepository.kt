@@ -187,7 +187,8 @@ class DownloadRepository(
                         .replace(Regex(" \\(\\d{1,3}\\)$"), "")
                         .ifBlank { rawTitle }
                     val songKey = "local_${com.nasmusic.tv.util.HashUtils.stablePathHash64(file.absolutePath)}"
-                    val dedupeKey = "${title.lowercase().replace(Regex("\\s+"), "")}|${artist.lowercase().replace(Regex("\\s+"), "")}"
+                    // G4-05：与 Song.dedupeKey 共用同一实现（空白折叠为单空格，不是删除）
+                    val dedupeKey = com.nasmusic.tv.backend.download.model.dedupeKeyOf(title, artist)
                     dao.upsert(
                         DownloadSongEntity(
                             songKey = songKey,

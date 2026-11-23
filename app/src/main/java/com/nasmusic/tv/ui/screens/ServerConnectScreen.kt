@@ -515,6 +515,9 @@ val backendRegistry = remember { (appContext.applicationContext as NasMusicApp).
             // 连接按钮
             FocusableSurface(
                 onClick = {
+                    // B2-07：连接中必须挡住重复点击（按钮文案会变「连接中」，但仍可聚焦触发）。
+                    // 连按会并发多次 initialize / saveServerConfig / onConnected。
+                    if (isConnecting) return@FocusableSurface
                     if (baseUrl.text.isBlank()) {
                         statusMessage = context.getString(R.string.server_address_required)
                     } else {

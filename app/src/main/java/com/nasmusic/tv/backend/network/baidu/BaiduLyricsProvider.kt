@@ -1,6 +1,7 @@
 package com.nasmusic.tv.backend.network.baidu
 
 import com.nasmusic.tv.util.AppLog
+import com.nasmusic.tv.util.readBodyLimited
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -112,13 +113,14 @@ class BaiduLyricsProvider(
                     AppLog.w(TAG, "downloadText too large: $declared bytes")
                     return null
                 }
-                val buf = okio.Buffer()
-                val read = body.source().read(buf, MAX_SIDECAR_LRC_BYTES + 1)
-                if (read > MAX_SIDECAR_LRC_BYTES) {
-                    AppLog.w(TAG, "downloadText exceeded cap (>$MAX_SIDECAR_LRC_BYTES bytes)")
+                // G3-01：必须循环读满 —— 单次 read 至多一个 segment（8 KiB），
+                // 否则超限判定恒假且歌词被截断。
+                val text = readBodyLimited(body.source(), MAX_SIDECAR_LRC_BYTES)
+                if (text == null) {
+                    AppLog.w(TAG, "downloadText exceeded cap (>$MAX_SIDECAR_LRC_BYTES bytes) or read failed")
                     return null
                 }
-                buf.readUtf8().takeIf { it.isNotBlank() }
+                text.takeIf { it.isNotBlank() }
             }
         } catch (e: Exception) {
             AppLog.e(TAG, "downloadText error", e)

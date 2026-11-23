@@ -25,18 +25,25 @@ class AlbumDetailFlowGateTest {
     }
 
     @Test
-    fun `T1 专辑详情硬件 BACK 必须回曲库而不是首页`() {
+    fun `T1 专辑详情硬件 BACK 必须回来源或曲库而不是首页`() {
         val source = src("ui/components/AppRoot.kt")
+        val branch = "currentScreen == Screen.AlbumDetail, currentScreen == Screen.ArtistDetail -> backToDetailOrigin"
         assertTrue(
-            "缺 AlbumDetail 的 BACK 分支 ⇒ 落到 else → Screen.Home",
-            source.contains("currentScreen == Screen.AlbumDetail -> navigateLibrary")
+            "缺详情页 BACK 分支 ⇒ 落到 else → Screen.Home",
+            source.contains(branch)
         )
         assertTrue(
             "navigateLibrary 未定义或目标错误",
             source.contains("val navigateLibrary: () -> Unit = { viewModel.navVM.navigateTo(Screen.Library) }")
         )
-        val mutated = source.replace("currentScreen == Screen.AlbumDetail -> navigateLibrary", "")
-        assertTrue("T1 护栏失效：删掉分支仍判正", !mutated.contains("currentScreen == Screen.AlbumDetail -> navigateLibrary"))
+        // G7-01：详情有首页/播放页两个非曲库入口，BACK 要回来源；无来源时仍回曲库兜底
+        assertTrue(
+            "backToDetailOrigin 未定义或缺「无来源回曲库」兜底",
+            source.contains("val backToDetailOrigin: () -> Unit = {") &&
+                source.contains("else navigateLibrary()")
+        )
+        val mutated = source.replace(branch, "")
+        assertTrue("T1 护栏失效：删掉分支仍判正", !mutated.contains(branch))
     }
 
     @Test

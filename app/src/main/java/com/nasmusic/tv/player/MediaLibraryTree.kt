@@ -481,7 +481,12 @@ class MediaLibraryTree(
         coverUrl = item.coverUrl,
         isNetworkSong = true,
         networkSource = item.networkSource,
-        networkId = item.networkId
+        networkId = item.networkId,
+        // G5-01：回放要按收藏时的原平台取链，⛔ 不能漏（漏了会回退当前全局平台）。
+        networkPlatform = item.networkPlatform,
+        // G6-01：同上，已下载收藏的 sourceType 依赖 storageType
+        isLocalSong = item.networkSource == "local",
+        storageType = item.storageType
     )
 
     /**

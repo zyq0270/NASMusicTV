@@ -176,20 +176,23 @@ class PlaylistImportViewModel(
      */
     private suspend fun checkUrlsInPlaylist(playlistId: String): Int {
         val playlist = prefs.getLocalPlaylists().firstOrNull { it.id == playlistId } ?: return 0
+        // B2-05：targets 必须携带 songId —— 旧实现事后用 streamUrl 值反查，
+        // 同一 URL 出现多次时永远只命中第一条，后续条目不显示失效徽标、计数也对不上。
         val targets = playlist.songs
             .filter { it.id.startsWith(PlaylistParsers.IMPORTED_ID_PREFIX) }
             .mapNotNull { song ->
-                song.streamUrl?.takeIf { it.startsWith("http") && !checker.isPrivateLanUrl(it) }
+                song.streamUrl
+                    ?.takeIf { it.startsWith("http") && !checker.isPrivateLanUrl(it) }
+                    ?.let { url -> song.id to url }
             }
         if (targets.isEmpty()) return 0
 
-        val results = checker.checkBatch(targets)
+        val results = checker.checkBatch(targets.map { it.second })
         var bad = 0
-        targets.zip(results).forEach { (url, pair) ->
+        targets.zip(results).forEach { (target, pair) ->
             val (result, _) = pair
             if (result != UrlReachabilityChecker.Result.REACHABLE) {
-                val songId = playlist.songs.firstOrNull { it.streamUrl == url }?.id ?: return@forEach
-                prefs.markSongUnreachable(songId, result.name)
+                prefs.markSongUnreachable(target.first, result.name)
                 bad++
             }
         }

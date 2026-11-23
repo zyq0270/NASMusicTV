@@ -31,14 +31,33 @@ class NavigationViewModel(app: Application) : AndroidViewModel(app) {
     private val _queueOrigin = MutableStateFlow<Screen?>(null)
     val queueOrigin: StateFlow<Screen?> = _queueOrigin.asStateFlow()
 
+    /**
+     * G7-01：详情页来源。专辑/艺人详情有两个**非曲库**入口（首页「最近添加」卡、
+     * 播放页点歌手名），BACK 写死回曲库会把这两处的用户弹到曲库。
+     * 与 [queueOrigin] 同款：在 navigateTo 内部拦截，覆盖所有调用点；
+     * 详情页之间互跳不覆盖来源。
+     */
+    private val _detailOrigin = MutableStateFlow<Screen?>(null)
+    val detailOrigin: StateFlow<Screen?> = _detailOrigin.asStateFlow()
+
     fun navigateTo(screen: Screen) {
         if (screen == Screen.Queue && _currentScreen.value != Screen.Queue) {
             _queueOrigin.value = _currentScreen.value
+        }
+        val fromDetail = _currentScreen.value == Screen.AlbumDetail ||
+            _currentScreen.value == Screen.ArtistDetail
+        if ((screen == Screen.AlbumDetail || screen == Screen.ArtistDetail) && !fromDetail) {
+            _detailOrigin.value = _currentScreen.value
         }
         _currentScreen.value = screen
     }
 
     /** BACK 消费完来源后清空，避免残留影响下一次进入 */
+    fun clearDetailOrigin() {
+        _detailOrigin.value = null
+    }
+
+    /** 队列页 BACK 消费完来源后清空，避免残留影响下一次进入 */
     fun clearQueueOrigin() {
         _queueOrigin.value = null
     }

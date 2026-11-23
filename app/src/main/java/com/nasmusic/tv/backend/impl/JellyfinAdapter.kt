@@ -16,6 +16,7 @@ import com.nasmusic.tv.util.AppLog
 import com.nasmusic.tv.util.EncodingUtils
 import com.nasmusic.tv.util.RetryConfig
 import com.nasmusic.tv.util.UrlSanitizer
+import com.nasmusic.tv.util.rethrowIfCancellation
 import com.nasmusic.tv.util.withRetry
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -392,8 +393,13 @@ class JellyfinAdapter : BackendAdapter {
                             "StartIndex=$startIndex&Limit=$pageSize"
                 }
 
-                val json = executeJsonRequest(url) ?: break
-                val items = json.getAsJsonArray("Items") ?: break
+                // G2-06：翻页中途失败必须抛（与 getAlbums / getArtists 同口径），
+                // ⛔ 不能 break 后把半截列表当完整结果返回。
+                val page = pages + 1
+                val json = executeJsonRequest(url)
+                    ?: throw IllegalStateException("Jellyfin getArtistSongs 第 $page 页无响应")
+                val items = json.getAsJsonArray("Items")
+                    ?: throw IllegalStateException("Jellyfin getArtistSongs 第 $page 页缺少 Items")
                 allSongs.addAll(items.mapNotNull { jsonObjectToSong(it.asJsonObject, null) })
 
                 val total = json.numInt("TotalRecordCount") ?: -1
@@ -409,8 +415,11 @@ class JellyfinAdapter : BackendAdapter {
             }
             allSongs
         } catch (e: Exception) {
+            e.rethrowIfCancellation()
             AppLog.e("JellyfinAdapter", "getArtistSongs failed", e)
-            emptyList()
+            // G2-06：向上抛，让调用方转成可见错误；调用方（MainViewModel.loadArtistSongs）
+            // 已逐 ID catch 并记 W，不会崩。
+            throw e
         }
     }
 

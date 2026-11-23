@@ -37,7 +37,12 @@ internal fun PlaylistManagementBranch(
                     PlaylistManagementScreen(
                         playlists = playlistsState.dataOrNull() ?: emptyList(),
                         selectedPlaylistSongs = selectedPlaylistSongsState.dataOrNull() ?: emptyList(),
-                        isLoading = false,
+                        // B2-03：按真实 UiState 传值 —— 旧实现硬编码 false 让 loading 分支成为
+                        // 死代码，并把 Error 折成空列表（用户只看到「暂无歌单」、无重试入口）。
+                        isLoading = playlistsState is UiState.Loading,
+                        errorMessage = (playlistsState as? UiState.Error)?.message,
+                        songsErrorMessage = (selectedPlaylistSongsState as? UiState.Error)?.message,
+                        onRetry = { viewModel.loadPlaylists() },
                         onSelectPlaylist = { viewModel.selectPlaylist(it) },
                         onCreatePlaylist = { name -> viewModel.createPlaylist(name) },
                         onDeletePlaylist = { viewModel.deletePlaylist(it) },

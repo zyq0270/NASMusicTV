@@ -32,10 +32,21 @@ class DownloadPathBuilder(private val rootProvider: () -> File) {
         val finalFile: File
     )
 
+    /**
+     * 下载目录使用的 artist 名（G4-03）。
+     *
+     * ⚠️ **写入侧与崩溃恢复侧必须共用这一个函数** —— 否则多艺术家曲目
+     *（`ArtistSplitter` 能拆出多个名字）写入时用首位、恢复时用整串，
+     * 目录名不同 ⇒ 恢复恒 miss ⇒ 完整文件变孤儿、用户重下并产生 "(2)" 副本。
+     */
+    fun artistDirName(rawArtist: String): String {
+        val artistRaw = ArtistSplitter.split(rawArtist).firstOrNull() ?: rawArtist
+        return sanitize(artistRaw).ifBlank { "未知歌手" }
+    }
+
     fun build(song: Song, ext: String): Paths {
         val root = rootProvider()
-        val artistRaw = ArtistSplitter.split(song.artist).firstOrNull() ?: song.artist
-        val artist = sanitize(artistRaw).ifBlank { "未知歌手" }
+        val artist = artistDirName(song.artist)
         val album = sanitize(song.album).ifBlank { DEFAULT_ALBUM }
         val title = sanitize(song.title).ifBlank { "未命名" }
 
@@ -58,8 +69,7 @@ class DownloadPathBuilder(private val rootProvider: () -> File) {
     /** 仅构造最终文件路径（不创建目录，不创建临时文件），供 reindex 与歌曲行使用 */
     fun buildFinalPath(song: Song, ext: String): File {
         val root = rootProvider()
-        val artistRaw = ArtistSplitter.split(song.artist).firstOrNull() ?: song.artist
-        val artist = sanitize(artistRaw).ifBlank { "未知歌手" }
+        val artist = artistDirName(song.artist)
         val album = sanitize(song.album).ifBlank { DEFAULT_ALBUM }
         val title = sanitize(song.title).ifBlank { "未命名" }
         val baseName = if (song.trackNumber > 0)
@@ -164,8 +174,7 @@ class DownloadPathBuilder(private val rootProvider: () -> File) {
      */
     fun build(song: Song, ext: String, quality: Int): Paths {
         val root = rootProvider()
-        val artistRaw = ArtistSplitter.split(song.artist).firstOrNull() ?: song.artist
-        val artist = sanitize(artistRaw).ifBlank { "未知歌手" }
+        val artist = artistDirName(song.artist)
         val album = sanitize(song.album).ifBlank { DEFAULT_ALBUM }
 
         val artistDir = File(root, artist)
