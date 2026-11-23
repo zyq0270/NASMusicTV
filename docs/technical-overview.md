@@ -29110,3 +29110,40 @@ Jellyfin 按名查询只发一次请求、fields 补齐并分页；Navidrome/Sub
 **涉及文件**：`ui/viewmodel/{MainViewModel,PlayerViewModel,NavigationViewModel}.kt`、`player/PlayModeAdjacent.kt`（新增）、`ui/components/AppRoot.kt`、`ui/screens/QueueScreen.kt`、`app/src/main/res/values/strings.xml`、`app/src/test/.../{QueueFlowFixGateTest,PlayModeAdjacentTest}.kt`（新增）、`CHANGELOG.md`、本章。
 
 **版本号**：同一效果的多轮修复不升版本号（所有者 2026-11-09 裁定），并入 v2.39.26。
+
+### 10.422 半圆快速选择器 Quick Dial（v2.39.27 - 2026-11-24）
+
+**背景**：借鉴「年度歌单」类界面的「沿圆弧排布 + 滑动旋转 + 中央行选中」交互，做成一个可复用的半圆拨盘选择器，落两个场景：① 曲库各 Tab 搜索框旁的**快速填写**；② 播放页控制条最左的**队列快速切歌**。设计与验收依据：`docs/archive/年度歌单快速选择开发方案.md`（已定稿）。
+
+**拨盘组件（`ui/components/picker/ArcDialPicker.kt` + `ArcDialDialog.kt`）**：
+
+1. **位置模型（⛔ 唯一真相源）**：每项绝对槽位 `index * itemPx`，`scrollPx` 为滚动偏移，屏幕相对位置 `pos = (index*itemPx - scrollPx)/itemPx`（0=中央行，正=下，负=上）；rotation/scale/alpha/颜色/字号一律基于 `pos`。⛔ 不能用 `dy = (index - selectedIndex)*itemHeight - anim`——`selectedIndex` 会被扣两次，选中项随手势漂移。
+2. **手势跟手**：`detectDragGestures` 的 `onDrag` 每帧 `scrollPx.snapTo(next)`（本地 `var dragScroll` 累积 + 捕获 `val next` 防竞态），松手才 `animateTo` 吸附并回写 index。⛔ 不在 `onDragEnd` 一次性改 index（拖动过程视觉不动）。
+3. **弧面朝向 `ArcAnchor`**：`LEFT`（圆心在左、向右凸「)」，播放页）/ `RIGHT`（圆心在右、向左凸「(」，搜索页）；`radSign`/`xSign` 镜像取反。圆心侧另画一条 `drawArc` 半圆装饰弧（`Primary` α0.35、1.5dp）。旋转角 7°（11° 会在横屏把文字挤在一起）。
+4. **TV**：`dPadMode` 下焦点落到拨盘本身（`FocusRequester`），上/下键改 `selectedIndex`，OK 确认，`BackHandler` 取消。
+5. **配色**：条目只按「是否中央行」着色（中央 `Primary`，其余 `TextPrimary`），与队列拨盘一致；⛔ 不按数据来源着色（候选已统一只列历史）。
+
+**场景 A 搜索快填（`LibraryScreen`）**：
+
+6. 搜索框右侧 `QueueMusic` 图标按钮（与播放页队列按钮同图标），点开拨盘，选中即 `onFilterQueryChange(value)` → 既有 `LaunchedEffect` 触发搜索并关弹窗。
+7. **候选只列该 Tab 的历史查询记录**（`quick_pick_stats[category]`，`category = LibraryTab.name`；SEARCH 另并 `search_history`，按 `ArtistSplitter.normalizeKey` 分组取 count 最大值，⛔ 不相加）；⛔ 不列当前页面列表/搜索结果。`buildQuickPickCandidates(tab, historyItems, stats)` 三参。
+8. **热度**：`QuickPickRanker.rank` 的 heat = 本类别 `count`，倒序；同热度按名称自然序；limit=7。⛔ 不混全局 `search_history`（跨 tab 污染，且一次操作会算两次）。
+9. **冷启动**：某类别无历史时点按钮**不静默关闭**，改为直接打开搜索输入框（搜一次即写入该类桶）。
+
+**场景 B 队列快切（`PlayerControls` / `NowPlayingScreen` / `NowPlayingBranch`）**：
+
+10. 控制条最左新增按钮（`showQuickSwitchButton` 默认关，TV/横屏与竖屏均开启），拨盘 `items = queue`、初始 `selectedIndex = currentIndex`；确认走 `resolveAndPlayByIndex`（空 URL 也能解析）。⛔ 队列场景**不写** `quick_pick_stats`。
+
+**统计（`quick_pick_stats`）**：
+
+11. `QuickPickStat(category, value, count, lastPickedAt)`，DataStore 键 `quick_pick_stats`（上限 300、无 TTL、纳入备份三处）。
+12. **写入点（缺一就会出现「有统计但弹不出」）**：拨盘选中 / 搜索框确认 / 选历史词 / 流派卡片点击（`onSongsByGenre` 包装）/ 年代卡片点击（`onSongsByYear` 包装）/ 电台自身搜索框（`RadioTab.onSearch` 包装）/ 发现页点歌曲播放（`DiscoverTab.onPlaySong` 包装）。判据：会产生「按某值去取内容」的动作才算查询；电台点播、歌曲播放不算（发现页点歌曲为所有者裁定的例外）。⛔ 电台曾因走自己的搜索框而**结构性永远无法写入**，是本轮修掉的真缺陷。
+13. 设置页：数据管理 → 统计块按类别各一行概览（歌曲/专辑/艺术家/流派/年代/搜索/发现/电台），点进单类别明细页 `Screen.QuickPickStats`；⛔ 概览行不放「清除」按钮（明细页已有，重复）。
+
+**各 Tab 搜索结果的就地展示（2026-11-24 定稿）**：所有 Tab 搜索后**不跳**搜索页，且**沿用各页自己的展示方式**——发现页保留语种/维度行、只换歌曲网格数据源（`emptyHintRes` 区分「选筛选条件」与「没有匹配的歌曲」）；流派/年代保留卡片网格，在同一 `LazyVerticalGrid` 内追加「搜索结果 (n)」小标题 + 同款卡片；电台就地按名称过滤电台网格。⛔ 不用搜索页 UI 整页替换（`SearchTab` 不再被复用）。
+
+**门禁**：`QuickPickGateTest` G1–G10（G1 统一配色/无来源着色、G2 D-Pad、G3 BackHandler、G4 队列不写统计、G5 设置按类别且无重复清除、G6 只列历史、G7 QueueMusic 图标、G8 空桶开搜索框、G9 四类写入点、G10 四页各自展示方式且不跳转）、`QuickPickRankerTest`（5 例）、`QuickPickSourceMergerTest`（4 例）。
+
+**涉及文件**：新增 `data/model/QuickPickStat.kt`、`data/stats/{QuickPickCandidate,QuickPickSourceMerger,QuickPickRanker}.kt`、`ui/components/picker/{ArcDialPicker,ArcDialDialog}.kt`、`ui/screens/stats/QuickPickStatsScreen.kt`、`ui/components/branches/QuickPickStatsBranch.kt`；改动 `data/prefs/{AppPreferences,HistoryPrefs}.kt`、`ui/viewmodel/MainViewModel.kt`、`ui/screens/{LibraryScreen,NowPlayingScreen,SettingsScreen}.kt`、`ui/screens/library/{DiscoverTab.kt,browse/GenreYearLists.kt}`、`ui/screens/settings/DataSettingsSection.kt`、`ui/components/{AppRoot,PlayerControls}.kt`、`ui/components/branches/{LibraryBranch,NowPlayingBranch,SettingsBranch}.kt`、`data/model/Screen.kt`、`ui/theme/Theme.kt`、`values/strings.xml` + `values-en/strings.xml`、`CHANGELOG.md`。
+
+**版本号**：v2.39.27（同版本多轮修复不升号，所有者 2026-11-09 裁定）。
