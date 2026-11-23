@@ -1,0 +1,640 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NASMusicTV 增量代码审查报告 · 2026-11-23</title>
+<style>
+  :root {
+    --bg:#f6f7f9; --card:#fff; --ink:#1c2024; --muted:#5b6470; --line:#e3e7ec;
+    --crit:#b3261e; --high:#c2410c; --med:#a16207; --low:#3f6212; --accent:#1d4ed8;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink);
+    font:15px/1.75 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif; }
+  .wrap { max-width:1080px; margin:0 auto; padding:40px 24px 80px; }
+  header.hero { background:linear-gradient(135deg,#12263f,#1d4ed8 70%,#2563eb);
+    color:#fff; border-radius:16px; padding:34px 36px; margin-bottom:26px; }
+  header.hero h1 { margin:0 0 10px; font-size:28px; letter-spacing:.3px; }
+  header.hero p { margin:4px 0; color:#dbe6ff; font-size:14px; }
+  .kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(132px,1fr));
+    gap:12px; margin:22px 0 8px; }
+  .kpi { background:rgba(255,255,255,.12); border:1px solid rgba(255,255,255,.22);
+    border-radius:12px; padding:14px 16px; }
+  .kpi b { display:block; font-size:26px; line-height:1.2; }
+  .kpi span { font-size:12px; color:#dbe6ff; }
+  section { background:var(--card); border:1px solid var(--line); border-radius:14px;
+    padding:26px 28px; margin-bottom:20px; }
+  h2 { font-size:20px; margin:0 0 14px; padding-bottom:10px; border-bottom:1px solid var(--line); }
+  h3 { font-size:16px; margin:26px 0 6px; }
+  h3:first-of-type { margin-top:10px; }
+  .gsub { color:var(--muted); font-size:13px; margin:0 0 12px; }
+  table { width:100%; border-collapse:collapse; font-size:14px; margin:10px 0 4px; }
+  th,td { text-align:left; padding:9px 10px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { background:#f0f3f7; font-weight:600; font-size:13px; }
+  .sev { display:inline-block; padding:1px 9px; border-radius:999px; font-size:12px;
+    font-weight:700; color:#fff; white-space:nowrap; }
+  .sev-critical { background:var(--crit); }
+  .sev-high { background:var(--high); }
+  .sev-medium { background:var(--med); }
+  .sev-low { background:var(--low); }
+  .delta { font-size:11px; color:var(--muted); margin-left:6px; }
+  .finding { border:1px solid var(--line); border-left:4px solid #9aa4b2; border-radius:10px;
+    padding:14px 16px; margin:12px 0; background:#fcfdfe; }
+  .finding.critical { border-left-color:var(--crit); }
+  .finding.medium { border-left-color:var(--med); }
+  .finding.low { border-left-color:var(--low); }
+  .fhead { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:6px; }
+  .fid { font-weight:700; font-family:ui-monospace,Consolas,monospace; }
+  .verdict { font-size:11px; padding:1px 8px; border-radius:999px; background:#eef2f7;
+    color:#41505f; border:1px solid #d8e0ea; }
+  .loc { font-family:ui-monospace,Consolas,monospace; font-size:12.5px; color:var(--accent);
+    word-break:break-all; }
+  .finding p { margin:6px 0; }
+  .finding .label { color:var(--muted); font-size:12px; font-weight:700; letter-spacing:.4px; }
+  code { background:#eef1f5; padding:1px 5px; border-radius:4px; font-size:.9em;
+    font-family:ui-monospace,Consolas,monospace; word-break:break-word; }
+  .note { background:#fff8e6; border:1px solid #f2dfae; border-radius:10px;
+    padding:12px 16px; font-size:14px; margin:14px 0; }
+  .note.crit { background:#fdf0ef; border-color:#f3c9c5; }
+  ul.tight li { margin:5px 0; }
+  .pill { display:inline-block; background:#eef2f7; border:1px solid #d8e0ea;
+    border-radius:999px; padding:2px 10px; font-size:12px; color:#41505f; margin:2px 4px 2px 0; }
+  footer { color:var(--muted); font-size:13px; text-align:center; padding:18px 0 0; }
+  @media print { body{background:#fff} section{break-inside:avoid-page;border-color:#ccc}
+    header.hero{background:#12263f !important;-webkit-print-color-adjust:exact} }
+</style>
+</head>
+<body><div class="wrap">
+<header class="hero">
+  <h1>NASMusicTV 增量代码审查报告</h1>
+  <p>2026-11-23 · 增量优先 + 全库兜底 · 10 个深审组 + 3 个独立复核代理</p>
+  <p>审查对象：<code style="background:rgba(255,255,255,.16);color:#fff">main @ 091e7a7</code> · v2.39.26 · 增量窗口 25d0b6a → 091e7a7（23 提交）</p>
+  <p>97 个改动源码文件全量覆盖 + 38 个未改动高风险文件抽样 · 只读审查，未改动任何业务代码</p>
+  <div class="kpis">
+    <div class="kpi"><b>62</b><span>终稿有效发现</span></div>
+    <div class="kpi"><b>1</b><span>Critical</span></div>
+    <div class="kpi"><b>20</b><span>Medium</span></div>
+    <div class="kpi"><b>41</b><span>Low</span></div>
+    <div class="kpi"><b>63</b><span>初稿 / 逐条复核</span></div>
+    <div class="kpi"><b>135</b><span>增量改动文件（含资源）</span></div>
+  </div>
+</header>
+
+<section id="summary">
+<h2>1. 执行摘要</h2>
+<p>本轮针对 <code>main @ 091e7a7</code>（v2.39.26）做增量优先审查：自上一轮基线 <code>25d0b6a</code>（v2.39.21）以来共 23 个提交、97 个 main 源码 <code>.kt</code> 改动（6 新增 / 4 删除 / 87 修改，<code>+2927 / −1567</code>），全部改动文件逐文件深审；另对 38 个未改动的高风险后端/播放/UI 文件做兜底抽样。</p>
+<p>方法沿用两阶段：先按子系统切成 8 个增量组 + 2 个兜底组互不重叠并行深审，再对全部 63 条初稿派 3 个独立复核代理逐条重读引用文件、grep 调用点、追上层兜底、核对机制方向，尽力证伪。复核裁定 <b>CONFIRMED 52 / PARTIALLY CORRECT 10 / REFUTED 0</b>；G8-04 与 G5-04 为同一处同根因，终稿合并，故 <b>63 条初稿 → 62 条有效发现</b>。</p>
+
+<div class="note crit">
+<b>本轮最重要的结论：上一轮的修复引入了一处回归。</b> 2026-11-18 审查的 14 条修复（提交 <code>e944188</code>）为保证「响应体有上限」，在 3 处写成
+<code>source.read(buffer, MAX + 1)</code> 只读一次即当作完整正文。okio 的 <code>BufferedSource.read</code> 每次至多搬一个 segment（8 KiB），
+该上限判断<b>恒为假</b>，正文被静默截断 —— 详情见 <b>G3-01（Critical）</b>。这类「修复本身成为新缺陷」是增量审查最该抓的东西。
+</div>
+
+<p>另一个跨组主题是<b>「门控加严后的副作用」</b>：设置页 14 项开关与可见性过滤在本窗口集中落地，随之出现「关掉本地音乐 → 已下载收藏消失且心形点不亮」（G6-01）、「关掉封面缓存 → 清除按钮变空操作」（G8-01）、「歌词缓存开关把读也关了」（G5-04）三类同根问题：<b>开关的可见性语义、数据来源与清理入口没有一起收敛</b>。</p>
+
+<h3>统计口径核对（四组数字必须自洽）</h3>
+<table>
+<tr><th>口径</th><th>Critical</th><th>High</th><th>Medium</th><th>Low</th><th>合计</th><th>说明</th></tr>
+<tr><td>① 初稿分布</td><td>1</td><td>1</td><td>26</td><td>35</td><td>63</td><td>10 个深审组原始输出</td></tr>
+<tr><td>② 复核范围</td><td>1</td><td>1</td><td>26</td><td>35</td><td>63</td><td>全部初稿，零抽样</td></tr>
+<tr><td>②′ 复核后分布</td><td>1</td><td>0</td><td>20</td><td>42</td><td>63</td><td>0 推翻；8 条降级、0 升级；G3-01 复核建议 High，主审维持 Critical</td></tr>
+<tr><td>③ 终稿（去重后）</td><td>1</td><td>0</td><td>20</td><td>41</td><td>62</td><td>G8-04 合并进 G5-04</td></tr>
+</table>
+<p style="color:var(--muted);font-size:13px">注：②′ 的「1 High」是 G3-01；终稿主审维持 Critical（复核建议 High），理由见该条。合计 1+0+20+42=63 → 去重 62。</p>
+</section>
+<section id="top">
+<h2>2. 最高优先级</h2>
+<h3>Critical</h3>
+<div class="finding critical">
+  <div class="fhead"><span class="fid">G3-01</span><span class="sev sev-critical">Critical</span><span class="verdict">CONFIRMED</span>
+    <span class="loc">backend/network/MetingApiService.kt:339 · LxScriptRepo.kt:146 · BaiduLyricsProvider.kt:116</span></div>
+  <p><span class="label">机制</span> 三处「限量读取」都写成 <code>val read = source.read(limited, MAX + 1)</code> 后直接 <code>limited.readUtf8()</code>。okio 的 <code>BufferedSource.read(Buffer, long)</code> 只从当前缓冲区搬运、每次至多一个 segment（8 KiB），返回后即退出 —— 它不是「读满 N 字节」的循环。因此 <code>read &gt; MAX</code> 永不成立，拿到的永远是被截断的前缀。</p>
+  <p><span class="label">影响</span> ① 网络音乐搜索：正文超过约 8 KiB（约 30 首以上）即 JSON 解析失败，四个端点全部返回空 ⇒ <b>搜索整体 0 条</b>，小结果仍正常，极易误判为端点故障；② 洛雪脚本真实 50–400 KB，必被截到约 8 KiB，而安装校验只看 <code>@name</code> ⇒ <b>半截脚本通过校验并被保存/执行</b>，这正是 C25 注释想防的反向失效；③ 百度歌词同样被截断。</p>
+  <p><span class="label">修法</span> 循环读到 EOF 或上限；或 <code>response.peekBody(max).string()</code>。三处一起改，并补一条 20 KB 正文的单测（现有夹具 ≤200 B，测不出来）。</p>
+  <p><span class="label">复核</span> 复核代理建议降为 High，理由是「搜索是否全废取决于真实正文长度」。主审维持 Critical：常规搜索结果普遍超过 8 KiB；且它同时让 LX 的「防半截脚本执行」保护反向失效。Meting 这处由 <code>e944188</code> 在本窗口引入（回归），LX/百度两处为同根因旧站点。</p>
+</div>
+
+<h3>Medium 中优先处理的 8 条</h3>
+<div class="finding medium">
+  <div class="fhead"><span class="fid">G5-02</span><span class="sev sev-medium">Medium</span><span class="loc">AppPreferences.kt:143-147 + NasMusicApp.kt:516</span></div>
+  <p><span class="label">影响</span> DataStore 无 corruptionHandler，启动读取又在 onCreate 裸 <code>runBlocking</code> ⇒ 设置文件一旦损坏即<b>崩溃循环，只能清应用数据</b>（连接、收藏、设置全丢）。修法：<code>ReplaceFileCorruptionHandler</code> + runCatching 回退默认值。</p>
+</div>
+<div class="finding medium">
+  <div class="fhead"><span class="fid">B1-02 / B1-03</span><span class="sev sev-medium">Medium</span><span class="loc">HqSeparationOrchestrator.kt:641 · LyricsManager.kt:423</span></div>
+  <p><span class="label">影响</span> 两处后台协程 scope 都没有 <code>CoroutineExceptionHandler</code>，而 finally / launch 内是无保护的写盘（<code>copyTo</code> / <code>writeText</code>）⇒ 磁盘满或缓存目录不可写时直接抛到线程默认处理器，<b>进程崩溃</b>：一处发生在分离成功后，一处发生在切歌时，且与用户操作无可见关联。</p>
+</div>
+<div class="finding medium">
+  <div class="fhead"><span class="fid">G6-02 / G7-02</span><span class="sev sev-medium">Medium</span><span class="loc">MainViewModel.kt:3385 · AlbumDetailScreen.kt:255</span></div>
+  <p><span class="label">影响</span> 专辑详情新增缓存短路，但 <code>_albumSongsCache</code> <b>只写不失效</b>，空结果也被缓存；空态又没有重试按钮 ⇒ 搜索态专辑串用上次搜索结果、关源后旧源歌曲复活、一次 0 首后永久「暂无歌曲」。两条是同一后果链，应一起修。</p>
+</div>
+<div class="finding medium">
+  <div class="fhead"><span class="fid">G6-01</span><span class="sev sev-medium">Medium</span><span class="loc">MainViewModel.kt:690-710</span></div>
+  <p><span class="label">影响</span> 收藏重建 Song 丢 <code>storageType</code> ⇒ 已下载收藏在关「本地音乐」后被过滤，<code>favoriteIds</code> 同步丢 id，心形显示未收藏且点击在删/加间翻转。</p>
+</div>
+<div class="finding medium">
+  <div class="fhead"><span class="fid">G2-01</span><span class="sev sev-medium">Medium</span><span class="loc">SearchAggregator.kt:364</span></div>
+  <p><span class="label">影响</span> 「关本地仍保留已下载歌曲」分支不可达（调用点已用同一开关减掉 LOCAL）⇒ 声称修好的「下载过的歌搜不到」没有生效。</p>
+</div>
+<div class="finding medium">
+  <div class="fhead"><span class="fid">G2-02</span><span class="sev sev-medium">Medium</span><span class="loc">NavidromeAdapter.kt:167 · SubsonicAdapter.kt:176</span></div>
+  <p><span class="label">影响</span> 零结果信封缺 <code>album</code> 键即抛异常 ⇒ 空曲库 / 500 整数倍曲库的专辑页恒 Error 且重试必复现。</p>
+</div>
+<div class="finding medium">
+  <div class="fhead"><span class="fid">G4-01</span><span class="sev sev-medium">Medium</span><span class="loc">DownloadViewModel.kt:315</span></div>
+  <p><span class="label">影响</span> 单曲删除用无档位键查库，而手动下载恒带 <code>:q&lt;quality&gt;</code> ⇒ 恒 null 静默返回：网络曲点 ✓ 二次确认后什么都没发生。</p>
+</div>
+<div class="finding medium">
+  <div class="fhead"><span class="fid">G8-01 / B2-02</span><span class="sev sev-medium">Medium</span><span class="loc">NasMusicApp.kt:928 · VisualizerViewModel.kt:556</span></div>
+  <p><span class="label">影响</span> 两处「开关从假变真」的副作用：关封面缓存后清除按钮变空操作、占用永远清不掉；降画质后重效果仍在跑（回落主题未持久化，被 settings 收集器覆盖回去）。</p>
+</div>
+</section>
+<section id="verify">
+<h2>3. 独立复核结论</h2>
+<p>3 个独立复核代理分别覆盖 G1–G3、G4–G7、G8/B1/B2，对 63 条初稿逐条回源、grep 调用点、追上层兜底。裁决：<b>CONFIRMED 52 · PARTIALLY CORRECT 10 · REFUTED 0</b>。</p>
+<p>复核的主要修正不是「推翻」，而是<b>收窄影响面与校准严重度</b>：</p>
+<ul class="tight">
+<li><b>G1-01 High→Medium</b>：索引错位是否真的发生，取决于 Media3 在「空列表加第一项」时是否回调 <code>onMediaItemTransition</code>（本机取不到 media3 构件，无法证实）；即便发生，后续 <code>setMediaItems</code> 也会整体覆盖，属暂时错位。</li>
+<li><b>G3-01 Critical 保留（复核建议 High）</b>：机制方向三方一致，分歧只在「搜索是否全废」的触发阈值。主审保留 Critical，理由见上节。</li>
+<li><b>G1-01 / G2-06 / G2-09 / G3-04 / G4-02 / G4-04 / G7-05 / B1-08 / B2-01 / B2-04 共 10 条 PARTIALLY</b>：机制成立但影响描述需校正（例如 G2-06 是「静默少一截」而非「显示无歌」；G4-04 的真缺口是 jaudiotagger 原地 commit，不是 copyTo；B1-08 的唯一调用点不随切歌取消）。</li>
+<li><b>降级 9 条</b>：G1-02、G1-03、G2-03、G3-02、G4-03、G5-01、B2-01 由 Medium 降 Low（触发面窄或后果轻微）；G3-01 复核建议降 High 但主审维持；G4-02 保留 Medium 但收窄为「只有 StorageFull 可达」。</li>
+</ul>
+<p><b>合并</b>：G8-04 与 G5-04 指向同一行同一根因（<code>LyricsPersistentCache.kt:76</code> 的读侧门控），终稿合并为 G5-04，避免重复计数。G7-02 与 G6-02 后果链重叠但缺陷独立，保留两条并交叉引用。</p>
+</section>
+<section id="groups"><h2>4. 各子系统发现</h2>
+<h3>G1 · 播放核心 / 队列 / 按键 <span style='font-weight:400;color:var(--muted);font-size:13px'>（7 条：Medium 2 / Low 5）</span></h3>
+<p class='gsub'>player/、util/MediaKeyHandler、PlayerViewModel、PlayerControls</p>
+<div class="finding medium">
+  <div class="fhead"><span class="fid">G1-01</span><span class="sev sev-medium">Medium</span><span class="delta">High ↓</span>
+    <span class="verdict">PARTIALLY CORRECT</span><span class="loc">player/PlayerManager.kt:1219-1221</span></div>
+  <p><span class="label">问题</span> 单曲入队去掉了 <code>player?.currentMediaItem != null</code> 守卫，只要 player 存在就 <code>addMediaItem</code>。冷启动持久化队列被 <code>stripVolatileStreamUrl</code> 清空 URL 时 <code>restoreQueue</code> 会跳过 prepare（:1401），此时 ExoPlayer 列表为空而 <code>_playerState.queue</code> 非空。</p>
+  <p><span class="label">影响与修法</span> 向空列表追加会让 <code>currentMediaItemIndex</code> 变 0 并触发 <code>onMediaItemTransition</code>，<code>updateCurrentSongFromPlayer()</code> 把状态覆盖成 <code>currentIndex=0/currentSong=queue[0]</code>：当前曲被无端跳走，播放器列表与状态队列索引错位。<br><b>修法</b>：<code>mediaItemCount == 0 &amp;&amp; currentQueue.isNotEmpty()</code> 时只改 StateFlow 不 addMediaItem；或在 <code>updateCurrentSongFromPlayer</code> 里加 <code>mediaItemCount != queue.size</code> 守卫。</p>
+</div>
+<div class="finding low">
+  <div class="fhead"><span class="fid">G1-02</span><span class="sev sev-low">Low</span><span class="delta">Medium ↓</span>
+    <span class="verdict">CONFIRMED</span><span class="loc">ui/components/PlayerControls.kt:191（配合 :174-178）</span></div>
+  <p><span class="label">问题</span> <code>dragConsumedGesture</code> 只在 <code>onDragStart</code> 置 true，唯一复位点是 tap 回调；但两个 pointerInput 挂同一 Box，拖动时 <code>change.consume()</code> 使 tap 的 <code>waitForUpOrCancellation</code> 返回 null。</p>
+  <p><span class="label">影响与修法</span> 标志钉死 true ⇒ 每次拖动后的下一次点击进度条定位被吞掉，用户要点两次（触屏路径）。<br><b>修法</b>：删掉该标志（拖动已 consume，tap 本不会触发），或改在 onDragEnd/onDragCancel 复位。</p>
+</div>
+<div class="finding low">
+  <div class="fhead"><span class="fid">G1-03</span><span class="sev sev-low">Low</span><span class="delta">Medium ↓</span>
+    <span class="verdict">CONFIRMED</span><span class="loc">player/PlayerManager.kt:409-412（配合 :1421-1443）</span></div>
+  <p><span class="label">问题</span> 新增 <code>_wantsToPlay</code> 直接映射 <code>playWhenReady</code>，但 SEQUENTIAL 播到队尾 <code>STATE_ENDED</code> 不会复位 <code>playWhenReady</code>；<code>onPlaybackEnded</code> 的 SEQUENTIAL 分支是 <code>/* Stop */</code> 空操作。</p>
+  <p><span class="label">影响与修法</span> 播完后 <code>wantsToPlay=true</code> ⇒ 播放键显示暂停图标（实际无声），第一次点击只清 flag；同一时刻通知栏读 <code>isPlaying=false</code>，两处图标矛盾。<br><b>修法</b>：STATE_ENDED 时同步置 false，或 <code>playPause()</code> 对 ENDED 特判（seekTo(0)+play）。</p>
+</div>
+<div class="finding medium">
+  <div class="fhead"><span class="fid">G1-04</span><span class="sev sev-medium">Medium</span>
+    <span class="verdict">CONFIRMED</span><span class="loc">ui/viewmodel/PlayerViewModel.kt:347-358（入口 :395、:409）</span></div>
+  <p><span class="label">问题</span> <code>resolveAndPlayCurrentSong()</code> 回写时读<b>完成时刻</b>的 <code>playerState.value.currentIndex</code>，把为 song 解析的 playUrl 写到该下标，仅靠 <code>resolveGeneration</code>；而 <code>next()/previous()</code> 走「目标曲已有 URL」分支时既不自增代数也不 cancel 在途解析（对比 <code>resolveAndPlayByIndex</code> 的 C32 id 校验 :521-526）。</p>
+  <p><span class="label">影响与修法</span> 网络歌解析可达数秒；解析期间切到已有 URL 的下一首，旧歌 URL 被写到新下标 ⇒ 队列中该曲 streamUrl 变脏，播放「B 的歌名 + A 的音频」。<br><b>修法</b>：回写前比对 <code>currentSong?.id</code>；next/previous 入口 invalidate 在途解析。</p>
+</div>
+<div class="finding low">
+  <div class="fhead"><span class="fid">G1-05</span><span class="sev sev-low">Low</span>
+    <span class="verdict">CONFIRMED</span><span class="loc">ui/viewmodel/PlayerViewModel.kt:239-242</span></div>
+  <p><span class="label">问题</span> 空 URL 提示只覆盖 <code>isNetworkSong</code>，解析失败后仍无条件 <code>playQueue</code>；非网络歌（NAS 未连 / 本地 path 为空）空 URL 仍静默空播。</p>
+  <p><span class="label">影响与修法</span> 界面切到播放页、队列显示该曲，但无声且无任何提示 —— 正是该提交要修的症状换了个入口。<br><b>修法</b>：判 <code>streamUrl.isNullOrBlank()</code> 并对非网络歌提示，解析彻底失败时 return。</p>
+</div>
+<div class="finding low">
+  <div class="fhead"><span class="fid">G1-06</span><span class="sev sev-low">Low</span>
+    <span class="verdict">CONFIRMED</span><span class="loc">player/PlaybackService.kt:250-263</span></div>
+  <p><span class="label">问题</span> try/catch 包在 <code>sleepTimer.state.collect</code> <b>外层</b>，catch 执行完协程即结束，订阅仍然永久消失（与注释「不能让订阅永久消失」相反）。</p>
+  <p><span class="label">影响与修法</span> 本次服务生命周期内 UI 改睡眠定时不再同步到通知与系统媒体卡片。<br><b>修法</b>：<code>while (isActive)</code> 重订阅，或把 try/catch 放进 collect lambda 内。</p>
+</div>
+<div class="finding low">
+  <div class="fhead"><span class="fid">G1-07</span><span class="sev sev-low">Low</span>
+    <span class="verdict">CONFIRMED</span><span class="loc">player/PlayerManager.kt:843-848（调用链 MainViewModel.kt:2226-2245）</span></div>
+  <p><span class="label">问题</span> <code>addToQueue(songs)</code> 按 id 去重后不返回实际追加数；随心听续播只判 <code>queue.size - currentIndex &lt;= 5</code>，成功路径无「无新增」退避。</p>
+  <p><span class="label">影响与修法</span> 小曲库时抽回的 20 首全被丢弃，仍每 5 秒请求一次 NAS，且队尾不再补充、播完即止。<br><b>修法</b>：返回实际条数，空追加时退避或重排队列。</p>
+</div>
+<p><span class='label'>该组做得好的地方</span></p><ul class='tight'><li><b>PlayModeAdjacent</b> 把「预判下标」抽成纯函数并要求与 PlayerManager.next/previous 逐条对齐，<code>null</code> 表示「本次不预判」，消除了 VO 与播放器双真相源。</li><li><b>QueueAddition.compute</b> 把「必须按 id 且队列 id 唯一」写成闭环论证，并记录了历史上 id 与 artist+title 两套口径漂移的成因。</li><li><b>DemucsSeparator</b> 的 overlap-add 修复算术自洽：每轮 <code>seek(startSample*8)</code> + <code>segLen=min(SEGMENT,total-start)</code>，尾段与 pending 冲刷都不越 EOF，RandomAccessFile 用 use{} 包裹。</li></ul>
+<h3>G2 · 后端核心 / NAS 适配器 <span style='font-weight:400;color:var(--muted);font-size:13px'>（9 条：Medium 4 / Low 5）</span></h3>
+<p class='gsub'>BackendAdapter、SearchAggregator、五个适配器、MusicMerger</p>
+<div class="finding medium">
+  <div class="fhead"><span class="fid">G2-01</span><span class="sev sev-medium">Medium</span>
+    <span class="verdict">CONFIRMED</span><span class="loc">backend/SearchAggregator.kt:364</span></div>
+  <p><span class="label">问题</span> 「关掉本地音乐后仍保留已下载歌曲」分支不可达：两个调用点都传 <code>effectiveEnabledSearchSources</code>，该集合已用同一个 <code>localMusicEnabled</code> 开关减去 LOCAL（SearchViewModel.kt:63-88）⇒ <code>LOCAL in sources</code> 与 localOn 恒等价，<code>!localOn</code> 永远为假。</p>
+  <p><span class="label">影响与修法</span> 「下载过的歌搜不到」在关闭本地音乐后仍然存在，注释声称修好的行为没有生效，且日志无痕。<br><b>修法</b>：调用点始终传 LOCAL 由聚合器决定保留范围，或条件改为 <code>repository != null &amp;&amp; (LOCAL in sources || localMusicEnabled())</code>；保留 :432 可见性兜底。</p>
+</div>
+<div class="finding medium">
+  <div class="fhead"><span class="fid">G2-02</span><span class="sev sev-medium">Medium</span>
+    <span class="verdict">CONFIRMED</span><span class="loc">backend/impl/NavidromeAdapter.kt:167-170；SubsonicAdapter.kt:176-179</span></div>
+  <p><span class="label">问题</span> 零结果时 <code>albumList2</code> 无 <code>album</code> 键，<code>getAsJsonArray("album") ?: throw</code> 直接抛异常，导致 <code>if (albums.size()==0) break</code> 成为死代码。</p>
+  <p><span class="label">影响与修法</span> 空曲库、或曲库总数恰为 pageSize=500 整数倍时，专辑页恒 <code>UiState.Error</code>，重试永不成功；同文件 <code>getArtists</code>/<code>getSongs</code> 对空库口径正确。<br><b>修法</b>：<code>albumList2</code> 存在即正常，<code>album</code> 缺失则 break。</p>
+</div>
+<div class="finding low">
+  <div class="fhead"><span class="fid">G2-03</span><span class="sev sev-low">Low</span><span class="delta">Medium ↓</span>
+    <span class="verdict">CONFIRMED</span><span class="loc">backend/impl/FeiniuAdapter.kt:637</span></div>
+  <p><span class="label">问题</span> <code>getArtists</code> 用 <code>if (result.isEmpty() &amp;&amp; lastFailure != null) throw</code>：第 2 页以后失败时 <code>fetchAllPages</code> 返回半截列表，<code>result.isEmpty()</code> 为假 ⇒ 既不上抛也不提示；同提交 <code>getAlbums</code> 无该条件。</p>
+  <p><span class="label">影响与修法</span> 艺术家超过一页（200）且翻页中途失败 ⇒ 艺术家页静默少一截，无错误态。<br><b>修法</b>：去掉 <code>result.isEmpty() &amp;&amp;</code>，与 getAlbums 统一。</p>
+</div>
+<div class="finding medium">
+  <div class="fhead"><span class="fid">G2-04</span><span class="sev sev-medium">Medium</span>
+    <span class="verdict">CONFIRMED</span><span class="loc">backend/impl/FeiniuAdapter.kt:606（清位 :600/:631，写入 :1039-1105）</span></div>
+  <p><span class="label">问题</span> 用实例级 <code>@Volatile lastFailure</code> 当「本次调用是否失败」的信号；启动时对同一 adapter 并行发起 albums/genres/favorites/artists 五路请求。</p>
+  <p><span class="label">影响与修法</span> 并发窗口内他请求失败 ⇒ 本次全部成功也误抛（数据其实是好的）；他请求成功清位 ⇒ 本次真实翻页失败被擦掉、半截列表照常返回。两个方向都成立。<br><b>修法</b>：<code>fetchAllPages</code> 返回局部 Result/Pair，实例字段只保留用户可见诊断文案。</p>
+</div>
+<div class="finding medium">
+  <div class="fhead"><span class="fid">G2-05</span><span class="sev sev-medium">Medium</span>
+    <span class="verdict">CONFIRMED</span><span class="loc">backend/local/MusicMerger.kt:163</span></div>
+  <p><span class="label">问题</span> 本地专辑分组键从 <code>normalizeKey(album)</code> 改成 <code>ArtistSplitter.albumKey(album, song.artist)</code>，用的是<b>曲目级</b> artist 而非 albumartist。</p>
+  <p><span class="label">影响与修法</span> 合辑 / 群星 / 合作曲目会把同一张专辑拆成 N 张同名卡，songCount 被拆散、id 不同；同一专辑来自 NAS 时仍是一张，视图内口径分裂。<br><b>修法</b>：先按专辑名归堆，堆内取出现次数最多的 artist 作 albumartist，再决定是否拆卡。</p>
+</div>
+<div class="finding low">
+  <div class="fhead"><span class="fid">G2-06</span><span class="sev sev-low">Low</span>
+    <span class="verdict">PARTIALLY CORRECT</span><span class="loc">backend/impl/JellyfinAdapter.kt:395-396</span></div>
+  <p><span class="label">问题</span> <code>getArtistSongs</code> 翻页 <code>?: break</code> 后正常返回半截列表；外层 <code>catch { emptyList() }</code> 只覆盖抛异常路径。</p>
+  <p><span class="label">影响与修法</span> 单个歌手 &gt;1000 首且翻页失败 ⇒ 详情页静默截断（复核纠正：不是「显示无歌」）。<br><b>修法</b>：循环内失败即抛，与 :218 / :303 同形。</p>
+</div>
+<div class="finding low">
+  <div class="fhead"><span class="fid">G2-07</span><span class="sev sev-low">Low</span>
+    <span class="verdict">CONFIRMED</span><span class="loc">backend/impl/DaoliyuAdapter.kt:249</span></div>
+  <p><span class="label">问题</span> <code>getArtists</code> 仍是 <code>page=1&amp;limit=PAGE_SIZE</code> 单页 500，不翻页；同提交已给 getAlbums 加了全量翻页。</p>
+  <p><span class="label">影响与修法</span> 艺术家超过 500 位的道理鱼库静默截断，同一后端两个列表口径不一致。<br><b>修法</b>：复用 getAlbums 的分页骨架。</p>
+</div>
+<div class="finding low">
+  <div class="fhead"><span class="fid">G2-08</span><span class="sev sev-low">Low</span>
+    <span class="verdict">CONFIRMED</span><span class="loc">backend/impl/DaoliyuAdapter.kt:219</span></div>
+  <p><span class="label">问题</span> 分页只用「本页不足 PAGE_SIZE」判末页，信封里的 <code>total</code>（getSongsTotalCount 已在用）未参与。</p>
+  <p><span class="label">影响与修法</span> 若服务端对 limit 有更小硬上限（如 100/页），首屏即误判末页，专辑列表静默退化。<br><b>修法</b>：优先用 total 判末页，缺失时回退短页判据。</p>
+</div>
+<div class="finding low">
+  <div class="fhead"><span class="fid">G2-09</span><span class="sev sev-low">Low</span>
+    <span class="verdict">PARTIALLY CORRECT</span><span class="loc">backend/impl/DaoliyuAdapter.kt:264-265</span></div>
+  <p><span class="label">问题</span> 接口契约把道理鱼归入「用 artistId、忽略名字」，并规定按名查询的后端必须覆盖 <code>queriesArtistSongsByName</code>；实现仍拼 <code>?name=</code> 且未覆盖。</p>
+  <p><span class="label">影响与修法</span> 缺陷是<b>契约与实现不一致</b>（文档误导后续改动）；复核纠正：同人多 ID 逐条查询是 ID 型后端的正确行为，不是缺陷。<br><b>修法</b>：删掉 <code>?name=</code>，或按契约覆盖并同步改契约与门禁。</p>
+</div>
+<p><span class='label'>该组做得好的地方</span></p><ul class='tight'><li><b>错误契约与消费方对得上</b>：BackendAdapter 明确「失败必须抛、空列表只表示确实没有」，两个调用点各自转成 UiState.Error + 重试闭包。</li><li><b>每个全量翻页都有显式上限</b>（道理鱼 100 页 / Navidrome 100 / Jellyfin 1000），异常服务端不会把 app 拖进无限翻页。</li><li><b>飞牛分页用 data.total 判末页</b>（记录 P2-7 教训），并逐条 runCatching 隔离脏数据。</li></ul>
+<h3>G3 · 网络音源 / 云盘 OAuth / LX / MV <span style='font-weight:400;color:var(--muted);font-size:13px'>（6 条：Critical 1 / Medium 1 / Low 4）</span></h3>
+<p class='gsub'>Meting、百度网盘、洛雪脚本、MV 搜索</p>
+<div class="finding critical">
+  <div class="fhead"><span class="fid">G3-01</span><span class="sev sev-critical">Critical</span>
+    <span class="verdict">CONFIRMED</span><span class="loc">backend/network/MetingApiService.kt:339（同机制 LxScriptRepo.kt:146、BaiduLyricsProvider.kt:116）</span></div>
+  <p><span class="label">问题</span> <code>source.read(limited, maxBodyBytes + 1)</code> 只调用一次；okio 的 <code>BufferedSource.read(Buffer, long)</code> 每次至多搬一个 segment（8 KiB）且返回即退出，因此 <code>read &gt; maxBodyBytes</code> <b>永不成立</b>，随后的 <code>limited.readUtf8()</code> 只是被截断的前缀。三处（8 MB 搜索 / 2 MB 脚本 / 歌词）全部失效。</p>
+  <p><span class="label">影响与修法</span> ① 搜索结果正文超过约 8 KiB（约 30 首以上，含 pic/url/lrc 三条 URL）即 JSON 解析失败 ⇒ 四个端点全部空 ⇒ <b>网络音乐搜索整体返回 0 条</b>，小结果仍正常，极易误判为端点故障；② 洛雪脚本真实 50–400 KB，必然被截到约 8 KiB，而校验只看 <code>@name</code> ⇒ <b>半截脚本通过校验并被执行</b>，C25 想防的正是这个；③ 百度歌词同样截断。既有单测夹具 ≤200 B，测不出来。<br><b>修法</b>：循环读到 EOF 或上限（<code>while (remaining &gt; 0) { val r = source.read(buf, remaining); if (r == -1L) break; remaining -= r }</code>），或 <code>peekBody(max)</code>；三处一起改，并补一条 20 KB 正文的单测。<br>⚠️ 复核曾建议降为 High（认为搜索是否全废取决于真实正文长度）；主审维持 Critical：本窗口内正常搜索结果普遍超过 8 KiB，且它同时让 LX 的截断执行保护反向失效。Meting 这处由上一轮修复 <code>e944188</code> 在本窗口引入，属回归；LX/百度两处为同根因旧站点。</p>
+</div>
+<div class="finding low">
+  <div class="fhead"><span class="fid">G3-02</span><span class="sev sev-low">Low</span><span class="delta">Medium ↓</span>
+    <span class="verdict">CONFIRMED</span><span class="loc">backend/network/NetworkMusicManager.kt:97</span></div>
+  <p><span class="label">问题</span> <code>playUrlKey</code> 只含 <code>source:networkId:quality</code>，没有 <code>networkPlatform</code>；而本窗口取链已改为按 <code>song.networkPlatform</code> 快照选平台（MetingApiService.kt:517）。</p>
+  <p><span class="label">影响与修法</span> 不同 Meting 平台的 networkId 撞号时，5 分钟 TTL 内 B 歌会拿到 A 歌直链（播放成另一首），负面探测也会串台误判死。<br><b>修法</b>：键补 platform 维度。</p>
+</div>
+<div class="finding medium">
+  <div class="fhead"><span class="fid">G3-03</span><span class="sev sev-medium">Medium</span>
+    <span class="verdict">CONFIRMED</span><span class="loc">backend/network/mv/MvSearchManager.kt:56（及 :66）</span></div>
+  <p><span class="label">问题</span> 缓存查找 / 删除在 <code>withContext(Dispatchers.IO)</code>（:71）<b>之前</b>执行；<code>MvPersistentCache.get()</code> 首次同步读盘并解析最多 5000 条 JSON，<code>remove</code> 命中后同步整表重写。全部调用点在主线程 <code>viewModelScope</code>。</p>
+  <p><span class="label">影响与修法</span> 冷启动后首次 MV 搜索 / 解析时主线程卡顿、ANR 风险；缓存命中但 bvid 解析失败时更糟。<br><b>修法</b>：整段移入 IO，或把 get/remove 改 suspend。</p>
+</div>
+<div class="finding low">
+  <div class="fhead"><span class="fid">G3-04</span><span class="sev sev-low">Low</span>
+    <span class="verdict">PARTIALLY CORRECT</span><span class="loc">ui/viewmodel/MvSearchViewModel.kt:233</span></div>
+  <p><span class="label">问题</span> <code>onMvNext</code> 的预搜分支丢弃 <code>advanceIndexSilently</code> 返回值并无条件 <code>mvAdvanced = true</code>；兄弟函数 <code>onMvPlaybackEnded</code>（:175-186）已修同根因。</p>
+  <p><span class="label">影响与修法</span> 队列无法推进时退出 MTV 会 <code>syncAndPlayCurrent()</code> 从 0 重播当前曲。复核纠正：需预搜时的 <code>currentPlayMode</code> 与按钮传入的 playMode 分歧才可达，不是「无条件」。<br><b>修法</b>：对齐 onMvPlaybackEnded 的 null 守卫。</p>
+</div>
+<div class="finding low">
+  <div class="fhead"><span class="fid">G3-05</span><span class="sev sev-low">Low</span>
+    <span class="verdict">CONFIRMED</span><span class="loc">backend/network/baidu/BaiduOAuthClient.kt:192（及 :198、:107-125）</span></div>
+  <p><span class="label">问题</span> <code>pollDeviceToken</code> 的 <code>error</code>/<code>error_description</code> 与 <code>requestDeviceCode</code> 五处仍是裸 <code>.asString</code>；JsonNull/JsonObject 会抛 <code>UnsupportedOperationException</code>。同函数另三处已按 I4-03 改成 <code>takeIf { it.isJsonPrimitive }</code>。</p>
+  <p><span class="label">影响与修法</span> 被 WAF/代理改写的错误信封会让轮询抛异常 → 被 catch 成 <code>Failed</code> → 电视端中止而手机端仍在授权，并弹原始异常文本。<br><b>修法</b>：五处统一走 <code>takeIf { it.isJsonPrimitive }?.asString</code>。</p>
+</div>
+<div class="finding low">
+  <div class="fhead"><span class="fid">G3-06</span><span class="sev sev-low">Low</span>
+    <span class="verdict">CONFIRMED</span><span class="loc">backend/network/MetingApiService.kt:430（及 :596、:666）</span></div>
+  <p><span class="label">问题</span> 同文件 <code>type=url</code> 的 200 分支、<code>lrc</code>、<code>playlist</code> 仍是无限量 <code>response.body?.string()</code>；I4-02 的威胁模型（端点回整页 HTML / 超大正文）对它们同样成立。</p>
+  <p><span class="label">影响与修法</span> 某端点返回超大正文时按体积分配内存 ⇒ 512 MB heap 电视上 OOM。<br><b>修法</b>：抽 <code>readLimited</code>，分别给 64 KiB / 1 MiB / 2 MiB。</p>
+</div>
+<p><span class='label'>该组做得好的地方</span></p><ul class='tight'><li><b>直链统一守卫</b>：<code>guardPlayUrl</code> 是三条放行路径的唯一出口，用放行私网 NAS、拦回环/元数据/非 http 的口径，注释写明严格版会误杀 NAS 直链。</li><li><b>OAuth 并发刷新</b>用 Mutex + 锁内复查应对 refresh_token 单次有效，缺字段时保留旧 refreshToken。</li><li><b>LX 三道防线</b>：安装入口 https + 严格 NetAddressGuard → 下载 client 逐跳同口径校验 → 落盘前后 SHA-256 pin 比对；更新失败保留旧版。</li></ul>
+<h3>G4 · 下载 / 导出 / 照片源 / 电台 / 天气 <span style='font-weight:400;color:var(--muted);font-size:13px'>（5 条：Medium 2 / Low 3）</span></h3>
+<p class='gsub'>SongDownloadManager、SongExporter、照片源、天气电台</p>
+<div class="finding medium">
+  <div class="fhead"><span class="fid">G4-01</span><span class="sev sev-medium">Medium</span>
+    <span class="verdict">CONFIRMED</span><span class="loc">ui/viewmodel/DownloadViewModel.kt:315</span></div>
+  <p><span class="label">问题</span> <code>deleteDownload</code> 用无档位键 <code>song.downloadKey</code>（= <code>downloadKeyOf(0)</code>）查库，而手动下载的 Meting 曲恒落 <code>ntwk_&lt;src&gt;_&lt;id&gt;:q&lt;quality&gt;</code>（探测档位排除 AUTO）⇒ <code>repo.get(key)</code> 恒 null ⇒ <code>?: return@launch</code> 静默返回。</p>
+  <p><span class="label">影响与修法</span> 网络曲点 ✓ 二次确认后什么都没发生：文件、DB 行、local_songs、✓、提示全不动，除「清空全部下载」外无单曲删除途径。<br><b>修法</b>：改用现成的 <code>repo.downloadedQualitiesOf(song.id)</code> 逐档删并清 local_songs；失败要给出可见提示。</p>
+</div>
+<div class="finding medium">
+  <div class="fhead"><span class="fid">G4-02</span><span class="sev sev-medium">Medium</span>
+    <span class="verdict">PARTIALLY CORRECT</span><span class="loc">backend/download/SongDownloadManager.kt:279-280</span></div>
+  <p><span class="label">问题</span> 循环开头写 <code>_downloadStates[key] = Downloading(0)</code>，终态早返回（StorageFull 等）不复位；StorageFull 在建 DB 行之前返回，<code>cancelAll()</code> 按 <code>getUnfinished()</code> 也清不到。</p>
+  <p><span class="label">影响与修法</span> 磁盘满后该曲状态永久停在 ⇣，清理空间后 <code>enqueueManual</code> 判成「已下载」并给误导文案，需杀进程才恢复。复核纠正：可达终态只有 StorageFull（其余三种全仓无构造点）。<br><b>修法</b>：终态分支清理内存条目或落 Failed，并提示失败原因。</p>
+</div>
+<div class="finding low">
+  <div class="fhead"><span class="fid">G4-03</span><span class="sev sev-low">Low</span><span class="delta">Medium ↓</span>
+    <span class="verdict">CONFIRMED</span><span class="loc">backend/download/SongDownloadManager.kt:680</span></div>
+  <p><span class="label">问题</span> 崩溃恢复按 <code>sanitize(entity.artist)</code> 全串拼目录，而写入侧用 <code>ArtistSplitter.split(artist).firstOrNull()</code>（DownloadPathBuilder.kt:167）。</p>
+  <p><span class="label">影响与修法</span> 多艺术家曲目（含 / 、 &amp; feat. 等）真实目录与恢复侧不同 ⇒ 恢复恒 null ⇒ rename 后的完整文件成孤儿，用户重下并产生 (2) 副本；:712 的修正对这类歌无效。<br><b>修法</b>：抽取唯一的「artist 目录名」函数，写入与恢复共用。</p>
+</div>
+<div class="finding low">
+  <div class="fhead"><span class="fid">G4-04</span><span class="sev sev-low">Low</span>
+    <span class="verdict">PARTIALLY CORRECT</span><span class="loc">backend/download/SongDownloadManager.kt:712</span></div>
+  <p><span class="label">问题</span> 判据改为 <code>fileSize &lt;= 0 || length == fileSize</code>，而未完成行的 fileSize 恒 0 ⇒ 等价于 <code>length &gt; 0</code>，M08 半截护栏失效。复核补充：copyTo 半截已被 .part+rename 消除，真正缺口是 :424 的 <code>MediaTagWriter.embed</code> 原地 commit。</p>
+  <p><span class="label">影响与修法</span> embed 期间被杀 ⇒ 长度 &gt;0 的坏文件被认领 COMPLETED，永不重下。<br><b>修法</b>：内嵌完成后再提交完成标记 / rename，或校验可解码；初稿「写权威长度」不可行（内嵌后长度必变）。</p>
+</div>
+<div class="finding low">
+  <div class="fhead"><span class="fid">G4-05</span><span class="sev sev-low">Low</span>
+    <span class="verdict">CONFIRMED</span><span class="loc">backend/download/model/DownloadKeys.kt:91</span></div>
+  <p><span class="label">问题</span> <code>Song.dedupeKey</code> 的空白处理由「删除」改为「折叠为单空格」，而 <code>DownloadRepository.reindexFromDisk</code>（:190）仍删除空白 ⇒ 两套口径永不相等。</p>
+  <p><span class="label">影响与修法</span> 该列目前零读取方，属潜在缺陷：一旦恢复跨源去重，reindex 产出的行与存量行全部失配 ⇒ 重复下载。<br><b>修法</b>：抽公共函数两处共用。</p>
+</div>
+<p><span class='label'>该组做得好的地方</span></p><ul class='tight'><li><b>.part + rename 原子替换</b>在下载与导出两条链上都做足；SAF 分支用 <code>targetCopyStarted</code> 区分「目标未被碰过」与「目标已截断」，避免删掉用户上次导出的完好文件。</li><li><b>取消语义用单调世代号</b>而非布尔复位，并在每个 IO 边界插 <code>checkCancelled()</code>，堵住 cancel 被 COMPLETED 覆盖。</li><li><b>下载完整性三层校验</b>：0 字节必败、声明长度严格相等、chunked 只兜零字节，失败必删半成品。</li></ul>
+<h3>G5 · 骨架 / 偏好 / 搜索拼音 / 歌词缓存 / 日志 <span style='font-weight:400;color:var(--muted);font-size:13px'>（6 条：Medium 1 / Low 5）</span></h3>
+<p class='gsub'>NasMusicApp、AppPreferences、PinyinUtils、LyricsCache、LogStore</p>
+<div class="finding low">
+  <div class="fhead"><span class="fid">G5-01</span><span class="sev sev-low">Low</span><span class="delta">Medium ↓</span>
+    <span class="verdict">CONFIRMED</span><span class="loc">data/model/NetworkFavoriteItem.kt:32（调用链 player/MediaLibraryTree.kt:476-485）</span></div>
+  <p><span class="label">问题</span> 新增 <code>networkPlatform</code>，但 <code>MediaLibraryTree.favoriteToSong</code> 构造 Song 时漏 copy（App 内两条路径已传）。</p>
+  <p><span class="label">影响与修法</span> 系统媒体浏览器（车机 / 助理）里播放收藏时平台丢失 ⇒ 用户改过全局平台后取链失败或取到别的歌。仅该路径可达，故降为 Low。<br><b>修法</b>：补字段，或提供单一 <code>toSong()</code> 让三处共用。</p>
+</div>
+<div class="finding medium">
+  <div class="fhead"><span class="fid">G5-02</span><span class="sev sev-medium">Medium</span>
+    <span class="verdict">CONFIRMED</span><span class="loc">data/prefs/AppPreferences.kt:143-147 + NasMusicApp.kt:516</span></div>
+  <p><span class="label">问题</span> <code>PreferenceDataStoreFactory.create {}</code> 未配 <code>corruptionHandler</code>（默认读到损坏文件即抛 <code>CorruptionException</code>）；<code>readBootSnapshot()</code> 在 onCreate 用 <code>runBlocking</code> 且无 try/catch。</p>
+  <p><span class="label">影响与修法</span> preferences_pb 一旦被写坏（写入中杀进程 / 断电 / 存储满）⇒ 启动即崩且每次启动复现 ⇒ <b>崩溃循环，只能清应用数据</b>（服务器连接、收藏、设置全丢）。<br><b>修法</b>：加 <code>ReplaceFileCorruptionHandler { emptyPreferences() }</code>，并给 <code>readBootSnapshot</code> 包 runCatching 回退默认值。</p>
+</div>
+<div class="finding low">
+  <div class="fhead"><span class="fid">G5-03</span><span class="sev sev-low">Low</span>
+    <span class="verdict">CONFIRMED</span><span class="loc">NasMusicApp.kt:466-475（重建点 :472）、:919-938</span></div>
+  <p><span class="label">问题</span> <code>cacheCover</code> 变化时 <code>Coil.setImageLoader(new)</code> 不 shutdown 旧 loader；每次新建 OkHttp 线程池 / 连接池 / 100 MB DiskCache。</p>
+  <p><span class="label">影响与修法</span> 反复切「自动缓存封面」会遗留 loader 句柄与线程池，同一 image_cache 目录短暂出现两个 DiskCache。<br><b>修法</b>：重建前 <code>runCatching { old.shutdown() }</code>，并复用 OkHttpClient。</p>
+</div>
+<div class="finding low">
+  <div class="fhead"><span class="fid">G5-04</span><span class="sev sev-low">Low</span>
+    <span class="verdict">CONFIRMED</span><span class="loc">lyrics/LyricsPersistentCache.kt:76（写侧 :119）</span></div>
+  <p><span class="label">问题</span> 「自动缓存歌词」开关同时门控了<b>读</b>与写：<code>get()</code> 首行即 <code>return null</code>；而 size/exportAll/clear 不受门控，文案只承诺「自动保存」。</p>
+  <p><span class="label">影响与修法</span> 关开关后磁盘上已有歌词全部不再使用（弱网 / 断网明明有缓存却无歌词），设置页仍显示并允许清理这份失效数据。G8-04 为同一处同根因，已合并。<br><b>修法</b>：只门控写（并拆掉 get 内 <code>maybePersistTouch</code> 的写副作用），或改文案为「关闭后不再读写本地缓存」。</p>
+</div>
+<div class="finding low">
+  <div class="fhead"><span class="fid">G5-05</span><span class="sev sev-low">Low</span>
+    <span class="verdict">CONFIRMED</span><span class="loc">util/LogStore.kt:442-445</span></div>
+  <p><span class="label">问题</span> 注释称「绝不先 file.delete()」，但 <code>tmp.copyTo(file, overwrite = true)</code> 在 kotlin.io 内部正是先 <code>target.delete()</code> 再拷贝，与注释声明的安全属性相反。</p>
+  <p><span class="label">影响与修法</span> 回退分支（同目录 renameTo 失败，Android 上近乎不可达）复制失败时目标已删、E 级日志整批丢失。<br><b>修法</b>：bak 中转 + 原子替换，或流式覆盖并如实注释。</p>
+</div>
+<div class="finding low">
+  <div class="fhead"><span class="fid">G5-06</span><span class="sev sev-low">Low</span>
+    <span class="verdict">CONFIRMED</span><span class="loc">util/LogStore.kt:428-432（配 :163/:400/:450-453）</span></div>
+  <p><span class="label">问题</span> 上限按<b>字节</b>（256 KB），保留量按<b>行数</b>（E200/W200/D100），二者无约束；<code>encode()</code> 把整份堆栈塞进一行（2–8 KB/条）。</p>
+  <p><span class="label">影响与修法</span> 保留集因长堆栈超 256 KB 后，此后每写一行都触发约 400 KB 整文件重读 + 临时文件重写，单线程 writer 上持续 I/O 与闪存写放大，并挤掉 D/I/X。<br><b>修法</b>：轮转尾部按字节再裁一次，或截断超长堆栈。</p>
+</div>
+<p><span class='label'>该组做得好的地方</span></p><ul class='tight'><li><b>拼音链路收敛成单一真相源</b>：PinyinMatcher 删除后全仓零残留引用，matches 的三条路径是旧实现的超集，门禁 T1/T2 带负自检。</li><li><b>ArtistSplitter.matchKey</b> 只剥有界白名单后缀且幂等，KDoc 明确禁止改 normalizeKey（身份口径），把匹配键与身份键分层。</li><li><b>LogStore 写入侧护栏完整</b>：深度背压、W/E 保底、限流去重、drop 计数不接 AppLog 防递归，且不依赖 Android 类型可单测。</li></ul>
+<h3>G6 · ViewModel 群 <span style='font-weight:400;color:var(--muted);font-size:13px'>（3 条：Medium 2 / Low 1）</span></h3>
+<p class='gsub'>Main / Navigation / Search / Server / Events / VocalSeparation</p>
+<div class="finding medium">
+  <div class="fhead"><span class="fid">G6-01</span><span class="sev sev-medium">Medium</span>
+    <span class="verdict">CONFIRMED</span><span class="loc">ui/viewmodel/MainViewModel.kt:690-710（判据 :706/:708）</span></div>
+  <p><span class="label">问题</span> 本窗口给 <code>networkFavoriteSongs</code> 加可见性过滤时，重建 Song 丢掉了 <code>storageType</code>；而 <code>Song.sourceType</code> 第一判据是 <code>storageType == "DOWNLOAD"</code>，已下载收藏又被存成 <code>networkSource="local"</code> ⇒ 一律落 LOCAL。</p>
+  <p><span class="label">影响与修法</span> 关「本地音乐」后：收藏里已下载的歌消失；<code>favoriteIds</code> 同步丢 id ⇒ 曲库/播放页心形显示未收藏，点击实际在删/加之间翻转（数据没删但心形点不亮）。<br><b>修法</b>：模型补 <code>storageType</code>（默认 null 兼容旧 JSON）并在重建时回填，或过滤时对 <code>networkSource=="local"</code> 特判。</p>
+</div>
+<div class="finding medium">
+  <div class="fhead"><span class="fid">G6-02</span><span class="sev sev-medium">Medium</span>
+    <span class="verdict">CONFIRMED</span><span class="loc">ui/viewmodel/MainViewModel.kt:3385-3387、3395-3397（无失效：:980-1023、:2717-2726）</span></div>
+  <p><span class="label">问题</span> 详情入口新增 <code>containsKey</code> 缓存短路，但 <code>_albumSongsCache</code> 全仓<b>只写不失效</b>：clearSourceScopedCaches 只清 artist 的 METING 段，refreshLibrary 不清，下载回填也不清；搜索态专辑的键跨关键词稳定。</p>
+  <p><span class="label">影响与修法</span> 会话内永久：① 先搜 A 点开专辑，改搜 B 再点同名牌，详情仍显示上次搜索结果，「播放全部」播的是当前搜索里不存在的歌；② 关源后旧源歌曲照常列出并可播放；③ NAS 未连时的兜底列表无法纠正；④ 缓存只增不减。<br><b>修法</b>：两缓存纳入 clearSourceScopedCaches / refreshLibrary；<code>search_album_</code> 不短路；补常驻刷新入口。与 G7-02 同一后果链。</p>
+</div>
+<div class="finding low">
+  <div class="fhead"><span class="fid">G6-03</span><span class="sev sev-low">Low</span>
+    <span class="verdict">CONFIRMED</span><span class="loc">ui/viewmodel/MainViewModel.kt:5021、:5038</span></div>
+  <p><span class="label">问题</span> <code>loadRadioStations</code> 新增拼音兜底后变两次串行远端请求，却仍无 Job 取消 / 代数守卫（对比 browseRefresh 与 SearchViewModel）。</p>
+  <p><span class="label">影响与修法</span> 先发的慢请求会把新关键词的 Loading 覆盖成旧关键词结果。<br><b>修法</b>：照抄 <code>radioJob + radioGeneration</code> 形态。</p>
+</div>
+<p><span class='label'>该组做得好的地方</span></p><ul class='tight'><li><b>搜索域取消 + 代数双保险</b>：先 <code>++searchGeneration</code> 再 cancel，被取消协程即便跑完也会被代数判据挡下；clearSearch 对称复位三处缓存键。</li><li><b>队列持久化用「转换检测」</b>而非无条件 else，既修好「删光队列后重启整队复活」，又没有踩「首帧空队列抹掉待恢复队列」。</li><li><b>详情按 id 建模 loading/error</b>，从结构上消灭「先发 A 请求读到 B 快照」。</li></ul>
+<h3>G7 · UI 主屏与核心组件 <span style='font-weight:400;color:var(--muted);font-size:13px'>（5 条：Medium 2 / Low 3）</span></h3>
+<p class='gsub'>八个主屏 + AppRoot / 播放控制 / K歌 / MV / 卡片</p>
+<div class="finding medium">
+  <div class="fhead"><span class="fid">G7-01</span><span class="sev sev-medium">Medium</span>
+    <span class="verdict">CONFIRMED</span><span class="loc">ui/components/AppRoot.kt:217</span></div>
+  <p><span class="label">问题</span> 本窗口新增的 BACK 分支把 Album/ArtistDetail 退路写死为 <code>navigateLibrary</code>；改前落 <code>else -&gt; navigateHome</code>。而首页「最近添加」卡与播放页歌手名都能进详情。</p>
+  <p><span class="label">影响与修法</span> 从首页进专辑返回落曲库（而非首页）；从播放页点歌手进详情返回落曲库（而非播放页）。Queue 已有 queueOrigin，详情页没有同等机制。<br><b>修法</b>：仿 queueOrigin 记录 <code>detailOrigin</code> 并按来源回退。</p>
+</div>
+<div class="finding medium">
+  <div class="fhead"><span class="fid">G7-02</span><span class="sev sev-medium">Medium</span>
+    <span class="verdict">CONFIRMED</span><span class="loc">ui/screens/AlbumDetailScreen.kt:255</span></div>
+  <p><span class="label">问题</span> 空态 <code>EmptyState</code> 无 <code>actionText/onAction</code>（歌手详情空态有「重试」）；而 <code>openAlbumDetail</code> 缓存短路、<code>loadAlbumSongs</code> 把空结果也写进缓存。</p>
+  <p><span class="label">影响与修法</span> 一次取数返回 0 首后，详情页永久「暂无歌曲」，退出重进也不重取，页内无任何补救动作。<br><b>修法</b>：空态接 <code>onRetry</code>（AlbumDetailBranch 已注入）。</p>
+</div>
+<div class="finding low">
+  <div class="fhead"><span class="fid">G7-03</span><span class="sev sev-low">Low</span>
+    <span class="verdict">CONFIRMED</span><span class="loc">ui/components/KaraokePlaybackScreen.kt:376</span></div>
+  <p><span class="label">问题</span> 缓冲期 <code>wantsToPlay=true</code> 但音频未推进；播放页已把歌词插值改用 <code>actualPlaying</code>，K 歌路径仍把 <code>isPlaying</code>（=wantsToPlay）传给 <code>KaraokeLyricsView</code>。</p>
+  <p><span class="label">影响与修法</span> 缓冲 / 卡顿时 K 歌歌词按墙上时钟继续前进，恢复后一次性跳回。<br><b>修法</b>：加 <code>actualPlaying</code> 参数并传入。</p>
+</div>
+<div class="finding low">
+  <div class="fhead"><span class="fid">G7-04</span><span class="sev sev-low">Low</span>
+    <span class="verdict">CONFIRMED</span><span class="loc">ui/components/QualityPickerDialog.kt:66</span></div>
+  <p><span class="label">问题</span> 档位列表收窄为 <code>QualityTiers.uiTiers()</code>（设备不能解 FLAC 时过滤 999），初始 <code>selected</code> 仍取未 clamp 的 <code>currentTier</code>。</p>
+  <p><span class="label">影响与修法</span> 持久化 999 + 设备不支持这一遗留态下，弹窗没有任何一行显示为已选，点「确定」又把 999 写回。<br><b>修法</b>：selected 先 clamp 到 tiers 内。</p>
+</div>
+<div class="finding low">
+  <div class="fhead"><span class="fid">G7-05</span><span class="sev sev-low">Low</span>
+    <span class="verdict">PARTIALLY CORRECT</span><span class="loc">ui/components/MvPlaybackScreen.kt:592</span></div>
+  <p><span class="label">问题</span> 新增 <code>MvSearchingScreen</code> 根 Box 只有 <code>.focusable()</code>，没有 focusRequester 与初次取焦；同文件其它页面都显式 requestFocus。</p>
+  <p><span class="label">影响与修法</span> TV 上搜索态没有节点持有初始焦点，返回按钮需靠几何焦点搜索命中（复核：按钮自身可聚焦，未证实完全不可达），BACK 仍可用。<br><b>修法</b>：补 FocusRequester + LaunchedEffect。</p>
+</div>
+<p><span class='label'>该组做得好的地方</span></p><ul class='tight'><li><b>队列来源记录放在 navigateTo 内部拦截</b>，注释写明改 3 个 Branch 调用点会漏掉 TV 顶栏/手机底栏，并用 <code>!= Screen.Queue</code> 防重复点 Tab 改来源。</li><li><b>wantsToPlay 与 isPlaying 拆成意图态与出声态两层</b>，消费端按「图标 vs 插值时钟」分开取值，而不是全局替换。</li><li><b>下载按钮门控只挡 Idle/Failed</b>，已下载曲目仍可管理，区分了「发起」与「管理」两类语义。</li></ul>
+<h3>G8 · UI 分支 / 库 Tab / 浏览列表 / 设置分区 <span style='font-weight:400;color:var(--muted);font-size:13px'>（5 条：Medium 1 / Low 4）</span></h3>
+<p class='gsub'>9 个 Branch、4 个 Tab、browse、6 个设置分区</p>
+<div class="finding medium">
+  <div class="fhead"><span class="fid">G8-01</span><span class="sev sev-medium">Medium</span>
+    <span class="verdict">CONFIRMED</span><span class="loc">NasMusicApp.kt:928-936 + ui/viewmodel/MainViewModel.kt:4784-4786</span></div>
+  <p><span class="label">问题</span> 关「自动缓存封面」后 <code>buildImageLoader</code> 不再配 diskCache，而 <code>clearCoverCache()</code> 取 <code>Coil.imageLoader(ctx).diskCache?.clear()</code> 直接跳过；占用清单仍扫描并显示 image_cache。本窗口 3a0133d 之前 loader 恒配 diskCache。</p>
+  <p><span class="label">影响与修法</span> 曾开过封面缓存再关掉后，「清除封面缓存」变空操作：无回收、数字原样不动，磁盘无法从设置页回收（只能清应用数据）。<br><b>修法</b>：清除时无条件下删 <code>cacheDir/image_cache</code>；重建 loader 前 shutdown 旧实例。</p>
+</div>
+<div class="finding low">
+  <div class="fhead"><span class="fid">G8-02</span><span class="sev sev-low">Low</span>
+    <span class="verdict">CONFIRMED</span><span class="loc">ui/screens/library/browse/SongList.kt:107（调用点 LibraryScreen.kt:894-909）</span></div>
+  <p><span class="label">问题</span> <code>showTotalCount</code> 只在搜索命中分支传 false，SongsTab 兜底分支仍默认 true；有搜索词且零命中时标题拼成「共 0 / NAS 全库」。</p>
+  <p><span class="label">影响与修法</span> 页面同时显示「共 0 / 5000 首」与「暂无歌曲」。<br><b>修法</b>：两处统一 <code>showTotalCount = filterQuery.isBlank()</code>。</p>
+</div>
+<div class="finding low">
+  <div class="fhead"><span class="fid">G8-03</span><span class="sev sev-low">Low</span>
+    <span class="verdict">CONFIRMED</span><span class="loc">ui/screens/library/RadioTab.kt:74-75（配合 :171-176）</span></div>
+  <p><span class="label">问题</span> 删掉自加载后由 LibraryScreen 的 activeTab effect 触发，但 RADIO 页在 pager 里会被<b>提前组合</b>，组合期状态是初值 <code>Success(emptyList())</code>，空态文案取「加载失败」；activeTab 要等 260 ms 动画结束才提交。</p>
+  <p><span class="label">影响与修法</span> 每次切到 RADIO Tab 的入场动画期间显示「电台加载失败」约 260 ms（复核补证：不只是首次）。<br><b>修法</b>：区分「未开始加载」显示加载中，或保留幂等 onLoadDefault。</p>
+</div>
+<div class="finding low">
+  <div class="fhead"><span class="fid">G8-05</span><span class="sev sev-low">Low</span>
+    <span class="verdict">CONFIRMED</span><span class="loc">ui/screens/library/browse/GenreYearLists.kt:79（及 :183）</span></div>
+  <p><span class="label">问题</span> 新串 <code>library_style_no_songs</code> 只有 values/，values-en/ 缺失。复核补证：本窗口共 5 个新 key 缺英文（另有 mv_searching、player_not_ready、queue_clear_confirm_{title,message}）。</p>
+  <p><span class="label">影响与修法</span> 英文界面中英混排；仓库没有全局 strings 平行性门禁，CI 不会抓到。<br><b>修法</b>：补齐 5 个英文串，并加「新增串必须双语」门禁。</p>
+</div>
+<div class="finding low">
+  <div class="fhead"><span class="fid">G8-06</span><span class="sev sev-low">Low</span>
+    <span class="verdict">CONFIRMED</span><span class="loc">ui/components/branches/MineBranch.kt:67-72（+ PlaylistManagementBranch.kt:36）</span></div>
+  <p><span class="label">问题</span> 同一入口 <code>loadPlaylists()</code> 被调用两次，且该函数无在途判据，每次先置 Loading 再发请求。</p>
+  <p><span class="label">影响与修法</span> 每次进入「服务器歌单」发 2 个相同请求；第二次 Loading 把已到的列表瞬时压成「暂无歌单」再回填。<br><b>修法</b>：删掉 MineBranch 的显式调用，或加飞行中守卫。</p>
+</div>
+<p><span class='label'>该组做得好的地方</span></p><ul class='tight'><li><b>置灰门控是真门控</b>：SettingsTile 在 onClick 内再判 enabled，KDoc 写明仅靠颜色挡不住遥控器确认键。</li><li><b>开关快照与派生重算有护栏</b>：先 awaitSourceMirror 再 bumpSourceRevision，避免拿旧可见性重算且此后无新发射。</li><li><b>网络歌跳页只在真正开播后发生</b>，四个入口全部改成回调式，无遗漏。</li></ul>
+<h3>B1 · 兜底：后端 / 播放 / 歌词 / 数据 <span style='font-weight:400;color:var(--muted);font-size:13px'>（8 条：Medium 3 / Low 5）</span></h3>
+<p class='gsub'>未改动高风险文件抽样 18 个</p>
+<div class="finding medium">
+  <div class="fhead"><span class="fid">B1-01</span><span class="sev sev-medium">Medium</span>
+    <span class="verdict">CONFIRMED</span><span class="loc">player/SpectrumAnalyzer.kt:329</span></div>
+  <p><span class="label">问题</span> <code>waveBuf</code> 只被分配与清零（:151/:290/:317），<code>analyze()</code> 从不写入；唯一生产者 <code>fillWaveform</code> 已随系统 Visualizer 于 v2.37.6 删除，但 emit() 仍把它作为时域波形传给仓库。</p>
+  <p><span class="label">影响与修法</span> 照片墙「波形擦除」收到「非 null 且非空的全 0 数组」⇒ 既不进「无数据 ⇒ 线性擦除」退化分支，又画出笔直边界 ⇒ 与普通线性擦除等价（选项可见、效果不生效，自 v2.37.6 起）。<br><b>修法</b>：传 null 走退化分支，或由 PcmSpectrumTap 填真实时域样本。</p>
+</div>
+<div class="finding medium">
+  <div class="fhead"><span class="fid">B1-02</span><span class="sev sev-medium">Medium</span>
+    <span class="verdict">CONFIRMED</span><span class="loc">player/HqSeparationOrchestrator.kt:641</span></div>
+  <p><span class="label">问题</span> 分离协程 finally 里无条件 <code>accompanimentCache.saveOriginalFile</code>，其内部裸 <code>copyTo</code> 无 catch；承载 scope 无 CoroutineExceptionHandler，finally 不在三层 catch 覆盖内。</p>
+  <p><span class="label">影响与修法</span> 分离成功后写缓存盘满 / 不可写 ⇒ 未捕获异常 ⇒ <b>进程崩溃</b>，而该场景（模型 166 MB + 双 WAV 同盘）ENOSPC 现实可达。<br><b>修法</b>：scope 加 handler + finally 内 runCatching + 缓存内 catch。</p>
+</div>
+<div class="finding medium">
+  <div class="fhead"><span class="fid">B1-03</span><span class="sev sev-medium">Medium</span>
+    <span class="verdict">CONFIRMED</span><span class="loc">lyrics/LyricsManager.kt:423</span></div>
+  <p><span class="label">问题</span> <code>backgroundScope.launch { persistentCache.put(entry) }</code>，scope 无异常处理器；<code>put</code> 的 <code>tmp.writeText</code> 无保护，只有 saveIndex 自带 try/catch。</p>
+  <p><span class="label">影响与修法</span> 磁盘满 / 目录不可写时，切歌触发的后台协程异常走线程默认 handler ⇒ <b>切歌即崩</b>，崩溃点与用户操作毫无可见关联。<br><b>修法</b>：加 handler 或 runCatching + put 内 catch。</p>
+</div>
+<div class="finding low">
+  <div class="fhead"><span class="fid">B1-04</span><span class="sev sev-low">Low</span>
+    <span class="verdict">CONFIRMED</span><span class="loc">backend/BackendRegistry.kt:148</span></div>
+  <p><span class="label">问题</span> catch 块内已 <code>releaseAdapter(adapter)</code>，但该 try 是初始化表达式，随后控制流仍落到 else 分支再 release 一次。</p>
+  <p><span class="label">影响与修法</span> 初始化抛异常时 logout/close 各执行两遍：第二次 logout 跑在已 close 的会话上，多一次网络请求与两条噪音日志，状态不错乱。<br><b>修法</b>：catch 末尾 <code>return@withContext false</code>。</p>
+</div>
+<div class="finding low">
+  <div class="fhead"><span class="fid">B1-05</span><span class="sev sev-low">Low</span>
+    <span class="verdict">CONFIRMED</span><span class="loc">backend/network/lx/LxScriptHost.kt:272（及 :229）</span></div>
+  <p><span class="label">问题</span> 宿主用阻塞 <code>CountDownLatch.await</code> 实现超时，协程内不可取消；<code>withTimeoutOrNull</code> 要到下一挂起点才生效。</p>
+  <p><span class="label">影响与修法</span> L1 声明预算 10 s，实际最坏约 15 s + 10 s ≈ 25 s；用户点「停止」后探测协程仍在 latch 上无响应地等。<br><b>修法</b>：改 Deferred/await 可取消等待，或对齐预算。</p>
+</div>
+<div class="finding low">
+  <div class="fhead"><span class="fid">B1-06</span><span class="sev sev-low">Low</span>
+    <span class="verdict">CONFIRMED</span><span class="loc">lyrics/LyricsNetworkProvider.kt:229（及 :328）</span></div>
+  <p><span class="label">问题</span> hash / songId 来自第三方响应仍手拼 query；同文件 <code>parseKugouLyrics</code> 已因同根因修过（M18），入口漏改。</p>
+  <p><span class="label">影响与修法</span> 含 <code>&amp;</code> / <code>#</code> / 空格时查询串被注入或截断，歌词静默变 null。<br><b>修法</b>：改用 <code>HttpUrl.Builder().addQueryParameter</code>。</p>
+</div>
+<div class="finding low">
+  <div class="fhead"><span class="fid">B1-07</span><span class="sev sev-low">Low</span>
+    <span class="verdict">CONFIRMED</span><span class="loc">backend/local/ArtistCoverResolver.kt:369</span></div>
+  <p><span class="label">问题</span> <code>optString("img", null) ?: optString("singer_img", null)</code>：JSON null 经 <code>optString</code> 得字符串 <code>"null"</code>（非 JVM null）⇒ <code>?:</code> 永不兜底，且 "null" 非空挡住歌曲封面兜底。</p>
+  <p><span class="label">影响与修法</span> 接口把头像返回成显式 null 时，艺术家卡显示破图而不是本可用的歌曲封面。<br><b>修法</b>：判 blank 与 "null"，或统一 <code>has &amp;&amp; !isNull</code> 取值包装。</p>
+</div>
+<div class="finding low">
+  <div class="fhead"><span class="fid">B1-08</span><span class="sev sev-low">Low</span>
+    <span class="verdict">PARTIALLY CORRECT</span><span class="loc">lyrics/LyricsManager.kt:314</span></div>
+  <p><span class="label">问题</span> EMBEDDED 分支 <code>catch (e: Exception) { null }</code> 会吞掉 <code>CancellationException</code>。</p>
+  <p><span class="label">影响与修法</span> 复核纠正：唯一调用点是用户手动切来源，其 job 不随切歌取消 ⇒ 初稿「切歌后歌词空白」不成立，仅剩取消语义约定问题。<br><b>修法</b>：<code>e.rethrowIfCancellation()</code>。</p>
+</div>
+<p><span class='label'>该组做得好的地方</span></p><ul class='tight'><li><b>OkHttp Response 生命周期无遗漏</b>：18 个文件每次 execute 都套 use{}，包括最容易漏的早退路径。</li><li><b>LxScriptHost 的 SSRF 防线三重纵深</b>（初始 URL + 逐跳拦截器 + 最终 URL 复核），并过滤脚本自设的 Host/Content-Length。</li><li><b>BackendRegistry 的世代号</b>把领号放在锁内、提交前比对、认证头 provider 与 adapter 提交同临界区，堵死旧世代回写与断开自连两条竞态。</li></ul>
+<h3>B2 · 兜底：UI / ViewModel / util <span style='font-weight:400;color:var(--muted);font-size:13px'>（8 条：Medium 2 / Low 6）</span></h3>
+<p class='gsub'>未改动高风险文件抽样 20 个</p>
+<div class="finding low">
+  <div class="fhead"><span class="fid">B2-01</span><span class="sev sev-low">Low</span><span class="delta">Medium ↓</span>
+    <span class="verdict">PARTIALLY CORRECT</span><span class="loc">ui/screens/netdisk/NetdiskScreen.kt:187</span></div>
+  <p><span class="label">问题</span> 搜索分支只用 <code>searchResults.isEmpty()</code> 判空，未用已收集的 <code>isLoading</code>（目录分支有）；且新搜索开始时不先清空旧结果。</p>
+  <p><span class="label">影响与修法</span> 首次或上次 0 条时，搜索期间显示「没有找到结果」，结果到达后自愈（复核下调为 Low）。<br><b>修法</b>：loading 且空 ⇒ 加载中占位。</p>
+</div>
+<div class="finding medium">
+  <div class="fhead"><span class="fid">B2-02</span><span class="sev sev-medium">Medium</span>
+    <span class="verdict">CONFIRMED</span><span class="loc">ui/viewmodel/VisualizerViewModel.kt:556</span></div>
+  <p><span class="label">问题</span> <code>setQuality()</code> 降档后当前效果不支持时把主题置默认但<b>不 persist</b>；写画质会让同一 DataStore 再发一次快照，settings 收集器随即用持久化主题覆盖回去。</p>
+  <p><span class="label">影响与修法</span> 降档后重效果仍在跑（用户降档正是为绕开它），重启后仍不一致。<br><b>修法</b>：回落时 persist；init 收集器补 supports 校正。</p>
+</div>
+<div class="finding medium">
+  <div class="fhead"><span class="fid">B2-03</span><span class="sev sev-medium">Medium</span>
+    <span class="verdict">CONFIRMED</span><span class="loc">ui/screens/PlaylistManagementScreen.kt:168</span></div>
+  <p><span class="label">问题</span> 调用点用 <code>dataOrNull() ?: emptyList()</code> 且 <code>isLoading = false</code> 硬编码 ⇒ loading 分支死代码，<code>UiState.Error</code> 也被折叠成「暂无播放列表」。</p>
+  <p><span class="label">影响与修法</span> NAS 未连 / 请求失败时用户看到「你没有歌单」，没有错误原因与重试入口；进页还会闪空态。<br><b>修法</b>：按真实 UiState 传 loading/error/retry。</p>
+</div>
+<div class="finding low">
+  <div class="fhead"><span class="fid">B2-04</span><span class="sev sev-low">Low</span>
+    <span class="verdict">PARTIALLY CORRECT</span><span class="loc">ui/screens/settings/PhotoWallSettingsSection.kt:223</span></div>
+  <p><span class="label">问题</span> 相册权限永久拒绝后无 <code>shouldShowRequestPermissionRationale</code>、无设置跳转；开关反复弹回。复核：已有 DENIED 提示文案，故「完全无自查路径」略夸大。</p>
+  <p><span class="label">影响与修法</span> 该来源等于永久不可用，用户只能反复经历「开开关 → 说明 → 弹回」。<br><b>修法</b>：区分永久拒绝，给 <code>ACTION_APPLICATION_DETAILS_SETTINGS</code> 跳转。</p>
+</div>
+<div class="finding low">
+  <div class="fhead"><span class="fid">B2-05</span><span class="sev sev-low">Low</span>
+    <span class="verdict">CONFIRMED</span><span class="loc">ui/viewmodel/PlaylistImportViewModel.kt:191</span></div>
+  <p><span class="label">问题</span> 不可达 URL 反查用值匹配 <code>firstOrNull { streamUrl == url }</code>，重复 URL 只命中第一条。</p>
+  <p><span class="label">影响与修法</span> 后出现的同 URL 条目不显示失效徽标，而「N 首不可达」按 target 计数 ⇒ 数字与标记对不上。<br><b>修法</b>：targets 携带索引/id 一一对应。</p>
+</div>
+<div class="finding low">
+  <div class="fhead"><span class="fid">B2-06</span><span class="sev sev-low">Low</span>
+    <span class="verdict">CONFIRMED</span><span class="loc">util/BackupFileUtils.kt:110</span></div>
+  <p><span class="label">问题</span> API29+ 写失败不回滚已插入的 MediaStore 行，留下 0 字节「备份」（且能通过列表过滤）；API&lt;29 文件名只到秒，同秒二次导出直接覆盖。</p>
+  <p><span class="label">影响与修法</span> 备份列表出现假备份、点开恢复失败；同秒连续导出丢前一份。<br><b>修法</b>：失败 <code>delete(uri)</code>；文件名去重或毫秒。</p>
+</div>
+<div class="finding low">
+  <div class="fhead"><span class="fid">B2-07</span><span class="sev sev-low">Low</span>
+    <span class="verdict">CONFIRMED</span><span class="loc">ui/screens/ServerConnectScreen.kt:517</span></div>
+  <p><span class="label">问题</span> 「连接」按钮只判空 URL，无 <code>isConnecting</code> 守卫（测试按钮有）。</p>
+  <p><span class="label">影响与修法</span> 连按确认键并发多次 initialize / save / onConnected；先完成的那个复位 loading 后可再点。世代号限制了危害。<br><b>修法</b>：加守卫。</p>
+</div>
+<div class="finding low">
+  <div class="fhead"><span class="fid">B2-08</span><span class="sev sev-low">Low</span>
+    <span class="verdict">CONFIRMED</span><span class="loc">ui/screens/TextInputDialog.kt:338</span></div>
+  <p><span class="label">问题</span> 自制键盘的只读显示框 Text 无 maxLines / overflow / 横滚，外层固定高度会裁掉第二行起内容。</p>
+  <p><span class="label">影响与修法</span> TV 上唯一的输入方式承载最长输入（服务器地址、Token、飞牛访问码），超过一行看不到尾部，无法核对。<br><b>修法</b>：单行省略或尾部窗口显示。</p>
+</div>
+<p><span class='label'>该组做得好的地方</span></p><ul class='tight'><li><b>PhotoWallController.close() 幂等 + ownScope.cancel()</b>，配合 VisualizerViewModel.dispose 的 isInitialized 判据，API22 上 Bitmap 有显式 recycle。</li><li><b>LocalFilePicker.readText 边读边计数</b>，<code>sizeOf == -1</code> 也不退化成无上限 readText，三处共用同一大小常量。</li><li><b>FocusIndicator 把设备嗅探改成用户开关 + 触摸抑制</b>，自动判据降级为 diag 取证并带条数上限。</li></ul>
+</section>
+<section id="plan">
+<h2>5. 整改路线</h2>
+<h3>P0 · 立即修（1 条）</h3>
+<ul class="tight">
+<li><b>G3-01</b> 三处限量读取改为循环读满。这是功能级破坏（搜索可能整体 0 条）叠加安全保护失效（半截 LX 脚本被执行），且为窗口内回归。修完补一条 20 KB 正文单测。</li>
+</ul>
+<h3>P1 · 本轮内修（与「门控副作用」相关，6 条）</h3>
+<ul class="tight">
+<li><b>G6-01</b> 收藏 Song 重建补齐 <code>storageType</code>，让「已下载」在可见性判据里与 LOCAL 区分。</li>
+<li><b>G8-01</b> 清除封面缓存改为无条件下删目录；重建 ImageLoader 前 shutdown 旧实例。</li>
+<li><b>B2-02</b> 降画质回落主题后 persist，并在 init 收集器补 supports 校正。</li>
+<li><b>G5-04</b> 歌词缓存只门控写；若保留读写双关，文案与清理入口一起改。</li>
+<li><b>G2-01</b> 搜索源集合与本地可见性解耦，让「关本地仍保留已下载」真正可达。</li>
+<li><b>G1-04</b> 解析回写前比对 song id；next/previous 作废在途解析。</li>
+</ul>
+<h3>P2 · 稳定性与体验（Medium 其余 + 高价值 Low）</h3>
+<ul class="tight">
+<li><b>G5-02</b> DataStore 自愈 + 启动读取兜底（防崩溃循环）。</li>
+<li><b>B1-02 / B1-03</b> 两个后台 scope 补 <code>CoroutineExceptionHandler</code>，写盘副作用加 runCatching。</li>
+<li><b>G6-02 / G7-02</b> 详情缓存纳入失效 + 空态重试入口。</li>
+<li><b>G2-02 / G2-04 / G2-05</b> 空页判据、实例级失败信号、专辑分组用 albumartist。</li>
+<li><b>G4-01 / G4-02</b> 删除按档位反查；终态清理内存状态。</li>
+<li><b>G3-03 / G7-01 / B2-03 / B1-01</b> 主线程持久缓存、详情返回来源、播放列表错误态、波形擦除失效。</li>
+</ul>
+<h3>P3 · 清理与一致性（Low）</h3>
+<ul class="tight">
+<li>翻页失败口径统一（G2-03/06/07/08）、去重键口径统一（G4-05）、日志轮转字节/行数对齐（G5-06）、双语字符串补齐 + 门禁（G8-05，共 5 个 key）、重复请求去重（G8-06 / B2-07）。</li>
+</ul>
+<div class="note">
+<b>修复顺序建议</b>：先修 P0（G3-01）并单独提交 + 单测锁定；再按「门控副作用」一组（G6-01 / G8-01 / B2-02 / G5-04）一次提交，因为它们共享「开关语义未收敛」的根因；其余按子系统各自提交，避免像本窗口这样把 14 项修复压在一个提交里 —— 那正是 G3-01 这类回归难以被 review 出来的原因。
+</div>
+</section>
+<section id="scope">
+<h2>6. 审查范围与口径</h2>
+<h3>本轮范围</h3>
+<table>
+<tr><th>项</th><th>值</th></tr>
+<tr><td>基线 / 目标</td><td><code>main</code> @ 25d0b6a（v2.39.21）→ <code>main</code> @ 091e7a7（v2.39.26）</td></tr>
+<tr><td>增量提交</td><td>23（含上一轮 14 条修复 <code>e944188</code>）</td></tr>
+<tr><td>改动源码</td><td>97 个 main <code>.kt</code>（6 新增 / 4 删除 / 87 修改），<code>+2927 / −1567</code>，全量覆盖</td></tr>
+<tr><td>兜底抽样</td><td>B1：18 个后端/播放/歌词/数据文件（约 8.3k 行）；B2：20 个 UI/ViewModel/util 文件（约 10.8k 行）</td></tr>
+<tr><td>深审 / 复核代理</td><td>10 + 3</td></tr>
+<tr><td>终稿发现</td><td>62 条（Critical 1 / Medium 20 / Low 41）</td></tr>
+</table>
+
+<h3>覆盖自证</h3>
+<p>各组均在输出中给出「实际读过的文件数 / 清单文件数」：G1 9/9、G2 8/8、G3 11/11、G4 12/12、G5 11/11、G6 6/6（MainViewModel 逐段读 diff 涉及方法）、G7 15/15 现存文件（2 个删除文件确认零残留引用）、G8 23/23（含删除文件确认）、B1 18/18、B2 20/20。读不到的文件：无。</p>
+
+<h3>未列入缺陷的已核验取舍</h3>
+<p>手工 DI 容器、原生 OkHttp 适配器、PlayerManager 轮询进度、<code>usesCleartextTraffic</code>、本地 HTTP 无鉴权、TinyPinyin、onnxruntime 1.17.1、单 Activity 手动导航与五级 BACK、电视+手机双支持、<code>VisualizerStage</code> 每帧重组、<code>onConnect</code> 禁止 reject、Demucs 恒 44100 Hz、<code>OrtEnvironment</code> 不 close、<code>AppLog.d/i/w</code> 的 DEBUG 守卫、lint 既有异常栈、<code>TripodFogRenderer</code> 禁用矩阵变换、<code>Stroke.width</code> 为 val —— 均为所有者已确认取舍，本轮未报。</p>
+
+<h3>已知且不再上报</h3>
+<ul class="tight">
+<li>3D 地球（WORLD）与生态球在 API22 老电视黑屏（§10.400，所有者裁决归因硬件）。</li>
+<li><code>ip-api.com</code> 免费版仅 HTTP、国内常不可达，城市回退北京（有兜底，产品决策）。</li>
+<li>上一轮 14 条发现已核实修复在位（LogStore NIO、下载恢复恒 null、Demucs 顺序读、百度分页 break 等）。</li>
+</ul>
+
+<h3>验证局限（如实声明）</h3>
+<ul class="tight">
+<li><b>G3-01</b> 的 okio 语义按 okio 契约与实现推定（单次 read 至多一个 segment）；本机无 Gradle 依赖缓存、无法运行用例复现。建议用 20 KB 正文单测一次性确认。</li>
+<li><b>G1-01</b> 依赖 Media3 在「空列表加第一项」时是否回调 <code>onMediaItemTransition</code>，本机取不到 media3 构件。</li>
+<li><b>G2-02 / G2-08 / G2-09</b> 的第二触发条件依赖外部服务行为（零结果是否省略 <code>album</code> 键、是否压小页大小、是否忽略 <code>name</code>），仓内无实测记录。</li>
+<li><b>B1-07</b> 依赖 AOSP <code>JSONObject.optString / JSON.toString</code> 的实现细节，按源码推断，未真机复现。</li>
+<li>本轮为只读审查：未运行 Gradle / lint / 单测，未操作电视或手机，未提交任何业务代码。</li>
+</ul>
+
+<h3>与上一轮的关系</h3>
+<p>2026-11-18 报告（<code>docs/archive/NASMusicTV-代码审查报告-2026-11-18.html</code>）的 14 条发现已于 <code>e944188</code> 全部落地，本轮逐条抽查确认在位。其中 I4-02 的修法在本轮被证明引入了 G3-01 这处回归 —— 这提示「加限制」类的修复必须配套一条<b>会失败的用例</b>（例如 20 KB 正文），否则「上限判断恒假」这种缺陷在所有既有小夹具下都是绿的。</p>
+</section>
+<footer>NASMusicTV 增量代码审查 · 2026-11-23 · main @ 091e7a7 · 只读审查，未改动业务代码</footer>
+</div></body></html>
