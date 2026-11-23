@@ -12,6 +12,8 @@ import androidx.tv.material3.ExperimentalTvMaterial3Api
 import androidx.tv.material3.Text
 import com.nasmusic.tv.R
 import com.nasmusic.tv.data.model.BackupMessage
+import com.nasmusic.tv.ui.screens.LibraryTab
+import com.nasmusic.tv.data.model.QuickPickStat
 import com.nasmusic.tv.util.BackupFileUtils
 import com.nasmusic.tv.ui.theme.FontSize
 import com.nasmusic.tv.ui.theme.NasMusicColors
@@ -23,6 +25,9 @@ data class DataSettingsState(
     /** 歌单导入（§4.4.2）：最近导入记录 + 导入结果消息 */
     val playlistImportHistory: List<com.nasmusic.tv.data.model.PlaylistImportHistoryItem> = emptyList(),
     val playlistImportMessage: BackupMessage? = null,
+    /** 快捷选择统计（按类别分桶），用于设置页按类别分别展示 */
+    val quickPickStats: List<QuickPickStat> = emptyList(),
+    val quickPickCategories: List<String> = emptyList(),
 )
 
 /** 数据管理分区动作（删除确认弹窗由宿主持有，经 onDeleteRequested 上抛） */
@@ -42,6 +47,8 @@ data class DataSettingsActions(
     val onOpenImportedPlaylist: ((String) -> Unit)? = null,
     /** 消费导入结果消息（4s 自动） */
     val onConsumePlaylistImportMessage: (() -> Unit)? = null,
+    /** 打开某类别的快捷选择统计明细 */
+    val onOpenQuickPickStats: ((String) -> Unit)? = null,
 )
 
 /**
@@ -182,9 +189,9 @@ internal fun DataSettingsSection(
                 }
             }
         }
-        // 卡③ 播放统计：入口（F2-1；方案 §3.2 上移到分区末尾独立成卡）
-        if (actions.onOpenPlayStats != null) {
-            SettingsGroupCard(title = stringResource(R.string.settings_group_play_stats)) {
+        // 卡③ 统计：播放统计入口 + 按类别分别统计的快捷选择入口
+        SettingsGroupCard(title = stringResource(R.string.settings_group_stats)) {
+            if (actions.onOpenPlayStats != null) {
                 SettingActionButton(
                     label = stringResource(R.string.pstats_title),
                     description = stringResource(R.string.pstats_entry_desc),
@@ -192,6 +199,27 @@ internal fun DataSettingsSection(
                     trailing = Trail.Arrow,
                 )
             }
+            // 快捷选择统计：与曲库各搜索 tab 一一对应，每类独立一行
+            state.quickPickCategories.forEach { category ->
+                val categoryStats = state.quickPickStats.filter { it.category == category }
+                val itemCount = categoryStats.size
+                val pickCount = categoryStats.sumOf { it.count }
+                val label = runCatching { LibraryTab.valueOf(category).titleRes }
+                    .getOrNull()?.let { stringResource(it) } ?: category
+                val desc = if (itemCount == 0) {
+                    stringResource(R.string.settings_qp_stats_empty)
+                } else {
+                    stringResource(R.string.settings_qp_stats_desc, itemCount, pickCount)
+                }
+                // ⛔ 不再在此处放「清除本类记录」按钮——明细页内已有同功能按钮，避免重复
+                SettingActionButton(
+                    label = label,
+                    description = desc,
+                    onClick = { actions.onOpenQuickPickStats?.invoke(category) },
+                    trailing = Trail.Arrow,
+                )
+            }
+            SettingsHint(text = stringResource(R.string.settings_quick_pick_hint))
         }
     }
 }

@@ -230,6 +230,7 @@ fun AppRoot(
             currentScreen == Screen.ServerConnect -> navSettings
             currentScreen == Screen.Equalizer -> navSettings
             currentScreen == Screen.PlayStats -> navSettings
+            currentScreen == Screen.QuickPickStats -> navSettings
             // ── "我的"域子页面：BACK 返回我的页（网盘 / 服务端歌单入口唯一：MineBranch）──
             // WeatherRadio 入口在首页，由 else 回首页覆盖，无需专门分支
             currentScreen == Screen.Netdisk -> navigateMine
@@ -404,6 +405,7 @@ fun AppRoot(
                 Screen.PlayStats -> PlayStatsBranch(
                     viewModel = viewModel
                 )
+                Screen.QuickPickStats -> QuickPickStatsBranch(viewModel = viewModel)
             }
         }
 

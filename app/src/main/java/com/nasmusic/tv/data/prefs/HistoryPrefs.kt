@@ -17,6 +17,14 @@ class HistoryPrefs internal constructor(private val prefs: AppPreferences) {
     suspend fun getRecentSongObjects(): List<com.nasmusic.tv.data.model.Song> = prefs.getRecentSongObjects()
     suspend fun purgeExpiredSearchHistory() = prefs.purgeExpiredSearchHistory()
 
+    // 快捷选择统计（Quick Dial，按类别分桶）
+    val quickPickStats = prefs.quickPickStats
+    suspend fun getQuickPickStats(): List<com.nasmusic.tv.data.model.QuickPickStat> = prefs.getQuickPickStats()
+    suspend fun getQuickPickStats(category: String): List<com.nasmusic.tv.data.model.QuickPickStat> =
+        prefs.getQuickPickStats(category)
+    suspend fun recordQuickPick(category: String, value: String) = prefs.recordQuickPick(category, value)
+    suspend fun clearQuickPickStats(category: String? = null) = prefs.clearQuickPickStats(category)
+
     // 网络收藏（LRU 500）
     val networkFavorites = prefs.networkFavorites
     suspend fun toggleNetworkFavorite(item: com.nasmusic.tv.data.model.NetworkFavoriteItem) =

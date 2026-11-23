@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
@@ -39,7 +40,10 @@ import kotlinx.coroutines.launch
 internal fun GenresTab(
     genres: List<Genre>,
     onSongsByGenre: ((String, (List<Song>) -> Unit) -> Unit)? = null,
-    onPlaySongs: (List<Song>) -> Unit
+    onPlaySongs: (List<Song>) -> Unit,
+    /** 搜索结果：非空时在本页卡片网格下方以同一套卡片样式追加（⛔ 不换搜索页 UI） */
+    searchResults: List<Song> = emptyList(),
+    onPlaySong: ((Song) -> Unit)? = null
 ) {
     val listState = rememberLazyGridState()
     val firstItemFocusRequester = remember { FocusRequester() }
@@ -82,7 +86,7 @@ internal fun GenresTab(
                 modifier = Modifier.padding(bottom = BrowseTokens.headerCountGap)
             )
         }
-        if (genres.isEmpty()) {
+        if (genres.isEmpty() && searchResults.isEmpty()) {
             Text(
                 text = stringResource(R.string.library_no_genres),
                 color = NasMusicColors.TextSecondary,
@@ -133,6 +137,46 @@ internal fun GenresTab(
                         }
                     }
                 }
+
+                // 搜索结果（顶部搜索框有词时由 LibraryScreen 传入）：用**本页卡片网格的样式**
+                // 追加在流派卡片之后 —— ⛔ 不整页换成搜索页的展示方式（所有者 2026-11-24）
+                if (searchResults.isNotEmpty()) {
+                    item(key = "search_header", span = { GridItemSpan(maxLineSpan) }) {
+                        Text(
+                            text = stringResource(
+                                R.string.library_search_results_count,
+                                searchResults.size
+                            ),
+                            color = NasMusicColors.TextPrimary,
+                            fontSize = FontSize.subtitle(),
+                            modifier = Modifier.padding(top = 12.dp, bottom = 4.dp)
+                        )
+                    }
+                    itemsIndexed(searchResults, key = { _, song -> "s_${song.id}" }) { _, song ->
+                        MediaCardShell(onClick = { onPlaySong?.invoke(song) }) {
+                            Column(
+                                modifier = Modifier.fillMaxWidth().padding(12.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text(
+                                    text = song.title,
+                                    color = NasMusicColors.TextPrimary,
+                                    fontSize = FontSize.button(),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = song.artist,
+                                    color = LocalFocusableContentColor.current,
+                                    fontSize = FontSize.body(),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -143,7 +187,10 @@ internal fun GenresTab(
 internal fun YearsTab(
     years: List<Int>,
     onSongsByYear: ((Int, Int, (List<Song>) -> Unit) -> Unit)? = null,
-    onPlaySongs: (List<Song>) -> Unit
+    onPlaySongs: (List<Song>) -> Unit,
+    /** 搜索结果：非空时在本页卡片网格下方以同一套卡片样式追加（⛔ 不换搜索页 UI） */
+    searchResults: List<Song> = emptyList(),
+    onPlaySong: ((Song) -> Unit)? = null
 ) {
     val listState = rememberLazyGridState()
     val firstItemFocusRequester = remember { FocusRequester() }
@@ -186,7 +233,7 @@ internal fun YearsTab(
                 modifier = Modifier.padding(bottom = BrowseTokens.headerCountGap)
             )
         }
-        if (years.isEmpty()) {
+        if (years.isEmpty() && searchResults.isEmpty()) {
             Text(
                 text = stringResource(R.string.library_no_years),
                 color = NasMusicColors.TextSecondary,
@@ -233,6 +280,46 @@ internal fun YearsTab(
                                 color = LocalFocusableContentColor.current,
                                 fontSize = FontSize.body()
                             )
+                        }
+                    }
+                }
+
+                // 搜索结果（顶部搜索框有词时由 LibraryScreen 传入）：用**本页卡片网格的样式**
+                // 追加在流派卡片之后 —— ⛔ 不整页换成搜索页的展示方式（所有者 2026-11-24）
+                if (searchResults.isNotEmpty()) {
+                    item(key = "search_header", span = { GridItemSpan(maxLineSpan) }) {
+                        Text(
+                            text = stringResource(
+                                R.string.library_search_results_count,
+                                searchResults.size
+                            ),
+                            color = NasMusicColors.TextPrimary,
+                            fontSize = FontSize.subtitle(),
+                            modifier = Modifier.padding(top = 12.dp, bottom = 4.dp)
+                        )
+                    }
+                    itemsIndexed(searchResults, key = { _, song -> "s_${song.id}" }) { _, song ->
+                        MediaCardShell(onClick = { onPlaySong?.invoke(song) }) {
+                            Column(
+                                modifier = Modifier.fillMaxWidth().padding(12.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text(
+                                    text = song.title,
+                                    color = NasMusicColors.TextPrimary,
+                                    fontSize = FontSize.button(),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = song.artist,
+                                    color = LocalFocusableContentColor.current,
+                                    fontSize = FontSize.body(),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
                         }
                     }
                 }

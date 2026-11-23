@@ -103,6 +103,8 @@ internal fun LibraryBranch(
                     val searchUnplayableIds by viewModel.searchVM.searchUnplayableIds.collectAsState()
                     val artistPaging by viewModel.searchVM.artistPaging.collectAsState()
                     val searchHistory by viewModel.searchHistory.collectAsState(initial = emptyList())
+                    // 快捷选择统计（拨盘候选的历史回填与热度排序）
+                    val quickPickStats by viewModel.quickPickStats.collectAsState(initial = emptyList())
 
                     // ── RADIO Tab state ──
                     val radioStations by viewModel.radioStations.collectAsState(initial = UiState.Success(emptyList()))
@@ -208,6 +210,8 @@ val discoverCurrentDimensionValues = remember(browseSelections) {
                         onSearch = { query -> viewModel.searchSongsOnServer(query) },
                         onClearSearch = { viewModel.searchVM.clearSearch() },
                         historyItems = searchHistory,
+                        quickPickStats = quickPickStats,
+                        onRecordQuickPick = { category, value -> viewModel.recordQuickPick(category, value) },
                         activeTab = libraryActiveTab,
                         onTabSelected = { tab -> viewModel.selectLibraryTab(tab) },
                         filterQuery = librarySearchKeyword,

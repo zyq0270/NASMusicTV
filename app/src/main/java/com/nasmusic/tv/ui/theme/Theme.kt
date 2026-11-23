@@ -263,6 +263,8 @@ object NasOverlayColors {
     val OnArtwork = Color(0xFFFFFFFF)
     /** 作品图上的次要文字 */
     val OnArtworkSecondary = Color(0xB3FFFFFF)
+    /** 模态弹窗遮罩（Dialog 系统窗口层，不随主题变） */
+    val DialogScrim = Color(0xB3000000)
 }
 
 /** 在指定调色板下强制渲染子树（频谱舞台 / 照片墙专用） */

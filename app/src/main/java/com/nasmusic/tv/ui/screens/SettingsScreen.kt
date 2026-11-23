@@ -147,6 +147,10 @@ internal fun SettingsScreen(
     storageAvailableBytes: Long = 0L,
     onOpenEqualizer: (() -> Unit)? = null,
     onOpenPlayStats: (() -> Unit)? = null,
+    // 快捷选择按类别统计（Quick Dial）
+    quickPickStats: List<com.nasmusic.tv.data.model.QuickPickStat> = emptyList(),
+    quickPickCategories: List<String> = emptyList(),
+    onOpenQuickPickStats: ((String) -> Unit)? = null,
     // F2-5：跨曲交叉淡入淡出
     crossfadeEnabled: Boolean = false,
     crossfadeDurationSec: Int = 4,
@@ -1046,6 +1050,8 @@ var activeSection by remember { mutableStateOf(SettingsSection.GENERAL) }
                             backupMessage = backupMessage,
                             playlistImportHistory = playlistImportHistory,
                             playlistImportMessage = playlistImportMessage,
+                            quickPickStats = quickPickStats,
+                            quickPickCategories = quickPickCategories,
                         ),
                         actions = DataSettingsActions(
                             onExportBackup = onExportBackup,
@@ -1057,6 +1063,7 @@ var activeSection by remember { mutableStateOf(SettingsSection.GENERAL) }
                             onImportPlaylistLocalFile = onImportPlaylistLocalFile,
                             onOpenImportedPlaylist = onOpenImportedPlaylist,
                             onConsumePlaylistImportMessage = onConsumePlaylistImportMessage,
+                            onOpenQuickPickStats = onOpenQuickPickStats,
                         ),
                         onDeleteRequested = { file -> backupToDelete = file }
                     )

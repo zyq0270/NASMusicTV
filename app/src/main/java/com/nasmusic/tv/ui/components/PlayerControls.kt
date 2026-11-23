@@ -25,6 +25,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.QueueMusic
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Shuffle
@@ -312,6 +313,9 @@ fun ControlButtonsRow(
     showMvButton: Boolean = false,
     mvAvailable: Boolean = false,
     onEnterMv: () -> Unit = {},
+    /** 队列快速切歌按钮（最左，带默认值避免改动全部调用点） */
+    showQuickSwitchButton: Boolean = false,
+    onOpenQuickSwitch: () -> Unit = {},
     modifier: Modifier = Modifier,
     compact: Boolean = false,
     playPauseFocusRequester: FocusRequester? = null
@@ -332,6 +336,14 @@ fun ControlButtonsRow(
     ) {
         // 按钮间距：紧凑模式 6dp / 常规 14dp —— 收紧以使 MTV 按钮完整落进 380dp 左栏
         val btnGap = if (compact) 6.dp else 14.dp
+        if (showQuickSwitchButton) {
+            IconButton(onClick = onOpenQuickSwitch, compact = compact, icon = {
+                Icon(imageVector = Icons.Filled.QueueMusic, contentDescription = "Queue",
+                    tint = NasMusicColors.TextPrimary,
+                    modifier = Modifier.size(if (compact) 20.dp else 28.dp))
+            })
+            Spacer(modifier = Modifier.width(btnGap))
+        }
         IconButton(onClick = onPrevious, compact = compact, icon = {
             Icon(imageVector = Icons.Filled.SkipPrevious, contentDescription = "Previous",
                 tint = NasMusicColors.TextPrimary,

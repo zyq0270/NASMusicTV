@@ -17,5 +17,6 @@ enum class Screen {
     PlaylistManagement,
     Netdisk,
     WeatherRadio,
-    PlayStats
+    PlayStats,
+    QuickPickStats
 }

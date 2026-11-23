@@ -20,8 +20,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.QueueMusic
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -46,6 +49,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.tv.material3.ExperimentalTvMaterial3Api
+import androidx.tv.material3.Icon
 import androidx.tv.material3.Text
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
@@ -60,13 +64,19 @@ import com.nasmusic.tv.data.model.Album
 import com.nasmusic.tv.data.model.Artist
 import com.nasmusic.tv.data.model.Genre
 import com.nasmusic.tv.data.model.MusicSourceType
+import com.nasmusic.tv.data.model.QuickPickStat
 import com.nasmusic.tv.data.model.SearchHistoryItem
 import com.nasmusic.tv.data.model.Song
 import com.nasmusic.tv.data.model.SongsPagingState
 import com.nasmusic.tv.data.model.UiState
 import com.nasmusic.tv.ui.components.FocusableSurface
 import com.nasmusic.tv.ui.components.SearchField
+import com.nasmusic.tv.ui.components.picker.ArcDialDialog
+import com.nasmusic.tv.ui.components.picker.ArcAnchor
 import com.nasmusic.tv.ui.components.songGridColumns
+import com.nasmusic.tv.data.stats.QuickPickCandidate
+import com.nasmusic.tv.data.stats.QuickPickRanker
+import com.nasmusic.tv.data.stats.QuickPickSourceMerger
 import com.nasmusic.tv.ui.screens.library.DiscoverTab
 import com.nasmusic.tv.ui.screens.library.RadioTab
 import com.nasmusic.tv.ui.screens.library.SearchTab
@@ -100,6 +110,51 @@ enum class LibraryTab(val titleRes: Int) {
  * 曲库子 TAB 横推动画时长（v2.36.2）：与竖屏播放页的模式切换保持一致的手感。
  */
 private const val LIBRARY_TAB_SLIDE_ANIM_MS = 260
+
+/**
+ * 快速填写拨盘的类别名（与 LibraryTab.name 对齐，用于 quick_pick_stats 分桶）。
+ */
+private fun LibraryTab.quickPickCategory(): String = this.name
+
+/**
+ * 按 tab 构造拨盘候选：**只列历史记录**，不混入当前页面全量数据。
+ *
+ * 所有者 2026-11-23 定稿：各 tab 快选一律只列「历史查询数据」，且**全部标 HISTORY**（绿色），
+ * 不再把页面上的专辑/艺术家/歌曲列表塞进候选，也不再追加搜索结果里的歌曲名。
+ * - SEARCH tab：历史 = 搜索历史词（`search_history`），并合并 `quick_pick_stats[SEARCH]`；
+ * - 其它 tab：历史 = 该 category 的 `quick_pick_stats` 记录。
+ *
+ * 历史为空 ⇒ 候选为空 ⇒ 上层直接不弹窗（不显示一个空拨盘）。
+ */
+private fun buildQuickPickCandidates(
+    tab: LibraryTab,
+    historyItems: List<SearchHistoryItem>,
+    stats: List<QuickPickStat>
+): List<QuickPickCandidate<String>> {
+    val category = tab.quickPickCategory()
+    val categoryStats = stats.filter { it.category == category }
+    // 全部候选都来自「历史」：base 传空 ⇒ 每项 source = HISTORY（显示绿色）
+    val historyStats: List<QuickPickStat> = if (tab == LibraryTab.SEARCH) {
+        // SEARCH tab 的「历史查询」= 用户搜过的词；与拨盘选择记录按归一化 key 合并，
+        // count 取两者较大值（同一次搜索会同时写两处，相加会翻倍）
+        val fromHistory = historyItems.map {
+            QuickPickStat(
+                category = category,
+                value = it.query,
+                count = it.count,
+                lastPickedAt = it.lastSearchedAt
+            )
+        }
+        (fromHistory + categoryStats)
+            .groupBy { ArtistSplitter.normalizeKey(it.value) }
+            .values
+            .map { group -> group.maxByOrNull { it.count }!! }
+    } else {
+        categoryStats
+    }
+    val merged = QuickPickSourceMerger.merge(emptyList<String>(), valueOf = { it }, stats = historyStats)
+    return QuickPickRanker.rank(merged, historyStats, limit = 7)
+}
 
 /**
  * 滚动位置**写回**的防抖窗口（C26）。
@@ -231,6 +286,10 @@ fun LibraryScreen(
     onSearch: (String) -> Unit = {},
     onClearSearch: () -> Unit = {},
     historyItems: List<SearchHistoryItem> = emptyList(),
+    /** 快捷选择统计（按类别分桶），用于拨盘候选的历史回填与热度排序 */
+    quickPickStats: List<QuickPickStat> = emptyList(),
+    /** 选中快捷项时写入统计：(category, value) */
+    onRecordQuickPick: (String, String) -> Unit = { _, _ -> },
     // 子 Tab 跨导航记忆（由 ViewModel 驱动）
     activeTab: LibraryTab = LibraryTab.ALBUMS,
     onTabSelected: (LibraryTab) -> Unit = {},
@@ -287,6 +346,8 @@ fun LibraryScreen(
     modifier: Modifier = Modifier
 ) {
     var showSearchDialog by remember { mutableStateOf(false) }
+    var showQuickPick by remember { mutableStateOf(false) }
+    var quickPickIndex by remember { mutableIntStateOf(0) }
     // v2.36.4 跟手 pager：tabPageFraction 是**连续页索引**（0..N-1），拖动中由手指位移
     // 驱动，相邻页同时组合并按 (页索引 − fraction) × 页宽 平移 —— 当前页划走、相邻页
     // 跟进，与竖屏播放页「封面 ⟷ 歌词」的跟手效果一致（真机反馈 v2.36.3 的
@@ -564,13 +625,36 @@ fun LibraryScreen(
                 }
             }
             val searchField: @Composable (Modifier) -> Unit = { m ->
-                SearchField(
-                    query = filterQuery,
-                    placeholder = stringResource(R.string.library_search_placeholder),
-                    onOpenSearch = { showSearchDialog = true },
-                    onClear = { onFilterQueryChange("") },
-                    modifier = m
-                )
+                Row(modifier = m, verticalAlignment = Alignment.CenterVertically) {
+                    SearchField(
+                        query = filterQuery,
+                        placeholder = stringResource(R.string.library_search_placeholder),
+                        onOpenSearch = { showSearchDialog = true },
+                        onClear = { onFilterQueryChange("") },
+                        modifier = Modifier.weight(1f)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    FocusableSurface(
+                        onClick = {
+                            quickPickIndex = 0
+                            showQuickPick = true
+                        },
+                        shape = RoundedCornerShape(20.dp),
+                        containerColor = NasMusicColors.Primary.copy(alpha = 0.15f),
+                        contentColor = NasMusicColors.Primary,
+                        focusedContentColor = NasMusicColors.Primary
+                    ) {
+                        // 图标与播放页「快捷切换歌曲」按钮一致（Icons.Filled.QueueMusic）
+                        Icon(
+                            imageVector = Icons.Filled.QueueMusic,
+                            contentDescription = stringResource(R.string.qp_button_label),
+                            tint = NasMusicColors.Primary,
+                            modifier = Modifier
+                                .padding(horizontal = 10.dp, vertical = 8.dp)
+                                .size(20.dp)
+                        )
+                    }
+                }
             }
             // TAB 切换（可横向滑动——手机窄屏滑动浏览全部 tab）
             val tabsRow: @Composable (Modifier) -> Unit = { m ->
@@ -747,35 +831,78 @@ fun LibraryScreen(
                     )
                 }
                 LibraryTab.DISCOVER -> {
+                    // 搜索时就地出结果，但**完全沿用发现页自己的展示方式**（语种/维度行 + 歌曲网格），
+                    // 只把网格的数据源换成搜索结果 —— ⛔ 不再整页换成搜索页的 UI（所有者 2026-11-24）
+                    val searching = filterQuery.isNotBlank()
                     DiscoverTab(
                         dimensions = discoverDimensions,
-                        filteredSongs = discoverFilteredSongs,
-                        isLoading = discoverIsLoading,
+                        filteredSongs = if (searching) searchResults else discoverFilteredSongs,
+                        // 搜索期间不要被发现页自身的加载态盖掉结果
+                        isLoading = if (searching) false else discoverIsLoading,
                         favoriteIds = favoriteIds,
                         queueSongIds = queueSongIds,
                         currentDimensionValues = discoverCurrentDimensionValues,
                         onDimensionChanged = onDiscoverDimensionChanged,
-                        onPlayAll = onDiscoverPlayAll,
-                        onShuffle = onDiscoverShuffle,
+                        // 播放全部 / 随机播放在搜索时都作用于搜索结果
+                        onPlayAll = if (searching) ({ onPlaySongs(searchResults) }) else onDiscoverPlayAll,
+                        onShuffle = if (searching) ({ onPlaySongs(searchResults.shuffled()) }) else onDiscoverShuffle,
                         onAddAllToQueue = onDiscoverAddAllToQueue,
-                        errorMessage = discoverError,
+                        errorMessage = if (searching) null else discoverError,
                         onRetry = onDiscoverRetry,
-                        onPlaySong = onPlaySong,
+                        // 发现页点歌曲播放也计入「发现」类别历史
+                        //（所有者 2026-11-23 第 8 轮裁定：点歌曲就计入）
+                        onPlaySong = { song ->
+                            onRecordQuickPick(
+                                LibraryTab.DISCOVER.quickPickCategory(),
+                                song.title
+                            )
+                            onPlaySong(song)
+                        },
                         onToggleFavorite = onToggleFavorite,
                         onToggleQueue = onToggleQueue,
                         onAddToPlaylist = onAddToPlaylist,
                         downloadStates = downloadStates,
-                        onDownloadSong = onDownloadSong
+                        onDownloadSong = onDownloadSong,
+                        // 搜索无结果时不能沿用「选择筛选条件」的文案
+                        emptyHintRes = if (searching) {
+                            R.string.library_no_search_results
+                        } else {
+                            R.string.discover_pick_dimension
+                        }
                     )
                 }
                 LibraryTab.RADIO -> {
+                    // 顶部搜索框有词时就地过滤电台列表 —— **沿用电台页自己的展示方式**，
+                    // ⛔ 不用搜索页 UI 替换电台页（所有者 2026-11-24）。
+                    // 电台自身搜索框（onSearchRadio）仍独立工作，会重新拉取电台列表。
+                    val radioQuery = filterQuery.trim()
+                    val visibleStations = if (radioQuery.isBlank()) {
+                        radioStations
+                    } else {
+                        when (val cur = radioStations) {
+                            is UiState.Success -> UiState.Success(
+                                cur.data.filter { it.name.contains(radioQuery, ignoreCase = true) }
+                            )
+                            else -> cur
+                        }
+                    }
                     RadioTab(
-                        radioStations = radioStations,
+                        radioStations = visibleStations,
                         radioActiveTag = radioActiveTag,
                         radioActiveQuery = radioActiveQuery,
                         onLoadDefault = onLoadRadioDefault,
                         onLoadTag = onLoadRadioTag,
-                        onSearch = onSearchRadio,
+                        // 电台 tab 自带搜索框（不走顶部共享 searchField）⇒ 必须在此处补录，
+                        // 否则 RADIO 桶永远为空
+                        onSearch = { query ->
+                            if (query.isNotBlank()) {
+                                onRecordQuickPick(
+                                    LibraryTab.RADIO.quickPickCategory(),
+                                    query.trim()
+                                )
+                            }
+                            onSearchRadio(query)
+                        },
                         onPlayStation = onPlayRadioStation
                     )
                 }
@@ -913,13 +1040,37 @@ fun LibraryScreen(
                             }
                             LibraryTab.GENRES -> GenresTab(
                                 genres = genres,
-                                onSongsByGenre = onSongsByGenre,
-                                onPlaySongs = onPlaySongs
+                                // 点流派 = 发起一次「按流派查歌曲」的查询 ⇒ 计入 GENRES 历史。
+                                // ⛔ 不补这个写入点，GENRES 桶只能靠顶部搜索框填充，实际几乎
+                                //    永远为空 ⇒ 拨盘无内容可列。
+                                onSongsByGenre = onSongsByGenre?.let { original ->
+                                    { name: String, onResult: (List<Song>) -> Unit ->
+                                        onRecordQuickPick(LibraryTab.GENRES.quickPickCategory(), name)
+                                        original(name, onResult)
+                                    }
+                                },
+                                onPlaySongs = onPlaySongs,
+                                // 搜索时就地出结果，用流派页自己的卡片网格样式追加在卡片之后
+                                //（⛔ 不整页换成搜索页 UI，所有者 2026-11-24）
+                                searchResults = if (filterQuery.isNotBlank()) searchResults else emptyList(),
+                                onPlaySong = onPlaySong
                             )
                             LibraryTab.YEARS -> YearsTab(
                                 years = years,
-                                onSongsByYear = onSongsByYear,
-                                onPlaySongs = onPlaySongs
+                                // 同上：点年代也是一次查询
+                                onSongsByYear = onSongsByYear?.let { original ->
+                                    { year: Int, yearEnd: Int, onResult: (List<Song>) -> Unit ->
+                                        onRecordQuickPick(
+                                            LibraryTab.YEARS.quickPickCategory(),
+                                            year.toString()
+                                        )
+                                        original(year, yearEnd, onResult)
+                                    }
+                                },
+                                onPlaySongs = onPlaySongs,
+                                // 同上：年代页保留年份卡片，结果用本页卡片样式追加
+                                searchResults = if (filterQuery.isNotBlank()) searchResults else emptyList(),
+                                onPlaySong = onPlaySong
                             )
                             else -> {}  // SEARCH, DISCOVER, RADIO handled above
                         }
@@ -963,14 +1114,9 @@ fun LibraryScreen(
                 initialValue = filterQuery,
                 onConfirm = { query ->
                     onFilterQueryChange(query)
+                    // 手动搜索同样计入当前 tab 的快捷选择统计（与拨盘选择共用同一热度口径）
+                    if (query.isNotBlank()) onRecordQuickPick(activeTab.quickPickCategory(), query.trim())
                     showSearchDialog = false
-                    // 只在非搜索 tab 时跳到搜索 tab；其他 tab 留在当前页做维度搜索
-                    if (activeTab != LibraryTab.SEARCH &&
-                        activeTab != LibraryTab.ALBUMS &&
-                        activeTab != LibraryTab.ARTISTS &&
-                        activeTab != LibraryTab.SONGS) {
-                        onTabSelected(LibraryTab.SEARCH)
-                    }
                 },
                 onDismiss = { showSearchDialog = false },
                 showQrCode = true,
@@ -978,15 +1124,42 @@ fun LibraryScreen(
                 historyItems = historyItems,
                 onHistorySelect = { query ->
                     onFilterQueryChange(query)
+                    if (query.isNotBlank()) onRecordQuickPick(activeTab.quickPickCategory(), query.trim())
                     showSearchDialog = false
-                    if (activeTab != LibraryTab.SEARCH &&
-                        activeTab != LibraryTab.ALBUMS &&
-                        activeTab != LibraryTab.ARTISTS &&
-                        activeTab != LibraryTab.SONGS) {
-                        onTabSelected(LibraryTab.SEARCH)
-                    }
                 }
             )
+        }
+
+        // 快捷选择拨盘（搜索快速填写）
+        if (showQuickPick) {
+            val candidates = buildQuickPickCandidates(
+                tab = activeTab,
+                historyItems = historyItems,
+                stats = quickPickStats
+            )
+            if (candidates.isEmpty()) {
+                // 本 tab 还没有任何历史查询记录 ⇒ 拨盘无内容可列（⛔ 不回退去列当前页面数据）。
+                // 与其静默关闭让用户以为按钮失灵，直接打开搜索输入框：这次用键盘搜一次，
+                // 确认时会写入本 tab 的 quick_pick_stats，下次点按钮就有快选内容了。
+                showQuickPick = false
+                showSearchDialog = true
+            } else {
+                ArcDialDialog(
+                    items = candidates,
+                    selectedIndex = quickPickIndex.coerceIn(0, candidates.size - 1),
+                    onSelectedIndexChange = { quickPickIndex = it },
+                    onConfirm = { candidate ->
+                        val value = candidate.value
+                        onFilterQueryChange(value)
+                        onRecordQuickPick(activeTab.quickPickCategory(), value)
+                    },
+                    onDismiss = { showQuickPick = false },
+                    label = { it.value },
+                    key = { it.value },
+                    dPadMode = LocalUiMode.current == UiMode.TV,
+                    anchor = ArcAnchor.RIGHT
+                )
+            }
         }
 
     }

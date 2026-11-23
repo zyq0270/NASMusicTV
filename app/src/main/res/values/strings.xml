@@ -850,6 +850,7 @@
     <string name="library_songs_parse_failed">歌曲数据解析失败（服务端字段不兼容）</string>
     <string name="library_load_more">加载更多…</string>
     <string name="library_genres_count">风格 (%d)</string>
+    <string name="library_search_results_count">搜索结果 (%d)</string>
     <string name="library_song_count_suffix">%d首</string>
     <string name="library_years_count">年代 (%d)</string>
     <string name="library_tap_to_play">点击播放</string>
@@ -943,6 +944,7 @@
     <string name="discover_change_batch">换一批 ↻</string>
     <string name="discover_song_count">%d 首</string>
     <string name="discover_pick_dimension">选择上方的筛选条件，开始发现音乐</string>
+    <string name="library_no_search_results">没有匹配的歌曲</string>
 
     <!-- Browse Dimension -->
     <string name="browse_dim_language">语种</string>
@@ -1741,4 +1743,28 @@
     <string name="settings_netdisk_index_rebuild_need_enable">先启用百度网盘</string>
     <string name="settings_netdisk_index_rebuild_need_login">先登录百度网盘</string>
     <string name="settings_auto_download_limit_disabled">自动下载关闭时不生效</string>
+    <!-- 快捷选择拨盘（Quick Dial） -->
+    <string name="qp_button_label">快选</string>
+    <string name="qp_title">%1$s · 快捷选择</string>
+    <string name="qp_confirm">确定</string>
+    <string name="qp_hint_touch">上下滑动选择 · 点按确定</string>
+    <string name="qp_hint_dpad">上/下键选择 · 确定键确认</string>
+    <string name="qp_queue_title">切换歌曲</string>
+    <string name="qp_queue_confirm">播放</string>
+    <string name="qp_queue_hint_touch">上下滑动选择 · 点按切歌</string>
+    <string name="qp_queue_hint_dpad">上/下键选择 · 确定键切歌</string>
+    <string name="qp_clear">清除本类记录</string>
+    <!-- 设置窗口：按类别分别统计 -->
+    <string name="settings_group_stats">统计</string>
+    <string name="settings_qp_stats_desc">已记录 %1$d 项 · 选中 %2$d 次</string>
+    <string name="settings_qp_stats_empty">暂无记录</string>
+    <string name="settings_quick_pick_hint">这些记录按类别分别保存，用于让快选拨盘把常用内容排在前面；播放切歌不使用这些记录。</string>
+    <string name="qp_stats_title">%1$s · 快捷选择统计</string>
+    <string name="qp_stats_count">记录项数</string>
+    <string name="qp_stats_total">累计选中</string>
+    <string name="qp_stats_empty">该类暂无记录</string>
+    <string name="qp_stats_picked">选中 %1$d 次</string>
+    <string name="qp_clear_confirm_title">清除记录</string>
+    <string name="qp_clear_confirm_message">确定清除「%1$s」的全部快捷选择记录吗？此操作不可撤销。</string>
+    <string name="qp_back">返回</string>
 </resources>

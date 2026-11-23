@@ -260,6 +260,9 @@ internal fun SettingsBranch(
                         storageAvailableBytes = storageAvailableBytes,
                         onOpenEqualizer = { viewModel.navVM.navigateTo(Screen.Equalizer) },
                         onOpenPlayStats = { viewModel.navVM.navigateTo(Screen.PlayStats) },
+                        quickPickStats = viewModel.quickPickStats.collectAsState(initial = emptyList()).value,
+                        quickPickCategories = viewModel.quickPickCategories,
+                        onOpenQuickPickStats = { category -> viewModel.openQuickPickStats(category) },
                         // F2-5：crossfade 设置接线
                         crossfadeEnabled = crossfadeEnabled,
                         crossfadeDurationSec = crossfadeDurationSec,

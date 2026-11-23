@@ -185,6 +185,34 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
     /** 搜索历史（最近输入 + 最多搜索） */
     val searchHistory = prefs.history.searchHistory
 
+    /** 快捷选择统计（按类别分桶，用于拨盘候选回填/排序与设置页分类统计） */
+    val quickPickStats = prefs.history.quickPickStats
+
+    /** 快捷选择统计的类别列表（与曲库搜索 tab 对齐，供设置页逐类展示） */
+    val quickPickCategories: List<String> = listOf(
+        "SONGS", "ALBUMS", "ARTISTS", "GENRES", "YEARS", "SEARCH", "DISCOVER", "RADIO"
+    )
+
+    /** 当前正在查看的快捷选择统计类别（进入明细页前写入） */
+    private val _quickPickStatsCategory = MutableStateFlow("ALBUMS")
+    val quickPickStatsCategory: StateFlow<String> = _quickPickStatsCategory.asStateFlow()
+
+    /** 记录一次快捷选择（仅搜索场景调用；播放切歌不走此处） */
+    fun recordQuickPick(category: String, value: String) {
+        viewModelScope.launch { prefs.history.recordQuickPick(category, value) }
+    }
+
+    /** 打开某类别的快捷选择统计明细页 */
+    fun openQuickPickStats(category: String) {
+        _quickPickStatsCategory.value = category
+        navVM.navigateTo(Screen.QuickPickStats)
+    }
+
+    /** 清除某类别（或全部）快捷选择记录 */
+    fun clearQuickPickStats(category: String? = null) {
+        viewModelScope.launch { prefs.history.clearQuickPickStats(category) }
+    }
+
     /**
      * 音乐源可见性判定（方案 §3.1 · 唯一真相源）。
      *

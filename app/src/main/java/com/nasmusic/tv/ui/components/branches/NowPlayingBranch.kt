@@ -3,6 +3,12 @@ package com.nasmusic.tv.ui.components.branches
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.res.stringResource
+import com.nasmusic.tv.ui.components.picker.ArcDialDialog
 import androidx.tv.material3.ExperimentalTvMaterial3Api
 import com.nasmusic.tv.data.model.Song
 import com.nasmusic.tv.ui.viewmodel.MainViewModel
@@ -94,6 +100,10 @@ internal fun NowPlayingBranch(
                         // 全部参数）重新求值；由叶子自己读 .value，重组范围就只剩那条进度线。
                         val progressState = viewModel.playerVM.progress.collectAsState(initial = 0L)
                         val duration by viewModel.playerVM.duration.collectAsState(initial = 0L)
+                        // 队列快速切歌：本分支持有弹窗状态，队列取自 playerState
+                        val playerState by viewModel.playerVM.playerState.collectAsState()
+                        var showQueueDial by remember { mutableStateOf(false) }
+                        var queueDialIndex by remember { mutableIntStateOf(0) }
                         NowPlayingScreen(
                             currentSong = currentSong,
                             isPlaying = isPlaying,
@@ -118,6 +128,11 @@ internal fun NowPlayingBranch(
                             onNext = { viewModel.playerVM.next() },
                             onPrevious = { viewModel.playerVM.previous() },
                             onTogglePlayMode = { viewModel.playerVM.togglePlayMode() },
+                            showQuickSwitchButton = playerState.queue.isNotEmpty(),
+                            onOpenQuickSwitch = {
+                                queueDialIndex = playerState.currentIndex
+                                showQueueDial = true
+                            },
                             // === KARAOKE 人声消除 ===
                             vocalRemovalEnabled = vocalRemovalEnabled,
                             onToggleVocalRemoval = { viewModel.vocalVM.toggleVocalRemoval() },
@@ -185,5 +200,22 @@ internal fun NowPlayingBranch(
                             appVolume = viewModel.playerVM.appVolume.collectAsState(initial = 1f).value,
                             onChangeAppVolume = { viewModel.playerVM.setAppVolume(it) },
                         )
+
+                        // 队列快速切歌拨盘：纯队列顺序，不读任何热度统计
+                        if (showQueueDial && playerState.queue.isNotEmpty()) {
+                            ArcDialDialog(
+                                items = playerState.queue,
+                                selectedIndex = queueDialIndex.coerceIn(0, playerState.queue.size - 1),
+                                onSelectedIndexChange = { queueDialIndex = it },
+                                onConfirm = { song ->
+                                    val index = playerState.queue.indexOfFirst { it.id == song.id && it.title == song.title }
+                                    if (index >= 0) viewModel.playerVM.resolveAndPlayByIndex(index)
+                                },
+                                onDismiss = { showQueueDial = false },
+                                label = { it.title },
+                                key = { "${it.id}_${it.title}" },
+                                dPadMode = isTV
+                            )
+                        }
                     }
 }

@@ -98,6 +98,8 @@ currentDimensionValues: Map<Int, Int> = emptyMap(),
     onAddToPlaylist: (Song) -> Unit = {},
     downloadStates: Map<String, DownloadState> = emptyMap(),
     onDownloadSong: (Song) -> Unit = {},
+    /** 空结果文案：默认「选择筛选条件」；搜索场景传「没有匹配的歌曲」 */
+    emptyHintRes: Int = R.string.discover_pick_dimension,
     modifier: Modifier = Modifier
 ) {
     val listState = rememberLazyGridState()
@@ -192,7 +194,7 @@ currentDimensionValues: Map<Int, Int> = emptyMap(),
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
-                                text = stringResource(R.string.discover_pick_dimension),
+                                text = stringResource(emptyHintRes),
                                 color = NasMusicColors.TextSecondary,
                                 fontSize = FontSize.body()
                             )

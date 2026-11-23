@@ -26,6 +26,7 @@ import com.nasmusic.tv.data.model.EqualizerPreset
 import com.nasmusic.tv.data.model.LocalPlaylist
 import com.nasmusic.tv.data.model.NetworkFavoriteItem
 import com.nasmusic.tv.data.model.PlayMode
+import com.nasmusic.tv.data.model.QuickPickStat
 import com.nasmusic.tv.data.model.SearchHistoryItem
 import com.nasmusic.tv.data.model.ServerConfig
 import com.nasmusic.tv.data.model.VisualizerTheme
@@ -659,6 +660,9 @@ class AppPreferences internal constructor(private val context: Context) {
     // --- 搜索历史（序列化为 JSON，30 天 TTL + 上限 200 条）---
     private val keySearchHistory = stringPreferencesKey("search_history")
 
+    // --- 快捷选择统计（JSON，按 类别+内容值 累计次数，上限裁剪，无 TTL）---
+    private val keyQuickPickStats = stringPreferencesKey("quick_pick_stats")
+
     // --- 网盘配置（按 CloudDriveType 存取，JSON 序列化 CloudDriveConfig；token 字段加密）---
     private val keyCloudDriveConfig = stringPreferencesKey("cloud_drive_configs")
 
@@ -667,6 +671,7 @@ class AppPreferences internal constructor(private val context: Context) {
     private val networkFavoritesMaxSize = 500
     private val searchHistoryMaxSize = 200
     private val searchHistoryTtlMs = 30L * 24 * 60 * 60 * 1000  // 30 天
+    private val quickPickStatsMaxSize = 300
 
     /**
      * 安全解析 JSON 偏好：解析失败时记录告警并返回 null（调用方应跳过回写，保留原数据），
@@ -2119,6 +2124,76 @@ class AppPreferences internal constructor(private val context: Context) {
         }
     }
 
+    // --- 快捷选择统计（Quick Dial）---
+
+    /** 快捷选择统计列表 Flow（响应式；顺序为最近选中在前） */
+    val quickPickStats: Flow<List<QuickPickStat>> = dataStore.data.map { prefs ->
+        val json = prefs[keyQuickPickStats] ?: "[]"
+        try {
+            gson.fromJson<List<QuickPickStat>>(json, object : TypeToken<List<QuickPickStat>>() {}.type)
+                ?: emptyList()
+        } catch (e: Exception) { emptyList() }
+    }
+
+    suspend fun getQuickPickStats(): List<QuickPickStat> {
+        return try {
+            dataStore.data.first().let { prefs ->
+                val json = prefs[keyQuickPickStats] ?: "[]"
+                gson.fromJson<List<QuickPickStat>>(json, object : TypeToken<List<QuickPickStat>>() {}.type)
+                    ?: emptyList()
+            }
+        } catch (e: Exception) { emptyList() }
+    }
+
+    suspend fun getQuickPickStats(category: String): List<QuickPickStat> =
+        getQuickPickStats().filter { it.category == category }
+
+    /**
+     * 记录一次快捷选择：同 category+value 合并 count+1、移到头部、超限裁剪。
+     * category 为空或 value 为空白时忽略。
+     */
+    suspend fun recordQuickPick(category: String, value: String) {
+        val cat = category.trim()
+        val trimmed = value.trim()
+        if (cat.isEmpty() || trimmed.isEmpty()) return
+        val now = System.currentTimeMillis()
+        dataStore.edit { prefs ->
+            val json = prefs[keyQuickPickStats] ?: "[]"
+            val list = safeParseJson("quick_pick_stats", json) {
+                gson.fromJson<MutableList<QuickPickStat>>(json, object : TypeToken<MutableList<QuickPickStat>>() {}.type)
+            } ?: return@edit
+            val mutable = list.toMutableList()
+            val idx = mutable.indexOfFirst { it.category == cat && it.value == trimmed }
+            if (idx >= 0) {
+                val existing = mutable.removeAt(idx)
+                mutable.add(0, existing.copy(lastPickedAt = now, count = existing.count + 1))
+            } else {
+                mutable.add(0, QuickPickStat(category = cat, value = trimmed, count = 1, lastPickedAt = now))
+            }
+            if (mutable.size > quickPickStatsMaxSize) {
+                mutable.subList(quickPickStatsMaxSize, mutable.size).clear()
+            }
+            prefs[keyQuickPickStats] = gson.toJson(mutable)
+        }
+    }
+
+    /** 清除快捷选择统计：category 为 null 时清空全部，否则只清该类别 */
+    suspend fun clearQuickPickStats(category: String? = null) {
+        dataStore.edit { prefs ->
+            if (category == null) {
+                prefs.remove(keyQuickPickStats)
+            } else {
+                val json = prefs[keyQuickPickStats] ?: return@edit
+                val list = safeParseJson("quick_pick_stats", json) {
+                    gson.fromJson<MutableList<QuickPickStat>>(json, object : TypeToken<MutableList<QuickPickStat>>() {}.type)
+                } ?: return@edit
+                val kept = list.filterNot { it.category == category }
+                if (kept.isEmpty()) prefs.remove(keyQuickPickStats)
+                else prefs[keyQuickPickStats] = gson.toJson(kept)
+            }
+        }
+    }
+
     // ========== 数据备份 ==========
 
     /**
@@ -2285,6 +2360,7 @@ class AppPreferences internal constructor(private val context: Context) {
         val playCounts: Map<String, Int> = emptyMap(),
         val playRecords: List<com.nasmusic.tv.data.model.PlayRecord> = emptyList(),
         val searchHistory: List<SearchHistoryItem> = emptyList(),
+        val quickPickStats: List<QuickPickStat> = emptyList(),
         val equalizerPreset: EqualizerPreset? = null,
         val equalizerBands: List<Float> = emptyList(),
         // v2: 新增备份项（旧备份文件恢复时用默认值）
@@ -2327,6 +2403,7 @@ class AppPreferences internal constructor(private val context: Context) {
             playCounts = playCounts.first(),
             playRecords = getPlayRecords(),
             searchHistory = getSearchHistory(),
+            quickPickStats = getQuickPickStats(),
             equalizerPreset = equalizerPreset.first(),
             equalizerBands = equalizerBands.first(),
             // v2: 补全之前遗漏的设置项
@@ -2466,6 +2543,9 @@ class AppPreferences internal constructor(private val context: Context) {
             }
             if (data.searchHistory.isNotEmpty()) {
                 prefs[keySearchHistory] = gson.toJson(data.searchHistory)
+            }
+            if (data.quickPickStats.isNotEmpty()) {
+                prefs[keyQuickPickStats] = gson.toJson(data.quickPickStats)
             }
             // v2: 恢复之前遗漏的设置项
             prefs[keyCoverFilterEnabled] = data.coverFilterEnabled

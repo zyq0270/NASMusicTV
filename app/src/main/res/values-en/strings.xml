@@ -807,6 +807,7 @@
     <string name="library_songs_parse_failed">Could not parse song data (incompatible server fields)</string>
     <string name="library_load_more">Load more…</string>
     <string name="library_genres_count">Genres (%d)</string>
+    <string name="library_search_results_count">Results (%d)</string>
     <string name="library_song_count_suffix">%d songs</string>
     <string name="library_years_count">Years (%d)</string>
     <string name="library_tap_to_play">Tap to play</string>
@@ -899,6 +900,7 @@
     <string name="discover_change_batch">Refresh ↻</string>
     <string name="discover_song_count">%d songs</string>
     <string name="discover_pick_dimension">Select a filter above to start discovering music</string>
+    <string name="library_no_search_results">No matching songs</string>
 
     <!-- Browse Dimension -->
     <string name="browse_dim_language">Language</string>
@@ -1730,4 +1732,28 @@
     <string name="player_not_ready">Player is not ready yet, please try again later</string>
     <string name="queue_clear_confirm_title">Clear play queue</string>
     <string name="queue_clear_confirm_message">This will remove all songs from the queue and stop playback. This action cannot be undone.</string>
+    <!-- Quick Dial picker -->
+    <string name="qp_button_label">Quick pick</string>
+    <string name="qp_title">%1$s · Quick pick</string>
+    <string name="qp_confirm">Select</string>
+    <string name="qp_hint_touch">Swipe up/down · Tap to select</string>
+    <string name="qp_hint_dpad">D-Pad up/down · OK to select</string>
+    <string name="qp_queue_title">Switch song</string>
+    <string name="qp_queue_confirm">Play</string>
+    <string name="qp_queue_hint_touch">Swipe up/down · Tap to play</string>
+    <string name="qp_queue_hint_dpad">D-Pad up/down · OK to play</string>
+    <string name="qp_clear">Clear this category</string>
+    <!-- Settings: per-category stats -->
+    <string name="settings_group_stats">Statistics</string>
+    <string name="settings_qp_stats_desc">%1$d items · %2$d picks</string>
+    <string name="settings_qp_stats_empty">No records</string>
+    <string name="settings_quick_pick_hint">These records are kept per category and used to rank frequently picked items in the quick-pick dial. Playback switching does not use them.</string>
+    <string name="qp_stats_title">%1$s · Quick pick stats</string>
+    <string name="qp_stats_count">Items</string>
+    <string name="qp_stats_total">Total picks</string>
+    <string name="qp_stats_empty">No records for this category</string>
+    <string name="qp_stats_picked">%1$d picks</string>
+    <string name="qp_clear_confirm_title">Clear records</string>
+    <string name="qp_clear_confirm_message">Clear all quick-pick records for \"%1$s\"? This cannot be undone.</string>
+    <string name="qp_back">Back</string>
 </resources>
