@@ -29122,6 +29122,7 @@ Jellyfin 按名查询只发一次请求、fields 补齐并分页；Navidrome/Sub
 3. **弧面朝向 `ArcAnchor`**：`LEFT`（圆心在左、向右凸「)」，播放页）/ `RIGHT`（圆心在右、向左凸「(」，搜索页）；`radSign`/`xSign` 镜像取反。圆心侧另画一条 `drawArc` 半圆装饰弧（`Primary` α0.35、1.5dp）。旋转角 7°（11° 会在横屏把文字挤在一起）。
 4. **TV**：`dPadMode` 下焦点落到拨盘本身（`FocusRequester`），上/下键改 `selectedIndex`，OK 确认，`BackHandler` 取消。
 5. **配色**：条目只按「是否中央行」着色（中央 `Primary`，其余 `TextPrimary`），与队列拨盘一致；⛔ 不按数据来源着色（候选已统一只列历史）。
+5.1 **弹窗外观（随明暗主题，2026-11-24 两轮收敛）**：遮罩 `NasMusicColors.DialogScrim` = 深色 70% 黑（`NasOverlayColors.DialogScrim`，`0xB3000000`）/ 浅色 **70% 白 `0xB3FFFFFF`**，两档 alpha 同取 `0xB3`、透光 30%（能看见下层页面）。底衬 `NasMusicColors.DialogPanel` = 深色 `Background`@28%，浅色 **`Color.Transparent`**。⛔ 浅色不许用恒定黑遮罩（整页发灰）；⛔ 浅色遮罩不许加到 90% 白（下层完全看不见）；⛔ 浅色底衬不许填任何颜色 —— 该层写在 `padding(horizontal = 20.dp)` 之内，比全屏遮罩窄 40dp，填色即出现「中间一块 + 两侧各一条」的三截灰。
 
 **场景 A 搜索快填（`LibraryScreen`）**：
 
@@ -29142,7 +29143,7 @@ Jellyfin 按名查询只发一次请求、fields 补齐并分页；Navidrome/Sub
 
 **各 Tab 搜索结果的就地展示（2026-11-24 定稿）**：所有 Tab 搜索后**不跳**搜索页，且**沿用各页自己的展示方式**——发现页保留语种/维度行、只换歌曲网格数据源（`emptyHintRes` 区分「选筛选条件」与「没有匹配的歌曲」）；流派/年代保留卡片网格，在同一 `LazyVerticalGrid` 内追加「搜索结果 (n)」小标题 + 同款卡片；电台就地按名称过滤电台网格。⛔ 不用搜索页 UI 整页替换（`SearchTab` 不再被复用）。
 
-**门禁**：`QuickPickGateTest` G1–G10（G1 统一配色/无来源着色、G2 D-Pad、G3 BackHandler、G4 队列不写统计、G5 设置按类别且无重复清除、G6 只列历史、G7 QueueMusic 图标、G8 空桶开搜索框、G9 四类写入点、G10 四页各自展示方式且不跳转）、`QuickPickRankerTest`（5 例）、`QuickPickSourceMergerTest`（4 例）。
+**门禁**：`QuickPickGateTest` G1–G11（G1 统一配色/无来源着色、G2 D-Pad、G3 BackHandler、G4 队列不写统计、G5 设置按类别且无重复清除、G6 只列历史、G7 QueueMusic 图标、G8 空桶开搜索框、G9 四类写入点、G10 四页各自展示方式且不跳转、G11 弹窗遮罩/底衬随主题且浅色为 70% 白 + 透明底衬）、`QuickPickRankerTest`（5 例）、`QuickPickSourceMergerTest`（4 例）。
 
 **涉及文件**：新增 `data/model/QuickPickStat.kt`、`data/stats/{QuickPickCandidate,QuickPickSourceMerger,QuickPickRanker}.kt`、`ui/components/picker/{ArcDialPicker,ArcDialDialog}.kt`、`ui/screens/stats/QuickPickStatsScreen.kt`、`ui/components/branches/QuickPickStatsBranch.kt`；改动 `data/prefs/{AppPreferences,HistoryPrefs}.kt`、`ui/viewmodel/MainViewModel.kt`、`ui/screens/{LibraryScreen,NowPlayingScreen,SettingsScreen}.kt`、`ui/screens/library/{DiscoverTab.kt,browse/GenreYearLists.kt}`、`ui/screens/settings/DataSettingsSection.kt`、`ui/components/{AppRoot,PlayerControls}.kt`、`ui/components/branches/{LibraryBranch,NowPlayingBranch,SettingsBranch}.kt`、`data/model/Screen.kt`、`ui/theme/Theme.kt`、`values/strings.xml` + `values-en/strings.xml`、`CHANGELOG.md`。
 

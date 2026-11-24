@@ -132,6 +132,34 @@ class QuickPickGateTest {
     }
 
     @Test
+    fun `G11 弹窗遮罩与底衬随明暗主题而不是恒定黑色`() {
+        val dlg = src("com/nasmusic/tv/ui/components/picker/ArcDialDialog.kt")
+        // 所有者 2026-11-24：浅色主题下打开快选，整页发灰 —— 恒定 70% 黑遮罩压出来的。
+        // 遮罩/底衬必须走随主题的 token。
+        assertTrue(!dlg.contains("NasOverlayColors"))
+        assertTrue(dlg.contains(".background(NasMusicColors.DialogScrim)"))
+        assertTrue(dlg.contains(".background(NasMusicColors.DialogPanel)"))
+        // ⛔ 不能再直接拿 Background 蒙一层（浅色下是灰的）
+        assertTrue(!dlg.contains("NasMusicColors.Background.copy(alpha = 0.28f)"))
+
+        val theme = src("com/nasmusic/tv/ui/theme/Theme.kt")
+        // 浅色分支必须是白色系；深色分支沿用原来的黑遮罩。
+        // 浅色 alpha 与深色 0xB3000000 对称取 0xB3（70% 白）：透光 30%，下层页面要看得见。
+        assertTrue(
+            theme.contains(
+                "if (LocalNasPalette.current.isLight) Color(0xB3FFFFFF) else NasOverlayColors.DialogScrim"
+            )
+        )
+        // 反例钉死：90% 白会把下层遮死（2026-11-24 第二轮：「背景透明度不够，下层内容看不到」）。
+        // 断言写语句级 `Color(...)`，别用裸字面量做全文否定 —— 注释里一提就自伤。
+        assertTrue(!theme.contains("Color(0xE6FFFFFF)"))
+        // 浅色底衬必须透明：该层写在 horizontal 20dp 内缩之内，比全屏遮罩窄 40dp，
+        // 填任何颜色都会叠出「中间一块 + 两侧两条」的三截灰（第二轮：「背景不是一体」）
+        assertTrue(theme.contains("val DialogPanel: Color"))
+        assertTrue(theme.contains("Color.Transparent"))
+    }
+
+    @Test
     fun `G5 设置页按类别分别展示统计且不重复放清除按钮`() {
         val s = src("com/nasmusic/tv/ui/screens/settings/DataSettingsSection.kt")
         // 每类一行概览 + 进入明细页；⛔ 不再放「清除本类记录」按钮（明细页已有）

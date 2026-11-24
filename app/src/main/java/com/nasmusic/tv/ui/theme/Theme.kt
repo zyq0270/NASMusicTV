@@ -161,6 +161,36 @@ object NasMusicColors {
         @Composable @ReadOnlyComposable get() = LocalNasPalette.current.surface
     val SurfaceVariant: Color
         @Composable @ReadOnlyComposable get() = LocalNasPalette.current.surfaceVariant
+
+    // 全屏弹窗（Quick Dial 拨盘等）
+    /**
+     * 模态遮罩：深色 = 70% 黑（`0xB3000000`）；浅色 = **70% 白（`0xB3FFFFFF`）**。
+     * 两档 alpha 故意取同一个 `0xB3`：同一套观感，只是底色反相。
+     *
+     * ⛔ 浅色下不能沿用黑色遮罩 —— 会把整页压成灰色蒙版、深色正文对比度骤降
+     * （2026-11-24 第一轮反馈：「整个背景发灰，不应该有灰色，应该在白色窗口下变半透明」）。
+     * ⛔ 也不要往白遮罩上加 alpha（第 10 轮曾用 90% 白）—— 透光只剩 10%，
+     * 下层页面被遮得一干二净（2026-11-24 第二轮反馈：「背景透明度不够，下层内容看不到」）。
+     */
+    val DialogScrim: Color
+        @Composable @ReadOnlyComposable get() =
+            if (LocalNasPalette.current.isLight) Color(0xB3FFFFFF) else NasOverlayColors.DialogScrim
+
+    /**
+     * 弹窗底衬：深色沿用 Background 28%（在遮罩之上再压暗一层，拨盘文字更「贴」）；
+     * **浅色 = 透明**。
+     *
+     * ⛔ 浅色下底衬不能有任何 alpha：这一层写在 `padding(horizontal = 20.dp)` 之内，
+     * 比全屏遮罩窄 40dp ⇒ 中间一块 + 两侧各一条，两种白叠出「背景不是一体」的错位色块
+     * （2026-11-24 第二轮反馈：「中间有个浅灰块，两侧都有浅灰条」）。
+     */
+    val DialogPanel: Color
+        @Composable @ReadOnlyComposable get() =
+            if (LocalNasPalette.current.isLight) {
+                Color.Transparent
+            } else {
+                LocalNasPalette.current.background.copy(alpha = 0.28f)
+            }
     // 主色
     val Primary: Color
         @Composable @ReadOnlyComposable get() = LocalNasPalette.current.primary
