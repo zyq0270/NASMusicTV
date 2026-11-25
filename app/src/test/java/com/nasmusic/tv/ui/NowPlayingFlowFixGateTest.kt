@@ -145,15 +145,21 @@ class NowPlayingFlowFixGateTest {
     @Test
     fun `T7 收藏 NAS 分支判断加类型守卫`() {
         val vm = src("ui/viewmodel/MainViewModel.kt")
-        val body = region(vm, "fun toggleNetworkFavorite(song: Song) = netVM.toggleNetworkFavorite(", "fun searchSongsOnServer(")
+        // 方法已从表达式体改为块体；只钉结构契约，不再锁死「= netVM.toggleNetworkFavorite」字面量。
+        val body = region(vm, "fun toggleNetworkFavorite(song: Song)", "fun searchSongsOnServer(")
+        assertTrue(
+            "收藏入口必须先把合成来源前缀剥离后的 Song 归一化",
+            body.contains("val normalized = song.stripSyntheticRadioPrefix()") &&
+                body.contains("netVM.toggleNetworkFavorite(")
+        )
         assertTrue(
             "isNasFavorite 须加来源类型守卫",
-            body.contains("!song.isNetworkSong && !song.isLocalSong && song.id in _favoriteIds.value")
+            body.contains("!normalized.isNetworkSong && !normalized.isLocalSong && normalized.id in _favoriteIds.value")
         )
         assertFalse(
             "T7 负自检：抹掉类型守卫后不得仍判正",
-            body.replace("!song.isNetworkSong && !song.isLocalSong && ", "")
-                .contains("!song.isNetworkSong && !song.isLocalSong && song.id in _favoriteIds.value")
+            body.replace("!normalized.isNetworkSong && !normalized.isLocalSong && ", "")
+                .contains("!normalized.isNetworkSong && !normalized.isLocalSong && normalized.id in _favoriteIds.value")
         )
     }
 

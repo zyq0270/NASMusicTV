@@ -160,6 +160,16 @@ class QuickPickGateTest {
     }
 
     @Test
+    fun `G12 队列拨盘按选中下标播放且重复项 key 含下标`() {
+        val s = src("com/nasmusic/tv/ui/components/branches/NowPlayingBranch.kt")
+        val queueDial = s.substringAfter("if (showQueueDial && playerState.queue.isNotEmpty())")
+            .substringBefore("dPadMode = isTV")
+        assertTrue("队列拨盘仍按 id/title 反查首个重复项", !queueDial.contains("indexOfFirst"))
+        assertTrue("队列拨盘确认回调未直接使用选中下标", queueDial.contains("onConfirm = { index"))
+        assertTrue("队列拨盘 key 未包含下标，重复队列项仍会撞 key", Regex("key\\s*=\\s*\\{\\s*index").containsMatchIn(queueDial))
+    }
+
+    @Test
     fun `G5 设置页按类别分别展示统计且不重复放清除按钮`() {
         val s = src("com/nasmusic/tv/ui/screens/settings/DataSettingsSection.kt")
         // 每类一行概览 + 进入明细页；⛔ 不再放「清除本类记录」按钮（明细页已有）

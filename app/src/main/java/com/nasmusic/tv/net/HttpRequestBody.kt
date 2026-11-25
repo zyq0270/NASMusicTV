@@ -42,16 +42,24 @@ internal object HttpRequestBody {
      * 也是防请求走私的要求）；两者皆无则视为无请求体。
      */
     fun read(headers: Map<String, String>, input: java.io.InputStream, maxBytes: Long): Result {
-        val transferEncoding = headers["transfer-encoding"] ?: ""
-        val contentLength = headers["content-length"]?.toLongOrNull()
+        val transferEncoding = headers["transfer-encoding"]?.trim().orEmpty()
+        val contentLengthHeader = headers["content-length"]
 
-        return if (transferEncoding.contains("chunked", ignoreCase = true)) {
-            readChunked(input, maxBytes)
-        } else if (contentLength == null || contentLength <= 0L) {
-            Result.Read(ByteArray(0))
-        } else {
-            readFixed(input, contentLength, maxBytes)
+        if (transferEncoding.isNotEmpty()) {
+            val codings = transferEncoding.split(',').map { it.trim().lowercase() }
+            return if (codings == listOf("chunked")) {
+                readChunked(input, maxBytes)
+            } else {
+                Result.Malformed("不支持的 Transfer-Encoding（$transferEncoding）")
+            }
         }
+        if (contentLengthHeader == null) return Result.Read(ByteArray(0))
+        if (!contentLengthHeader.all { it in '0'..'9' }) {
+            return Result.Malformed("非法 Content-Length（$contentLengthHeader）")
+        }
+        val contentLength = contentLengthHeader.toLongOrNull()
+            ?: return Result.Malformed("Content-Length 超出可表示范围（$contentLengthHeader）")
+        return if (contentLength == 0L) Result.Read(ByteArray(0)) else readFixed(input, contentLength, maxBytes)
     }
 
     /** 按 Content-Length 定长读取（keep-alive 上绝不能读到 -1，否则会阻塞至 SO_TIMEOUT） */
@@ -82,8 +90,11 @@ internal object HttpRequestBody {
             val headerLine = readLine(input, MAX_CHUNK_HEADER_BYTES)
                 ?: return Result.Malformed("chunked：块头缺失或超过 $MAX_CHUNK_HEADER_BYTES 字节")
             val sizeText = headerLine.substringBefore(';').trim()
+            if (!sizeText.all { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' } || sizeText.isEmpty()) {
+                return Result.Malformed("chunked：块头无法解析（$sizeText）")
+            }
             val size = sizeText.toLongOrNull(radix = 16)
-                ?: return Result.Malformed("chunked：块头无法解析（$sizeText）")
+                ?: return Result.Malformed("chunked：块大小超出可表示范围（$sizeText）")
             if (size == 0L) {
                 // 消费 trailer 行直到结束空行
                 while (true) {

@@ -408,6 +408,17 @@ class SongDownloadManager(
         // 7. 原子 rename 到最终路径（必须在 embed 之前，否则 .part 扩展名
         //    不在 EMBEDDABLE 集合中，supportsEmbedding() 返回 false 导致永远不内嵌）
         checkCancelled()
+        // G4-04：embed 是**原地改写同一文件**。标记必须在 rename 到最终路径之前创建；
+        // 若创建失败仍继续，后续 embed 会失去崩溃保护，且失败路径可能把坏文件标为 COMPLETED。
+        val incompleteMarker = File(p.albumDir, p.finalFile.name + INCOMPLETE_SUFFIX)
+        try {
+            incompleteMarker.writeText("embedding", Charsets.UTF_8)
+        } catch (e: Exception) {
+            AppLog.w(TAG, "cannot create incomplete marker before rename: ${incompleteMarker.name}", e)
+            runCatching { incompleteMarker.delete() }
+            p.tmpFile.delete()
+            return DownloadResult.NotDownloadable
+        }
         if (!p.tmpFile.renameTo(p.finalFile)) {
             // 跨目录 rename 失败（极少数情况）：先把完整 tmp 复制到最终目录的 .part，
             // 再 rename 原子替换。S04-01：绝不 copyTo(finalFile, overwrite=true) 非原子直写
@@ -420,6 +431,7 @@ class SongDownloadManager(
             runCatching { part.delete() }
             if (!saved) {
                 p.tmpFile.delete()
+                runCatching { incompleteMarker.delete() }
                 return DownloadResult.Failure("文件保存失败")
             }
             p.tmpFile.delete()
@@ -438,12 +450,7 @@ class SongDownloadManager(
             // 8. 元数据内嵌（失败走旁路）
             val fileExt = p.finalFile.extension.lowercase()
             AppLog.d(TAG, "embed: file=${p.finalFile.name}, ext=$fileExt, supportsEmbed=${MediaTagWriter.supportsEmbedding(p.finalFile)}, coverBytes=${coverBytes?.size}, lrc=${lrc?.take(50)}")
-            // G4-04：embed 是**原地改写同一文件**。若在 embed 中被杀/断电，最终路径上会留下
-            // 长度 > 0 的坏文件，而 DB 仍是 DOWNLOADING ⇒ 崩溃恢复按 length>0 认领成
-            // COMPLETED，用户拿到坏文件且永不重下。用 .incomplete 标记把「写坏」与「写完」分开：
-            // 恢复侧见到标记就丢弃文件；正常路径（含 embed 抛异常）一定在 finally 删标记。
-            val incompleteMarker = File(p.albumDir, p.finalFile.name + INCOMPLETE_SUFFIX)
-            runCatching { incompleteMarker.writeText("embedding", Charsets.UTF_8) }
+            // G4-04：标记已在 rename 前创建；正常路径（含 embed 抛异常）一定在 finally 删标记。
             embedded = try {
                 tagWriter.embed(p.finalFile, song, coverBytes, lrc)
             } finally {

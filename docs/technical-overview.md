@@ -29148,3 +29148,35 @@ Jellyfin 按名查询只发一次请求、fields 补齐并分页；Navidrome/Sub
 **涉及文件**：新增 `data/model/QuickPickStat.kt`、`data/stats/{QuickPickCandidate,QuickPickSourceMerger,QuickPickRanker}.kt`、`ui/components/picker/{ArcDialPicker,ArcDialDialog}.kt`、`ui/screens/stats/QuickPickStatsScreen.kt`、`ui/components/branches/QuickPickStatsBranch.kt`；改动 `data/prefs/{AppPreferences,HistoryPrefs}.kt`、`ui/viewmodel/MainViewModel.kt`、`ui/screens/{LibraryScreen,NowPlayingScreen,SettingsScreen}.kt`、`ui/screens/library/{DiscoverTab.kt,browse/GenreYearLists.kt}`、`ui/screens/settings/DataSettingsSection.kt`、`ui/components/{AppRoot,PlayerControls}.kt`、`ui/components/branches/{LibraryBranch,NowPlayingBranch,SettingsBranch}.kt`、`data/model/Screen.kt`、`ui/theme/Theme.kt`、`values/strings.xml` + `values-en/strings.xml`、`CHANGELOG.md`。
 
 **版本号**：v2.39.27（同版本多轮修复不升号，所有者 2026-11-09 裁定）。
+
+### 10.423 全仓库双轴审查修复（v2.39.28 - 2026-11-25）
+
+**背景**：对当前 `main` 工作树做全仓库双轴审查，标准轴核对仓库文档化约定，规格轴对照 README、CHANGELOG、技术总览与可执行测试契约。确认并修复标准轴 7 项、规格轴 7 项；另有 3 项经证据复核排除（二维码日志不输出 token、MV fallback 生产逻辑正确而 Fake 无法表达 null resolution、跨源下载去重是既有契约）。
+
+**标准轴修复**：
+
+1. **发布安全闭环**：`scripts/gitee_release.py` 在正式发布前再次锁定 HEAD，校验本地与远端 tag 指向，按精确版本选择 APK，并校验公开构建证明；推送时使用精确 main SHA 与 tag object SHA，避免 preflight 后 ref 变化。`scripts/sync_gitee_mirror.ps1` 同样二次校验干净、非 detached 的 main，推送精确 main SHA，按 tag object SHA 推送可达历史标签，并回读远端 main 比较 SHA。历史标签允许指向旧提交，但必须能从锁定 HEAD 到达。
+2. **页面边距统一**：`QueueScreen`、`PlaylistManagementScreen`、`PlayStatsScreen`、`WeatherRadioScreen`、`NetdiskScreen` 根容器改用 `pagePadding()`；`PagePaddingContractTest` 扩到 12 个根页面，`ScreenUiModeCoverageTest` 把 `pagePadding(` 纳入自适应 marker，避免统一令牌后被旧门禁误判。
+3. **粒子预算门禁**：`ParticleBudgetGateTest` 去注释后解析 `VisualizerRendererFactory` 的条件分支，把各可达 renderer 纳入预算映射，不再只统计无条件分支。
+4. **调试包名后缀**：`app/build.gradle.kts` 仅在 `e50.debugSuffix=true` 时添加 `.debug`；属性缺省与显式 false 均保持 `com.nasmusic.tv`。
+5. **内嵌服务请求体**：`LocalInputServer`、`RemoteControlServer` 统一走 `readRequestBody()`；分块体完整消费，超限、非法 Content-Length、不支持的 Transfer-Encoding 与中途 EOF 均 `noKeepAlive()`。`Transfer-Encoding` 只接受单一 `chunked`，拒绝前导/尾随空 coding 与重复 coding。
+6. **伴奏缓存路径**：`AccompanimentCache` 用 songId 的 SHA-256 生成文件名，并在 canonical 校验后的父目录内解析最终文件，避免路径穿越与越界写入。
+7. **私有覆盖层检查**：`sync_private_overlay.py` 比较期望文件集合，缺失必需源、非法源路径与目标独有残留都判漂移；行为测试不再因 Python 不可用而静默跳过。
+
+**规格轴修复**：
+
+1. **百度网盘目录入口**：`MineScreen` 常显网盘入口；`NetdiskScreen` 首次进入刷新百度连接状态。目录列表、加载更多、目录树、搜索、播放目录与收集音频均由源开关门控。`NetworkMusicViewModel.onBaiduSourceDisabled()` 在关源时递增请求世代、取消目录与分页 Job，并清空目录、搜索词、结果、分页游标和 loading/hasMore 状态；`MainViewModel.setSourceEnabled()` 立即调用该清理，不依赖用户再次进入网盘页。加载更多保存独立 Job，目录播放在异步收集完成后复核源开关与世代，递归收集每一层前复核源开关，搜索播放入口也直接拒绝关源后的残留结果。动态回归测试覆盖关源清状态、禁止播放残留结果、取消在途分页并使其结果失效。
+2. **IDLE 恢复播放模式**：新增 `PlayModeAdjacent.adjacentIndex()` 作为手动 next/previous 的目标下标判据；`PlayerManager` 的 IDLE 恢复在 SHUFFLE 走随机目标，在 SEQUENTIAL 边界不动作，REPEAT_ONE/REPEAT_ALL 按既有手动切歌语义处理。
+3. **Quick Dial 重复队列项**：拨盘确认回调带回真实 index 与条目，稳定 key 包含 index；播放页按真实下标 `resolveAndPlayByIndex`，不再把重复歌曲解析到第一处。
+4. **二维码备份列表**：`BackupTransferServer` 注入最新导入记录，列表、下载与恢复统一走 `BackupFileUtils.listBackups(context, importedBackups())`；弹窗用 `rememberUpdatedState` 捕获最新记录。
+5. **本地歌词读取**：`LocalLyricsProvider` 支持普通文件、file URI、MediaStore、SAF tree 与单文档 content URI；MediaStore 在 Q+ 用 `RELATIVE_PATH + DISPLAY_NAME`，旧版用 `DATA`。SAF 只枚举有权限的父目录，单文档 URI 不伪造兄弟权限；树 URI 用 `pathSegments` 判定，避免调用 API 24 才有的 `DocumentsContract.isTreeUri`。File/content sidecar 统一限制 2MiB，ID3 先探测 256KB，再按 tag 大小有界补读。`LyricsManager` 与 `MainViewModel` 注入真实 ContentResolver。
+6. **下载扫描与写入分离**：`DownloadRootResolver` 的扫描根只要求外部卷已挂载、可读；写入根另要求可写、目录存在且至少 512MB 可用。空间不足不再让旧下载从曲库消失，新写入回落内置目录并节流告警。
+7. **下载完成标记**：`SongDownloadManager` 在 rename 前创建 `.incomplete`，创建失败时清理并返回 `NotDownloadable`，不再留下可能被误认成完整的文件。
+
+**测试夹具与门禁**：修复 `MvSearchManagerTest`、`SourceGatingGateTest`、`NetworkSourceSwitchGateTest`、`PlayPauseFlowGateTest`、`NowPlayingFlowFixGateTest`、`QueueFlowFixGateTest`、`AlbumDetailFlowGateTest`、`QueueAddFlowGateTest`、`ArtistExpansionGenerationGateTest` 的失真夹具；艺人搜索用例改为等待旧请求真实取消、正确打桩 suspend 方法，并注入内存偏好流以隔离 Application 的共享 DataStore，不放大 10 秒超时。隔离后目标测试类连续 3 次 6/6 通过。新增下载根、伴奏缓存、本地歌词、不完整标记、网盘入口、回环 HTTP framing、发布安全与覆盖层行为测试。
+
+**验证结果（2026-11-25）**：最终执行 `testDebugUnitTest lintDebug --rerun-tasks --no-daemon -Pkotlin.compiler.execution.strategy=in-process`，JUnit XML 合计 **3348 例，0 失败、0 错误、1 跳过**，lint **0 Error / 255 Warning**；发布与覆盖层 Python 行为测试 **38/38** 通过。网盘关源与分页目标测试 5 例通过，分页取消回归经临时移除取消语句确认有效 RED 后恢复 GREEN；本地歌词目标测试 13 例通过。私有覆盖层漂移 0、双分支 docs 逐字节一致、Kotlin 注释平衡、init shim 与 `git diff --check` 均通过。独立只读复审未发现可证实的高优先级遗留。
+
+**涉及文件**：`scripts/{gitee_release.py,sync_gitee_mirror.ps1,sync_private_overlay.py}`、`scripts/tests/`、`app/build.gradle.kts`、`backend/download/`、`lyrics/`、`net/`、`player/`、`ui/components/picker/`、`ui/components/branches/`、`ui/screens/`、`ui/viewmodel/`、`visualizer/VisualizerRendererFactory.kt`、对应 `app/src/test/` 门禁与回归测试、`docs/conventions-adaptive-ui.md`、`CHANGELOG.md`。
+
+**版本号**：v2.39.28（versionCode 213）；不修改已打 tag 的 v2.39.27 历史 section。

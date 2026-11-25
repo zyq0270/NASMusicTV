@@ -64,6 +64,49 @@ if (-not $AllowLegacyGitHubSync -and @('Trigger', 'CreateMirror', 'Push') -conta
     throw "策略护栏（2026-11-17）：Gitee 为主、GitHub 冻结，禁止 $Action 这类 GitHub → Gitee 覆盖动作。若确需恢复旧镜像，先取得所有者裁定，再显式传 -AllowLegacyGitHubSync。"
 }
 
+# ⭐ S1 发布安全护栏：任何本地 push/tag 动作之前，只允许干净、非 detached 的 main。
+# 显式解锁旧镜像的 -AllowLegacyGitHubSync 也必须先过这一关；校验只读，不访问网络。
+function Assert-PublishSafeMain {
+    # 校验脚本所属仓库，而不是调用者的 CWD；否则从另一个干净仓库调用会绕过本仓护栏。
+    $repoRoot = Split-Path -Parent $PSScriptRoot
+    Push-Location $repoRoot
+    try {
+        $inside = & git rev-parse --is-inside-work-tree 2>&1
+        if ($LASTEXITCODE -ne 0 -or ($inside | Out-String).Trim() -ne 'true') {
+            throw "发布安全护栏：当前目录不是 Git 工作树，禁止 push/tag。"
+        }
+
+        $branch = & git symbolic-ref --quiet --short HEAD 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            throw "发布安全护栏：当前处于 detached HEAD，禁止 push/tag；请先切回 main。"
+        }
+        if (($branch | Out-String).Trim() -cne 'main') {
+            throw "发布安全护栏：只允许从当前 main 发布，当前分支为 '$($branch)'；私有分支永不 push/tag。"
+        }
+
+        $headSha = (& git rev-parse --verify HEAD 2>&1 | Out-String).Trim()
+        if ($LASTEXITCODE -ne 0) { throw "发布安全护栏：无法读取 HEAD，禁止 push/tag。" }
+        $mainSha = (& git rev-parse --verify refs/heads/main 2>&1 | Out-String).Trim()
+        if ($LASTEXITCODE -ne 0 -or $mainSha -cne $headSha) {
+            throw "发布安全护栏：HEAD 与 refs/heads/main 不一致，禁止 push/tag。"
+        }
+
+        $dirty = (& git status --porcelain=v1 --untracked-files=all 2>&1 | Out-String).Trim()
+        if ($LASTEXITCODE -ne 0) { throw "发布安全护栏：无法检查工作树，禁止 push/tag。" }
+        if ($dirty) {
+            throw "发布安全护栏：工作树不干净，禁止 push/tag。请先提交或还原改动：`n$dirty"
+        }
+        return $headSha
+    } finally {
+        Pop-Location
+    }
+}
+
+$publishHead = $null
+if (@('PublishLocal', 'Push') -contains $Action) {
+    $publishHead = Assert-PublishSafeMain
+}
+
 # 本机装了失效的系统级代理残留，显式置空，避免 .NET HTTP 走代理导致连不上 gitee.com
 try { [System.Net.WebRequest]::DefaultWebProxy = $null } catch { }
 
@@ -218,11 +261,18 @@ switch ($Action) {
         }
         $repoRoot = Split-Path -Parent $PSScriptRoot
         Set-Location $repoRoot
+        $recheckedHead = Assert-PublishSafeMain
+        if ($recheckedHead -cne $publishHead) {
+            throw "发布安全护栏：HEAD 在发布前发生变化（$publishHead -> $recheckedHead），禁止推送未经复核的提交。"
+        }
         $gitCommon = @('-c', 'http.proxy=', '-c', 'https.proxy=')
 
         $localRef = Invoke-GitRetry ($gitCommon + @('rev-parse', 'HEAD'))
         if (-not $localRef.ok) { Write-Host "==> 读取本地 HEAD 失败"; exit 1 }
         $localSha = $localRef.out.Trim()
+        if ($localSha -cne $publishHead) {
+            throw "发布安全护栏：本地 HEAD 在发布前变为 $localSha，不再是已校验的 $publishHead。"
+        }
 
         $remoteUrl = "https://gitee.com/$GiteeOwner/$GiteeRepo.git"
         if ((& git remote) -contains 'gitee') {
@@ -239,21 +289,42 @@ switch ($Action) {
         try {
             & git remote set-url gitee $pushUrl
             Write-Host ">> 发布本地 main ($localSha) 到 Gitee"
-            & git @gitPush push gitee "HEAD:refs/heads/main"
+            & git @gitPush push gitee "${publishHead}:refs/heads/main"
             if ($LASTEXITCODE -ne 0) { Write-Host "==> 分支推送失败（见 git 原始报错）；未推标签，未改 GitHub。"; exit 1 }
 
-            $tagRefs = @(& git tag --merged HEAD --format='%(refname)' | Where-Object { $_ })
+            $tagRefs = @(& git tag --merged $publishHead --format='%(refname)' | Where-Object { $_ })
             if ($tagRefs.Count -gt 0) {
                 Write-Host ">> 推送 $($tagRefs.Count) 个可从 HEAD 到达的标签"
                 $specs = @()
-                foreach ($t in $tagRefs) { $specs += "$($t):$($t)" }
+                foreach ($t in $tagRefs) {
+                    $tagObject = (& git rev-parse --verify $t)
+                    if ($LASTEXITCODE -ne 0) { throw "无法锁定标签 $t 的对象 SHA" }
+                    $tagCommit = (& git rev-parse --verify "$($tagObject.Trim())^{commit}")
+                    if ($LASTEXITCODE -ne 0) { throw "无法校验标签 $t 的指向" }
+                    & git merge-base --is-ancestor $tagCommit.Trim() $publishHead
+                    if ($LASTEXITCODE -ne 0) {
+                        throw "标签 $t 指向 $($tagCommit.Trim())，不是锁定 HEAD 可达的历史；禁止推送。"
+                    }
+                    $specs += "$($tagObject.Trim()):$t"
+                }
                 & git @gitPush push gitee @specs
                 if ($LASTEXITCODE -ne 0) { Write-Host "==> 标签推送失败（分支已成功，见 git 原始报错）"; exit 1 }
             }
 
             Write-Host ">> 回读 Gitee 端 main 校验"
-            & git @gitPush ls-remote gitee 'refs/heads/main'
+            $remoteMainLines = @(& git @gitPush ls-remote gitee 'refs/heads/main')
             if ($LASTEXITCODE -ne 0) { Write-Host "==> 回读校验失败"; exit 1 }
+            $remoteMain = ($remoteMainLines -join "`n").Trim()
+            Write-Host $remoteMain
+            if ($remoteMain -notmatch '^[0-9a-fA-F]{40,64}\s+refs/heads/main$') {
+                Write-Host "==> 回读校验失败：Gitee main 响应格式异常"
+                exit 1
+            }
+            $remoteSha = ($remoteMain -split '\s+')[0]
+            if ($remoteSha -ne $publishHead) {
+                Write-Host "==> 回读校验失败：Gitee main 为 $remoteSha，不是已发布的 $publishHead"
+                exit 1
+            }
         } finally {
             # 无论成功/失败都把令牌从 .git/config 抹掉
             & git remote set-url gitee $remoteUrl
@@ -319,9 +390,14 @@ switch ($Action) {
             Write-Host "   （这是上次成功拉取时的快照，可能不是 GitHub 最新状态；链路恢复后重跑本动作）"
         }
 
-        $base = (& git rev-parse --verify "origin/main").Trim()
-        $tagRefs = @(& git tag --merged $base --format='%(refname)' | Where-Object { $_ })
-        Write-Host ">> 基准提交（origin/main）: $base"
+        # 即使显式解锁旧同步动作，标签也只能来自已通过护栏的当前本地 main，不能来自刚 fetch 的任意 GitHub 提交。
+        $recheckedHead = Assert-PublishSafeMain
+        if ($recheckedHead -cne $publishHead) {
+            throw "发布安全护栏：HEAD 在拉取后发生变化（$publishHead -> $recheckedHead），禁止推送未经复核的提交。"
+        }
+        $base = $publishHead
+        $tagRefs = @(& git tag --merged $publishHead --format='%(refname)' | Where-Object { $_ })
+        Write-Host ">> 基准提交（本地 main）: $base"
         Write-Host ">> 可同步标签数: $($tagRefs.Count)"
 
         $remoteUrl = "https://gitee.com/$GiteeOwner/$GiteeRepo.git"
@@ -336,21 +412,42 @@ switch ($Action) {
         $gitPush = @('-c', 'http.proxy=', '-c', 'https.proxy=', '-c', "http.https://gitee.com/.extraheader=AUTHORIZATION: basic $auth")
 
         Write-Host ">> 推送分支 main（仅 main，不含任何其它分支）"
-        & git @gitPush push gitee "refs/heads/main:refs/heads/main" --force
+        & git @gitPush push gitee "${publishHead}:refs/heads/main" --force
         if ($LASTEXITCODE -ne 0) { Write-Host "==> 推送分支失败（上面是 git 的原始报错）"; exit 1 }
 
         if ($tagRefs.Count -gt 0) {
             Write-Host ">> 推送 $($tagRefs.Count) 个标签（只有可从 main 到达的标签）"
             $specs = @()
-            foreach ($t in $tagRefs) { $specs += "$($t):$($t)" }
+            foreach ($t in $tagRefs) {
+                $tagObject = (& git rev-parse --verify $t)
+                if ($LASTEXITCODE -ne 0) { throw "无法锁定标签 $t 的对象 SHA" }
+                $tagCommit = (& git rev-parse --verify "$($tagObject.Trim())^{commit}")
+                if ($LASTEXITCODE -ne 0) { throw "无法校验标签 $t 的指向" }
+                & git merge-base --is-ancestor $tagCommit.Trim() $publishHead
+                if ($LASTEXITCODE -ne 0) {
+                    throw "标签 $t 指向 $($tagCommit.Trim())，不是锁定 HEAD 可达的历史；禁止推送。"
+                }
+                $specs += "$($tagObject.Trim()):$t"
+            }
             & git @gitPush push gitee --force @specs
             if ($LASTEXITCODE -ne 0) { Write-Host "==> 推送标签失败（上面是 git 的原始报错）"; exit 1 }
         }
 
         Write-Host ">> 回读 Gitee 端 main 校验"
-        & git @gitPush ls-remote gitee "refs/heads/main"
+        $remoteMainLines = @(& git @gitPush ls-remote gitee 'refs/heads/main')
         if ($LASTEXITCODE -ne 0) { Write-Host "==> 回读校验失败"; exit 1 }
-        Write-Host "==> 推送完成：https://gitee.com/$GiteeOwner/$GiteeRepo"
+        $remoteMain = ($remoteMainLines -join "`n").Trim()
+        Write-Host $remoteMain
+        if ($remoteMain -notmatch '^[0-9a-fA-F]{40,64}\s+refs/heads/main$') {
+            Write-Host "==> 回读校验失败：Gitee main 响应格式异常"
+            exit 1
+        }
+        $remoteSha = ($remoteMain -split '\s+')[0]
+        if ($remoteSha -ne $publishHead) {
+            Write-Host "==> 回读校验失败 [REMOTE_MAIN_MISMATCH]：Gitee main 为 $remoteSha，不是已发布的 $publishHead"
+            exit 1
+        }
+        Write-Host "==> 推送完成 [PUSH_COMPLETE]：https://gitee.com/$GiteeOwner/$GiteeRepo"
     }
 
     'CreateMirror' {

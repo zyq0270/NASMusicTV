@@ -32,10 +32,10 @@ fun <T> ArcDialDialog(
     items: List<T>,
     selectedIndex: Int,
     onSelectedIndexChange: (Int) -> Unit,
-    onConfirm: (T) -> Unit,
+    onConfirm: (Int, T) -> Unit,
     onDismiss: () -> Unit,
     label: (T) -> String,
-    key: (T) -> String,
+    key: (Int, T) -> String,
     dPadMode: Boolean,
     anchor: ArcAnchor = ArcAnchor.LEFT
 ) {
@@ -69,8 +69,8 @@ fun <T> ArcDialDialog(
                     items = items,
                     selectedIndex = selectedIndex,
                     onSelectedIndexChange = onSelectedIndexChange,
-                    onConfirm = { value ->
-                        onConfirm(value)
+                    onConfirm = { index, value ->
+                        onConfirm(index, value)
                         onDismiss()
                     },
                     label = label,

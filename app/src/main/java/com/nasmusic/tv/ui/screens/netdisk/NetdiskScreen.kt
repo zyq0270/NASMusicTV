@@ -57,6 +57,7 @@ import com.nasmusic.tv.ui.theme.FontSize
 import com.nasmusic.tv.ui.theme.NasMusicColors
 import com.nasmusic.tv.ui.theme.LocalUiMode
 import com.nasmusic.tv.ui.theme.UiMode
+import com.nasmusic.tv.ui.theme.pagePadding
 import com.nasmusic.tv.ui.viewmodel.MainViewModel
 import com.nasmusic.tv.ui.viewmodel.NetworkMusicViewModel
 import com.nasmusic.tv.backend.download.model.stateOfSong
@@ -95,7 +96,9 @@ val downloadStates by viewModel.songDownloadStates.collectAsState(initial = empt
     // 首次进入：刷新连接状态并加载当前目录（不依赖时序上的首次连接状态，避免空列表）
     LaunchedEffect(Unit) {
         viewModel.netVM.refreshBaiduConnectionState()
-        viewModel.netVM.listBaiduDir(viewModel.netdiskCurrentDir.value)
+        if (viewModel.netVM.isBaiduSourceActive) {
+            viewModel.netVM.listBaiduDir(viewModel.netdiskCurrentDir.value)
+        }
     }
 
     // v2.36.0 竖屏（方案 §4.5 / P0-19）：页 padding 32→16；搜索框 420dp → 整行（原头部三件套一行必溢出）
@@ -107,7 +110,7 @@ val downloadStates by viewModel.songDownloadStates.collectAsState(initial = empt
     val searchGridState = rememberLazyGridState()
     val dirGridState = rememberLazyGridState()
     Column(
-        modifier = Modifier.fillMaxSize().padding(if (isPhonePortrait) 16.dp else 32.dp)
+        modifier = Modifier.fillMaxSize().padding(pagePadding())
     ) {
         val backAndTitle: @Composable (Modifier) -> Unit = { m ->
             Row(modifier = m, verticalAlignment = Alignment.CenterVertically) {

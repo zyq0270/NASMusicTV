@@ -134,7 +134,7 @@ fun QueueScreen(
 
     // v2.36.0 竖屏（方案 §4.5）：340dp 侧卡折为顶部 56dp 横条，队列单列；上/下移/移出进 ⋮ 菜单
     if (LocalUiMode.current == UiMode.PhonePortrait) {
-        Column(modifier = modifier.fillMaxSize().padding(16.dp)) {
+        Column(modifier = modifier.fillMaxSize().padding(pagePadding())) {
             PortraitQueueHeader(
                 currentSong = currentSong,
                 coverCandidates = coverCandidates,

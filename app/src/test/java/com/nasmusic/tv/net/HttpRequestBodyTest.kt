@@ -89,6 +89,30 @@ class HttpRequestBodyTest {
     }
 
     @Test
+    fun `非法 Content-Length 必须判畸形而不是当作无请求体`() {
+        listOf("-1", "+1", "1, 1", "abc", "").forEach { value ->
+            val r = read(mapOf("content-length" to value), "GET /next HTTP/1.1\r\n\r\n")
+            assertTrue("Content-Length=$value 应判畸形，实际 $r", r is HttpRequestBody.Result.Malformed)
+        }
+    }
+
+    @Test
+    fun `不受支持的 Transfer-Encoding 或非末位 chunked 必须判畸形`() {
+        listOf("gzip", "chunked, gzip", ",chunked", "chunked,", "chunked,,chunked").forEach { value ->
+            val r = read(mapOf("transfer-encoding" to value), "1\r\na\r\n0\r\n\r\n")
+            assertTrue("Transfer-Encoding=$value 应判畸形，实际 $r", r is HttpRequestBody.Result.Malformed)
+        }
+    }
+
+    @Test
+    fun `负 chunk-size 必须判畸形`() {
+        listOf("-1", "+1").forEach { value ->
+            val r = read(mapOf("transfer-encoding" to "chunked"), "$value\r\n0\r\n\r\n")
+            assertTrue("chunk-size=$value 必须断开连接，实际 $r", r is HttpRequestBody.Result.Malformed)
+        }
+    }
+
+    @Test
     fun `块头无法解析判为畸形`() {
         val r = read(mapOf("transfer-encoding" to "chunked"), "ZZ\r\n")
         assertTrue(r is HttpRequestBody.Result.Malformed)

@@ -35,6 +35,12 @@ import java.io.File
 class PagePaddingContractTest {
 
     private val screensDir = "com/nasmusic/tv/ui/screens"
+    private val pageFiles = listOf(
+        "HomeScreen", "LibraryScreen", "MineScreen", "QueueScreen", "SettingsScreen",
+        "AlbumDetailScreen", "ArtistDetailScreen", "EqualizerScreen",
+        "PlaylistManagementScreen", "WeatherRadioScreen", "netdisk/NetdiskScreen",
+        "stats/PlayStatsScreen",
+    )
 
     // ───────────────────────── 取值契约 ─────────────────────────
 
@@ -66,10 +72,6 @@ class PagePaddingContractTest {
     @Test
     fun `页面根容器不许内联形态判断式 padding`() {
         val offenders = mutableListOf<String>()
-        val pageFiles = listOf(
-            "HomeScreen", "LibraryScreen", "MineScreen", "QueueScreen", "SettingsScreen",
-            "AlbumDetailScreen", "ArtistDetailScreen", "EqualizerScreen",
-        )
         for (name in pageFiles) {
             val src = readSource("$screensDir/$name.kt")
             // 只认**根容器**：`.fillMaxSize()` 之后紧跟的那一个 `.padding(...)`。
@@ -77,11 +79,10 @@ class PagePaddingContractTest {
             // 不是页内边距，不在本门禁范围内 —— 判据必须窄，否则门禁会逼着人去
             // 「统一」那些本来该按组件走的间距。
             val root = Regex(
-                """fillMaxSize\(\)\s*\.padding\(\s*[^)]*?""" +
-                    """(?:UiMode\.(?:TV|PhoneLandscape|PhonePortrait)|isPhoneLandscape|isPhonePortrait|isPortraitPhone)""",
+                """fillMaxSize\(\)\s*\.padding\(([^)]*)\)""",
                 RegexOption.DOT_MATCHES_ALL,
             ).find(src)
-            if (root != null) {
+            if (root != null && "pagePadding(" !in root.groupValues[1]) {
                 offenders += "$name.kt: ${root.value.replace(Regex("\\s+"), " ").take(140)}"
             }
         }
@@ -94,14 +95,10 @@ class PagePaddingContractTest {
     }
 
     @Test
-    fun `pagePadding 必须是公开 API 且八个页面都在用`() {
+    fun `pagePadding 必须是公开 API 且所有根页面都在用`() {
         val theme = readSource("com/nasmusic/tv/ui/theme/Theme.kt")
         assertTrue("pagePadding 不见了", "fun pagePadding(" in theme)
 
-        val pageFiles = listOf(
-            "HomeScreen", "LibraryScreen", "MineScreen", "QueueScreen", "SettingsScreen",
-            "AlbumDetailScreen", "ArtistDetailScreen", "EqualizerScreen",
-        )
         val missing = pageFiles.filter { name ->
             !readSource("$screensDir/$name.kt").contains("pagePadding(")
         }

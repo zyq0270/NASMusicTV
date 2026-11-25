@@ -1148,14 +1148,14 @@ fun LibraryScreen(
                     items = candidates,
                     selectedIndex = quickPickIndex.coerceIn(0, candidates.size - 1),
                     onSelectedIndexChange = { quickPickIndex = it },
-                    onConfirm = { candidate ->
+                    onConfirm = { _, candidate ->
                         val value = candidate.value
                         onFilterQueryChange(value)
                         onRecordQuickPick(activeTab.quickPickCategory(), value)
                     },
                     onDismiss = { showQuickPick = false },
                     label = { it.value },
-                    key = { it.value },
+                    key = { index, candidate -> "$index:${candidate.value}" },
                     dPadMode = LocalUiMode.current == UiMode.TV,
                     anchor = ArcAnchor.RIGHT
                 )

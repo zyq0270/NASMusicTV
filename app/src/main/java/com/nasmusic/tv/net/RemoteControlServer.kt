@@ -145,7 +145,11 @@ class RemoteControlServer(
         }
 
         private fun handlePlay(session: IHTTPSession): Response {
-            val body = parseJsonBody(session) ?: return jsonError(Response.Status.BAD_REQUEST, "bad body")
+            val parsed = readJsonBody(session)
+            val body = when (parsed) {
+                is JsonBodyResult.Read -> parsed.body
+                is JsonBodyResult.Rejected -> return parsed.response
+            }
             val index = body.get("index")?.asInt ?: return jsonError(Response.Status.BAD_REQUEST, "missing index")
             if (!isValidQueueIndex(index)) return jsonError(Response.Status.BAD_REQUEST, "index out of range")
             callbacks.playAt(index)
@@ -153,7 +157,11 @@ class RemoteControlServer(
         }
 
         private fun handleMove(session: IHTTPSession): Response {
-            val body = parseJsonBody(session) ?: return jsonError(Response.Status.BAD_REQUEST, "bad body")
+            val parsed = readJsonBody(session)
+            val body = when (parsed) {
+                is JsonBodyResult.Read -> parsed.body
+                is JsonBodyResult.Rejected -> return parsed.response
+            }
             val from = body.get("from")?.asInt ?: return jsonError(Response.Status.BAD_REQUEST, "missing from")
             val to = body.get("to")?.asInt ?: return jsonError(Response.Status.BAD_REQUEST, "missing to")
             if (!isValidQueueIndex(from) || !isValidQueueIndex(to)) {
@@ -164,7 +172,11 @@ class RemoteControlServer(
         }
 
         private fun handleRemove(session: IHTTPSession): Response {
-            val body = parseJsonBody(session) ?: return jsonError(Response.Status.BAD_REQUEST, "bad body")
+            val parsed = readJsonBody(session)
+            val body = when (parsed) {
+                is JsonBodyResult.Read -> parsed.body
+                is JsonBodyResult.Rejected -> return parsed.response
+            }
             val index = body.get("index")?.asInt ?: return jsonError(Response.Status.BAD_REQUEST, "missing index")
             if (!isValidQueueIndex(index)) return jsonError(Response.Status.BAD_REQUEST, "index out of range")
             callbacks.removeFromQueue(index)
@@ -172,7 +184,11 @@ class RemoteControlServer(
         }
 
         private fun handleAdd(session: IHTTPSession): Response {
-            val body = parseJsonBody(session) ?: return jsonError(Response.Status.BAD_REQUEST, "bad body")
+            val parsed = readJsonBody(session)
+            val body = when (parsed) {
+                is JsonBodyResult.Read -> parsed.body
+                is JsonBodyResult.Rejected -> return parsed.response
+            }
             val songObj = body.getAsJsonObject("song") ?: return jsonError(Response.Status.BAD_REQUEST, "missing song")
             val song = try {
                 gson.fromJson(songObj, Song::class.java)
@@ -242,19 +258,33 @@ class RemoteControlServer(
             return jsonResponse(json.toString())
         }
 
-        private fun parseJsonBody(session: IHTTPSession): JsonObject? {
+        private sealed interface JsonBodyResult {
+            data class Read(val body: JsonObject) : JsonBodyResult
+            data class Rejected(val response: Response) : JsonBodyResult
+        }
+
+        private fun readJsonBody(session: IHTTPSession): JsonBodyResult {
             return try {
-                // 防御（2026-09-22 审查）：请求体上限 1MB——parseBody 的 postData 全量进
-                // 内存，同网段超大 POST 可耗尽内存（对齐 Backup/Playlist 上传的硬上限口径；
-                // 正常搜索/队列操作 JSON 远小于 1MB）。
-                val contentLength = session.headers["content-length"]?.toLongOrNull() ?: -1L
-                if (contentLength > 1L * 1024 * 1024) return null
-                val files = HashMap<String, String>()
-                session.parseBody(files)
-                val postData = files["postData"] ?: return null
-                gson.fromJson(postData, JsonObject::class.java)
+                when (val body = session.readRequestBody(1L * 1024 * 1024)) {
+                    is HttpRequestBody.Result.Read -> {
+                        val parsed = gson.fromJson(String(body.bytes, Charsets.UTF_8), JsonObject::class.java)
+                        if (parsed == null || !parsed.isJsonObject) {
+                            JsonBodyResult.Rejected(jsonError(Response.Status.BAD_REQUEST, "bad body"))
+                        } else {
+                            JsonBodyResult.Read(parsed)
+                        }
+                    }
+                    is HttpRequestBody.Result.OverLimit -> JsonBodyResult.Rejected(
+                        jsonError(Response.Status.PAYLOAD_TOO_LARGE, "body too large").noKeepAlive()
+                    )
+                    is HttpRequestBody.Result.Malformed -> JsonBodyResult.Rejected(
+                        jsonError(Response.Status.BAD_REQUEST, "malformed body").noKeepAlive()
+                    )
+                }
             } catch (e: Exception) {
-                null
+                JsonBodyResult.Rejected(
+                    jsonError(Response.Status.BAD_REQUEST, "bad body").noKeepAlive()
+                )
             }
         }
 

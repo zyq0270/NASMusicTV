@@ -71,7 +71,7 @@ class ScreenUiModeCoverageTest {
                 "以下 Screen 未引用任何自适应布局 API，手机竖屏会直接套用 TV 版式：\n" +
                     violations.joinToString("\n") { "  • $it" } +
                     "\n\n修法：读 `LocalUiMode` 加竖屏分支，或使用 `AdaptiveLayout` / " +
-                    "`adaptiveColumns` / `responsiveDialogSize` / `portraitTouchTarget`。\n" +
+                    "`adaptiveColumns` / `responsiveDialogSize` / `portraitTouchTarget` / `pagePadding`。\n" +
                     "确实不需要竖屏分支的（如被 `isFullScreenPage` 强制横屏的全屏页），" +
                     "在文件顶部加 `$EXEMPT_MARKER: <理由>` 注释。\n" +
                     "约定见 docs/conventions-adaptive-ui.md §9。",
@@ -112,6 +112,7 @@ class ScreenUiModeCoverageTest {
             "responsiveDialogSize(480.dp)",
             "Modifier.size(portraitTouchTarget(48.dp))",
             "Modifier.size(PHONE_TOUCH_TARGET)",
+            "Modifier.padding(pagePadding())",
         )
         markers.forEach { marker ->
             val text = """
@@ -238,6 +239,7 @@ private val ADAPTIVE_MARKERS = listOf(
     "responsiveDialogSize(",
     "portraitTouchTarget(",
     "PHONE_TOUCH_TARGET",
+    "pagePadding(",
 )
 
 /** 是否为「Screen 组合函数所在文件」：有顶层 `fun XxxScreen(` 且含 `@Composable` */

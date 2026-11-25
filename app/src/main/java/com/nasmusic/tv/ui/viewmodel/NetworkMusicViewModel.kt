@@ -54,7 +54,7 @@ class NetworkMusicViewModel(app: Application) : AndroidViewModel(app) {
      * ⚠️ 只回答「用户把百度源开着吗」，**不回答**「它能不能用」——后者是 services map 的事
      *    （与 `AppPreferences.isSourceEnabledSync` 的 KDoc 同一纪律）。
      */
-    private val baiduSourceActive: Boolean get() = prefs.getBaiduActiveSync()
+    val isBaiduSourceActive: Boolean get() = prefs.getBaiduActiveSync()
 
     /** 加入队列动作（经 MainViewModel 路由到 PlayerViewModel） */
     var onAddToQueue: ((List<Song>) -> Unit)? = null
@@ -299,7 +299,25 @@ class NetworkMusicViewModel(app: Application) : AndroidViewModel(app) {
      * 现在：领号 + 取消上一个 + 只有「还是最新世代」才写状态/复位 loading。
      */
     private var netdiskJob: kotlinx.coroutines.Job? = null
+    private var netdiskLoadMoreJob: kotlinx.coroutines.Job? = null
     private var netdiskGeneration: Int = 0
+
+    /** 关源时立即使在途请求失效，并清空网盘页的可操作状态。 */
+    fun onBaiduSourceDisabled() {
+        netdiskGeneration++
+        netdiskJob?.cancel()
+        netdiskLoadMoreJob?.cancel()
+        netdiskJob = null
+        netdiskLoadMoreJob = null
+        netdiskDirOffset = 0
+        _netdiskDirFiles.value = emptyList()
+        _netdiskSearchKeyword.value = ""
+        _netdiskSearchResults.value = emptyList()
+        _netdiskIsLoading.value = false
+        _netdiskLoadingMore.value = false
+        _netdiskHasMore.value = false
+        _baiduConnectionState.value = BaiduConnectionState.Off
+    }
 
     /** 异步刷新连接状态（初始化与开关切换后调用；T2 第一批：getBaiduConfigSync → baiduConfigFlow.first()） */
     suspend fun refreshBaiduConnectionState() {
@@ -519,6 +537,10 @@ class NetworkMusicViewModel(app: Application) : AndroidViewModel(app) {
     // ---- 网盘目录浏览 ----
 
     fun listBaiduDir(dir: String) {
+        if (!isBaiduSourceActive) {
+            onBaiduSourceDisabled()
+            return
+        }
         AppLog.d("BaiduAuth", "listBaiduDir: dir=$dir, current state=${_baiduConnectionState.value}")
         val generation = ++netdiskGeneration
         netdiskJob?.cancel()
@@ -530,6 +552,12 @@ class NetworkMusicViewModel(app: Application) : AndroidViewModel(app) {
         _netdiskLoadingMore.value = false
         netdiskJob = viewModelScope.launch {
             try {
+                if (!isBaiduSourceActive) {
+                    _netdiskDirFiles.value = emptyList()
+                    _netdiskHasMore.value = false
+                    _baiduConnectionState.value = BaiduConnectionState.Off
+                    return@launch
+                }
                 val result = baiduApi.listDir(dir)
                 AppLog.d("BaiduAuth", "listBaiduDir: got ${result.files.size} files, hasMore=${result.hasMore}, errno=${result.errno}")
                 if (generation != netdiskGeneration) return@launch
@@ -567,12 +595,20 @@ class NetworkMusicViewModel(app: Application) : AndroidViewModel(app) {
      * 停滞保护：`hasMore=true` 却返回 0 条时直接收敛为 `false`，否则触底会无限重试同一个 `start`。
      */
     fun loadMoreBaiduDir() {
+        if (!isBaiduSourceActive) {
+            onBaiduSourceDisabled()
+            return
+        }
         if (!_netdiskHasMore.value || _netdiskLoadingMore.value || _netdiskIsLoading.value) return
         val dir = _netdiskCurrentDir.value
         val generation = netdiskGeneration
         _netdiskLoadingMore.value = true
-        viewModelScope.launch {
+        netdiskLoadMoreJob = viewModelScope.launch {
             try {
+                if (!isBaiduSourceActive) {
+                    _netdiskHasMore.value = false
+                    return@launch
+                }
                 val result = baiduApi.listDir(dir, start = netdiskDirOffset)
                 if (generation != netdiskGeneration) return@launch
                 if (result.errno != 0) {
@@ -608,7 +644,7 @@ class NetworkMusicViewModel(app: Application) : AndroidViewModel(app) {
      * 异常直接上抛，由对话框展示失败态并允许重试。
      */
     suspend fun listBaiduDirs(path: String): List<BaiduFile> =
-        baiduApi.listDir(path).files
+        if (isBaiduSourceActive) baiduApi.listDir(path).files else emptyList()
 
     fun navigateBaiduDirUp() {
         val current = _netdiskCurrentDir.value
@@ -630,9 +666,14 @@ class NetworkMusicViewModel(app: Application) : AndroidViewModel(app) {
             _netdiskSearchResults.value = emptyList()
             return
         }
+        if (!isBaiduSourceActive) {
+            onBaiduSourceDisabled()
+            return
+        }
         val generation = ++netdiskGeneration
         netdiskJob?.cancel()
         netdiskJob = viewModelScope.launch {
+            if (!isBaiduSourceActive) return@launch
             _netdiskIsLoading.value = true
             // 本地命中要在 catch 里继续可用（服务端失败时不清掉它），故声明在 try 之外
             var localHits: List<Song> = emptyList()
@@ -686,6 +727,10 @@ class NetworkMusicViewModel(app: Application) : AndroidViewModel(app) {
 
     /** 播放全部网盘搜索结果 */
     fun playAllNetdiskSearch() {
+        if (!isBaiduSourceActive) {
+            showMessage?.invoke(getApplication<Application>().getString(R.string.netdisk_status_baidu_not_logged_in))
+            return
+        }
         val results = _netdiskSearchResults.value
         if (results.isEmpty()) {
             showMessage?.invoke(getApplication<Application>().getString(R.string.netdisk_search_no_results))
@@ -707,13 +752,15 @@ class NetworkMusicViewModel(app: Application) : AndroidViewModel(app) {
      * @param onPlayAll 收集完成后回调（播放队列由调用方导航到 NowPlaying）
      */
     fun playAllNetdiskDir(dir: String, onPlayAll: (List<Song>) -> Unit) {
-        if (!baiduSourceActive) {
+        if (!isBaiduSourceActive) {
             AppLog.i("NetworkMusicViewModel", "playAllNetdiskDir: 百度源未生效（未启用或未登录），已跳过播放")
             showMessage?.invoke(getApplication<Application>().getString(R.string.netdisk_status_baidu_not_logged_in))
             return
         }
+        val generation = netdiskGeneration
         viewModelScope.launch {
             val songs = collectAudioInDir(dir)
+            if (!isBaiduSourceActive || generation != netdiskGeneration) return@launch
             if (songs.isEmpty()) {
                 showMessage?.invoke(getApplication<Application>().getString(R.string.netdisk_no_audio_files))
             } else {
@@ -729,7 +776,7 @@ class NetworkMusicViewModel(app: Application) : AndroidViewModel(app) {
      * （**连索引都不读、网盘都不递归**），保证关源后这条路一个请求都不发。
      */
     private suspend fun collectAudioInDir(dir: String): List<Song> {
-        if (!baiduSourceActive) return emptyList()
+        if (!isBaiduSourceActive) return emptyList()
         val base = dir.trimEnd('/')
         val index = baiduIndexCache.load()
         val indexed = index?.entries?.filter {
@@ -746,6 +793,7 @@ class NetworkMusicViewModel(app: Application) : AndroidViewModel(app) {
         visited.add(base)
         try {
             while (queue.isNotEmpty()) {
+                if (!isBaiduSourceActive) return emptyList()
                 val dirPath = queue.removeFirst()
                 val result = baiduApi.listDir(dirPath)
                 for (f in result.files) {

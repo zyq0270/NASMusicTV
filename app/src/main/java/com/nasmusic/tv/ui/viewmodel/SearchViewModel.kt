@@ -12,6 +12,7 @@ import com.nasmusic.tv.backend.FilterMode
 import com.nasmusic.tv.backend.SourceVisibility
 import com.nasmusic.tv.backend.network.NetworkArtistExpansion
 import com.nasmusic.tv.data.model.MusicSourceType
+import com.nasmusic.tv.data.prefs.AppPreferences
 import com.nasmusic.tv.data.model.Song
 import com.nasmusic.tv.data.model.SongsPagingState
 import com.nasmusic.tv.data.model.UiState
@@ -39,11 +40,11 @@ import kotlinx.coroutines.withContext
 class SearchViewModel(
     app: Application,
     private val backendRegistry: BackendRegistry,
-    private val searchAggregator: SearchAggregator
+    private val searchAggregator: SearchAggregator,
+    private val prefs: AppPreferences = (app as NasMusicApp).appPreferences
 ) : AndroidViewModel(app) {
 
     private val nasMusicApp = app as NasMusicApp
-    private val prefs = nasMusicApp.appPreferences
 
     // --- 搜索来源点亮状态（跨导航记忆，决定搜索哪些源） ---
     private val _enabledSearchSources = MutableStateFlow(MusicSourceType.DEFAULT_SEARCH_SOURCES)

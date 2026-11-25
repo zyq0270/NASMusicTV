@@ -92,6 +92,15 @@ class NetworkSourceSwitchGateTest {
         assertTrue("护栏失效：用同步镜像决定注册仍被判正",
             registrationProblems(mirrorDecided).isNotEmpty())
 
+        // 破坏 2b：保留 boot.settings 派生形状，但把 DataStore 快照读取换掉。
+        val noBootSnapshot = app.replace(
+            "runBlocking { appPreferences.readBootSnapshot() }",
+            "runBlocking { appPreferences.appSettings.first() }"
+        )
+        assertTrue("自证失效：破坏样本 2b 没改动到文本", noBootSnapshot != app)
+        assertTrue("护栏失效：不再读取启动快照仍被判正",
+            registrationProblems(noBootSnapshot).isNotEmpty())
+
         // 破坏 3：自愈改成「无源也写盘」
         val writeAnyway = app.replace(
             "if (registered.isEmpty()) return null",
@@ -123,16 +132,28 @@ class NetworkSourceSwitchGateTest {
         """if \(bootSettings\.metingEnabled\)\s*\{?\s*mapOf\(NetworkSongId\.METING_SOURCE to metingApiService\)\s*\}?\s*else\s*\{?\s*emptyMap\(\)\s*\}?"""
     )
 
+    private val bootSnapshotRead = Regex(
+        """runBlocking\s*\{\s*appPreferences\.readBootSnapshot\(\)\s*\}"""
+    )
+
     private fun registrationProblems(app: String): List<String> {
         val problems = mutableListOf<String>()
         if (!metingConditional.containsMatchIn(app)) {
             problems += "meting 注册没有由 `bootSettings.metingEnabled` 决定（缺 if/else 条件注册）"
         }
-        // v2.39.23：三次独立 runBlocking 收敛为 readBootSnapshot() 合并读，事实源口径不变；
-        // 判据改为认「bootSettings 由 boot.settings 派生」而不是锁死旧的单条语句。
-        if (!app.contains("val boot = runBlocking { appPreferences.readBootSnapshot() }") ||
-            !app.contains("val bootSettings = boot.settings")
+        // v2.39.23：三次独立 runBlocking 收敛为 readBootSnapshot() 合并读，事实源口径不变。
+        // 允许 try/catch 兜底：只认「bootSettings 由 boot.settings 派生，且中间确有 DataStore 快照读取」，
+        // 不再锁死无 try/catch 的单行字面量。
+        val bootAssignment = Regex("""val\s+boot\s*=""").find(app)
+        val bootSettingsAssignment = Regex("""val\s+bootSettings\s*=\s*boot\.settings""").find(app)
+        val bootRead = if (bootAssignment != null && bootSettingsAssignment != null &&
+            bootAssignment.range.first < bootSettingsAssignment.range.first
         ) {
+            app.substring(bootAssignment.range.first, bootSettingsAssignment.range.first)
+        } else {
+            ""
+        }
+        if (!bootSnapshotRead.containsMatchIn(bootRead)) {
             problems += "没有在构造期直接读 DataStore（`bootSettings` 必须来自 readBootSnapshot）—— 同步镜像在冷启动时尚未收敛"
         }
         if (app.contains("appPreferences.getMetingEnabledSync()")) {

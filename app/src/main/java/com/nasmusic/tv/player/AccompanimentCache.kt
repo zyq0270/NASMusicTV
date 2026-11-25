@@ -3,6 +3,7 @@ package com.nasmusic.tv.player
 import android.content.Context
 import com.nasmusic.tv.util.AppLog
 import java.io.File
+import java.security.MessageDigest
 
 /**
  * 伴奏文件缓存管理
@@ -12,8 +13,10 @@ import java.io.File
  * 2. LRU 淘汰：总缓存上限 500MB / 最多 10 个文件
  *
  * 缓存策略：
- * - 文件路径：context.cacheDir/accompaniment/{songId}_accompaniment.wav
- * - 文件名：{songId}_accompaniment.wav
+ * - 文件路径：context.cacheDir/accompaniment/{songId 的 SHA-256}_{类型}.wav
+ * - 文件名：{SHA-256(songId)}_accompaniment.wav / _vocals.wav / _original.wav
+ * - 旧缓存是按原始 songId 命名的派生文件；升级后允许一次缓存未命中并重新分离，
+ *   不做路径迁移，避免把不可信旧文件名重新引入文件操作。
  * - LRU 淘汰：按最后访问时间排序，超过 500MB 时删除最旧的文件
  */
 class AccompanimentCache(
@@ -29,6 +32,19 @@ class AccompanimentCache(
 
     private val cacheDir: File by lazy {
         File(context.cacheDir, CACHE_DIR_NAME).also { it.mkdirs() }
+    }
+
+    /** songId 只参与哈希，不直接参与路径拼接；规范化后再校验父目录，避免符号链接逃逸。 */
+    private fun cacheFile(songId: String, suffix: String): File {
+        val root = cacheDir.canonicalFile
+        val digest = MessageDigest.getInstance("SHA-256")
+            .digest(songId.toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it) }
+        val file = File(root, "${digest}$suffix").canonicalFile
+        check(file.parentFile == root) {
+            "Accompaniment cache path escaped cacheDir: ${file.canonicalPath}"
+        }
+        return file
     }
 
     /**
@@ -48,14 +64,14 @@ class AccompanimentCache(
      * 获取伴奏文件
      */
     fun getAccompanimentFile(songId: String): File {
-        return File(cacheDir, "${songId}_accompaniment.wav")
+        return cacheFile(songId, "_accompaniment.wav")
     }
 
     /**
      * 获取人声文件（用于高质量模式播放）
      */
     fun getVocalsFile(songId: String): File {
-        return File(cacheDir, "${songId}_vocals.wav")
+        return cacheFile(songId, "_vocals.wav")
     }
 
     /**
@@ -140,7 +156,7 @@ class AccompanimentCache(
      * 获取原唱缓存文件
      */
     fun getOriginalFile(songId: String): File {
-        return File(cacheDir, "${songId}_original.wav")
+        return cacheFile(songId, "_original.wav")
     }
 
     /**

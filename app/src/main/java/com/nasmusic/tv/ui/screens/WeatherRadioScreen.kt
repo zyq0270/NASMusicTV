@@ -37,9 +37,8 @@ import com.nasmusic.tv.ui.components.common.SectionHeader
 import com.nasmusic.tv.ui.components.song.UnifiedSongRow
 import com.nasmusic.tv.ui.components.song.SongRowMode
 import com.nasmusic.tv.ui.theme.FontSize
-import com.nasmusic.tv.ui.theme.LocalUiMode
 import com.nasmusic.tv.ui.theme.NasMusicColors
-import com.nasmusic.tv.ui.theme.UiMode
+import com.nasmusic.tv.ui.theme.pagePadding
 import com.nasmusic.tv.backend.download.model.stateOfSong
 
 /**
@@ -74,15 +73,10 @@ fun WeatherRadioScreen(
     onDeleteDownloadSong: ((Song) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
-    // v2.36.0 竖屏：页 padding 32→16
-    val isPhonePortrait = LocalUiMode.current == UiMode.PhonePortrait
     Column(
         modifier = modifier
             .fillMaxSize()
-            .padding(
-                horizontal = if (isPhonePortrait) 16.dp else 32.dp,
-                vertical = if (isPhonePortrait) 12.dp else 20.dp
-            )
+            .padding(pagePadding())
     ) {
         // 返回 + 标题 + 播放全部
         Row(

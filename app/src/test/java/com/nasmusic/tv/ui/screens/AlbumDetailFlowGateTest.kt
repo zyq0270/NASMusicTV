@@ -12,6 +12,16 @@ import java.io.File
  */
 class AlbumDetailFlowGateTest {
 
+    /** when 分支条件可用逗号或 `||`；只认两个详情屏都路由到 backToDetailOrigin。 */
+    private val detailBackBranches = listOf(
+        Regex(
+            """currentScreen\s*==\s*Screen\.AlbumDetail\s*(?:\|\||,)\s*currentScreen\s*==\s*Screen\.ArtistDetail\s*->\s*backToDetailOrigin"""
+        ),
+        Regex(
+            """currentScreen\s*==\s*Screen\.ArtistDetail\s*(?:\|\||,)\s*currentScreen\s*==\s*Screen\.AlbumDetail\s*->\s*backToDetailOrigin"""
+        )
+    )
+
     private fun flatten(text: String): String = text.replace(Regex("\\s+"), " ")
 
     private fun src(relativePath: String): String = flatten(mainSourceFile(relativePath))
@@ -27,10 +37,9 @@ class AlbumDetailFlowGateTest {
     @Test
     fun `T1 专辑详情硬件 BACK 必须回来源或曲库而不是首页`() {
         val source = src("ui/components/AppRoot.kt")
-        val branch = "currentScreen == Screen.AlbumDetail, currentScreen == Screen.ArtistDetail -> backToDetailOrigin"
         assertTrue(
             "缺详情页 BACK 分支 ⇒ 落到 else → Screen.Home",
-            source.contains(branch)
+            detailBackBranches.any { it.containsMatchIn(source) }
         )
         assertTrue(
             "navigateLibrary 未定义或目标错误",
@@ -42,8 +51,8 @@ class AlbumDetailFlowGateTest {
             source.contains("val backToDetailOrigin: () -> Unit = {") &&
                 source.contains("else navigateLibrary()")
         )
-        val mutated = source.replace(branch, "")
-        assertTrue("T1 护栏失效：删掉分支仍判正", !mutated.contains(branch))
+        val mutated = source.replace(Regex("""->\s*backToDetailOrigin"""), "-> navigateHome")
+        assertTrue("T1 护栏失效：把详情分支改去首页仍判正", detailBackBranches.none { it.containsMatchIn(mutated) })
     }
 
     @Test

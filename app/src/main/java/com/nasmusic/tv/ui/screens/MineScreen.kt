@@ -146,6 +146,15 @@ fun MineScreen(
     Column(
         modifier = Modifier.fillMaxSize().padding(pagePadding(uniform = true))
     ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            MineQuickLink(stringResource(R.string.nav_queue), onOpenQueue)
+            MineQuickLink(stringResource(R.string.netdisk_title), onOpenNetdisk)
+            MineQuickLink(stringResource(R.string.nav_settings), onOpenSettings)
+        }
     val isPhone = LocalPhoneCompact.current
     if (isPhone) {
         // 手机端：整个页面单个 LazyColumn —— 收藏标题+歌曲 → 歌单标题+卡片+展开歌曲，统一滚动
@@ -440,6 +449,27 @@ fun MineScreen(
         )
     }
     }   // 外层 Column（手机上下 / TV 左右）
+}
+
+@OptIn(ExperimentalTvMaterial3Api::class)
+@Composable
+private fun MineQuickLink(text: String, onClick: () -> Unit) {
+    FocusableSurface(
+        onClick = onClick,
+        shape = RoundedCornerShape(10.dp),
+        focusedScale = 1.05f,
+        containerColor = NasMusicColors.Surface,
+        contentColor = NasMusicColors.TextPrimary,
+        focusedContainerColor = NasMusicColors.Primary.copy(alpha = 0.2f),
+        focusedContentColor = NasMusicColors.Primary
+    ) {
+        Text(
+            text = text,
+            color = LocalFocusableContentColor.current,
+            fontSize = FontSize.button(),
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)
+        )
+    }
 }
 
 /**

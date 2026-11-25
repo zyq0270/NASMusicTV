@@ -1110,6 +1110,15 @@ class PlayerManager(private val applicationContext: Context) {
      */
     private fun isIdle(): Boolean = player?.playbackState == Player.STATE_IDLE
 
+    private fun randomIdleTarget(): Int? {
+        val queueSize = _playerState.value.queue.size
+        if (queueSize == 0) return null
+        val available = (0 until queueSize).filter { it !in shuffleHistory }
+        if (available.isEmpty()) shuffleHistory.clear()
+        return (0 until queueSize).filter { it !in shuffleHistory }.randomOrNull()
+            ?: ((_playerState.value.currentIndex + 1) % queueSize)
+    }
+
     fun next(playMode: PlayMode) {
         val p = player ?: return
         // F2-5：手动切歌立即中断进行中的 crossfade（不做优雅等待）
@@ -1117,16 +1126,16 @@ class PlayerManager(private val applicationContext: Context) {
         // 出错恢复路径：IDLE 下 seekToNextMediaItem 不触发过渡回调也不 prepare，
         // 统一走手动恢复（含空 URL 网络歌曲的解析触发）
         if (isIdle()) {
-            val target = when (playMode) {
-                PlayMode.SHUFFLE -> {
-                    // 随机模式：排除已播历史后随机选（与 playRandom 同策略，但走手动恢复路径）
-                    val available = (0 until _playerState.value.queue.size).filter { it !in shuffleHistory }
-                    if (available.isEmpty()) shuffleHistory.clear()
-                    ((0 until _playerState.value.queue.size).filter { it !in shuffleHistory }).randomOrNull()
-                        ?: ((_playerState.value.currentIndex + 1) % _playerState.value.queue.size.coerceAtLeast(1))
-                }
-                else -> if (_playerState.value.currentIndex + 1 < _playerState.value.queue.size) _playerState.value.currentIndex + 1 else 0
-            }
+            val target = if (playMode == PlayMode.SHUFFLE) {
+                randomIdleTarget()
+            } else {
+                adjacentIndex(
+                    _playerState.value.queue.size,
+                    _playerState.value.currentIndex,
+                    playMode,
+                    previous = false
+                )
+            } ?: return
             if (playMode == PlayMode.SHUFFLE) shuffleHistory.add(target)
             transitionToIndex(target)
             return
@@ -1172,10 +1181,18 @@ class PlayerManager(private val applicationContext: Context) {
         crossfadeController.abort()
         // 出错恢复路径：IDLE 下 seekToPreviousMediaItem 不触发过渡回调也不 prepare
         if (isIdle()) {
-            val queueSize = _playerState.value.queue.size
-            if (queueSize == 0) return
-            val prevIndex = if (_playerState.value.currentIndex - 1 >= 0) _playerState.value.currentIndex - 1 else queueSize - 1
-            transitionToIndex(prevIndex)
+            val target = if (playMode == PlayMode.SHUFFLE) {
+                randomIdleTarget()
+            } else {
+                adjacentIndex(
+                    _playerState.value.queue.size,
+                    _playerState.value.currentIndex,
+                    playMode,
+                    previous = true
+                )
+            } ?: return
+            if (playMode == PlayMode.SHUFFLE) shuffleHistory.add(target)
+            transitionToIndex(target)
             return
         }
         when (playMode) {

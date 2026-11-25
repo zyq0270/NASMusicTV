@@ -107,7 +107,7 @@ class QueueFlowFixGateTest {
         assertTrue("只在从非 Queue 进入 Queue 时记录来源", nav.contains("screen == Screen.Queue && _currentScreen.value != Screen.Queue"))
         assertTrue("缺消费后清空", nav.contains("fun clearQueueOrigin()"))
 
-        val root = src("components/AppRoot.kt")
+        val root = src("ui/components/AppRoot.kt")
         assertTrue("BACK 分支未接队列来源", root.contains("currentScreen == Screen.Queue && queueOriginScreen != null -> backToQueueOrigin"))
         assertTrue("queueOriginScreen 未进 LaunchedEffect key ⇒ handler 不刷新", root.contains("settingsSection, queueOriginScreen"))
 
@@ -117,7 +117,7 @@ class QueueFlowFixGateTest {
 
     @Test
     fun `T5 清空按钮走真 Dialog 二次确认且 BACK 只关弹窗`() {
-        val screen = src("screens/QueueScreen.kt")
+        val screen = src("ui/screens/QueueScreen.kt")
         assertTrue("清空按钮未改为请求确认", screen.contains("onClearQueue = requestClearQueue"))
         assertTrue("两处形态（TV/竖屏）都必须渲染确认弹窗", count(screen, "QueueClearConfirmDialog(showClearConfirm, onClearConfirm, onClearDismiss)") == 2)
         assertTrue(
@@ -142,7 +142,7 @@ class QueueFlowFixGateTest {
 
     @Test
     fun `T6 key 注释与入队去重口径一致`() {
-        val screen = src("screens/QueueScreen.kt")
+        val screen = src("ui/screens/QueueScreen.kt")
         assertFalse("旧注释仍称 addToQueue 不查重，与 QueueAddition.compute 矛盾", screen.contains("addToQueue 不查重"))
         assertTrue("注释须说明整队播放可绕过入队去重", screen.contains("整队播放不经过它"))
         val addition = src("player/QueueAddition.kt")

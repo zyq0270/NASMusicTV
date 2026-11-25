@@ -47,6 +47,7 @@ import com.nasmusic.tv.ui.theme.FontSize
 import com.nasmusic.tv.ui.theme.LocalUiMode
 import com.nasmusic.tv.ui.theme.NasMusicColors
 import com.nasmusic.tv.ui.theme.UiMode
+import com.nasmusic.tv.ui.theme.pagePadding
 
 /**
  * 播放统计页面（F2-1 / F2-5）
@@ -75,14 +76,10 @@ fun PlayStatsScreen(
     LaunchedEffect(Unit) { viewModel.loadStats() }
 
     // v2.36.0 竖屏：页 padding 32→16
-    val isPhonePortrait = LocalUiMode.current == UiMode.PhonePortrait
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(
-                horizontal = if (isPhonePortrait) 16.dp else 32.dp,
-                vertical = if (isPhonePortrait) 12.dp else 20.dp
-            )
+            .padding(pagePadding())
     ) {
         // 标题行
         Row(verticalAlignment = Alignment.CenterVertically) {

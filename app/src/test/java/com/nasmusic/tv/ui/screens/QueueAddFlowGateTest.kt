@@ -1,5 +1,6 @@
 package com.nasmusic.tv.ui.screens
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -75,10 +76,17 @@ class QueueAddFlowGateTest {
             "「我的」收藏 pane 没走只增不删入口",
             mine.contains("onAddAllToQueue = { onAddSongsToQueue(mergedFavorites) }")
         )
-        val recentAndPlaylist = "onAddAllToQueue = { onAddSongsToQueue(songs) }"
-        assertTrue(
-            "「我的」最近播放 + 歌单歌曲两处批量按钮未全部改掉（应恰好 2 处）",
-            mine.split(recentAndPlaylist).size - 1 == 2
+        // 「我的」的两个批量入口分别使用收藏合并结果与歌曲列表；
+        // 只要求都走只增不删入口，不要求两处实参是同一个片段。
+        val addArguments = Regex("""onAddSongsToQueue\(\s*([^)]*?)\s*\)""")
+            .findAll(mine)
+            .map { it.groupValues[1].trim() }
+            .toList()
+        assertEquals("「我的」应恰好有两处批量加入入口", 2, addArguments.size)
+        assertEquals(
+            "「我的」批量加入实参必须是收藏合并结果与歌曲列表",
+            setOf("mergedFavorites", "songs"),
+            addArguments.toSet()
         )
     }
 

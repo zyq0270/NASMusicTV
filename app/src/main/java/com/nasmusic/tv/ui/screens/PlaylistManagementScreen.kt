@@ -40,6 +40,7 @@ import com.nasmusic.tv.ui.theme.FontSize
 import com.nasmusic.tv.ui.theme.NasMusicColors
 import com.nasmusic.tv.ui.theme.LocalUiMode
 import com.nasmusic.tv.ui.theme.UiMode
+import com.nasmusic.tv.ui.theme.pagePadding
 import com.nasmusic.tv.ui.components.BackButton
 import com.nasmusic.tv.ui.components.FocusableSurface
 import com.nasmusic.tv.ui.components.LocalFocusableContentColor
@@ -131,7 +132,7 @@ fun PlaylistManagementScreen(
 
     Box(modifier = modifier.fillMaxSize()) {
         Column(
-            modifier = Modifier.fillMaxSize().padding(horizontal = 32.dp, vertical = 20.dp)
+            modifier = Modifier.fillMaxSize().padding(pagePadding())
         ) {
             // 返回 + 标题
             Row(

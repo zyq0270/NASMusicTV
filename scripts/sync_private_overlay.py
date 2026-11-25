@@ -206,6 +206,80 @@ def _copy_tree(src, dst):
     shutil.copytree(src, dst)
 
 
+def _relative_files(root):
+    out = {}
+    if not os.path.isdir(root):
+        return out
+    for dp, _dn, fn in os.walk(root):
+        for name in fn:
+            path = os.path.join(dp, name)
+            out[os.path.relpath(path, root).replace(os.sep, '/')] = path
+    return out
+
+
+def _expected_overlay_files(src_java, src_assets):
+    expected = {}
+    missing = []
+    for root_kind, src_root, entries in (
+        ('java', src_java, SHADOWED_JAVA),
+        ('assets', src_assets, SHADOWED_ASSETS),
+    ):
+        for rel, kind in entries:
+            label = ('assets/' if root_kind == 'assets' else '') + rel
+            src = os.path.join(src_root, *rel.split('/'))
+            if not os.path.exists(src):
+                missing.append('missing-source:' + label)
+                continue
+            if kind == 'dir':
+                if not os.path.isdir(src):
+                    missing.append('invalid-source:' + label)
+                    continue
+                for child_rel, child_path in _relative_files(src).items():
+                    expected[(root_kind, rel + '/' + child_rel)] = (child_path, label)
+            else:
+                if not os.path.isfile(src):
+                    missing.append('invalid-source:' + label)
+                    continue
+                expected[(root_kind, rel)] = (src, label)
+    return expected, missing
+
+
+def compare_overlay(src_java, src_assets, ov_java, ov_assets):
+    """返回覆盖层漂移清单；缺失必需源与目标独有文件都算漂移。"""
+    expected, drift = _expected_overlay_files(src_java, src_assets)
+    actual = {
+        **{('java', rel): path for rel, path in _relative_files(ov_java).items()},
+        **{('assets', rel): path for rel, path in _relative_files(ov_assets).items()},
+    }
+    for key in actual:
+        if key not in expected:
+            kind, rel = key
+            drift.append('extra:' + ('assets/' if kind == 'assets' else '') + rel)
+
+    changed_labels = set()
+    for key, (src, label) in expected.items():
+        dst = actual.get(key)
+        if dst is None or not filecmp.cmp(src, dst, shallow=False):
+            changed_labels.add(label)
+    drift.extend(sorted(changed_labels))
+    return sorted(set(drift))
+
+
+def _remove_overlay_extras(src_java, src_assets, ov_java, ov_assets):
+    expected, _ = _expected_overlay_files(src_java, src_assets)
+    for root_kind, root in (('java', ov_java), ('assets', ov_assets)):
+        for rel, path in _relative_files(root).items():
+            if (root_kind, rel) not in expected:
+                os.remove(path)
+        for dp, dn, _fn in os.walk(root, topdown=False):
+            if os.path.abspath(dp) == os.path.abspath(root):
+                continue
+            try:
+                os.rmdir(dp)
+            except OSError:
+                pass
+
+
 def main(argv):
     # ⛔ 本机 Windows 控制台默认 CP936(GBK) ⇒ 打印 '✓'(U+2713) 会抛 UnicodeEncodeError
     #    ⇒ 脚本崩在第一次成功行 ⇒ 退出码 1 ⇒ 漂移门禁恒红（误判）。
@@ -245,58 +319,50 @@ def main(argv):
     ov_java = os.path.join(ov, OVERLAY_JAVA_REL, 'com', 'nasmusic', 'tv')
     ov_assets = os.path.join(ov, OVERLAY_ASSETS_REL)
 
-    drift = []
+    drift = compare_overlay(src_java, src_assets, ov_java, ov_assets)
+    source_errors = [item for item in drift if item.startswith(('missing-source:', 'invalid-source:'))]
+    if source_errors:
+        for item in source_errors:
+            print('  ⛔ %s' % item)
+        print('')
+        print('隐藏分支缺少清单中的必需源码/资产；为避免静默产出不完整覆盖层，已停止。')
+        return 1
+
+    if check_only:
+        for item in drift:
+            print('  漂移 ✗  %s' % item)
+        if drift:
+            print('')
+            print('⛔ 覆盖层与隐藏分支源码有 %d 处漂移：%s' % (len(drift), ', '.join(drift)))
+            print('   跑 `python scripts/sync_private_overlay.py` 同步。')
+            return 1
+        print('')
+        print('完成：漂移 0 处')
+        return 0
+
     for rel, kind in SHADOWED_JAVA:
         src = os.path.join(src_java, *rel.split('/'))
         dst = os.path.join(ov_java, *rel.split('/'))
-        if not os.path.exists(src):
-            print('  跳过（源里没有）：%s' % rel)
-            continue
-        same = (os.path.isdir(dst) and _tree_same(src, dst)) if kind == 'dir' \
-            else (os.path.exists(dst) and filecmp.cmp(src, dst, shallow=False))
-        if same:
-            print('  一致 ✓  %s' % rel)
-            continue
-        drift.append(rel)
-        if check_only:
-            print('  漂移 ✗  %s' % rel)
+        if kind == 'dir':
+            _copy_tree(src, dst)
         else:
-            if kind == 'dir':
-                _copy_tree(src, dst)
-            else:
-                os.makedirs(os.path.dirname(dst), exist_ok=True)
-                shutil.copy2(src, dst)
-            print('  已同步 ✓  %s' % rel)
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            shutil.copy2(src, dst)
+        print('  已同步 ✓  %s' % rel)
 
     for rel, kind in SHADOWED_ASSETS:
         src = os.path.join(src_assets, *rel.split('/'))
         dst = os.path.join(ov_assets, *rel.split('/'))
-        if not os.path.exists(src):
-            print('  跳过（源里没有）：assets/%s' % rel)
-            continue
-        same = (os.path.isdir(dst) and _tree_same(src, dst)) if kind == 'dir' \
-            else (os.path.exists(dst) and filecmp.cmp(src, dst, shallow=False))
-        if same:
-            print('  一致 ✓  assets/%s' % rel)
-            continue
-        drift.append('assets/' + rel)
-        if check_only:
-            print('  漂移 ✗  assets/%s' % rel)
+        if kind == 'dir':
+            _copy_tree(src, dst)
         else:
-            if kind == 'dir':
-                _copy_tree(src, dst)
-            else:
-                os.makedirs(os.path.dirname(dst), exist_ok=True)
-                shutil.copy2(src, dst)
-            print('  已同步 ✓  assets/%s' % rel)
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            shutil.copy2(src, dst)
+        print('  已同步 ✓  assets/%s' % rel)
 
-    if check_only and drift:
-        print('')
-        print('⛔ 覆盖层与隐藏分支源码有 %d 处漂移：%s' % (len(drift), ', '.join(drift)))
-        print('   跑 `python scripts/sync_private_overlay.py` 同步。')
-        return 1
+    _remove_overlay_extras(src_java, src_assets, ov_java, ov_assets)
     print('')
-    print('完成：漂移 %d 处%s' % (len(drift), '（已同步）' if drift and not check_only else ''))
+    print('完成：漂移 %d 处（已同步）' % len(drift))
     return 0
 
 

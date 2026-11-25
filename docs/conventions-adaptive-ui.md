@@ -418,7 +418,7 @@ JAVA_HOME="C:/Program Files/Android/Android Studio/jbr" \
 文件同时满足：① 有**顶层** `fun XxxScreen(`；② 含 `@Composable`；
 ③ **没有**出现任一 marker（`LocalUiMode` / `UiMode.` / `AdaptiveLayout(` /
 `adaptiveColumns(` / `adaptiveColumnsOf(` / `responsiveDialogSize(` /
-`portraitTouchTarget(` / `PHONE_TOUCH_TARGET`）→ 判失败。
+`portraitTouchTarget(` / `PHONE_TOUCH_TARGET` / `pagePadding(`）→ 判失败。
 
 ### 豁免
 

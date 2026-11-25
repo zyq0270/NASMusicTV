@@ -25,6 +25,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -39,6 +40,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.tv.material3.Text
 import com.nasmusic.tv.R
+import com.nasmusic.tv.data.model.ImportedBackupRecord
 import com.nasmusic.tv.net.BackupTransferServer
 import com.nasmusic.tv.ui.components.FocusableSurface
 import com.nasmusic.tv.ui.components.responsiveDialogSize
@@ -69,13 +71,15 @@ import kotlinx.coroutines.withContext
 fun BackupTransferDialog(
     onRestore: (String) -> Boolean,
     onBackupChanged: () -> Unit = {},
+    importedBackups: List<ImportedBackupRecord> = emptyList(),
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
     var qrBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var serverUrl by remember { mutableStateOf<String?>(null) }
     var status by remember { mutableStateOf(context.getString(R.string.backup_transfer_starting)) }
-    val server = remember { BackupTransferServer(context, onRestore, onBackupChanged) }
+    val currentImportedBackups by rememberUpdatedState(importedBackups)
+    val server = remember { BackupTransferServer(context, onRestore, onBackupChanged, importedBackups = { currentImportedBackups }) }
     val closeFocusRequester = remember { FocusRequester() }
     // C27 / N09：二维码位图必须在后台线程生成（ZXing 编码 + 360×360 位图分配，
     // 放在组合期同步跑会直接卡住首帧）。写法对齐 TextInputDialog 的既有模板。

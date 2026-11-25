@@ -30,12 +30,19 @@ class MvSearchManagerTest {
     private fun song(title: String = "晴天", artist: String = "周杰伦"): Song =
         Song(id = "s-$title", title = title, artist = artist)
 
+    private sealed interface ResolveOutcome {
+        /** 未单独配置解析结果时，沿用既有测试语义：从 search 结果里按 bvid 取。 */
+        data object FromSearchResult : ResolveOutcome
+        data class Resolved(val mv: MvInfo) : ResolveOutcome
+        /** 明确表示解析失败，不能与「未配置、回退 search 结果」混淆。 */
+        data object Failed : ResolveOutcome
+    }
+
     private class FakeMvService(
         val name: String,
         var result: MvSearchResult? = null,
         var error: Exception? = null,
-        /** 显式指定 resolveMv 返回值；null 时回退为 result.mv（既有测试语义） */
-        var resolveResult: MvInfo? = null
+        var resolveOutcome: ResolveOutcome = ResolveOutcome.FromSearchResult
     ) : MvSearchService {
         var callCount = 0; private set
         var lastTitle: String? = null; private set
@@ -59,8 +66,11 @@ class MvSearchManagerTest {
         }
         override suspend fun resolveMv(bvid: String): MvInfo? {
             resolveCallCount++
-            if (resolveResult != null) return resolveResult
-            return result?.takeIf { it.mv.bvid == bvid }?.mv
+            return when (val outcome = resolveOutcome) {
+                ResolveOutcome.FromSearchResult -> result?.takeIf { it.mv.bvid == bvid }?.mv
+                is ResolveOutcome.Resolved -> outcome.mv
+                ResolveOutcome.Failed -> null
+            }
         }
     }
 
@@ -90,7 +100,11 @@ class MvSearchManagerTest {
         // 模拟百度本地 MV：search 只给 bvid、videoUrl 为空占位，直链需按 bvid 现取
         val blankMv = MvInfo("ntwk_baidu_mv_777", "晴天.mp4", null, "")
         val resolvedMv = MvInfo("ntwk_baidu_mv_777", "晴天.mp4", null, "https://d.pcs.baidu.com/stream")
-        val svc = FakeMvService("baidu", result = MvSearchResult(blankMv, emptyList()), resolveResult = resolvedMv)
+        val svc = FakeMvService(
+            "baidu",
+            result = MvSearchResult(blankMv, emptyList()),
+            resolveOutcome = ResolveOutcome.Resolved(resolvedMv)
+        )
         val manager = MvSearchManager(listOf(svc))
         val result = manager.searchMvFor(song().copy(networkSource = "baidu"))
         assertEquals("https://d.pcs.baidu.com/stream", result!!.mv.videoUrl)
@@ -105,12 +119,17 @@ class MvSearchManagerTest {
     @Test
     fun `searchMvFor 空直链且解析失败时 fallback 到下一源`() = runTest {
         val blankMv = MvInfo("b1", "blank", null, "")
-        val baidu = FakeMvService("baidu", result = MvSearchResult(blankMv, emptyList()), resolveResult = null)
+        val baidu = FakeMvService(
+            "baidu",
+            result = MvSearchResult(blankMv, emptyList()),
+            resolveOutcome = ResolveOutcome.Failed
+        )
         val bilibili = FakeMvService("bilibili", result = mvResult(bvid = "BV2"))
         val manager = MvSearchManager(listOf(baidu, bilibili))
         val result = manager.searchMvFor(song())
         assertEquals("BV2", result!!.mv.bvid)
         assertEquals(1, baidu.callCount)
+        assertEquals(1, baidu.resolveCallCount)
         assertEquals(1, bilibili.callCount)
     }
 

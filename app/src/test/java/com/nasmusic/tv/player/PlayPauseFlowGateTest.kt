@@ -22,7 +22,7 @@ class PlayPauseFlowGateTest {
     private val vmPath = "ui/viewmodel/PlayerViewModel.kt"
     private val keyHandlerPath = "util/MediaKeyHandler.kt"
     private val appRootPath = "ui/components/AppRoot.kt"
-    private val stringsPath = "values/strings.xml"
+    private val stringsPath = "app/src/main/res/values/strings.xml"
 
     @Test
     fun `T1 playPause 判据必须是用户意图 playWhenReady 而非 isPlaying`() {
@@ -141,11 +141,16 @@ class PlayPauseFlowGateTest {
     }
 
     private fun mainSourceFile(relativePath: String): String {
-        val candidates = listOf(
-            File("src/main/java/com/nasmusic/tv").resolve(relativePath),
-            File("app/src/main/java/com/nasmusic/tv").resolve(relativePath),
-            File("app/src/main/res").resolve(relativePath)
-        )
+        val candidates = if (relativePath.startsWith("app/src/main/res/")) {
+            // Gradle 可能以 app/ 或仓库根为 user.dir；资源文件不能再拼到 Java 源根下。
+            listOf(File(relativePath), File("../$relativePath"))
+        } else {
+            listOf(
+                File("src/main/java/com/nasmusic/tv").resolve(relativePath),
+                File("app/src/main/java/com/nasmusic/tv").resolve(relativePath),
+                File("../app/src/main/java/com/nasmusic/tv").resolve(relativePath)
+            )
+        }
         val file = candidates.firstOrNull { it.isFile }
         assertTrue("找不到源码文件；已尝试：${candidates.joinToString { it.absolutePath }}", file != null)
         val text = file!!.readText(Charsets.UTF_8)

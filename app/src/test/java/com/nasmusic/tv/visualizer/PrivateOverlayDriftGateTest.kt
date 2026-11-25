@@ -56,6 +56,34 @@ class PrivateOverlayDriftGateTest {
     }
 
     @Test
+    fun 覆盖层比较器必须识别缺失源与残留文件() {
+        val root = repoRoot() ?: return
+        val py = pythonCommand() ?: error("⛔ 找不到 Python，无法运行覆盖层比较器回归测试")
+        val proc = try {
+            ProcessBuilder(py, "-m", "unittest", "scripts.tests.test_sync_private_overlay")
+                .directory(root)
+                .redirectErrorStream(true)
+                .start()
+        } catch (e: Exception) {
+            throw AssertionError("⛔ 无法启动覆盖层比较器回归测试", e)
+        }
+        val out = try {
+            proc.inputStream.bufferedReader(Charsets.UTF_8).readText()
+        } catch (_: Exception) {
+            ""
+        }
+        val finished = proc.waitFor(60, TimeUnit.SECONDS)
+        if (!finished) {
+            proc.destroyForcibly()
+            error("⛔ 覆盖层比较器回归测试超时：\n" + out.trim())
+        }
+        assertTrue(
+            "⛔ 覆盖层比较器回归测试失败：\n" + out.trim(),
+            proc.exitValue() == 0
+        )
+    }
+
+    @Test
     fun 覆盖层与隐藏分支源码不得漂移() {
         val root = repoRoot() ?: return          // 找不到脚本（异常环境）⇒ 跳过
         val py = pythonCommand() ?: return       // 没有 python（CI 的某些 runner）⇒ 跳过

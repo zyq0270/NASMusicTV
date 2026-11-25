@@ -111,20 +111,18 @@ class LocalInputServer(
 
         private fun handleSubmit(session: IHTTPSession): Response {
             return try {
-                // 防御（2026-09-22 审查）：请求体上限 1MB——postData 全量进内存，
+                // 防御（2026-09-22 审查）：请求体上限 1MB——文本全量进内存，
                 // 同网段超大 POST 可耗尽内存（对齐 Backup/Playlist 上传的硬上限口径）。
-                val contentLength = session.headers["content-length"]?.toLongOrNull() ?: -1L
-                if (contentLength > 1L * 1024 * 1024) {
-                    // 拒绝即断连：body 还没读，留在这条 keep-alive 连接上会污染下一请求
-                    return newFixedLengthResponse(
-                        Response.Status.BAD_REQUEST,
-                        "application/json; charset=UTF-8",
-                        """{"ok":false}"""
-                    ).noKeepAlive()
+                val text = when (val body = session.readRequestBody(1L * 1024 * 1024)) {
+                    is HttpRequestBody.Result.Read -> String(body.bytes, Charsets.UTF_8)
+                    is HttpRequestBody.Result.OverLimit, is HttpRequestBody.Result.Malformed -> {
+                        return newFixedLengthResponse(
+                            Response.Status.BAD_REQUEST,
+                            "application/json; charset=UTF-8",
+                            """{"ok":false}"""
+                        ).noKeepAlive()
+                    }
                 }
-                val files = HashMap<String, String>()
-                session.parseBody(files)
-                val text = files["postData"] ?: ""
                 if (text.isNotEmpty()) {
                     onText.invoke(text)
                 }
@@ -139,7 +137,7 @@ class LocalInputServer(
                     Response.Status.INTERNAL_ERROR,
                     "application/json; charset=UTF-8",
                     """{"ok":false}"""
-                )
+                ).noKeepAlive()
             }
         }
     }

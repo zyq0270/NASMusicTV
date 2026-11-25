@@ -913,6 +913,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
                 }
                 AppPreferences.SOURCE_BAIDU -> {
                     prefs.baidu.setBaiduEnabled(enabled)
+                    if (!enabled) netVM.onBaiduSourceDisabled()
                     nasMusicApp.refreshBaiduServiceRegistration()
                     netVM.refreshBaiduConnectionState()
                 }
@@ -4176,7 +4177,9 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
                     val localLyricPath = (dlState as? DownloadState.Completed)?.lyricPath
                     AppLog.d("NASMusic", "loadLyrics: localAudioPath=$localAudioPath, lyricPath=$localLyricPath")
                     val localLrc = LocalLyricsProvider.getLyricsFromPath(
-                        localAudioPath, localLyricPath
+                        localAudioPath,
+                        localLyricPath,
+                        getApplication<android.app.Application>().contentResolver,
                     )
                     AppLog.d("NASMusic", "loadLyrics: localLrc=${localLrc != null}, validLrc=${localLrc?.let { LrcParser.isValidLrc(it) }}")
                     if (localLrc != null && LrcParser.isValidLrc(localLrc)) {

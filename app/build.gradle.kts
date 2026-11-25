@@ -260,9 +260,9 @@ android {
         applicationId = "com.nasmusic.tv"
         minSdk = 22
         targetSdk = 34
-        // versionCode 口径：= 185 + 次版本号（... / 2.39.25→210 / 2.39.26→211 / 2.39.27→212）。
-        versionCode = 212
-        versionName = "2.39.27"
+        // versionCode 口径：= 185 + 次版本号（... / 2.39.26→211 / 2.39.27→212 / 2.39.28→213）。
+        versionCode = 213
+        versionName = "2.39.28"
 
         // 洛雪宿主的引擎测试依赖 native 库，只能在设备上跑（见文件末尾 androidTestImplementation 注释）
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -330,7 +330,7 @@ android {
             //
             // 用法：`./gradlew.bat connectedDebugAndroidTest "-Pe50.debugSuffix=true" …`
             // ⛔ 该开关**不得**改成默认开启（会让所有 debug 安装都变成 `com.nasmusic.tv.debug`）。
-            if (providers.gradleProperty("e50.debugSuffix").isPresent) {
+            if (providers.gradleProperty("e50.debugSuffix").orNull == "true") {
                 applicationIdSuffix = ".debug"
             }
         }

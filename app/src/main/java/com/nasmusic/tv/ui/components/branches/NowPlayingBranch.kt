@@ -207,13 +207,14 @@ internal fun NowPlayingBranch(
                                 items = playerState.queue,
                                 selectedIndex = queueDialIndex.coerceIn(0, playerState.queue.size - 1),
                                 onSelectedIndexChange = { queueDialIndex = it },
-                                onConfirm = { song ->
-                                    val index = playerState.queue.indexOfFirst { it.id == song.id && it.title == song.title }
-                                    if (index >= 0) viewModel.playerVM.resolveAndPlayByIndex(index)
+                                onConfirm = { index, _ ->
+                                    if (index in playerState.queue.indices) {
+                                        viewModel.playerVM.resolveAndPlayByIndex(index)
+                                    }
                                 },
                                 onDismiss = { showQueueDial = false },
                                 label = { it.title },
-                                key = { "${it.id}_${it.title}" },
+                                key = { index, song -> "$index:${song.id}:${song.title}" },
                                 dPadMode = isTV
                             )
                         }

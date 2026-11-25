@@ -3,7 +3,9 @@ package com.nasmusic.tv.player
 import com.nasmusic.tv.data.model.PlayMode
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.File
 
 /**
  * [adjacentIndex] 的穷举边界（2026-11-22 队列页修复 P2）。
@@ -52,6 +54,27 @@ class PlayModeAdjacentTest {
         assertNull(adjacentIndex(0, 0, PlayMode.SEQUENTIAL, previous = false))
         assertNull(adjacentIndex(5, -1, PlayMode.SEQUENTIAL, previous = false))
         assertNull(adjacentIndex(5, 5, PlayMode.SEQUENTIAL, previous = true))
+    }
+
+    @Test
+    fun `IDLE 恢复不得绕过播放模式边界`() {
+        val source = listOf(
+            "app/src/main/java/com/nasmusic/tv/player/PlayerManager.kt",
+            "../app/src/main/java/com/nasmusic/tv/player/PlayerManager.kt",
+            System.getProperty("user.dir") + "/app/src/main/java/com/nasmusic/tv/player/PlayerManager.kt"
+        ).map(::File).firstOrNull { it.isFile }?.readText()
+            ?: throw AssertionError("找不到 PlayerManager.kt")
+        val nextBody = source.substringAfter("fun next(playMode: PlayMode)")
+            .substringBefore("fun previous(playMode: PlayMode)")
+        val previousBody = source.substringAfter("fun previous(playMode: PlayMode)")
+            .substringBefore("fun seekTo(")
+        val nextIdle = nextBody.substringAfter("if (isIdle())").substringBefore("when (playMode)")
+        val previousIdle = previousBody.substringAfter("if (isIdle())").substringBefore("when (playMode)")
+
+        assertTrue("IDLE next 未复用 adjacentIndex，顺序模式会在队尾错误回卷", nextIdle.contains("adjacentIndex("))
+        assertTrue("IDLE previous 未复用 adjacentIndex，会在队首错误回卷", previousIdle.contains("adjacentIndex("))
+        assertTrue("IDLE next 仍有无条件回卷", !nextIdle.contains("else 0"))
+        assertTrue("IDLE previous 仍有无条件回卷", !previousIdle.contains("else queueSize - 1"))
     }
 
     @Test

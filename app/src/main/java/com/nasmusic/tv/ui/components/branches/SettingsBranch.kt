@@ -110,6 +110,7 @@ internal fun SettingsBranch(
                         initial = com.nasmusic.tv.data.model.CloudDriveConfig(com.nasmusic.tv.data.model.CloudDriveType.BAIDU)
                     )
                     val jamendoClientId by viewModel.prefs.network.jamendoClientIdFlow.collectAsState(initial = "")
+                    val importedBackups by viewModel.prefs.importedBackups.collectAsState(initial = emptyList())
                     // v2.39.8：卡④ Meting 行的「当前平台」（与搜索结果页同一份 StateFlow）
                     val networkPlatformKey by viewModel.searchNetworkPlatform.collectAsState()
                     // v2.39.8：洛雪子块（方案 §7.1）—— 会话态在 MainViewModel，这里只做投影 + 接线
@@ -540,6 +541,7 @@ internal fun SettingsBranch(
                         BackupTransferDialog(
                             onRestore = { json -> viewModel.backupVM.restoreBackupFromJsonBlocking(json) },
                             onBackupChanged = { viewModel.backupVM.refreshBackupFiles() },
+                            importedBackups = importedBackups,
                             onDismiss = { showBackupTransferDialog = false }
                         )
                     }

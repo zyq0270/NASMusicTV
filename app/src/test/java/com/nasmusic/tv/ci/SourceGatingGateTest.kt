@@ -98,9 +98,11 @@ class SourceGatingGateTest {
      * - `retrySongsLoad()`：重试前清掉带 error 的旧状态；
      * - `refreshLibrary()`：用户手动刷新曲库；
      * - `serverVM.onDisconnected`：NAS 连接断开。
+     * - `loadArtists()` 的 NAS 禁用分支：仅允许把 `_artists` 清成 `Success(emptyList())`，
+     *   用于移除骨架屏；这不是关源时改写原始库存，且**不得外溢到该分支之外**。
      *
      * ⛔ **不在白名单里的任何一处清空都是回归** —— 尤其不得出现在 `setSourceEnabled` /
-     * `clearSourceScopedCaches` 里。
+     * `clearSourceScopedCaches` 里，也不得把整个 `loadArtists()` 放进白名单。
      */
     @Test
     fun `G2b 库存流的清空点必须全部落在非开关路径`() {
@@ -271,6 +273,16 @@ class SourceGatingGateTest {
         assertTrue(
             "护栏失效：库存流在白名单之外被清空仍被判正",
             inventoryClearOutsideAllowlistProblems(vmClearsInventory).isNotEmpty(),
+        )
+        // 9b) 精确例外只认 `_artists`：同一 NAS 禁用分支里改清 `_albums` 仍必须判负。
+        val vmWrongSkeletonReset = vm.replaceFirst(
+            "_artists.value = UiState.Success(emptyList())",
+            "_albums.value = UiState.Success(emptyList())",
+        )
+        assertTrue("自证失效：破坏样本 9b 没改动到文本", vmWrongSkeletonReset != vm)
+        assertTrue(
+            "护栏失效：NAS 禁用分支里清空其它库存流仍被判正",
+            inventoryClearOutsideAllowlistProblems(vmWrongSkeletonReset).isNotEmpty(),
         )
 
         // ── 10) VM 侧：`updateMergedData` 不再把 NAS 段置空 ──
@@ -464,13 +476,17 @@ class SourceGatingGateTest {
         val allowed = INVENTORY_CLEAR_ALLOWLIST.mapNotNull { (label, marker) ->
             runCatching { blockRange(vm, marker) }.getOrNull()?.let { label to it }
         }
+        val loadArtistsSkeletonReset = loadArtistsDisabledClearRange(vm)
         for ((name, pattern) in INVENTORY_STREAMS) {
             for (m in pattern.findAll(vm)) {
                 val line = vm.substring(0, m.range.first).count { it == '\n' } + 1
                 val inAllowed = allowed.any { (_, range) -> m.range.first in range }
-                if (!inAllowed) {
+                val inArtistsSkeletonReset = name == "_artists" &&
+                    loadArtistsSkeletonReset?.contains(m.range.first) == true
+                if (!inAllowed && !inArtistsSkeletonReset) {
                     problems += "`$name` 在白名单之外被清空（第 $line 行：`${m.value}`）—— " +
-                        "原始库存流只在「NAS 未连接 / 重试 / 手动刷新 / 断开连接」这四种与源开关无关的位置允许清空"
+                        "原始库存流只在「NAS 未连接 / 重试 / 手动刷新 / 断开连接」以及 " +
+                        "loadArtists 的 NAS 禁用骨架屏清理分支允许清空"
                 }
             }
         }
@@ -677,8 +693,12 @@ class SourceGatingGateTest {
     private fun blockRange(text: String, marker: String): IntRange {
         val idx = text.indexOf(marker)
         check(idx >= 0) { "定位失败：找不到 `$marker`" }
-        val open = text.indexOf('{', idx)
-        check(open >= 0) { "定位失败：`$marker` 之后找不到 `{`" }
+        return blockRangeFrom(text, idx)
+    }
+
+    private fun blockRangeFrom(text: String, markerStart: Int): IntRange {
+        val open = text.indexOf('{', markerStart)
+        check(open >= 0) { "定位失败：marker 之后找不到 `{`" }
         var depth = 0
         var i = open
         while (i < text.length) {
@@ -691,7 +711,21 @@ class SourceGatingGateTest {
             }
             i++
         }
-        error("定位失败：`$marker` 的花括号没有闭合")
+        error("定位失败：marker 的花括号没有闭合")
+    }
+
+    /**
+     * 仅定位 `loadArtists()` 内「NAS 不可见」的那一个分支。
+     *
+     * 不把整个方法加入白名单：方法内其它位置若清空 `_albums` / `_songs` 等库存流，仍必须判负。
+     */
+    private fun loadArtistsDisabledClearRange(text: String): IntRange? {
+        val method = runCatching { blockRange(text, "fun loadArtists()") }.getOrNull() ?: return null
+        val disabledGate = Regex(
+            """if\s*\(\s*!sourceVisibility\.isVisible\(\s*MusicSourceType\.NAS\s*\)\s*\)\s*\{"""
+        ).find(text, method.first)
+        if (disabledGate == null || disabledGate.range.first !in method) return null
+        return runCatching { blockRangeFrom(text, disabledGate.range.first) }.getOrNull()
     }
 
     /**

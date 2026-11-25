@@ -45,12 +45,22 @@ class ParticleBudgetGateTest {
             // 只认「读」：声明形如 `val maxParticles: Int,` 的构造参数行不算
             !Regex("""^\s*(val|var)\s+maxParticles\b""").containsMatchIn(line)
 
-    /** 工厂映射：`VisualizerTheme.X -> YRenderer(…)` ⇒ X → YRenderer */
-    private fun themeToRendererClass(): Map<String, String> {
-        val src = File(visualizerRoot(), "VisualizerRendererFactory.kt").readText()
-        return Regex("""VisualizerTheme\.([A-Z_0-9]+)\s*->\s*([A-Za-z0-9_]+)\s*\(""")
-            .findAll(src).associate { it.groupValues[1] to it.groupValues[2] }
+    /** 工厂映射：收集每个主题分支可达的全部渲染器，条件分支不能逃过预算核对。 */
+    private fun parseFactoryMapping(src: String): Map<String, Set<String>> {
+        val code = src.lineSequence().mapNotNull(::codeLine).joinToString("\n")
+        return Regex(
+            """VisualizerTheme\.([A-Z_0-9]+)\s*->([\s\S]*?)(?=VisualizerTheme\.|^\s*\})""",
+            RegexOption.MULTILINE,
+        ).findAll(code).associate { branch ->
+            branch.groupValues[1] to Regex("""\b([A-Za-z0-9_]+Renderer)\s*\(""")
+                .findAll(branch.groupValues[2])
+                .map { it.groupValues[1] }
+                .toSet()
+        }
     }
+
+    private fun themeToRendererClasses(): Map<String, Set<String>> =
+        parseFactoryMapping(File(visualizerRoot(), "VisualizerRendererFactory.kt").readText())
 
     /** 扫描 renderers/ 与 photo/，返回「类体内真读了 maxParticles」的渲染器类名集合 */
     private fun budgetConsumingClasses(): Set<String> {
@@ -81,11 +91,12 @@ class ParticleBudgetGateTest {
 
     @Test
     fun 枚举标注与源码里真正读取粒子预算的效果一致() {
-        val mapping = themeToRendererClass()
+        val mapping = themeToRendererClasses()
         assertEquals("工厂应映射全部 ${VisualizerTheme.entries.size} 套效果",
             VisualizerTheme.entries.size, mapping.size)
+        assertTrue("每个主题分支都至少应有一个渲染器", mapping.values.all { it.isNotEmpty() })
         val consuming = budgetConsumingClasses()
-        val derived = VisualizerTheme.entries.filter { mapping[it.name] in consuming }.toSet()
+        val derived = VisualizerTheme.entries.filter { mapping[it.name].orEmpty().any { it in consuming } }.toSet()
         val declared = VisualizerTheme.entries.filter { it.needsParticleBudget }.toSet()
 
         assertEquals(
@@ -127,6 +138,29 @@ class ParticleBudgetGateTest {
     }
 
     // ── 负向自证 ──
+
+    @Test
+    fun `条件工厂分支里的所有渲染器都必须进入预算核对`() {
+        val mapping = parseFactoryMapping(
+            """
+            VisualizerTheme.QIANLI_SCROLL ->
+                if (style) QianliUpstreamRenderer() else HeavyRenderer()
+            }
+            """.trimIndent()
+        )
+        assertEquals(setOf("QianliUpstreamRenderer", "HeavyRenderer"), mapping["QIANLI_SCROLL"])
+        val commented = parseFactoryMapping(
+            """
+            VisualizerTheme.HIGHWAY ->
+                // 注释里的 HiddenRenderer() 不是真实分支
+                CircularRingRenderer()
+            }
+            """.trimIndent()
+        )
+        assertEquals(setOf("CircularRingRenderer"), commented["HIGHWAY"])
+        assertEquals(setOf("QianliUpstreamRenderer", "QianliScrollRenderer"),
+            themeToRendererClasses()["QIANLI_SCROLL"])
+    }
 
     @Test
     fun 扫描判据能抓到读取预算的行而不误抓注释与声明() {

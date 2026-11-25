@@ -3,6 +3,7 @@ package com.nasmusic.tv.net
 import android.content.Context
 import com.google.gson.Gson
 import com.nasmusic.tv.R
+import com.nasmusic.tv.data.model.ImportedBackupRecord
 import com.nasmusic.tv.util.AppLog
 import com.nasmusic.tv.util.BackupFileUtils
 import fi.iki.elonen.NanoHTTPD
@@ -31,7 +32,8 @@ class BackupTransferServer(
     private val context: Context,
     private val onRestore: (String) -> Boolean,
     private val onBackupChanged: () -> Unit = {},
-    private val port: Int = DEFAULT_PORT
+    private val port: Int = DEFAULT_PORT,
+    private val importedBackups: () -> List<ImportedBackupRecord> = { emptyList() }
 ) {
 
     companion object {
@@ -66,7 +68,7 @@ class BackupTransferServer(
             AppLog.i(TAG, "start: already running, returning true")
             return true
         }
-        val impl = Impl(context, onRestore, onBackupChanged, port, authToken)
+        val impl = Impl(context, onRestore, onBackupChanged, port, authToken, importedBackups)
         return try {
             impl.start(NanoHTTPD.SOCKET_READ_TIMEOUT, false)
             server = impl
@@ -98,7 +100,8 @@ class BackupTransferServer(
         private val onRestore: (String) -> Boolean,
         private val onBackupChanged: () -> Unit,
         port: Int,
-        private val authToken: String
+        private val authToken: String,
+        private val importedBackups: () -> List<ImportedBackupRecord>
     ) : NanoHTTPD(port) {
 
         private val gson = Gson()
@@ -363,7 +366,7 @@ loadBackups();
         /** 列出 TV 端备份文件 */
         private fun handleList(): Response {
             return try {
-                val backups = BackupFileUtils.listBackups(context)
+                val backups = BackupFileUtils.listBackups(context, importedBackups())
                 val items = backups.map { bf ->
                     mapOf(
                         "name" to bf.displayName,
@@ -386,7 +389,7 @@ loadBackups();
         private fun handleDownload(session: IHTTPSession): Response {
             return try {
                 val name = getQueryParam(session, "name") ?: return notFound(context.getString(R.string.backup_msg_missing_name))
-                val backups = BackupFileUtils.listBackups(context)
+                val backups = BackupFileUtils.listBackups(context, importedBackups())
                 val target = backups.find { it.displayName == name }
                     ?: return notFound(context.getString(R.string.backup_msg_not_found, name))
 
@@ -469,7 +472,7 @@ loadBackups();
         private fun handleRestore(session: IHTTPSession): Response {
             return try {
                 val name = getQueryParam(session, "name") ?: return jsonResponse(false, context.getString(R.string.backup_msg_missing_name))
-                val backups = BackupFileUtils.listBackups(context)
+                val backups = BackupFileUtils.listBackups(context, importedBackups())
                 val target = backups.find { it.displayName == name }
                     ?: return jsonResponse(false, context.getString(R.string.backup_msg_not_found, name))
 

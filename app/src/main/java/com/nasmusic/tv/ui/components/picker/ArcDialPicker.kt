@@ -19,6 +19,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -82,9 +83,9 @@ fun <T> ArcDialPicker(
     items: List<T>,
     selectedIndex: Int,
     onSelectedIndexChange: (Int) -> Unit,
-    onConfirm: (T) -> Unit,
+    onConfirm: (Int, T) -> Unit,
     label: (T) -> String,
-    key: (T) -> String,
+    key: (Int, T) -> String,
     modifier: Modifier = Modifier,
     itemHeight: Dp = 56.dp,
     visiblePerSide: Int = 3,
@@ -164,7 +165,7 @@ fun <T> ArcDialPicker(
                                 when (event.key) {
                                     Key.DirectionDown -> { move(1); true }
                                     Key.DirectionUp -> { move(-1); true }
-                                    Key.Enter, Key.NumPadEnter -> { onConfirm(items[safeIndex]); true }
+                                    Key.Enter, Key.NumPadEnter -> { onConfirm(safeIndex, items[safeIndex]); true }
                                     else -> false
                                 }
                             }
@@ -241,28 +242,30 @@ fun <T> ArcDialPicker(
                 //    所有者 2026-11-23 第 7 轮定稿：既然全是历史，深绿就失去区分意义。
                 val textColor = if (isCentered) NasMusicColors.Primary else NasMusicColors.TextPrimary
 
-                Row(
-                    modifier = Modifier
-                        .height(itemHeight)
-                        .graphicsLayer {
-                            translationY = y
-                            translationX = xShift
-                            rotationZ = rotation
-                            scaleX = animScale
-                            scaleY = animScale
-                            this.alpha = alpha
-                        }
-                        .clickable { onConfirm(item) }
-                        .padding(horizontal = 18.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = label(item),
-                        color = textColor,
-                        fontSize = if (isCentered) FontSize.title() else FontSize.body(),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                key(key(index, item)) {
+                    Row(
+                        modifier = Modifier
+                            .height(itemHeight)
+                            .graphicsLayer {
+                                translationY = y
+                                translationX = xShift
+                                rotationZ = rotation
+                                scaleX = animScale
+                                scaleY = animScale
+                                this.alpha = alpha
+                            }
+                            .clickable { onConfirm(index, item) }
+                            .padding(horizontal = 18.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = label(item),
+                            color = textColor,
+                            fontSize = if (isCentered) FontSize.title() else FontSize.body(),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                 }
             }
         }

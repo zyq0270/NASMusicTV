@@ -153,7 +153,7 @@ class LyricsManager(
         // 0. 本地歌曲：优先读取同目录同名 .lrc 文件（本地音乐专用，最高优先级）
         //    若无侧车 LRC，fallback 到内嵌歌词（ID3 USLT 帧）
         if (song.isLocalSong) {
-            val sidecarText = LocalLyricsProvider.getSidecarLyrics(song)
+            val sidecarText = LocalLyricsProvider.getSidecarLyrics(song, context.contentResolver)
             if (sidecarText != null) {
                 val lyrics = LrcParser.parse(sidecarText, song.id)
                     .copy(source = LyricsSource.LOCAL_FILE)
@@ -164,7 +164,7 @@ class LyricsManager(
                 }
                 AppLog.w("LyricsManager", "getLyrics: sidecar LRC parsed to 0 lines, fall through")
             }
-            val embeddedText = LocalLyricsProvider.getEmbeddedLyrics(song)
+            val embeddedText = LocalLyricsProvider.getEmbeddedLyrics(song, context.contentResolver)
             if (embeddedText != null) {
                 val lyrics = LrcParser.parse(embeddedText, song.id)
                     .copy(source = LyricsSource.EMBEDDED)

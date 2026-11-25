@@ -4,6 +4,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
+import java.util.concurrent.TimeUnit
 
 /**
  * 「以 Gitee 为主、GitHub 冻结」仓库策略的源码门禁（§10.408，2026-11-17 所有者裁定）。
@@ -25,8 +26,11 @@ import java.io.File
  * | L4 | `Verify` 必须把「Gitee==本地、GitHub 落后」判为预期状态 |
  * | L5 | `gitee-mirror-setup.md` 与两个 README 的下载入口必须以 Gitee 为准 |
  * | L6 | 负向自证：喂给同一谓词一段旧脚本文本必须判负，防止断言空转 |
+ * | L7 | 任何本地 push/tag 前必须校验脚本所属仓库是干净、非 detached 的 main |
+ * | L8 | 发布脚本行为测试（私有分支/detached/脏树/APK/哈希/私有内容）必须通过 |
  *
- * ⚠️ 只读文本，不执行 PowerShell、不访问网络。断言全部用 JUnit 的 Assert（Kotlin assert 是空操作）。
+ * ⚠️ L1–L7 只读文本，不执行 PowerShell、不访问网络；L8 调用 Python 行为测试，
+ * 测试自身使用临时仓库与假 Git/网络边界，不接触真实远端。
  */
 class GiteePrimaryGateTest {
 
@@ -66,8 +70,12 @@ class GiteePrimaryGateTest {
         val script = mirrorScript()
         assertTrue("缺少 PublishLocal 动作 —— Gitee 为主后没有发布通道", script.contains("'PublishLocal'"))
         assertTrue(
-            "PublishLocal 必须把本地 HEAD 推到 gitee/main",
-            script.contains("push gitee \"HEAD:refs/heads/main\""),
+            "PublishLocal 必须推送 preflight 锁定的精确 SHA，不得推送可变分支 ref 或任意 HEAD",
+            script.contains("push gitee \"\${publishHead}:refs/heads/main\""),
+        )
+        assertFalse(
+            "危险回归：PublishLocal 又恢复了 HEAD:refs/heads/main，可能把 detached/私有分支内容推到公开 main",
+            script.contains("HEAD:refs/heads/main"),
         )
         assertTrue(
             "PublishLocal 必须声明不碰 GitHub（注释或输出均可）",
@@ -145,6 +153,82 @@ class GiteePrimaryGateTest {
         )
         // 正向自证：当前脚本喂同一谓词必须为真
         assertTrue("正向自证失败：当前脚本未被判为合规", predicate(mirrorScript()))
+    }
+
+    @Test
+    fun `任何本地推送标签前都必须先校验干净非detached的main`() {
+        val script = mirrorScript()
+        assertTrue("缺少发布前置校验函数", script.contains("function Assert-PublishSafeMain"))
+        assertTrue(
+            "PublishLocal 与显式解锁的遗留 Push 都必须先过发布前置校验",
+            script.contains("if (@('PublishLocal', 'Push') -contains \$Action) {") &&
+                script.contains("    \$publishHead = Assert-PublishSafeMain"),
+        )
+        assertTrue("必须拒绝 detached HEAD", script.contains("git symbolic-ref --quiet --short HEAD"))
+        assertTrue("必须检查 HEAD 与 refs/heads/main 一致", script.contains("git rev-parse --verify refs/heads/main"))
+        assertTrue("必须检查含未跟踪文件的工作树洁净度", script.contains("git status --porcelain=v1 --untracked-files=all"))
+        assertTrue(
+            "必须校验脚本所属仓库，不能误校验调用者 CWD 的另一个仓库",
+            script.contains("Push-Location \$repoRoot"),
+        )
+        assertTrue("标签必须只从 preflight 锁定的精确 SHA 选取", script.contains("git tag --merged \$publishHead"))
+        assertFalse("不得按可变分支 ref 选择发布标签", script.contains("git tag --merged refs/heads/main"))
+        assertFalse("不得再按 GitHub 的 origin/main 选择发布标签", script.contains("git tag --merged \$base"))
+    }
+
+    @Test
+    fun `发布安全行为测试必须通过`() {
+        val root = checkNotNull(repoRoot()) { "找不到仓库根，发布安全行为测试不能静默跳过" }
+        val python = checkNotNull(pythonCommand()) { "找不到 Python，发布安全行为测试不能静默跳过" }
+        val process = try {
+            ProcessBuilder(
+                python, "-m", "unittest", "discover",
+                "-s", "scripts/tests", "-p", "test_release_safety.py", "-v",
+            )
+                .directory(root)
+                .redirectErrorStream(true)
+                .start()
+        } catch (e: Exception) {
+            throw AssertionError("发布安全行为测试无法启动", e)
+        }
+        val output = try {
+            process.inputStream.bufferedReader(Charsets.UTF_8).readText()
+        } catch (e: Exception) {
+            throw AssertionError("发布安全行为测试输出无法读取", e)
+        }
+        if (!process.waitFor(180, TimeUnit.SECONDS)) {
+            process.destroyForcibly()
+            assertTrue("发布安全行为测试超时（180 秒）", false)
+        }
+        assertTrue(
+            "发布安全行为测试失败（退出码 ${process.exitValue()}）：\n" +
+                output.trim() + "\n\n" +
+                "⇒ 复跑：python -m unittest discover -s scripts/tests -p test_release_safety.py -v",
+            process.exitValue() == 0,
+        )
+    }
+
+    /** 仓库根（同时含发布脚本与 Python 行为测试的那一层）。 */
+    private fun repoRoot(): File? {
+        var dir: File? = File("").absoluteFile
+        while (dir != null) {
+            if (File(dir, "scripts/tests/test_release_safety.py").isFile) return dir
+            dir = dir.parentFile
+        }
+        return null
+    }
+
+    /** Windows 用 python，CI runner 常用 python3。 */
+    private fun pythonCommand(): String? {
+        for (command in listOf("python", "python3")) {
+            try {
+                val process = ProcessBuilder(command, "--version").redirectErrorStream(true).start()
+                if (process.waitFor(20, TimeUnit.SECONDS) && process.exitValue() == 0) return command
+            } catch (_: Exception) {
+                // 试下一个解释器
+            }
+        }
+        return null
     }
 
     private fun mirrorScript(): String {

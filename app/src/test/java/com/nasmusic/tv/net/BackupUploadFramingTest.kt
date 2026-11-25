@@ -5,7 +5,9 @@ import androidx.test.core.app.ApplicationProvider
 import fi.iki.elonen.NanoHTTPD
 import fi.iki.elonen.NanoHTTPD.IHTTPSession
 import fi.iki.elonen.NanoHTTPD.Response
+import com.nasmusic.tv.data.model.Song
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -16,6 +18,9 @@ import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
 import java.nio.charset.StandardCharsets.US_ASCII
+import java.io.File
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 /**
  * 内嵌 server 的**连接帧**回归测试（真 NanoHTTPD + 真回环 socket）。
@@ -110,6 +115,122 @@ class BackupUploadFramingTest {
             sb.append(b.toChar())
         }
         return sb.toString()
+    }
+
+    private fun source(relative: String): String {
+        val root = listOf(
+            File("app/src/main/java/com/nasmusic/tv"),
+            File("../app/src/main/java/com/nasmusic/tv"),
+            File(System.getProperty("user.dir", ""), "src/main/java/com/nasmusic/tv"),
+        ).map { File(it, relative) }.firstOrNull { it.isFile }
+            ?: throw AssertionError("找不到源码：$relative")
+        return root.readText()
+    }
+
+    private fun authToken(server: Any): String {
+        val field = server.javaClass.getDeclaredField("authToken")
+        field.isAccessible = true
+        return field.get(server) as String
+    }
+
+    @Test
+    fun `本地输入与遥控服务必须统一读取 chunked 请求体`() {
+        for (relative in listOf("net/LocalInputServer.kt", "net/RemoteControlServer.kt")) {
+            val code = source(relative)
+            assertTrue("$relative 绕过统一请求体读取器", code.contains("session.readRequestBody("))
+            assertFalse("$relative 仍调用 parseBody", code.contains("session.parseBody("))
+        }
+        val remote = source("net/RemoteControlServer.kt")
+        assertTrue(remote.contains("jsonError(Response.Status.PAYLOAD_TOO_LARGE, \"body too large\").noKeepAlive()"))
+    }
+
+    @Test
+    fun `本地输入 chunked 提交完整传给回调`() {
+        val port = freePort()
+        val received = CountDownLatch(1)
+        var value = ""
+        val server = LocalInputServer(app, port)
+        assertTrue(server.start { value = it; received.countDown() })
+        try {
+            connect(port).use { s ->
+                s.send(
+                    "POST /submit?t=${authToken(server)} HTTP/1.1\r\nHost: x\r\n" +
+                        "Transfer-Encoding: chunked\r\n\r\n5\r\nhello\r\n6\r\n world\r\n0\r\n\r\n"
+                )
+                assertTrue(readResponse(s.getInputStream()).contains("\"ok\":true"))
+                assertTrue("chunked 文本未完整送达", received.await(5, TimeUnit.SECONDS))
+                assertEquals("hello world", value)
+            }
+        } finally {
+            server.stop()
+        }
+    }
+
+    @Test
+    fun `本地输入超限请求返回 400 并断连`() {
+        val port = freePort()
+        val server = LocalInputServer(app, port)
+        assertTrue(server.start { })
+        try {
+            connect(port).use { s ->
+                s.send("POST /submit?t=${authToken(server)} HTTP/1.1\r\nHost: x\r\nContent-Length: 1048577\r\n\r\n")
+                val response = readResponse(s.getInputStream())
+                assertTrue(response.startsWith("HTTP/1.1 400"))
+                assertEquals("", drainUntilEof(s.getInputStream()))
+            }
+        } finally {
+            server.stop()
+        }
+    }
+
+    @Test
+    fun `遥控服务接受 chunked JSON 并拒绝畸形分块`() {
+        val port = freePort()
+        val played = CountDownLatch(1)
+        val callbacks = object : RemoteCallbacks {
+            override fun getQueue(): List<Song> = listOf(Song(id = "1", title = "one"))
+            override fun getCurrentIndex() = 0
+            override fun isPlaying() = false
+            override fun getProgressMs() = 0L
+            override fun getDurationMs() = 0L
+            override fun playAt(index: Int) { played.countDown() }
+            override fun moveQueueItem(from: Int, to: Int) = Unit
+            override fun removeFromQueue(index: Int) = Unit
+            override fun addToQueue(song: Song) = Unit
+            override suspend fun search(keyword: String) = RemoteSearchResult(emptyList(), emptyList())
+        }
+        val server = RemoteControlServer(app, port)
+        server.start(callbacks)
+        try {
+            connect(port).use { s ->
+                val json = "{\"index\":0}"
+                val hex = json.length.toString(16)
+                s.send(
+                    "POST /api/queue/play?t=${authToken(server)} HTTP/1.1\r\nHost: x\r\n" +
+                        "Transfer-Encoding: chunked\r\n\r\n$hex\r\n$json\r\n0\r\n\r\n"
+                )
+                assertTrue(readResponse(s.getInputStream()).contains("\"ok\":true"))
+                assertTrue("遥控队列操作未执行", played.await(5, TimeUnit.SECONDS))
+            }
+            connect(port).use { s ->
+                s.send(
+                    "POST /api/queue/play?t=${authToken(server)} HTTP/1.1\r\nHost: x\r\n" +
+                        "Transfer-Encoding: chunked\r\n\r\nZZ\r\n"
+                )
+                assertTrue(readResponse(s.getInputStream()).startsWith("HTTP/1.1 400"))
+            }
+        } finally {
+            server.stop()
+        }
+    }
+
+    @Test
+    fun `扫码备份列表三处都合并导入登记`() {
+        val server = source("net/BackupTransferServer.kt")
+        assertEquals(3, server.split("BackupFileUtils.listBackups(context, importedBackups())").size - 1)
+        val settings = source("ui/components/branches/SettingsBranch.kt")
+        assertTrue(settings.contains("viewModel.prefs.importedBackups.collectAsState"))
+        assertTrue(settings.contains("importedBackups = importedBackups"))
     }
 
     @Test
