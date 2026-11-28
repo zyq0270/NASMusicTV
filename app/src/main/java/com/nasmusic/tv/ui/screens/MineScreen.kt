@@ -110,6 +110,9 @@ fun MineScreen(
     onOpenQueue: () -> Unit = {},
     onOpenNetdisk: () -> Unit = {},
     onOpenSettings: () -> Unit = {},
+    /** 选择本地歌单推送到当前 NAS；后端无能力时宿主不传并给出原因。 */
+    onPushLocalPlaylists: (() -> Unit)? = null,
+    pushUnavailableReason: String? = null,
     // 歌曲下载状态
     downloadStates: Map<String, DownloadState> = emptyMap(),
     onDownloadSong: (Song) -> Unit = {},
@@ -153,7 +156,18 @@ fun MineScreen(
         ) {
             MineQuickLink(stringResource(R.string.nav_queue), onOpenQueue)
             MineQuickLink(stringResource(R.string.netdisk_title), onOpenNetdisk)
+            if (onPushLocalPlaylists != null) {
+                MineQuickLink(stringResource(R.string.playlist_sync_push_to_nas), onPushLocalPlaylists)
+            }
             MineQuickLink(stringResource(R.string.nav_settings), onOpenSettings)
+        }
+        if (onPushLocalPlaylists == null && !pushUnavailableReason.isNullOrBlank()) {
+            Text(
+                text = pushUnavailableReason,
+                color = NasMusicColors.TextSecondary,
+                fontSize = FontSize.small(),
+                modifier = Modifier.padding(bottom = 12.dp),
+            )
         }
     val isPhone = LocalPhoneCompact.current
     if (isPhone) {

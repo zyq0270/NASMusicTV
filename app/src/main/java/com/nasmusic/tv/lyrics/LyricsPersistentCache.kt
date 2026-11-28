@@ -3,6 +3,7 @@ package com.nasmusic.tv.lyrics
 import android.content.Context
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
+import com.nasmusic.tv.data.cache.CacheLimits
 import com.nasmusic.tv.data.model.LyricsCacheEntry
 import com.nasmusic.tv.util.AppLog
 import java.io.File
@@ -16,7 +17,7 @@ import java.util.concurrent.ConcurrentHashMap
  * - `filesDir/lyrics_cache/{songId}.lrc` → 纯 LRC 文本
  *
  * 写入时机：用户主动切换到网络歌词来源（[MainViewModel.switchLyricsSource]）
- * LRU 淘汰：超过 [MAX_ENTRIES] 条时删 lastPlayedAt 最旧的，同时删除对应的 .lrc 文件
+ * LRU 淘汰：超过 [CacheLimits] 快照中的歌词上限时删 lastPlayedAt 最旧的，同时删除对应的 .lrc 文件
  *
  * ## 进程级单例（C24）
  *
@@ -61,7 +62,6 @@ class LyricsPersistentCache private constructor(context: Context) {
             instance ?: synchronized(this) {
                 instance ?: LyricsPersistentCache(context.applicationContext).also { instance = it }
             }
-        private const val MAX_ENTRIES = 2000
         /** get 命中后累积多少次再落盘一次索引（真 LRU 访问时间刷新） */
         private const val TOUCH_SAVE_INTERVAL = 16
     }
@@ -114,7 +114,7 @@ class LyricsPersistentCache private constructor(context: Context) {
 
     /**
      * 写入缓存条目（更新 lastPlayedAt 时间戳）。
-     * 超过 [MAX_ENTRIES] 时自动淘汰最旧的条目，同时删除对应的 .lrc 文件。
+     * 超过 [CacheLimits.current] 的歌词上限时自动淘汰最旧的条目，同时删除对应的 .lrc 文件。
      */
     fun put(entry: LyricsCacheEntry) {
         // 设置页「自动缓存歌词」关闭 ⇒ 不写盘（见 LyricsCachePolicy）。
@@ -138,7 +138,7 @@ class LyricsPersistentCache private constructor(context: Context) {
                 songArtist = entry.songArtist,
                 lastPlayedAt = now
             )
-            if (index.size > MAX_ENTRIES) evictOldest()
+            if (index.size > CacheLimits.current().lyricsMaxEntries) evictOldest()
             saveIndex()
             AppLog.d(TAG, "put: '${entry.songTitle}' by ${entry.songArtist}, id=${entry.songId}")
         }
@@ -199,16 +199,24 @@ class LyricsPersistentCache private constructor(context: Context) {
                     lastPlayedAt = entry.lastPlayedAt
                 )
             }
-            if (index.size > MAX_ENTRIES) evictOldest()
+            if (index.size > CacheLimits.current().lyricsMaxEntries) evictOldest()
             saveIndex()
             AppLog.d(TAG, "importAll: ${index.size} entries")
+        }
+    }
+
+    /** 显式维护入口：设置变更后按当前快照收敛，供设置/备份流程调用。 */
+    fun maintain() = synchronized(saveLock) {
+        if (index.size > CacheLimits.current().lyricsMaxEntries) {
+            evictOldest()
+            saveIndex()
         }
     }
 
     /** 淘汰最久未访问的条目，同时删除对应的 .lrc 文件 */
     private fun evictOldest() {
         val sorted = index.entries.sortedBy { it.value.lastPlayedAt }
-        val toRemove = sorted.take(index.size - MAX_ENTRIES)
+        val toRemove = sorted.take(index.size - CacheLimits.current().lyricsMaxEntries)
         toRemove.forEach { (songId, _) ->
             lrcFile(songId).delete()
             index.remove(songId)
@@ -225,6 +233,10 @@ class LyricsPersistentCache private constructor(context: Context) {
             val type = object : TypeToken<Map<String, IndexEntry>>() {}.type
             val loaded = gson.fromJson<Map<String, IndexEntry>>(json, type) ?: return
             index.putAll(loaded)
+            if (index.size > CacheLimits.current().lyricsMaxEntries) {
+                evictOldest()
+                saveIndex()
+            }
             AppLog.d(TAG, "loaded ${index.size} entries")
         } catch (e: Exception) {
             AppLog.e(TAG, "loadIndex failed: ${e.message}", e)

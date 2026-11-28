@@ -247,6 +247,16 @@ class BackendRegistry(private val appContext: Context? = null) {
     fun getConfig(): ServerConfig? = synchronized(lock) { currentConfig }
 
     /**
+     * 原子读取当前连接。歌单同步必须用同一份 adapter/config 快照绑定歌曲来源，
+     * 不能分别读取而在连接切换时把新服务器 ID 配到旧适配器上。
+     */
+    fun getActiveConnection(): Pair<BackendAdapter, ServerConfig>? = synchronized(lock) {
+        val adapter = currentAdapter ?: return@synchronized null
+        val config = currentConfig ?: return@synchronized null
+        adapter to config
+    }
+
+    /**
      * 获取服务端显示名称
      */
     fun getServerDisplayName(): String = synchronized(lock) { serverDisplayName }

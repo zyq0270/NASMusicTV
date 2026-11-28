@@ -14,6 +14,10 @@ import com.nasmusic.tv.data.model.VersionInfo
  */
 interface BackendAdapter {
 
+    /** 当前后端对歌单读写的真实能力；UI 与同步编排据此禁用/提示。 */
+    val capabilities: BackendCapabilities
+        get() = BackendCapabilities()
+
     /**
      * 后端类型标识
      */
@@ -239,6 +243,24 @@ interface BackendAdapter {
     suspend fun addToPlaylist(playlistId: String, songId: String): Boolean = false
     suspend fun removeFromPlaylist(playlistId: String, songId: String): Boolean = false
 
+    /**
+     * 歌单同步专用结构化 API。默认桥接旧 Boolean/List 方法，适配器可覆写以保留
+     * HTTP 401/403/404/5xx 等区别；旧调用方无需迁移。
+     */
+    suspend fun getPlaylistsResult(): BackendResult<List<Playlist>> =
+        playlistCall { getPlaylists() }
+
+    suspend fun getPlaylistSongsResult(playlistId: String): BackendResult<List<Song>> =
+        playlistCall { getPlaylistSongs(playlistId) }
+
+    suspend fun createPlaylistResult(name: String): BackendResult<Playlist> =
+        playlistCall { createPlaylist(name) }
+
+    suspend fun addToPlaylistResult(playlistId: String, songId: String): BackendResult<Unit> =
+        playlistCall<Unit> {
+            if (addToPlaylist(playlistId, songId)) Unit else null
+        }
+
     // --- 收藏 ---
     /**
      * 切换收藏状态。
@@ -265,4 +287,47 @@ interface BackendAdapter {
 
     // --- 歌曲技术信息 ---
     suspend fun getSongTechnicalInfo(songId: String): SongTechnicalInfo? = null
+}
+
+internal suspend fun <T> BackendAdapter.playlistCall(block: suspend () -> T?): BackendResult<T> =
+    try {
+        val value = block()
+        if (value == null) BackendResult.Failure(BackendError.UNSUPPORTED)
+        else BackendResult.Success(value)
+    } catch (e: Exception) {
+        if (e is kotlinx.coroutines.CancellationException) throw e
+        BackendResult.Failure(backendErrorFromThrowable(e))
+    }
+
+internal fun backendErrorFromHttpStatus(status: Int): BackendError = when (status) {
+    401 -> BackendError.UNAUTHORIZED
+    403 -> BackendError.FORBIDDEN
+    404 -> BackendError.NOT_FOUND
+    409 -> BackendError.CONFLICT
+    in 500..599 -> BackendError.SERVER
+    else -> BackendError.UNKNOWN
+}
+
+internal fun backendErrorFromThrowable(error: Throwable): BackendError = when (error) {
+    is java.net.SocketTimeoutException -> BackendError.TIMEOUT
+    is java.io.IOException -> BackendError.NETWORK
+    else -> BackendError.UNKNOWN
+}
+
+internal fun com.google.gson.JsonObject?.subsonicBackendError(): BackendError? {
+    this ?: return null
+    val response = get("subsonic-response")
+        ?.takeIf { it.isJsonObject }?.asJsonObject ?: return null
+    val status = response.get("status")?.takeIf { it.isJsonPrimitive }?.asString
+    if (status != "failed") return null
+    val code = response.get("code")?.takeIf { it.isJsonPrimitive }?.let { element ->
+        runCatching { element.asInt }.getOrNull()
+    } ?: -1
+    return when (code) {
+        40 -> BackendError.UNAUTHORIZED
+        50 -> BackendError.FORBIDDEN
+        70 -> BackendError.NOT_FOUND
+        in 0..99 -> BackendError.PROTOCOL
+        else -> BackendError.SERVER
+    }
 }

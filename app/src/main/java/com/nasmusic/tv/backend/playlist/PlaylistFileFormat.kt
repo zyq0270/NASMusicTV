@@ -32,6 +32,10 @@ data class RawSongEntry(
     val originalIndex: Int,
     val directUrl: String? = null,
     val directUrlType: DirectUrlType = DirectUrlType.NONE,
+    /** JSON v3 恢复出的完整歌曲；旧版 JSON / M3U 为 null。 */
+    val song: com.nasmusic.tv.data.model.Song? = null,
+    /** JSON v3 的来源身份；旧版 JSON 为 LEGACY_UNBOUND。 */
+    val songRef: com.nasmusic.tv.data.model.PlaylistSongRef? = null,
 )
 
 enum class SongSourceHint { NONE, NETWORK_METING, LOCAL_FILE, NAS }

@@ -4,16 +4,23 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.nasmusic.tv.NasMusicApp
+import com.nasmusic.tv.data.model.MusicSourceType
 import com.nasmusic.tv.data.model.Song
+import com.nasmusic.tv.data.model.sourceType
+import com.nasmusic.tv.data.model.SongSourceIdentity
+import com.nasmusic.tv.data.model.SongSourceKind
 import com.nasmusic.tv.data.stats.PlayHeatmap
 import com.nasmusic.tv.data.stats.PlayHeatmapBuilder
 import com.nasmusic.tv.data.stats.PlayStatsAggregator
+import com.nasmusic.tv.data.stats.StatsAliasResolver
 import com.nasmusic.tv.data.stats.StatsBundle
 import com.nasmusic.tv.util.AppLog
+import com.nasmusic.tv.util.SongKeys
 import com.nasmusic.tv.util.rethrowIfCancellation
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -31,6 +38,15 @@ class PlayStatsViewModel(app: Application) : AndroidViewModel(app) {
 
     private val nasMusicApp = app as NasMusicApp
     private val prefs = nasMusicApp.appPreferences
+    private val readModel = nasMusicApp.localMusicRepository.readModel
+
+    init {
+        viewModelScope.launch {
+            readModel.snapshots.collect { snapshot ->
+                if (snapshot.loaded && _monthlyBundle.value != null) loadStats()
+            }
+        }
+    }
 
     private val _monthlyBundle = MutableStateFlow<StatsBundle?>(null)
     val monthlyBundle: StateFlow<StatsBundle?> = _monthlyBundle
@@ -74,12 +90,29 @@ class PlayStatsViewModel(app: Application) : AndroidViewModel(app) {
                 val dailyCounts = withContext(Dispatchers.IO) {
                     prefs.playStatsRepo.getDailyCounts()
                 }
+                val resolutions = withContext(Dispatchers.IO) {
+                    nasMusicApp.roadmapPreferences.duplicateResolutionsFlow().first()
+                }
+                val resolver = StatsAliasResolver(resolutions)
+                val snapshot = readModel.snapshots.value
+                val stableSongs = songMeta.mapNotNull { song -> sourceFor(song)?.let { song to it } }
+                val idToStable = stableSongs.associate { (song, source) ->
+                    song.id to runCatching { SongKeys.stableKey(song, source) }.getOrNull()
+                }.filterValues { it != null }.mapValues { it.value!! }
+                val metadata = songMeta.mapNotNull { song ->
+                    val source = sourceFor(song)
+                    val key = source?.let { runCatching { SongKeys.stableKey(song, it) }.getOrNull() } ?: song.id
+                    val displayed = source?.let { readModel.applyIncludingHidden(song, it, snapshot) } ?: song
+                    key to displayed.copy(id = key)
+                }.toMap().let(resolver::resolveMetadata)
+                val resolvedMonthly = resolver.resolveCounts(stableCounts(monthlyCounts, idToStable), metadata.keys)
+                val resolvedAllTime = resolver.resolveCounts(stableCounts(allTimeCounts, idToStable), metadata.keys)
 
                 _monthlyBundle.value = withContext(Dispatchers.Default) {
-                    PlayStatsAggregator.aggregate(month, monthlyCounts, songMeta)
+                    PlayStatsAggregator.aggregate(month, resolvedMonthly, metadata.values.toList())
                 }
                 _allTimeBundle.value = withContext(Dispatchers.Default) {
-                    PlayStatsAggregator.aggregate("all", allTimeCounts, songMeta)
+                    PlayStatsAggregator.aggregate("all", resolvedAllTime, metadata.values.toList())
                 }
                 _heatmap.value = withContext(Dispatchers.Default) {
                     PlayHeatmapBuilder.build(dailyCounts)
@@ -91,5 +124,31 @@ class PlayStatsViewModel(app: Application) : AndroidViewModel(app) {
                 _loading.value = false
             }
         }
+    }
+
+    private fun stableCounts(counts: Map<String, Int>, idToStable: Map<String, String>): Map<String, Int> =
+        counts.entries.fold(mutableMapOf()) { sums, (id, count) ->
+            val key = idToStable[id] ?: id
+            sums[key] = (sums[key] ?: 0) + count
+            sums
+        }
+
+    private fun sourceFor(song: Song): SongSourceIdentity? {
+        if (song.networkSource == "weather") return null
+        SongKeys.bindSource(song)?.let { return it }
+        if (song.sourceType != MusicSourceType.NAS || song.id.startsWith("imported_")) return null
+        val config = nasMusicApp.backendRegistry.getConfig() ?: return null
+        val adapter = nasMusicApp.backendRegistry.getAdapter() ?: return null
+        val nativeId = when {
+            song.id.startsWith("nasf_") -> song.id.removePrefix("nasf_")
+            song.id.startsWith("nas_") -> song.id.removePrefix("nas_")
+            else -> song.id
+        }
+        return SongSourceIdentity(
+            kind = SongSourceKind.NAS,
+            nativeId = nativeId,
+            serverId = config.id,
+            backendType = adapter.backendType,
+        )
     }
 }

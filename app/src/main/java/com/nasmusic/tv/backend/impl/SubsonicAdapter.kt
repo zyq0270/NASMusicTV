@@ -3,6 +3,12 @@ package com.nasmusic.tv.backend.impl
 import com.google.gson.Gson
 import com.google.gson.JsonObject
 import com.nasmusic.tv.backend.BackendAdapter
+import com.nasmusic.tv.backend.BackendCapabilities
+import com.nasmusic.tv.backend.BackendError
+import com.nasmusic.tv.backend.BackendResult
+import com.nasmusic.tv.backend.backendErrorFromHttpStatus
+import com.nasmusic.tv.backend.backendErrorFromThrowable
+import com.nasmusic.tv.backend.subsonicBackendError
 import com.nasmusic.tv.data.model.Album
 import com.nasmusic.tv.data.model.Artist
 import com.nasmusic.tv.data.model.Genre
@@ -41,6 +47,8 @@ import java.util.concurrent.TimeUnit
 class SubsonicAdapter : BackendAdapter {
 
     override val backendType: String = "subsonic"
+    /** 通用 Subsonic 目前只接读能力；createPlaylist/updatePlaylist 写能力未实现。 */
+    override val capabilities = BackendCapabilities(playlistRead = true)
     override var apiVersion: String = "Unknown"
 
 @Volatile
@@ -623,6 +631,83 @@ class SubsonicAdapter : BackendAdapter {
             AppLog.e("SubsonicAdapter", "getPlaylistSongs failed", e)
             emptyList()
         }
+    }
+
+    // --- 歌单同步结构化读 API；写能力保持禁用 ---
+    override suspend fun createPlaylistResult(name: String): BackendResult<Playlist> =
+        BackendResult.Failure(BackendError.UNSUPPORTED)
+
+    override suspend fun addToPlaylistResult(playlistId: String, songId: String): BackendResult<Unit> =
+        BackendResult.Failure(BackendError.UNSUPPORTED)
+
+    override suspend fun getPlaylistsResult(): BackendResult<List<Playlist>> = withContext(Dispatchers.IO) {
+        when (val result = requestPlaylistJson(buildRestUrl("getPlaylists"))) {
+            is BackendResult.Failure -> result
+            is BackendResult.Success -> {
+                val playlists = result.value?.getAsJsonObject("subsonic-response")
+                    ?.getAsJsonObject("playlists")?.let { it.getAsJsonArray("playlist") ?: emptyList() }
+                    ?: return@withContext BackendResult.Failure(BackendError.PROTOCOL)
+                BackendResult.Success(playlists.mapNotNull { item ->
+                    val obj = item.asJsonObject
+                    val id = obj.get("id")?.asString ?: return@mapNotNull null
+                    Playlist(
+                        id = id,
+                        name = EncodingUtils.fixEncoding(obj.get("name")?.asString) ?: "Unknown",
+                        songCount = obj.get("songCount")?.asInt ?: 0,
+                        durationMs = (obj.get("duration")?.asLong ?: 0L) * 1000,
+                    )
+                })
+            }
+        }
+    }
+
+    override suspend fun getPlaylistSongsResult(playlistId: String): BackendResult<List<Song>> =
+        withContext(Dispatchers.IO) {
+            val encodedId = java.net.URLEncoder.encode(playlistId, "UTF-8")
+            when (val result = requestPlaylistJson(buildRestUrl("getPlaylist") + "&id=$encodedId")) {
+                is BackendResult.Failure -> result
+                is BackendResult.Success -> {
+                    val playlist = result.value?.getAsJsonObject("subsonic-response")?.getAsJsonObject("playlist")
+                        ?: return@withContext BackendResult.Failure(BackendError.PROTOCOL)
+                    val songs = playlist.getAsJsonArray("entry") ?: emptyList()
+                    BackendResult.Success(songs.mapNotNull { item ->
+                            val obj = item.asJsonObject
+                            val id = obj.get("id")?.asString ?: return@mapNotNull null
+                            val coverId = obj.get("coverArt")?.asString.orEmpty()
+                            Song(
+                                id = id,
+                                title = EncodingUtils.fixEncoding(obj.get("title")?.asString) ?: "Unknown",
+                                artist = EncodingUtils.fixEncoding(obj.get("artist")?.asString) ?: "",
+                                album = EncodingUtils.fixEncoding(obj.get("album")?.asString) ?: "",
+                                albumId = obj.get("albumId")?.asString ?: "",
+                                coverUrl = if (coverId.isNotBlank()) buildCoverUrl(coverId) else null,
+                                streamUrl = getStreamUrl(id),
+                                durationMs = (obj.get("duration")?.asLong ?: 0L) * 1000,
+                                trackNumber = obj.get("track")?.asInt ?: 0,
+                                discNumber = obj.get("discNumber")?.asInt ?: 1,
+                                year = obj.get("year")?.asInt,
+                                bitrate = obj.get("bitRate")?.asInt ?: 0,
+                            )
+                        })
+                }
+            }
+        }
+
+    private suspend fun requestPlaylistJson(url: String): BackendResult<JsonObject?> = try {
+        client.newCall(Request.Builder().url(url).get().build()).execute().use { response ->
+            if (!response.isSuccessful) {
+                return@use BackendResult.Failure(backendErrorFromHttpStatus(response.code))
+            }
+            val body = response.body?.string()
+            if (body.isNullOrBlank()) return@use BackendResult.Failure(BackendError.PROTOCOL)
+            val json = runCatching { gson.fromJson(body, JsonObject::class.java) }.getOrNull()
+                ?: return@use BackendResult.Failure(BackendError.PROTOCOL)
+            json.subsonicBackendError()?.let { return@use BackendResult.Failure(it) }
+            BackendResult.Success(json)
+        }
+    } catch (e: Exception) {
+        e.rethrowIfCancellation()
+        BackendResult.Failure(backendErrorFromThrowable(e))
     }
 
     // --- 流派 ---

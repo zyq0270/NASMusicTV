@@ -56,6 +56,9 @@ object MediaSessionAccessPolicy {
     /** 通知栏 / 系统媒体卡片上的「睡眠定时」按钮动作 */
     const val ACTION_SLEEP_TIMER_CYCLE = "com.nasmusic.tv.action.SLEEP_TIMER_CYCLE"
 
+    /** 通知栏 / 系统媒体卡片上的「收藏当前歌曲」按钮动作 */
+    const val ACTION_TOGGLE_FAVORITE = "com.nasmusic.tv.action.TOGGLE_FAVORITE"
+
     /** Google 助理（手机端）包名 */
     const val PKG_GOOGLE_ASSISTANT = "com.google.android.googlequicksearchbox"
 
@@ -119,6 +122,7 @@ object MediaSessionAccessPolicy {
         if (trusted) {
             builder.add(SessionCommand(ACTION_TOGGLE_PLAY_MODE, Bundle.EMPTY))
             builder.add(SessionCommand(ACTION_SLEEP_TIMER_CYCLE, Bundle.EMPTY))
+            builder.add(SessionCommand(ACTION_TOGGLE_FAVORITE, Bundle.EMPTY))
         }
         return builder.build()
     }

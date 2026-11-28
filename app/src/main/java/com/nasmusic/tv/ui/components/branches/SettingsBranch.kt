@@ -16,6 +16,9 @@ import android.content.ActivityNotFoundException
 import android.content.Intent
 import androidx.activity.compose.ManagedActivityResultLauncher
 import androidx.activity.result.ActivityResult
+import androidx.lifecycle.viewmodel.compose.viewModel
+import android.widget.Toast
+import com.nasmusic.tv.R
 import com.nasmusic.tv.backend.photo.PhotoSourceKind
 import com.nasmusic.tv.util.LocalFilePicker
 import com.nasmusic.tv.util.AppLog
@@ -59,6 +62,8 @@ internal fun SettingsBranch(
                     // F2-5：crossfade 设置状态
                     val crossfadeEnabled by viewModel.prefs.player.crossfadeEnabled.collectAsState(initial = false)
                     val crossfadeDurationSec by viewModel.prefs.player.crossfadeDurationSec.collectAsState(initial = 4)
+                    val seamlessMode by viewModel.seamlessMode.collectAsState()
+                    val replayGainEnabled by viewModel.replayGainEnabled.collectAsState()
                     // F2-7：应用内音量（PlayerViewModel 状态，独立于系统音量）
                     val appVolume by viewModel.playerVM.appVolume.collectAsState(initial = 1f)
                     // F2-6：音质档位
@@ -78,6 +83,54 @@ internal fun SettingsBranch(
                     var showModelTransferDialog by remember { mutableStateOf(false) }
                     var showPlaylistImportDialog by remember { mutableStateOf(false) }
                     val branchContext = androidx.compose.ui.platform.LocalContext.current
+                    val app = branchContext.applicationContext as com.nasmusic.tv.NasMusicApp
+                    val playlistSyncVM: PlaylistSyncViewModel = viewModel(
+                        factory = PlaylistSyncViewModel.factory(branchContext)
+                    )
+                    val playlistSyncState by playlistSyncVM.state.collectAsState()
+                    val localPlaylists by viewModel.playlistVM.localPlaylists.collectAsState(initial = emptyList())
+                    var playlistSyncMode by remember { mutableStateOf<PlaylistSyncDialogMode?>(null) }
+                    var pendingPlaylistExport by remember {
+                        mutableStateOf<Pair<com.nasmusic.tv.data.model.LocalPlaylist, PlaylistExportFormat>?>(null)
+                    }
+                    fun exportPickedPlaylist(uri: android.net.Uri?) {
+                        val pending = pendingPlaylistExport
+                        pendingPlaylistExport = null
+                        if (uri == null || pending == null) return
+                        val resolver: (Song) -> com.nasmusic.tv.data.model.PlaylistSongRef? = {
+                            com.nasmusic.tv.data.model.PlaylistSongRef.fromSong(it)
+                        }
+                        if (pending.second == PlaylistExportFormat.JSON) {
+                            playlistSyncVM.exportJson(uri, pending.first.name, pending.first.songs, resolver)
+                        } else {
+                            playlistSyncVM.exportM3u(uri, pending.first.name, pending.first.songs, resolver)
+                        }
+                    }
+                    val exportJsonLauncher = rememberLauncherForActivityResult(
+                        ActivityResultContracts.CreateDocument("application/json"), ::exportPickedPlaylist
+                    )
+                    val exportM3uLauncher = rememberLauncherForActivityResult(
+                        ActivityResultContracts.CreateDocument("audio/x-mpegurl"), ::exportPickedPlaylist
+                    )
+                    val activeConnection = app.backendRegistry.getActiveConnection()
+                    val canPullPlaylists = activeConnection?.first?.capabilities?.playlistRead == true
+                    val pullUnavailableReason = if (isConnected && !canPullPlaylists) {
+                        stringResource(R.string.playlist_sync_pull_unsupported)
+                    } else null
+                    val playlistSyncTerminalMessage = when {
+                        playlistSyncState.busy -> null
+                        playlistSyncState.completed -> playlistSyncSuccessMessage(playlistSyncState)
+                        playlistSyncState.error != null -> playlistSyncErrorMessage(playlistSyncState)
+                        else -> null
+                    }
+                    LaunchedEffect(playlistSyncTerminalMessage, playlistSyncMode) {
+                        if (playlistSyncMode == null) {
+                            playlistSyncTerminalMessage?.let {
+                                Toast.makeText(branchContext, it, Toast.LENGTH_LONG).show()
+                                playlistSyncVM.consumeTerminalEvent()
+                            }
+                        }
+                    }
                     // 「从本地文件导入」三枚入口（备份 json / 歌单 / 分离模型）：文件已在这台设备上时
                     // 不必绕扫码 —— 扫码要求本 app 活着当服务端，手机一开浏览器就进后台被冻结。
                     // ⛔ 一律显示，不做「本机有没有选择器」的能力探测（v2.39.3 就是这样误判把行藏掉的）；
@@ -94,9 +147,8 @@ internal fun SettingsBranch(
                         }
                     }
                     val playlistFileLauncher = rememberLauncherForActivityResult(
-                        ActivityResultContracts.StartActivityForResult()
-                    ) { result ->
-                        val picked = if (result.resultCode == Activity.RESULT_OK) result.data?.data else null
+                        ActivityResultContracts.OpenDocument()
+                    ) { picked ->
                         if (picked != null) viewModel.playlistImportVM.importPlaylist(picked)
                     }
                     val modelFileLauncher = rememberLauncherForActivityResult(
@@ -229,6 +281,8 @@ internal fun SettingsBranch(
                     val faceScanSupported by viewModel.visualizerVM.faceScanSupported.collectAsState()
                     // T8b：剩余空间（CACHE「占用与存储」首行）
                     val storageAvailableBytes by viewModel.storageAvailableBytes.collectAsState()
+                    val cacheLimits by viewModel.cacheLimits.collectAsState()
+                    val offlinePolicy by viewModel.offlinePolicy.collectAsState()
                     // T16（§5.4）：网络探针状态（MainViewModel 持有，UI 只渲染 + 发意图）
                     val networkProbeRunning by viewModel.networkProbeRunning.collectAsState(initial = false)
                     val networkProbeStatus by viewModel.networkProbeStatus.collectAsState(initial = "")
@@ -259,6 +313,10 @@ internal fun SettingsBranch(
                         onClearExtractedCoverCache = { viewModel.clearExtractedCoverCache() },
                         // T8b：CACHE「占用与存储」首行剩余空间（StorageGuard 的 30s 轮询值）
                         storageAvailableBytes = storageAvailableBytes,
+                        cacheLimits = cacheLimits,
+                        offlinePolicy = offlinePolicy,
+                        onSetCacheLimit = viewModel::setRoadmapCacheLimit,
+                        onSetOfflinePolicy = { viewModel.setOfflinePolicy(it) },
                         onOpenEqualizer = { viewModel.navVM.navigateTo(Screen.Equalizer) },
                         onOpenPlayStats = { viewModel.navVM.navigateTo(Screen.PlayStats) },
                         quickPickStats = viewModel.quickPickStats.collectAsState(initial = emptyList()).value,
@@ -269,6 +327,10 @@ internal fun SettingsBranch(
                         crossfadeDurationSec = crossfadeDurationSec,
                         onToggleCrossfade = { viewModel.setCrossfadeEnabled(it) },
                         onChangeCrossfadeDuration = { viewModel.setCrossfadeDurationSec(it) },
+                        seamlessMode = seamlessMode,
+                        onChangeSeamlessMode = { viewModel.setSeamlessMode(it) },
+                        replayGainEnabled = replayGainEnabled,
+                        onToggleReplayGain = { viewModel.setReplayGainEnabled(it) },
                         // F2-7：应用内音量接线
                         appVolume = appVolume,
                         onChangeAppVolume = { viewModel.playerVM.setAppVolume(it) },
@@ -338,10 +400,25 @@ internal fun SettingsBranch(
                         playlistImportMessage = playlistImportMessage,
                         onImportPlaylistFile = { showPlaylistImportDialog = true },
                         onImportPlaylistLocalFile = {
-                            launchDocumentPicker(playlistFileLauncher, LocalFilePicker.PLAYLIST_MIME_TYPES) {
+                            launchOpenDocument(playlistFileLauncher, LocalFilePicker.PLAYLIST_MIME_TYPES) {
                                 viewModel.playlistImportVM.reportImportFailure(it)
                             }
                         },
+                        onExportPlaylist = {
+                            if (!playlistSyncState.busy) {
+                                playlistSyncVM.prepare()
+                                playlistSyncMode = PlaylistSyncDialogMode.EXPORT
+                            }
+                        },
+                        onPullPlaylist = if (isConnected) ({
+                            if (canPullPlaylists && !playlistSyncState.busy) {
+                                playlistSyncVM.prepare()
+                                playlistSyncMode = PlaylistSyncDialogMode.PULL
+                                playlistSyncVM.loadRemotePlaylists()
+                            }
+                        }) else null,
+                        playlistPullEnabled = canPullPlaylists,
+                        playlistPullUnavailableReason = pullUnavailableReason,
                         onOpenImportedPlaylist = { _ -> viewModel.navVM.navigateTo(Screen.Mine) },
                         onConsumePlaylistImportMessage = { viewModel.playlistImportVM.consumeImportMessage() },
                         // 百度网盘设置
@@ -564,6 +641,47 @@ internal fun SettingsBranch(
                             onDismiss = { showPlaylistImportDialog = false }
                         )
                     }
+                    playlistSyncMode?.let { mode ->
+                        PlaylistSyncDialog(
+                            mode = mode,
+                            state = playlistSyncState,
+                            localPlaylists = localPlaylists,
+                            onExport = { playlist, format ->
+                                pendingPlaylistExport = playlist to format
+                                playlistSyncMode = null
+                                val extension = if (format == PlaylistExportFormat.JSON) "json" else "m3u"
+                                val documentName = safePlaylistDocumentName(playlist.name) + "." + extension
+                                try {
+                                    if (format == PlaylistExportFormat.JSON) {
+                                        exportJsonLauncher.launch(documentName)
+                                    } else {
+                                        exportM3uLauncher.launch(documentName)
+                                    }
+                                } catch (e: ActivityNotFoundException) {
+                                    pendingPlaylistExport = null
+                                    AppLog.e("SettingsBranch", "CreateDocument unavailable", e)
+                                    Toast.makeText(
+                                        branchContext,
+                                        R.string.playlist_sync_selector_unavailable,
+                                        Toast.LENGTH_LONG,
+                                    ).show()
+                                }
+                            },
+                            onPull = { remote -> playlistSyncVM.pull(remote.id, remote.name) },
+                            onPush = { _, _ -> },
+                            onResume = { _, _ -> },
+                            onRefreshRemote = { playlistSyncVM.loadRemotePlaylists() },
+                            onDismiss = {
+                                if (!playlistSyncState.busy) {
+                                    playlistSyncMode = null
+                                    playlistSyncVM.consumeTerminalEvent()
+                                }
+                            },
+                        )
+                    }
+                    if (playlistSyncMode == null && playlistSyncState.busy) {
+                        PlaylistSyncProgressDialog(playlistSyncState)
+                    }
 }
 
 /**
@@ -605,6 +723,22 @@ private fun lxPlatformHintOf(
     val newest = declaring.mapNotNull { it.result?.ts }.maxOrNull() ?: return null
     return LxPlatformHint.AllFailed(hoursAgo = (now - newest).coerceAtLeast(0L) / 3_600_000L)
 }
+
+private fun launchOpenDocument(
+    launcher: ManagedActivityResultLauncher<Array<String>, android.net.Uri?>,
+    mimeTypes: List<String>,
+    onUnavailable: (String) -> Unit,
+) {
+    try {
+        launcher.launch(mimeTypes.toTypedArray())
+    } catch (e: ActivityNotFoundException) {
+        AppLog.e("SettingsBranch", "OpenDocument unavailable", e)
+        onUnavailable(e.message ?: "ActivityNotFoundException")
+    }
+}
+
+private fun safePlaylistDocumentName(name: String): String =
+    name.trim().replace(Regex("[\\\\/:*?\"<>|]"), "_").ifBlank { "playlist" }
 
 /**
  * 打开系统文件选择器（三枚「从本地文件导入」入口共用）。

@@ -10,6 +10,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import java.io.File
+import java.util.Locale
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import com.nasmusic.tv.backend.network.MetingApiService
@@ -26,6 +27,7 @@ import com.nasmusic.tv.data.model.EqualizerPreset
 import com.nasmusic.tv.data.model.LocalPlaylist
 import com.nasmusic.tv.data.model.NetworkFavoriteItem
 import com.nasmusic.tv.data.model.PlayMode
+import com.nasmusic.tv.data.model.PlaylistSongRef
 import com.nasmusic.tv.data.model.QuickPickStat
 import com.nasmusic.tv.data.model.SearchHistoryItem
 import com.nasmusic.tv.data.model.ServerConfig
@@ -1599,7 +1601,8 @@ class AppPreferences internal constructor(private val context: Context) {
      * 新收藏的歌曲添加到列表头部（最新在前）
      * 超过 networkFavoritesMaxSize（500 条）时自动清理最旧的收藏
      */
-    suspend fun toggleNetworkFavorite(item: NetworkFavoriteItem) {
+    suspend fun toggleNetworkFavorite(item: NetworkFavoriteItem): Boolean? {
+        var toggled: Boolean? = null
         dataStore.edit { prefs ->
             val json = prefs[keyNetworkFavorites] ?: "[]"
             val list = safeParseJson("network_favorites", json) {
@@ -1608,6 +1611,7 @@ class AppPreferences internal constructor(private val context: Context) {
 
             val mutable = list.toMutableList()
             val existing = mutable.indexOfFirst { it.songId == item.songId }
+            toggled = existing < 0
             if (existing >= 0) {
                 mutable.removeAt(existing)  // 取消收藏
             } else {
@@ -1619,6 +1623,7 @@ class AppPreferences internal constructor(private val context: Context) {
             }
             prefs[keyNetworkFavorites] = gson.toJson(mutable)
         }
+        return toggled
     }
 
     // --- 本地歌单（DataStore JSON，独立于 NAS 后端歌单）---
@@ -1674,6 +1679,54 @@ class AppPreferences internal constructor(private val context: Context) {
     }
 
     /**
+     * 原子创建带歌曲的本地歌单（歌单导入 / NAS 拉取）。
+     *
+     * 解析、冲突命名和完整歌曲列表在同一个 DataStore edit 内完成，观察者不会看到空歌单。
+     * 与普通创建不同，已有 JSON 损坏时抛异常并保留原文，不能把损坏误当成空列表覆盖。
+     */
+    suspend fun createLocalPlaylistWithSongs(
+        name: String,
+        songs: List<Song>,
+        renameOnConflict: Boolean = false,
+    ): LocalPlaylist {
+        val trimmed = name.trim()
+        require(trimmed.isNotEmpty()) { "Playlist name must not be empty" }
+        require(songs.all { it.id.isNotBlank() && it.title.isNotBlank() }) { "Invalid playlist song" }
+        require(songs.map(::playlistSongKey).distinct().size == songs.size) { "Duplicate playlist song" }
+        val storedSongs = songs.map { it.stripVolatileStreamUrl() }
+        lateinit var created: LocalPlaylist
+        dataStore.edit { stored ->
+            val json = stored[keyLocalPlaylists] ?: "[]"
+            val list = gson.fromJson<MutableList<LocalPlaylist>>(
+                json,
+                object : TypeToken<MutableList<LocalPlaylist>>() {}.type,
+            ) ?: throw IllegalStateException("Invalid local playlist data")
+            val existingNames = list.map { it.name.lowercase(Locale.ROOT) }.toSet()
+            val resolvedName = if (renameOnConflict) {
+                uniqueImportedPlaylistName(trimmed, existingNames)
+            } else trimmed
+            created = LocalPlaylist(
+                id = java.util.UUID.randomUUID().toString(),
+                name = resolvedName,
+                createdAt = System.currentTimeMillis(),
+                songs = storedSongs,
+            )
+            stored[keyLocalPlaylists] = gson.toJson(listOf(created) + list)
+        }
+        return created
+    }
+
+    private fun uniqueImportedPlaylistName(base: String, existingNames: Set<String>): String {
+        if (base.lowercase(Locale.ROOT) !in existingNames) return base
+        val date = java.text.SimpleDateFormat("yyyyMMdd", Locale.US).format(java.util.Date())
+        val first = "$base (导入 $date)"
+        if (first.lowercase(Locale.ROOT) !in existingNames) return first
+        var suffix = 2
+        while ("$first $suffix".lowercase(Locale.ROOT) in existingNames) suffix++
+        return "$first $suffix"
+    }
+
+    /**
      * 重命名本地歌单
      */
     suspend fun renameLocalPlaylist(id: String, newName: String) {
@@ -1712,10 +1765,11 @@ class AppPreferences internal constructor(private val context: Context) {
     }
 
     /**
-     * 添加歌曲到本地歌单（按 song.id 去重；仅网络歌曲 streamUrl 置空不持久化）
+     * 添加歌曲到本地歌单（按稳定来源 key 去重；仅网络歌曲 streamUrl 置空不持久化）
      * @return true 添加成功；false 歌单不存在或歌曲已在歌单中
      */
     suspend fun addSongToPlaylist(playlistId: String, song: Song): Boolean {
+        val songKey = playlistSongKey(song)
         var added = false
         dataStore.edit { prefs ->
             val json = prefs[keyLocalPlaylists] ?: "[]"
@@ -1729,7 +1783,7 @@ class AppPreferences internal constructor(private val context: Context) {
                 added = false
             } else {
                 val current = mutable[idx]
-                if (current.songs.any { it.id == song.id }) {
+                if (current.songs.any { playlistSongKey(it) == songKey }) {
                     added = false
                 } else {
                     mutable[idx] = current.copy(songs = current.songs + song.stripVolatileStreamUrl())
@@ -1740,6 +1794,10 @@ class AppPreferences internal constructor(private val context: Context) {
         }
         return added
     }
+
+    private fun playlistSongKey(song: Song): String =
+        PlaylistSongRef.fromSong(song)?.stableKey?.takeIf { it.isNotBlank() }
+            ?: "legacy:${song.id}"
 
     /**
      * 从本地歌单移除歌曲

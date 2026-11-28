@@ -3,6 +3,7 @@ package com.nasmusic.tv.player
 import android.content.Context
 import android.os.Looper
 import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -40,11 +41,11 @@ class CrossfadeControllerTest {
 
     private val itemFactory: (Int) -> MediaItem? = { MediaItem.fromUri("http://example.com/song.mp3") }
 
-    /** 读取私有 crossfadePlayer 字段的当前音量（未启动/已释放时返回 -1f） */
-    private fun crossfadePlayerVolume(controller: CrossfadeController): Float {
-        val field = CrossfadeController::class.java.getDeclaredField("crossfadePlayer")
-        field.isAccessible = true
-        return (field.get(controller) as? ExoPlayer)?.volume ?: -1f
+    /** 副播放器已就绪桩：avoid 网络 prepare，直接让 beginFade 走 READY 分支 */
+    private fun readyCrossfadePlayer(): ExoPlayer {
+        val player = Mockito.mock(ExoPlayer::class.java)
+        Mockito.`when`(player.playbackState).thenReturn(Player.STATE_READY)
+        return player
     }
 
     @Test
@@ -117,16 +118,46 @@ class CrossfadeControllerTest {
         assertFalse(controller.isFading())
     }
 
+    // ── P0-1：主/副播放器按各自 songKey 经唯一音量出口分发 ──
+
+    @Test
+    fun `crossfade writes current and next keys independently`() {
+        val main = Mockito.mock(ExoPlayer::class.java)
+        val writes = mutableListOf<Triple<String?, Float, Float>>()
+        val fade = CrossfadeController(
+            context = RuntimeEnvironment.getApplication(),
+            mainPlayerProvider = { main },
+            appVolumeProvider = { 0.5f },
+            onCrossfadeComplete = { },
+            volumeWriter = { _, volume, key, factor -> writes += Triple(key, volume, factor) },
+            currentSongKeyProvider = { "current" },
+            nextSongKeyProvider = { "next" },
+            crossfadePlayerFactory = { readyCrossfadePlayer() },
+        )
+        assertTrue(fade.maybeStartCrossfade(
+            enabled = true, durationSec = 4, suppressPlayback = false, repeatOne = false,
+            queueSize = 5, currentIndex = 0, nextMediaItemFactory = itemFactory))
+        assertEquals(Triple("next", 0.5f, 0f), writes.first())
+        assertEquals(Triple("current", 0.5f, 1f), writes.last())
+        val shadow = shadowOf(Looper.getMainLooper())
+        shadow.idleFor(CrossfadeController.STEP_MS, TimeUnit.MILLISECONDS)
+        assertTrue(writes.any { it.first == "next" && it.third > 0f })
+        assertTrue(writes.any { it.first == "current" && it.third < 1f })
+        fade.abort()
+    }
+
     // ── F2-7：应用内音量缩放（真实 ExoPlayer + ShadowLooper 驱动 ramp）──
 
     @Test
     fun `fade ramp endpoints scale with appVolume 0_5`() {
         val main = Mockito.mock(ExoPlayer::class.java)
+        val next = readyCrossfadePlayer()
         val fade = CrossfadeController(
             context = RuntimeEnvironment.getApplication(),
             mainPlayerProvider = { main },
             appVolumeProvider = { 0.5f },
-            onCrossfadeComplete = { }
+            onCrossfadeComplete = { },
+            crossfadePlayerFactory = { next },
         )
         assertTrue(fade.maybeStartCrossfade(
             enabled = true, durationSec = 4, suppressPlayback = false, repeatOne = false,
@@ -136,14 +167,43 @@ class CrossfadeControllerTest {
         Mockito.verify(main).setVolume(0.5f)
 
         // 推进 79/80 步（每步 50ms）：等功率曲线 sin/cos 端点接近 sin(π/2)=1
-        // → cf 音量 ≈ 0.5 * 1 = 0.5（complete 尚未触发，crossfadePlayer 字段仍存活）
+        // → cf 音量 ≈ 0.5 * 1 = 0.5（complete 尚未触发）
         val shadow = shadowOf(Looper.getMainLooper())
         repeat(79) { shadow.idleFor(CrossfadeController.STEP_MS, TimeUnit.MILLISECONDS) }
-        assertEquals(0.5f, crossfadePlayerVolume(fade), 0.01f)
+        val cfCaptor = ArgumentCaptor.forClass(Float::class.java)
+        Mockito.verify(next, Mockito.atLeastOnce()).setVolume(cfCaptor.capture())
+        assertEquals(0.5f, cfCaptor.allValues.last(), 0.01f)
 
-        // 最后一步触发 complete()：释放真实 ExoPlayer（避免跨测试泄漏播放线程）
+        // 最后一步触发 complete()：释放副播放器
         shadow.idleFor(CrossfadeController.STEP_MS, TimeUnit.MILLISECONDS)
         assertFalse(fade.isFading())
+    }
+
+    @Test
+    fun `queue change during fade aborts without switching songs`() {
+        val main = Mockito.mock(ExoPlayer::class.java)
+        var queue = listOf("current", "next")
+        var completedIndex = -1
+        val writes = mutableListOf<Float>()
+        val fade = CrossfadeController(
+            context = RuntimeEnvironment.getApplication(),
+            mainPlayerProvider = { main },
+            appVolumeProvider = { 0.5f },
+            onCrossfadeComplete = { completedIndex = it },
+            volumeWriter = { _, _, _, factor -> writes += factor },
+            queueIdentityProvider = { queue },
+            crossfadePlayerFactory = { readyCrossfadePlayer() },
+        )
+        assertTrue(fade.maybeStartCrossfade(
+            enabled = true, durationSec = 1, suppressPlayback = false, repeatOne = false,
+            queueSize = queue.size, currentIndex = 0, nextMediaItemFactory = itemFactory))
+
+        queue = listOf("current", "replacement")
+        shadowOf(Looper.getMainLooper()).idleFor(CrossfadeController.STEP_MS, TimeUnit.MILLISECONDS)
+
+        assertEquals(-1, completedIndex)
+        assertFalse(fade.isFading())
+        assertEquals(1f, writes.last(), 0.001f)
     }
 
     @Test
@@ -153,7 +213,8 @@ class CrossfadeControllerTest {
             context = RuntimeEnvironment.getApplication(),
             mainPlayerProvider = { main },
             appVolumeProvider = { 0.5f },
-            onCrossfadeComplete = { }
+            onCrossfadeComplete = { },
+            crossfadePlayerFactory = { readyCrossfadePlayer() },
         )
         assertTrue(fade.maybeStartCrossfade(
             enabled = true, durationSec = 4, suppressPlayback = false, repeatOne = false,
@@ -175,7 +236,8 @@ class CrossfadeControllerTest {
             context = RuntimeEnvironment.getApplication(),
             mainPlayerProvider = { main },
             appVolumeProvider = { 0.5f },
-            onCrossfadeComplete = { }
+            onCrossfadeComplete = { },
+            crossfadePlayerFactory = { readyCrossfadePlayer() },
         )
         assertTrue(fade.maybeStartCrossfade(
             enabled = true, durationSec = 4, suppressPlayback = false, repeatOne = false,

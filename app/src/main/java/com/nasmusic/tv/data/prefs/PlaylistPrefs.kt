@@ -11,6 +11,8 @@ class PlaylistPrefs internal constructor(private val prefs: AppPreferences) {
     val localPlaylists = prefs.localPlaylists
 
     suspend fun createLocalPlaylist(name: String) = prefs.createLocalPlaylist(name)
+    suspend fun createLocalPlaylistWithSongs(name: String, songs: List<Song>, renameOnConflict: Boolean = false) =
+        prefs.createLocalPlaylistWithSongs(name, songs, renameOnConflict)
     suspend fun renameLocalPlaylist(id: String, newName: String) = prefs.renameLocalPlaylist(id, newName)
     suspend fun deleteLocalPlaylist(id: String) = prefs.deleteLocalPlaylist(id)
     suspend fun addSongToPlaylist(playlistId: String, song: Song): Boolean =

@@ -73,14 +73,17 @@ class MediaSessionAccessPolicyTest {
     fun `专有命令只下发给可信调用方`() {
         val toggle = SessionCommand(MediaSessionAccessPolicy.ACTION_TOGGLE_PLAY_MODE, Bundle.EMPTY)
         val sleep = SessionCommand(MediaSessionAccessPolicy.ACTION_SLEEP_TIMER_CYCLE, Bundle.EMPTY)
+        val favorite = SessionCommand(MediaSessionAccessPolicy.ACTION_TOGGLE_FAVORITE, Bundle.EMPTY)
 
         val trusted = MediaSessionAccessPolicy.availableSessionCommands(trusted = true)
         assertTrue("可信调用方拿不到「播放模式」命令", trusted.contains(toggle))
         assertTrue("可信调用方拿不到「睡眠定时」命令", trusted.contains(sleep))
+        assertTrue("可信调用方拿不到「收藏」命令", trusted.contains(favorite))
 
         val untrusted = MediaSessionAccessPolicy.availableSessionCommands(trusted = false)
         assertFalse("不可信调用方不应拿到「播放模式」命令", untrusted.contains(toggle))
         assertFalse("不可信调用方不应拿到「睡眠定时」命令", untrusted.contains(sleep))
+        assertFalse("不可信调用方不应拿到「收藏」命令", untrusted.contains(favorite))
     }
 
     // ─────────────────── 行为：可信判定正负向 ───────────────────

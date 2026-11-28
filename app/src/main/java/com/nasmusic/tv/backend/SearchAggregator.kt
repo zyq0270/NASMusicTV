@@ -9,7 +9,11 @@ import com.nasmusic.tv.data.model.MusicSourceType
 import com.nasmusic.tv.data.model.RankedSong
 import com.nasmusic.tv.data.model.SearchAggregatorResult
 import com.nasmusic.tv.data.model.Song
+import com.nasmusic.tv.data.model.SongSourceIdentity
+import com.nasmusic.tv.data.model.SongSourceKind
 import com.nasmusic.tv.data.model.SongWithPinyin
+import com.nasmusic.tv.data.model.sourceType
+import com.nasmusic.tv.util.SongKeys
 import com.nasmusic.tv.util.AppLog
 import com.nasmusic.tv.util.PinyinUtils
 import com.nasmusic.tv.util.SearchQuery
@@ -186,10 +190,15 @@ enum class SearchType {
         searchType: SearchType = SearchType.SONG_NAME_OR_ARTIST,
         nasLocalSongs: List<Song> = emptyList(),
         localDeviceSongs: List<Song> = emptyList(),
-        baiduLocalSongs: List<Song> = emptyList()
+        baiduLocalSongs: List<Song> = emptyList(),
+        /**
+         * 是否启用客户端拼音匹配。默认沿用 [isTVDevice]，保持既有调用方行为；
+         * SharedSearchService 会显式传 true，让 TV / 遥控 / 车机使用同一套拼音语义。
+         */
+        enablePinyin: Boolean = isTVDevice
     ): SearchAggregatorResult = withContext(Dispatchers.Default) {
         val baiduKw = baiduKeyword ?: keyword
-        AppLog.d(TAG, "search: keyword='$keyword' baiduKeyword='$baiduKw' sources=${sources.map { it.name }} directoryMode=$directoryMode filterMode=$filterMode")
+        AppLog.d(TAG, "search: sources=${sources.map { it.name }} directoryMode=$directoryMode filterMode=$filterMode searchType=$searchType")
 
         if (keyword.isBlank()) {
             return@withContext SearchAggregatorResult(
@@ -227,7 +236,7 @@ enum class SearchType {
                             emptyList()
                         }
                     }
-                    if (isPinyinQuery && nasLocalSongs.isNotEmpty() && isTVDevice) {
+                    if (isPinyinQuery && nasLocalSongs.isNotEmpty() && enablePinyin) {
                         // 拼音搜索：NAS 服务端不认拼音，改用本地缓存 + 客户端拼音匹配
                         val localHits = nasLocalSongs.filter { song ->
                             matchesBySearchType(song, keyword, searchType)
@@ -307,7 +316,7 @@ enum class SearchType {
                             emptyList()
                         }
                     }
-                    if (isPinyinQuery && isTVDevice) {
+                    if (isPinyinQuery && enablePinyin) {
                         // 拼音搜索：百度网盘服务端不认拼音，改用本地索引缓存 + 客户端拼音匹配
                         val localHits = baiduLocalSongs.filter { song ->
                             matchesBySearchType(song, keyword, searchType)
@@ -389,7 +398,7 @@ enum class SearchType {
                             emptyList()
                         }
                     }
-                    if (isPinyinQuery && localDeviceSongs.isNotEmpty() && isTVDevice) {
+                    if (isPinyinQuery && localDeviceSongs.isNotEmpty() && enablePinyin) {
                         // 拼音搜索：本地源 Room LIKE 查询不认拼音，改用客户端过滤
                         val localHits = localDeviceSongs.filter { song ->
                             matchesBySearchType(song, keyword, searchType)
@@ -432,16 +441,26 @@ enum class SearchType {
         //
         // ⚠️ 已下载歌曲（`sourceType == DOWNLOAD`）恒可见 —— 本地开关的语义是
         //    「关 = 只显示已下载」，⛔ 不得把下载歌曲一起滤掉（方案 §5.6 红线）。
-        val allResults = merged.filter { visible(it.source) && visible(it.song) }
+        val visibleOnly = merged.filter { visible(it.source) && visible(it.song) }
+        val readModel = localMusicRepository?.readModel
+        val snapshot = readModel?.snapshots?.value
+        val allResults = if (readModel != null && snapshot != null) {
+            visibleOnly.mapNotNull { ranked ->
+                readModel.apply(ranked.song, sourceFor(ranked.song), snapshot)
+                    ?.let { ranked.copy(song = it) }
+            }
+        } else {
+            visibleOnly
+        }
 
         // 精细过滤（搜索页）：按 searchType 维度匹配
         // 中文输入走子串匹配，拼音输入走拼音匹配，互不干扰
-        // 仅 TV 端启用拼音匹配（手机端触屏输入汉字方便，无需拼音）
+        // 默认仅 TV 设备启用拼音匹配；共享搜索入口可显式强制启用。
         val filtered = if (filterMode == FilterMode.PRECISE) {
             val k = keyword.trim().lowercase()
 
-            // 仅 TV 设备且需要拼音匹配时，提前生成拼音缓存
-            val pinyinCache = if (isTVDevice) {
+            // 需要拼音匹配时，提前生成拼音缓存
+            val pinyinCache = if (enablePinyin) {
                 SongWithPinyin.fromSongs(allResults.map { it.song })
             } else {
                 emptyMap()
@@ -452,7 +471,7 @@ enum class SearchType {
                     song = ranked.song,
                     keyword = k,
                     searchType = searchType,
-                    isTVDevice = isTVDevice,
+                    isTVDevice = enablePinyin,
                     pinyinCache = pinyinCache
                 )
             }
@@ -474,6 +493,26 @@ enum class SearchType {
         SearchAggregatorResult(
             allResults = sorted,
             sourceBreakdown = sourceBreakdown
+        )
+    }
+
+    private fun sourceFor(song: Song): SongSourceIdentity? {
+        if (song.networkSource == "weather") return null
+        SongKeys.bindSource(song)?.let { return it }
+        if (song.sourceType != MusicSourceType.NAS || song.id.startsWith("imported_")) return null
+        val registry = backendRegistry ?: return null
+        val config = registry.getConfig() ?: return null
+        val adapter = registry.getAdapter() ?: return null
+        val nativeId = when {
+            song.id.startsWith("nasf_") -> song.id.removePrefix("nasf_")
+            song.id.startsWith("nas_") -> song.id.removePrefix("nas_")
+            else -> song.id
+        }
+        return SongSourceIdentity(
+            kind = SongSourceKind.NAS,
+            nativeId = nativeId,
+            serverId = config.id,
+            backendType = adapter.backendType,
         )
     }
 

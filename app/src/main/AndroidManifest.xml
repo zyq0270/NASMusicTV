@@ -38,10 +38,11 @@
     -->
 
     <!--
-      包可见性声明（API 30+）。两处消费方：
+      包可见性声明（API 30+）。三处消费方：
       - 设置 → 数据 的「从本地文件导入」（备份 / 歌单 / 分离模型）用 ACTION_OPEN_DOCUMENT
       - 导出与网盘目录选择用 ACTION_OPEN_DOCUMENT_TREE（`ExportPermissionHelper.isTreePickAvailable`
         的 resolveActivity 探测，未声明时在本机同样查不到）
+      - 电视语音搜索用 ACTION_RECOGNIZE_SPEECH（只探测能力，不申请录音权限）
       ⚠️ `<intent>` 的匹配是**逐字段比对**的：目标 filter 声明了 `<data mimeType>` 时，
       查询侧不写 `<data>` 就数不相等 ⇒ 查不到（v2.39.3 在小米 MIUI 上就是这样把
       「从本地文件导入」整行误判成不可用而藏掉的）。categories 同理，必须把
@@ -56,6 +57,10 @@
         </intent>
         <intent>
             <action android:name="android.intent.action.OPEN_DOCUMENT_TREE" />
+            <category android:name="android.intent.category.DEFAULT" />
+        </intent>
+        <intent>
+            <action android:name="android.speech.action.RECOGNIZE_SPEECH" />
             <category android:name="android.intent.category.DEFAULT" />
         </intent>
     </queries>
@@ -164,6 +169,17 @@
                 <action android:name="android.media.action.MEDIA_PLAY_FROM_SEARCH" />
             </intent-filter>
         </service>
+
+        <receiver
+            android:name=".appwidget.RemotePlaybackWidgetProvider"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/remote_playback_widget_info" />
+        </receiver>
 
     </application>
 

@@ -83,14 +83,19 @@ class PinyinSearchGateTest {
 
     @Test
     fun `T3 百度索引拼音匹配必须离开主线程且只对拼音形态求值`() {
-        val vm = src("ui/viewmodel/SearchViewModel.kt")
+        // 2026-11-29：拼音索引求值随共享搜索入口迁入 SharedSearchService
+        // （界面 / 遥控 / 语音共用同一份「只对拼音形态求值 + 离开主线程」语义）。
+        val svc = src("backend/search/SharedSearchService.kt")
         val block = region(
-            vm,
-            "val baiduLocalSongs = if (SearchQuery.isPinyinLike(query))",
-            "val result = searchAggregator.search("
+            svc,
+            "val caches = if (SearchQuery.isPinyinLike(query))",
+            "} else {",
         )
         assertTrue("百度索引求值没有切到 Dispatchers.Default", block.contains("withContext(Dispatchers.Default)"))
-        assertTrue("拼音匹配开关丢了", block.contains("pinyinMatch = true"))
+        assertTrue("百度索引只在拼音形态下求值", block.contains("baiduLocalSongsProvider(query)"))
+        val vm = src("ui/viewmodel/SearchViewModel.kt")
+        assertTrue("百度索引拼音匹配开关丢了", vm.contains("pinyinMatch = true"))
+        assertTrue("搜索页必须走共享搜索入口", vm.contains("sharedSearchService.searchNormalized("))
         // 旧形态：直接写在实参位置 ⇒ 参数求值发生在聚合器的 withContext 之前
         assertFalse(
             "baiduLocalSongs 又写成聚合器的实参直调（主线程 3.8 万条拼音匹配）",

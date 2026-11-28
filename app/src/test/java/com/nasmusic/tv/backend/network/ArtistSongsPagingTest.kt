@@ -327,7 +327,7 @@ class ArtistSongsPagingTest {
         //    用户手动熄灭的源因此在任何路径都不可能被复活（这条比原先的单字符串检查更强）。
         assertTrue(
             "C1：有效点亮集必须由「点亮集减掉被关掉的源」得出，否则熄灭的源可能被复活",
-            src.contains("combine(_enabledSearchSources, disabledSearchSources)")
+            src.contains("combine(_enabledSearchSources, disabledSearchSources")
         )
         assertTrue(
             "I1：VM 的在途门必须读 expansion 的真实单飞标志",

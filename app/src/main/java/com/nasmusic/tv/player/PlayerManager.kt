@@ -10,17 +10,27 @@ import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import com.nasmusic.tv.R
 import com.nasmusic.tv.data.model.PlayMode
+import com.nasmusic.tv.data.model.SeamlessMode
 import com.nasmusic.tv.data.model.Song
+import com.nasmusic.tv.data.model.SongSourceIdentity
+import com.nasmusic.tv.backend.local.GaplessProbe
+import com.nasmusic.tv.backend.local.GaplessProbeResult
+import com.nasmusic.tv.backend.local.Media3AudioHeaderSource
 import com.nasmusic.tv.data.prefs.AppPreferences
+import com.nasmusic.tv.data.prefs.RoadmapPreferences
 import com.nasmusic.tv.util.AppLog
+import com.nasmusic.tv.util.SongKeys
 import android.net.Uri
 import android.widget.Toast
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -64,6 +74,25 @@ class PlayerManager(private val applicationContext: Context) {
         }
     )
 
+    /** P0-1：唯一 ExoPlayer.volume 写入出口；prepareFor 只预读，不提交当前曲。 */
+    val replayGainController = ReplayGainController(applicationContext)
+    private val gaplessProber = GaplessProber(Media3AudioHeaderSource(applicationContext))
+    private var playbackScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private val gaplessResults = mutableMapOf<String, GaplessProbeResult>()
+    private val gaplessProbing = mutableSetOf<String>()
+    private val shortFadeIn = ShortFadeIn()
+    private var pendingShortFade = false
+    private var pendingShortFadeKey: String? = null
+
+    /**
+     * 来源绑定钩子。NAS 必须由已连接后端提供 SongSourceIdentity（含 serverId/backendType）；
+     * 未接线时 SongKeys.bindSource 只能自动绑定本地/网络来源，NAS 安全地保持无增益。
+     */
+    var sourceIdentityProvider: ((Song) -> SongSourceIdentity?)? = null
+
+    /** UI 展示对象进入队列前还原原曲，展示 override 不得写入队列持久化数据。 */
+    var queueInputNormalizer: ((Song) -> Song)? = null
+
     /** F2-5：跨曲交叉淡入淡出（双实例方案，进度轮询驱动） */
     val crossfadeController = CrossfadeController(
         context = applicationContext,
@@ -72,7 +101,23 @@ class PlayerManager(private val applicationContext: Context) {
         onCrossfadeComplete = { nextIndex ->
             // 窗口结束：主播放器切到新歌（v2.28.1 的 IDLE 安全恢复路径复用）
             transitionToIndex(nextIndex)
-        }
+        },
+        volumeWriter = { p, volume, key, fade ->
+            replayGainController.writeVolume(p, volume, key, fade)
+        },
+        currentSongKeyProvider = { currentSongKey() },
+        nextSongKeyProvider = { index -> songKeyAt(index) },
+        queueIdentityProvider = {
+            val state = _playerState.value
+            val p = player
+            CrossfadeController.PlaybackIdentity(
+                queue = state.queue,
+                currentIndex = state.currentIndex,
+                playMode = p?.let(::derivePlayMode) ?: PlayMode.SEQUENTIAL,
+                playWhenReady = p?.playWhenReady == true,
+                isPlaying = p?.isPlaying == true,
+            )
+        },
     )
 
     /** F2-5：crossfade 设置（PlayerViewModel/AppPreferences 收集后注入，避免 PlayerManager 依赖 prefs） */
@@ -81,6 +126,25 @@ class PlayerManager(private val applicationContext: Context) {
 
     @Volatile
     var crossfadeDurationSec: Int = 4
+
+    /** P0-1 三态：OFF 跟随旧 crossfade 设置；GAPLESS 与 CROSSFADE 互斥。 */
+    @Volatile
+    var seamlessMode: SeamlessMode = SeamlessMode.OFF
+        set(value) {
+            field = value
+            if (value == SeamlessMode.GAPLESS) {
+                crossfadeController.abort()
+                shortFadeIn.cancel()
+                pendingShortFade = false
+            }
+        }
+
+    @Volatile
+    var replayGainEnabled: Boolean = false
+        set(value) {
+            field = value
+            replayGainController.setEnabled(value)
+        }
 
     /** 应用内音量（0.0–1.0，独立于系统音量；经 applyAppVolume 应用，跨淡由 CrossfadeController 按比例缩放） */
     @Volatile
@@ -166,6 +230,7 @@ class PlayerManager(private val applicationContext: Context) {
             val dur = p.duration
             if (dur > 0) _duration.value = dur
             // F2-5：临近曲尾触发 crossfade（1 秒粒度检查，controller 内部有防重）
+            maybeTriggerGapless(p, dur)
             maybeTriggerCrossfade(p, dur)
             progressHandler.postDelayed(this, 1000)
         }
@@ -173,14 +238,14 @@ class PlayerManager(private val applicationContext: Context) {
 
     /** F2-5：进度钩子——剩余时长进入 crossfade 窗口时启动淡入淡出 */
     private fun maybeTriggerCrossfade(p: ExoPlayer, dur: Long) {
-        if (!crossfadeEnabled || crossfadeDurationSec <= 0) return
+        if (!SeamlessPolicy.crossfadeEnabled(seamlessMode, crossfadeEnabled, crossfadeDurationSec)) return
         if (crossfadeController.isFading()) return
         if (dur <= 0 || !p.isPlaying) return
         val remaining = dur - p.currentPosition
         if (remaining > crossfadeDurationSec * 1000L) return
         val mode = derivePlayMode(p)
         crossfadeController.maybeStartCrossfade(
-            enabled = crossfadeEnabled,
+            enabled = true,
             durationSec = crossfadeDurationSec,
             suppressPlayback = suppressPlayback,
             repeatOne = mode == PlayMode.REPEAT_ONE,
@@ -343,7 +408,7 @@ class PlayerManager(private val applicationContext: Context) {
     fun applyAppVolume(volume: Float) {
         val v = volume.coerceIn(0f, 1f)
         appVolume = v
-        player?.volume = v
+        player?.let { replayGainController.writeVolume(it, v) }
     }
 
     // ── 升降调 & 变速（仅 K 歌页面使用，由 MainViewModel 调用）──
@@ -405,6 +470,68 @@ class PlayerManager(private val applicationContext: Context) {
     @Volatile
     private var lastErrorRetryIndex = -1
 
+    private fun boundSource(song: Song): SongSourceIdentity? =
+        sourceIdentityProvider?.invoke(song) ?: SongKeys.bindSource(song)
+
+    fun stableKeyFor(song: Song): String? {
+        val source = boundSource(song) ?: return null
+        return runCatching { SongKeys.stableKey(song, source) }.getOrNull()
+    }
+
+    private fun songKeyAt(index: Int): String? {
+        val song = _playerState.value.queue.getOrNull(index) ?: return null
+        return stableKeyFor(song)
+    }
+
+    private fun currentSongKey(): String? = songKeyAt(_playerState.value.currentIndex)
+
+    private fun prepareReplayGain(song: Song?) {
+        song ?: return
+        val source = boundSource(song) ?: return
+        replayGainController.prepareFor(song, source)
+    }
+
+    private fun commitCurrentReplayGain() {
+        val p = player ?: return
+        val key = currentSongKey()
+        replayGainController.commit(key.orEmpty(), p, appVolume)
+        _playerState.value.currentSong?.let(::prepareReplayGain)
+    }
+
+    /** Prefetch only; result is consumed when that item actually transitions. */
+    private fun maybeTriggerGapless(p: ExoPlayer, dur: Long) {
+        if (!SeamlessPolicy.shouldProbeGapless(seamlessMode) || dur <= 0 || !p.isPlaying) return
+        if (derivePlayMode(p) == PlayMode.REPEAT_ONE) return
+        val nextIndex = _playerState.value.currentIndex + 1
+        val next = _playerState.value.queue.getOrNull(nextIndex) ?: return
+        val nextKey = stableKeyFor(next) ?: return
+        if (gaplessResults.containsKey(nextKey) || !gaplessProbing.add(nextKey)) return
+        val source = boundSource(next) ?: run { gaplessProbing.remove(nextKey); return }
+        if (!GaplessProbe.supportsProbe(source.kind) || next.streamUrl.isNullOrBlank()) {
+            gaplessResults[nextKey] = GaplessProbeResult(false, reason = "unconfirmed_source")
+            gaplessProbing.remove(nextKey)
+            return
+        }
+        playbackScope.launch {
+            val result = gaplessProber.probe(next, source)
+            gaplessResults[nextKey] = result
+            gaplessProbing.remove(nextKey)
+        }
+    }
+
+    private fun startPendingShortFadeIfReady() {
+        if (!pendingShortFade) return
+        val p = player ?: return
+        val key = currentSongKey()
+        if (p.playbackState != Player.STATE_READY || key == null || key != pendingShortFadeKey) return
+        pendingShortFade = false
+        pendingShortFadeKey = null
+        shortFadeIn.start(
+            player = p,
+            writeVolume = { factor -> replayGainController.writeVolume(p, appVolume, key, factor) },
+        )
+    }
+
     private val playerListener = object : Player.Listener {
         override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
             // 按钮图标的真相源：用户意图（playWhenReady），BUFFERING 期间也保持 true。
@@ -452,6 +579,12 @@ class PlayerManager(private val applicationContext: Context) {
             }
             // 播放器就绪后启动 PCM 频谱通道
             if (playbackState == Player.STATE_READY) {
+                // Header read-ahead may have completed after the transition; READY re-applies the
+                // already committed current key without ever committing a prefetched next song.
+                commitCurrentReplayGain()
+                if (pendingShortFade) {
+                    startPendingShortFadeIfReady()
+                }
                 playerEqualizer.initSpectrumAnalyzer()
                 // 会话变更兜底：ExoPlayer 重建/切轨更换 audioSession 时重建均衡器，
                 // 避免 EQ 静默失效（此前仅用户下次拖动频段才重建）。
@@ -461,6 +594,26 @@ class PlayerManager(private val applicationContext: Context) {
 
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
             updateCurrentSongFromPlayer()
+            prepareReplayGain(_playerState.value.currentSong)
+            commitCurrentReplayGain()
+            _playerState.value.queue.getOrNull(_playerState.value.currentIndex + 1)?.let(::prepareReplayGain)
+            // GAPLESS unsupported: single-player short fade only. Never create crossfade player.
+            if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO && seamlessMode == SeamlessMode.GAPLESS) {
+                val index = _playerState.value.currentIndex
+                val key = songKeyAt(index)
+                val supported = key?.let { gaplessResults[it]?.supported == true } == true
+                if (!supported && key != null) {
+                    pendingShortFade = true
+                    pendingShortFadeKey = key
+                    startPendingShortFadeIfReady()
+                } else if (pendingShortFadeKey != key) {
+                    pendingShortFade = false
+                    pendingShortFadeKey = null
+                }
+            } else if (pendingShortFadeKey != songKeyAt(_playerState.value.currentIndex)) {
+                pendingShortFade = false
+                pendingShortFadeKey = null
+            }
             // 除 playlist 变更（重新解析后 playQueue 重载队列）外，切到新歌曲后允许再次触发"出错重新解析"
             if (reason != Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED) {
                 lastErrorRetryIndex = -1
@@ -587,6 +740,21 @@ class PlayerManager(private val applicationContext: Context) {
     /** 断网标志（NetworkMonitor 驱动）：断网期间 onPlayerError 冻结跳歌 */
     @Volatile
     var networkLost = false
+        set(value) {
+            field = value
+            if (value) onNetworkLost?.invoke()
+        }
+    var onNetworkLost: (() -> Unit)? = null
+
+    data class PrefetchFailure(val songKey: String, val title: String)
+
+    private val _prefetchFailures = MutableSharedFlow<PrefetchFailure>(extraBufferCapacity = 4)
+    val prefetchFailures: SharedFlow<PrefetchFailure> = _prefetchFailures.asSharedFlow()
+
+    fun reportPrefetchFailure(song: Song) {
+        val key = stableKeyFor(song) ?: return
+        _prefetchFailures.tryEmit(PrefetchFailure(key, song.title))
+    }
 
     /** 断点（index/positionMs/是否在播），网络恢复后 seek 回该点续播 */
     data class ResumePoint(val index: Int, val positionMs: Long, val wasPlaying: Boolean)
@@ -629,8 +797,17 @@ class PlayerManager(private val applicationContext: Context) {
     }
 
     fun setPlayer(exoPlayer: ExoPlayer) {
+        if (!playbackScope.coroutineContext[kotlinx.coroutines.Job]!!.isActive) {
+            playbackScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+        }
+        gaplessResults.clear()
+        gaplessProbing.clear()
         // 清理旧 player
         val previous = player
+        crossfadeController.abort()
+        shortFadeIn.cancel()
+        pendingShortFade = false
+        pendingShortFadeKey = null
         previous?.removeListener(playerListener)
         progressHandler.removeCallbacks(progressUpdateRunnable)
         // N04：覆盖旧实例时对称释放。服务重建会 new 一个新 ExoPlayer，
@@ -645,7 +822,7 @@ class PlayerManager(private val applicationContext: Context) {
         // addListener 不回放当前状态：注入时若 playWhenReady 已为 true（服务重建/状态恢复），
         // 不主动同步会让按钮图标停留在"播放"直到下一次按键。
         _wantsToPlay.value = exoPlayer.playWhenReady
-        exoPlayer.volume = appVolume
+        commitCurrentReplayGain()
         // 仅在播放时启动进度更新
         if (exoPlayer.isPlaying) {
             progressHandler.post(progressUpdateRunnable)
@@ -679,7 +856,8 @@ class PlayerManager(private val applicationContext: Context) {
             .build()
     }
 
-    fun playSong(song: Song) {
+    fun playSong(displayedSong: Song) {
+        val song = queueInputNormalizer?.invoke(displayedSong) ?: displayedSong
         val streamUrl = song.streamUrl ?: return
         val p = player
         if (p == null) {
@@ -688,6 +866,7 @@ class PlayerManager(private val applicationContext: Context) {
         }
 
         AppLog.d("PlayerManager", "playSong: ${song.title}, currentPlaying=${p.isPlaying}")
+        prepareReplayGain(song)
 
         // Check if song is already in current queue — if so, seek to it (gapless path)
         val existingIndex = _playerState.value.queue.indexOf(song)
@@ -717,10 +896,12 @@ class PlayerManager(private val applicationContext: Context) {
         }
         // Initialize duration from API data; player.duration may return
         // C.TIME_UNSET if the stream format lacks duration metadata.
+        commitCurrentReplayGain()
         if (song.durationMs > 0) _duration.value = song.durationMs
     }
 
-    fun playQueue(songs: List<Song>, startIndex: Int = 0) {
+    fun playQueue(displayedSongs: List<Song>, startIndex: Int = 0) {
+        val songs = queueInputNormalizer?.let { normalize -> displayedSongs.map(normalize) } ?: displayedSongs
         if (songs.isEmpty()) return
         val p = player
         if (p == null) {
@@ -746,6 +927,11 @@ class PlayerManager(private val applicationContext: Context) {
         } catch (e: Exception) {
             AppLog.e("PlayerManager", "playQueue failed", e)
         }
+
+        commitCurrentReplayGain()
+        gaplessResults.clear()
+        gaplessProbing.clear()
+        songs.getOrNull(startIndex + 1)?.let(::prepareReplayGain)
 
         // 从歌曲数据初始化时长（player.duration 可能返回 C.TIME_UNSET）
         val currentSong = songs.getOrNull(startIndex)
@@ -823,6 +1009,8 @@ class PlayerManager(private val applicationContext: Context) {
         val p = player ?: return
         val song = _playerState.value.queue.getOrNull(index) ?: return
         val url = song.streamUrl?.takeIf { it.isNotBlank() } ?: return
+        prepareReplayGain(song)
+        commitCurrentReplayGain()
         runCatching {
             if (index < p.mediaItemCount) {
                 p.replaceMediaItem(index, buildMediaItem(song, url))
@@ -850,7 +1038,8 @@ class PlayerManager(private val applicationContext: Context) {
      * @return 实际追加的条数（去重后）。G1-07：随心听续播依赖它区分「加了」与
      *         「全部已在队列中」，否则小曲库时会每 5 秒白拉一次 20 首。
      */
-    fun addToQueue(songs: List<Song>): Int {
+    fun addToQueue(displayedSongs: List<Song>): Int {
+        val songs = queueInputNormalizer?.let { normalize -> displayedSongs.map(normalize) } ?: displayedSongs
         if (songs.isEmpty()) return 0
         val currentQueue = _playerState.value.queue
         val toAdd = QueueAddition.compute(currentQueue, songs)
@@ -939,6 +1128,7 @@ class PlayerManager(private val applicationContext: Context) {
 
     /** 暂停主播放器（无条件设 playWhenReady=false，避免 BUFFERING 时 isPlaying=false 跳过暂停） */
     fun pause() {
+        crossfadeController.abort()
         player?.pause()
         AppLog.d("PlayerManager", "pause: playWhenReady=${player?.playWhenReady}")
     }
@@ -1081,11 +1271,17 @@ class PlayerManager(private val applicationContext: Context) {
      * - 否则 seekTo + prepare + play（IDLE 下的标准恢复路径）
      */
     fun transitionToIndex(index: Int) {
+        crossfadeController.abort()
+        shortFadeIn.cancel()
+        pendingShortFade = false
+        pendingShortFadeKey = null
         val p = player ?: return
         val queue = _playerState.value.queue
         if (index !in queue.indices) return
         val song = queue[index]
         _playerState.update { it.copy(currentIndex = index, currentSong = song) }
+        prepareReplayGain(song)
+        commitCurrentReplayGain()
         if (song.durationMs > 0) _duration.value = song.durationMs
         if (song.streamUrl.isNullOrBlank()) {
             AppLog.d("PlayerManager", "transitionToIndex: empty streamUrl at $index '${song.title}', resolving")
@@ -1123,6 +1319,9 @@ class PlayerManager(private val applicationContext: Context) {
         val p = player ?: return
         // F2-5：手动切歌立即中断进行中的 crossfade（不做优雅等待）
         crossfadeController.abort()
+        shortFadeIn.cancel()
+        pendingShortFade = false
+        pendingShortFadeKey = null
         // 出错恢复路径：IDLE 下 seekToNextMediaItem 不触发过渡回调也不 prepare，
         // 统一走手动恢复（含空 URL 网络歌曲的解析触发）
         if (isIdle()) {
@@ -1179,6 +1378,9 @@ class PlayerManager(private val applicationContext: Context) {
     fun previous(playMode: PlayMode) {
         // F2-5：手动切歌立即中断 crossfade
         crossfadeController.abort()
+        shortFadeIn.cancel()
+        pendingShortFade = false
+        pendingShortFadeKey = null
         // 出错恢复路径：IDLE 下 seekToPreviousMediaItem 不触发过渡回调也不 prepare
         if (isIdle()) {
             val target = if (playMode == PlayMode.SHUFFLE) {
@@ -1209,6 +1411,10 @@ class PlayerManager(private val applicationContext: Context) {
     }
 
     fun seekTo(positionMs: Long) {
+        crossfadeController.abort()
+        shortFadeIn.cancel()
+        pendingShortFade = false
+        pendingShortFadeKey = null
         AppLog.d("NASMusic", "seekTo: position=$positionMs, player=${player != null}, state=${player?.playbackState}")
         seekPending = true
         // 先移除上一次未触发的兜底 timeout，避免重复清除
@@ -1225,6 +1431,7 @@ class PlayerManager(private val applicationContext: Context) {
      * @param mode 不存储状态，只应用 ExoPlayer 设置
      */
     fun applyPlayMode(mode: PlayMode) {
+        if (crossfadeController.isFading()) crossfadeController.abort()
         player?.shuffleModeEnabled = (mode == PlayMode.SHUFFLE)
         player?.repeatMode = when (mode) {
             PlayMode.REPEAT_ONE -> Player.REPEAT_MODE_ONE
@@ -1242,7 +1449,8 @@ class PlayerManager(private val applicationContext: Context) {
      * 现在只要 player 存在就 addMediaItem（不会触发播放）；未 prepare 时该条目
      * 会在后续 setMediaItems 中被整体覆盖，不会重复。
      */
-    fun addToQueue(song: Song) {
+    fun addToQueue(displayedSong: Song) {
+        val song = queueInputNormalizer?.invoke(displayedSong) ?: displayedSong
         val currentQueue = _playerState.value.queue
         if (QueueAddition.compute(currentQueue, listOf(song)).isEmpty()) return
         _playerState.update { it.copy(queue = currentQueue + song) }
@@ -1278,6 +1486,10 @@ class PlayerManager(private val applicationContext: Context) {
 
     /** 跳转到队列指定索引并播放（手机遥控用） */
     fun playAt(index: Int) {
+        crossfadeController.abort()
+        shortFadeIn.cancel()
+        pendingShortFade = false
+        pendingShortFadeKey = null
         val p = player ?: return
         val queue = _playerState.value.queue
         if (index !in queue.indices) return
@@ -1422,7 +1634,8 @@ class PlayerManager(private val applicationContext: Context) {
      * @param songs 队列歌曲列表
      * @param currentIndex 当前播放索引
      */
-    fun restoreQueue(songs: List<Song>, currentIndex: Int) {
+    fun restoreQueue(displayedSongs: List<Song>, currentIndex: Int) {
+        val songs = queueInputNormalizer?.let { normalize -> displayedSongs.map(normalize) } ?: displayedSongs
         if (songs.isEmpty()) return
         val safeIndex = currentIndex.coerceIn(0, songs.lastIndex)
         // T3：三元组同帧发布
@@ -1564,6 +1777,11 @@ class PlayerManager(private val applicationContext: Context) {
         // 中止进行中的 crossfade：释放子播放器与 50ms 淡化轮询，避免服务销毁后
         // fadeRunnable 继续向已释放的 player 写 volume（原实现漏调 abort）。
         crossfadeController.abort()
+        shortFadeIn.cancel()
+        pendingShortFade = false
+        pendingShortFadeKey = null
+        playbackScope.coroutineContext[kotlinx.coroutines.Job]?.cancel()
+        replayGainController.detach()
         player?.removeListener(playerListener)
         player = null
         playerEqualizer.release()

@@ -33,7 +33,7 @@ internal fun QueueBranch(
     isPlaying: Boolean,
     playMode: com.nasmusic.tv.data.model.PlayMode
 ) {
-                    val playerState by viewModel.playerVM.playerState.collectAsState()
+                    val playerState by viewModel.displayPlayerState.collectAsState()
                     val queue = playerState.queue
                     val currentIndex = playerState.currentIndex
                     QueueScreen(

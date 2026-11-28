@@ -5,6 +5,7 @@ import androidx.test.core.app.ApplicationProvider
 import com.nasmusic.tv.backend.BackendAdapter
 import com.nasmusic.tv.backend.BackendRegistry
 import com.nasmusic.tv.backend.network.NetworkMusicManager
+import com.nasmusic.tv.data.model.ServerConfig
 import com.nasmusic.tv.data.model.Song
 import com.nasmusic.tv.data.prefs.AppPreferences
 import kotlinx.coroutines.runBlocking
@@ -57,6 +58,9 @@ class PlaylistEnricherTest {
         adapter = mock(BackendAdapter::class.java)
         networkMusicManager = mock(NetworkMusicManager::class.java)
         `when`(backendRegistry.getAdapter()).thenReturn(adapter)
+        `when`(backendRegistry.getActiveConnection()).thenReturn(
+            adapter to ServerConfig(id = "srv", backendType = "jellyfin", baseUrl = "http://nas")
+        )
         enricher = PlaylistEnricher(backendRegistry, networkMusicManager, prefs)
     }
 
@@ -80,7 +84,7 @@ class PlaylistEnricherTest {
 
         val result = enricher.enrichSong(stubSong("海阔天空", "Beyond"))
 
-        assertEquals(nasHit, result)                       // NAS 命中保留 streamUrl
+        assertEquals("nas-1", result?.id)                  // NAS 命中保留 streamUrl
         assertEquals("http://nas/audio/1.mp3", result?.streamUrl)
     }
 

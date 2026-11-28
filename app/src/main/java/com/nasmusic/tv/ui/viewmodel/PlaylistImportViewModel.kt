@@ -146,6 +146,13 @@ class PlaylistImportViewModel(
                 )
                 return@launch
             }
+            if (summary.parseError) {
+                _importMessage.value = BackupMessage(
+                    appCtx.getString(R.string.playlist_import_parse_error),
+                    isError = true
+                )
+                return@launch
+            }
             if (summary.playlistId.isEmpty() || summary.unrecognizedFormat) {
                 _importMessage.value = BackupMessage(
                     appCtx.getString(R.string.playlist_import_unrecognized),
@@ -215,6 +222,13 @@ class PlaylistImportViewModel(
             AppLog.e("PlaylistImportViewModel", "importRemoteFile failed", e)
             _importMessage.value = BackupMessage(
                 appCtx.getString(R.string.playlist_import_failed, e.message?.take(60) ?: e.javaClass.simpleName),
+                isError = true
+            )
+            return null
+        }
+        if (summary.parseError) {
+            _importMessage.value = BackupMessage(
+                appCtx.getString(R.string.playlist_import_parse_error),
                 isError = true
             )
             return null

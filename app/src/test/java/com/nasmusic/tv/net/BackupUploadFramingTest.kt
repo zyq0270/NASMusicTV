@@ -193,10 +193,13 @@ class BackupUploadFramingTest {
             override fun isPlaying() = false
             override fun getProgressMs() = 0L
             override fun getDurationMs() = 0L
-            override fun playAt(index: Int) { played.countDown() }
-            override fun moveQueueItem(from: Int, to: Int) = Unit
-            override fun removeFromQueue(index: Int) = Unit
-            override fun addToQueue(song: Song) = Unit
+            override fun playAt(index: Int): Boolean {
+                played.countDown()
+                return true
+            }
+            override fun moveQueueItem(from: Int, to: Int) = true
+            override fun removeFromQueue(index: Int) = true
+            override fun addToQueue(song: Song) = true
             override suspend fun search(keyword: String) = RemoteSearchResult(emptyList(), emptyList())
         }
         val server = RemoteControlServer(app, port)

@@ -131,7 +131,9 @@ fun TextInputDialog(
     showHistory: Boolean = false,
     historyItems: List<SearchHistoryItem> = emptyList(),
     onHistorySelect: ((String) -> Unit)? = null,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    keyboardType: KeyboardType = KeyboardType.Text,
+    errorText: String? = null,
 ) {
     var text by remember(initialValue) { mutableStateOf(initialValue) }
     var isUpperCase by remember { mutableStateOf(false) }
@@ -303,7 +305,7 @@ fun TextInputDialog(
                                 visualTransformation = if (masked) PasswordVisualTransformation()
                                                       else VisualTransformation.None,
                                 keyboardOptions = KeyboardOptions(
-                                    keyboardType = if (masked) KeyboardType.Password else KeyboardType.Text
+                                    keyboardType = if (masked) KeyboardType.Password else keyboardType
                                 ),
                                 cursorBrush = SolidColor(NasMusicColors.Primary),
                                 decorationBox = { innerTextField ->
@@ -350,6 +352,16 @@ fun TextInputDialog(
                                     modifier = Modifier.padding(horizontal = 12.dp)
                                 )
                             }
+                        }
+
+                        // 调用方校验错误（如缓存数量非整数/越界）；不自动关闭对话框。
+                        if (!errorText.isNullOrBlank()) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = errorText,
+                                color = NasMusicColors.Warning,
+                                fontSize = FontSize.body()
+                            )
                         }
 
                         // IME 不可用提示

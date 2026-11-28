@@ -8,6 +8,9 @@ import com.nasmusic.tv.R
 import com.nasmusic.tv.backend.BackendRegistry
 import com.nasmusic.tv.data.model.PlayMode
 import com.nasmusic.tv.data.model.Song
+import com.nasmusic.tv.data.model.PlaylistSongRef
+import com.nasmusic.tv.data.model.SongSourceKind
+import com.nasmusic.tv.util.SongKeys
 import com.nasmusic.tv.player.PlayerManager
 import com.nasmusic.tv.player.PlayerState
 import com.nasmusic.tv.player.adjacentIndex
@@ -19,7 +22,6 @@ import com.nasmusic.tv.util.rethrowIfCancellation
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
@@ -41,11 +43,14 @@ class PlayerViewModel(
     private val backendRegistry = nasMusicApp.backendRegistry
     private val prefs = nasMusicApp.appPreferences
     private val playlistEnricher = nasMusicApp.playlistEnricher
+    private val externalPlaybackController = nasMusicApp.externalPlaybackController
 
     /** 播放开始（供 PlayHistoryViewModel 记录最近播放），由 MainViewModel 注入 */
     var onRecordPlay: ((Song) -> Unit)? = null
     /** 错误消息通道（经 MainViewModel 的 errorMessage 语义） */
     var showMessage: ((String) -> Unit)? = null
+    /** UI 展示曲入库前还原原曲，避免 override 写入持久化队列 JSON。 */
+    var queueInputNormalizer: ((Song) -> Song)? = null
 
     // B-13: 播放器状态（isPlaying/progress/duration 由 PlayerManager 拥有）
     // T3: queue/currentIndex/currentSong 合并为 playerState 单流（原子同帧发布）
@@ -55,9 +60,8 @@ class PlayerViewModel(
     val wantsToPlay: StateFlow<Boolean> = playerManager.wantsToPlay
     val progress: StateFlow<Long> = playerManager.progress
     val duration: StateFlow<Long> = playerManager.duration
-    // B-13: playMode 由本类拥有（UI/设置状态，不归 PlayerManager）
-    private val _playMode = MutableStateFlow(PlayMode.SEQUENTIAL)
-    val playMode: StateFlow<PlayMode> = _playMode.asStateFlow()
+    // B-13: playMode 由应用级外部控制器拥有，UI / 系统媒体会话 / 小组件共享同一状态。
+    val playMode: StateFlow<PlayMode> = externalPlaybackController.playMode
 
     // F2-2：睡眠定时器状态桥接（PlayerManager.sleepTimer → UI）
     val sleepTimerState: StateFlow<com.nasmusic.tv.player.SleepTimerController.State> =
@@ -78,6 +82,7 @@ class PlayerViewModel(
     }
 
     init {
+        externalPlaybackController.onPlayModeChanged = { onPlayModeChanged?.invoke(it) }
         // F2-5：crossfade 设置注入 PlayerManager（volatile 字段，进度轮询读取）
         viewModelScope.launch {
             prefs.player.crossfadeEnabled.collect { playerManager.crossfadeEnabled = it }
@@ -111,24 +116,19 @@ class PlayerViewModel(
 
     /** 初始化播放模式（B-13: 从预设置恢复，MainViewModel 启动期调用一次） */
     fun initPlayModeFromSettings(defaultMode: PlayMode) {
-        _playMode.value = defaultMode
-        playerManager.applyPlayMode(defaultMode)
+        externalPlaybackController.initializePlayMode(defaultMode)
     }
 
     fun setPlayMode(mode: PlayMode) {
-        _playMode.value = mode
-        playerManager.applyPlayMode(mode)
-        onPlayModeChanged?.invoke(mode)
+        externalPlaybackController.setPlayMode(mode)
     }
 
     fun togglePlayMode() {
-        val modes = PlayMode.entries
-        val nextIndex = (modes.indexOf(_playMode.value) + 1) % modes.size
-        val newMode = modes[nextIndex]
-        setPlayMode(newMode)
+        externalPlaybackController.togglePlayMode()
     }
 
-    fun playSong(song: Song) {
+    fun playSong(displayedSong: Song) {
+        val song = queueInputNormalizer?.invoke(displayedSong) ?: displayedSong
         AppLog.d("PlayerViewModel", "playSong: ${song.title}, coverUrl=${song.coverUrl ?: "null"}")
         // 2026-11-19 修复：空 streamUrl 时 PlayerManager.playSong 会在 `streamUrl ?: return`
         // 静默丢弃——连 MediaItem 都不 set，onMediaItemTransition(AUTO) 兜底解析链也不会触发，
@@ -147,7 +147,8 @@ class PlayerViewModel(
         onRecordPlay?.invoke(song)
     }
 
-    fun playQueue(songs: List<Song>, startIndex: Int = 0) {
+    fun playQueue(displayedSongs: List<Song>, startIndex: Int = 0) {
+        val songs = queueInputNormalizer?.let { normalize -> displayedSongs.map(normalize) } ?: displayedSongs
         if (songs.isEmpty()) return
         // 2026-09-25 审查修复（#9 旧快照覆盖）：进入即递增代数，needsResolve 分支的异步解析
         // 在回写 playQueue 前比对代数，期间用户再次 playQueue/playSong/切歌解析则丢弃本次结果
@@ -219,8 +220,7 @@ class PlayerViewModel(
                     !firstSong.isNetworkSong && !firstSong.isLocalSong &&
                         !firstSong.id.startsWith("imported_") && firstSong.streamUrl.isNullOrBlank() -> {
                         try {
-                            val adapter = backendRegistry.getAdapter()
-                            val url = adapter?.getSongsByIds(listOf(firstSong.id))?.firstOrNull()?.streamUrl
+                            val url = resolveNasStreamUrl(firstSong)
                             if (!url.isNullOrBlank()) {
                                 firstSong.copy(streamUrl = url)
                             } else {
@@ -339,11 +339,7 @@ class PlayerViewModel(
                     }
                     // NAS 歌曲：通过后端获取 streamUrl
                     else -> {
-                        val adapter = backendRegistry.getAdapter()
-                        if (adapter != null) {
-                            val songs = adapter.getSongsByIds(listOf(song.id))
-                            songs.firstOrNull()?.streamUrl
-                        } else null
+                        resolveNasStreamUrl(song)
                     }
                 }
 
@@ -358,7 +354,7 @@ class PlayerViewModel(
                 // G1-04：解析窗口内用户可能已切歌 —— next()/previous() 走「目标曲已有 URL」
                 // 分支时不会自增代数，只靠 generation 挡不住。回写前必须确认当前曲仍是
                 // 本次解析的那首，否则会把 A 的直链写到 B 的下标上。
-                if (playerState.value.currentSong?.id != song.id) {
+                if (playerState.value.currentSong?.let(::playbackKey) != playbackKey(song)) {
                     AppLog.d(
                         "PlayerViewModel",
                         "resolveAndPlayCurrentSong: current song changed (${playerState.value.currentSong?.title} != ${song.title}), drop result"
@@ -405,7 +401,7 @@ class PlayerViewModel(
         // 在 SEQUENTIAL 末尾会绕过「不回卷」的无动作语义。目标索引统一交给纯函数
         // [adjacentIndex]；返回 null 表示本次不预判（随机 / 顺序边界），交给 PlayerManager。
         val state = playerState.value
-        val targetIndex = adjacentIndex(state.queue.size, state.currentIndex, _playMode.value, previous = false)
+        val targetIndex = adjacentIndex(state.queue.size, state.currentIndex, playMode.value, previous = false)
         if (targetIndex != null) {
             val nextSong = state.queue.getOrNull(targetIndex)
             if (nextSong != null && nextSong.streamUrl.isNullOrBlank()) {
@@ -415,13 +411,13 @@ class PlayerViewModel(
         }
         // G1-04：目标切换时作废在途的首曲解析（旧结果不得写到新下标上）。
         invalidatePendingResolves()
-        playerManager.next(_playMode.value)
+        playerManager.next(playMode.value)
     }
 
     fun previous() {
         // 同 next：上一首的空 URL 预判走同款模式判据（SHUFFLE / 顺序边界不预判）。
         val state = playerState.value
-        val targetIndex = adjacentIndex(state.queue.size, state.currentIndex, _playMode.value, previous = true)
+        val targetIndex = adjacentIndex(state.queue.size, state.currentIndex, playMode.value, previous = true)
         if (targetIndex != null) {
             val prevSong = state.queue.getOrNull(targetIndex)
             if (prevSong != null && prevSong.streamUrl.isNullOrBlank()) {
@@ -431,7 +427,7 @@ class PlayerViewModel(
         }
         // G1-04：同上，作废在途的首曲解析。
         invalidatePendingResolves()
-        playerManager.previous(_playMode.value)
+        playerManager.previous(playMode.value)
     }
 
     /**
@@ -458,12 +454,31 @@ class PlayerViewModel(
                 }
             }
             else -> {
-                val adapter = backendRegistry.getAdapter()
-                if (adapter != null) {
-                    adapter.getSongsByIds(listOf(song.id)).firstOrNull()?.streamUrl
-                } else null
+                resolveNasStreamUrl(song)
             }
         }
+    }
+
+    private fun playbackKey(song: Song): String =
+        PlaylistSongRef.decodeFromSong(song)?.stableKey?.takeIf { it.isNotBlank() }
+            ?: SongKeys.bindSource(song)?.let { runCatching { SongKeys.stableKey(song, it) }.getOrNull() }
+            ?: "legacy:${song.id}"
+
+    private suspend fun resolveNasStreamUrl(song: Song): String? {
+        val connection = backendRegistry.getActiveConnection() ?: return null
+        val (adapter, config) = connection
+        val source = PlaylistSongRef.decodeFromSong(song)?.source
+        if (source != null) {
+            if (source.kind != SongSourceKind.NAS || source.serverId != config.id ||
+                source.backendType != adapter.backendType
+            ) return null
+        }
+        val nativeId = source?.nativeId ?: when {
+            song.id.startsWith("nasf_") -> song.id.removePrefix("nasf_")
+            song.id.startsWith("nas_") -> song.id.removePrefix("nas_")
+            else -> song.id
+        }
+        return adapter.getSongsByIds(listOf(nativeId)).firstOrNull()?.streamUrl
     }
 
     /**
@@ -526,7 +541,7 @@ class PlayerViewModel(
                     if (generation != resolveGeneration) return@launch
                     AppLog.w("PlayerViewModel", "resolveAndPlayByIndex: failed after all fallbacks, skipping ${song.title}")
                     showMessage?.invoke(getApplication<Application>().getString(R.string.resolve_url_auto_skip_with_title, song.title))
-                    playerManager.next(_playMode.value)
+                    playerManager.next(playMode.value)
                     return@launch
                 }
 
@@ -544,7 +559,7 @@ class PlayerViewModel(
                 // 只比代数挡不住 ⇒ 必须校验 targetIndex 上还是不是同一首歌，
                 // 否则解析结果会写到已换成别的歌的同一下标上。
                 val currentAtTarget = latestQueue.getOrNull(targetIndex)
-                if (currentAtTarget == null || currentAtTarget.id != song.id) {
+                if (currentAtTarget == null || playbackKey(currentAtTarget) != playbackKey(song)) {
                     AppLog.d(
                         "PlayerViewModel",
                         "resolveAndPlayByIndex: 队列已变（index $targetIndex 现为 ${currentAtTarget?.title ?: "越界"}），丢弃 ${song.title} 的解析结果"
@@ -599,7 +614,7 @@ class PlayerViewModel(
         val latestQueue = playerState.value.queue
         // N01：与 C32 同族 —— 回写前确认 targetIndex 上仍是触发替换的那首歌，
         // 否则队列已增删/移动，替换产物会落到别的歌上（队列变短时还会越界）。
-        if (latestQueue.getOrNull(targetIndex)?.id != song.id) {
+        if (latestQueue.getOrNull(targetIndex)?.let(::playbackKey) != playbackKey(song)) {
             AppLog.d("PlayerViewModel", "tryReplaceByReSearch: 队列已变，丢弃 ${song.title} 的替换结果")
             return false
         }
@@ -718,7 +733,7 @@ class PlayerViewModel(
      * 此处不再另写一套过滤，避免与遥控/随心听等入口口径漂移。
      */
     fun addSongsToQueue(songs: List<Song>) {
-        playerManager.addToQueue(songs)
+        playerManager.addToQueue(queueInputNormalizer?.let { normalize -> songs.map(normalize) } ?: songs)
     }
 
     /**
@@ -729,7 +744,8 @@ class PlayerViewModel(
      * 增删任意一首歌都会让所有在途解析作废，包括正在播放那首的解析 ⇒ 反而更糟。
      * 正确性由 `resolveAndPlayByIndex` / `tryReplaceByReSearch` 回写前的 **id 校验**保证。
      */
-    fun toggleQueueSong(song: Song) {
+    fun toggleQueueSong(displayedSong: Song) {
+        val song = queueInputNormalizer?.invoke(displayedSong) ?: displayedSong
         val currentQueue = playerState.value.queue
         val inQueue = currentQueue.any { it.id == song.id }
         if (inQueue) {

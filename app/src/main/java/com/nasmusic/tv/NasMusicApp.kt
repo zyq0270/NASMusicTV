@@ -47,12 +47,20 @@ import com.nasmusic.tv.backend.network.mv.MvSearchManager
 import com.nasmusic.tv.backend.network.mv.MvPersistentCache
 import com.nasmusic.tv.backend.network.netease.NeteaseOpenApi
 import com.nasmusic.tv.data.model.CloudDriveType
+import com.nasmusic.tv.data.model.PlaylistSongRef
+import com.nasmusic.tv.data.model.SongSourceIdentity
+import com.nasmusic.tv.data.model.SongSourceKind
+import com.nasmusic.tv.data.model.Song
+import com.nasmusic.tv.data.model.MusicSourceType
+import com.nasmusic.tv.data.model.sourceType
 import com.nasmusic.tv.data.prefs.AppPreferences
+import com.nasmusic.tv.data.prefs.RoadmapPreferences
 import com.nasmusic.tv.player.ModelDownloadManager
 import com.nasmusic.tv.player.PlayerManager
 import com.nasmusic.tv.ui.components.FocusVisualPreference
 import com.nasmusic.tv.util.AppLog
 import com.nasmusic.tv.util.LogStore
+import com.nasmusic.tv.util.SongKeys
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -109,10 +117,21 @@ class NasMusicApp : Application(), ImageLoaderFactory {
         private set
     lateinit var appPreferences: AppPreferences
         private set
+    lateinit var roadmapPreferences: RoadmapPreferences
+        private set
     lateinit var playerManager: PlayerManager
         private set
+    lateinit var sourceIdentityProvider: (Song) -> SongSourceIdentity?
+        internal set
     lateinit var networkMusicManager: NetworkMusicManager
         private set
+
+    val externalPlaybackController: com.nasmusic.tv.player.ExternalPlaybackController by lazy {
+        com.nasmusic.tv.player.ExternalPlaybackController(this)
+    }
+    val yearlyStatsRecorder: com.nasmusic.tv.data.stats.YearlyStatsRecorder by lazy {
+        com.nasmusic.tv.data.stats.YearlyStatsRecorder(roadmapPreferences, applicationScope)
+    }
     /**
      * Meting 服务实例（方案 §7.5 S2）：构造期按 `settings_meting_enabled` 决定是否注册，
      * 运行时开关切换由 `MainViewModel.setSourceEnabled` 调 `registerService` / `unregisterService`。
@@ -452,6 +471,7 @@ val baiduOAuthClient: BaiduOAuthClient by lazy { BaiduOAuthClient(this, baiduOkH
         LogStore.init(filesDir)
         installCrashLogger()
         appPreferences = AppPreferences.getInstance(this)
+        roadmapPreferences = RoadmapPreferences.getInstance(this)
         // v2.35.0 多码率：单曲覆盖存储（须在 networkMusicManager 构造前初始化，供 provider 闭包使用）
         qualityOverrides = com.nasmusic.tv.data.prefs.QualityOverrides(this)
         // R-7（第三类）：启动 provider 键内存镜像收集（DataStore Flow → @Volatile）
@@ -487,6 +507,31 @@ val baiduOAuthClient: BaiduOAuthClient by lazy { BaiduOAuthClient(this, baiduOkH
         // 后端适配器使用（如飞牛音乐的 deviceId）。
         backendRegistry = BackendRegistry(applicationContext)
         playerManager = PlayerManager(this)
+        sourceIdentityProvider = { song ->
+            PlaylistSongRef.decodeFromSong(song)?.source
+                ?: SongKeys.bindSource(song)
+                ?: if (
+                    song.networkSource == "weather" ||
+                    song.sourceType != MusicSourceType.NAS ||
+                    song.id.startsWith("imported_")
+                ) {
+                    null
+                } else {
+                    backendRegistry.getActiveConnection()?.let { (adapter, config) ->
+                        SongSourceIdentity(
+                            kind = SongSourceKind.NAS,
+                            nativeId = when {
+                                song.id.startsWith("nasf_") -> song.id.removePrefix("nasf_")
+                                song.id.startsWith("nas_") -> song.id.removePrefix("nas_")
+                                else -> song.id
+                            },
+                            backendType = adapter.backendType,
+                            serverId = config.id,
+                        )
+                    }
+                }
+        }
+        playerManager.sourceIdentityProvider = sourceIdentityProvider
         // F2-3：智能电台（打分纯函数在 RadioSongScorer，播放次数作偏好信号）
         smartRadioManager = com.nasmusic.tv.backend.radio.SmartRadioManager(
             backendRegistry = backendRegistry,
@@ -827,6 +872,25 @@ autoDownloadController = com.nasmusic.tv.backend.download.AutoDownloadController
             // 改为显式判「用户开没开」（此前只看实例非空 ⇒ 关源后照样返回结果，§5.2）。
             sourceVisibility = sourceVisibility
         )
+
+        applicationScope.launch {
+            com.nasmusic.tv.data.cache.CacheLimits.loadFrom(roadmapPreferences)
+            com.nasmusic.tv.lyrics.LyricsPersistentCache.get(this@NasMusicApp).maintain()
+            coverUrlPersistentCache.maintain()
+            networkMusicManager.maintainPlayUrlCache()
+        }
+
+        // 小组件只订阅原子播放状态，不读取进度，避免高频刷新。
+        val externalController = externalPlaybackController
+        applicationScope.launch {
+            playerManager.playerState.collect { externalController.requestWidgetUpdate() }
+        }
+        applicationScope.launch {
+            playerManager.isPlaying.collect { externalController.requestWidgetUpdate() }
+        }
+        applicationScope.launch {
+            playerManager.sleepTimer.state.collect { externalController.requestWidgetUpdate() }
+        }
 
         // 启动时清理超过 30 天的搜索历史
         applicationScope.launch {

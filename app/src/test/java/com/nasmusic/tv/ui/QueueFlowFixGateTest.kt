@@ -89,8 +89,16 @@ class QueueFlowFixGateTest {
         val vm = src("ui/viewmodel/PlayerViewModel.kt")
         val next = region(vm, "fun next()", "fun previous()")
         val previous = region(vm, "fun previous()", "解析单首歌曲的播放链接")
-        assertTrue("next 未走 adjacentIndex", next.contains("adjacentIndex(state.queue.size, state.currentIndex, _playMode.value, previous = false)"))
-        assertTrue("previous 未走 adjacentIndex", previous.contains("adjacentIndex(state.queue.size, state.currentIndex, _playMode.value, previous = true)"))
+        assertTrue(
+            "next 未走 adjacentIndex",
+            Regex("adjacentIndex\\(state\\.queue\\.size, state\\.currentIndex, _?playMode\\.value, previous = false\\)")
+                .containsMatchIn(next)
+        )
+        assertTrue(
+            "previous 未走 adjacentIndex",
+            Regex("adjacentIndex\\(state\\.queue\\.size, state\\.currentIndex, _?playMode\\.value, previous = true\\)")
+                .containsMatchIn(previous)
+        )
         assertFalse(
             "旧无条件环绕预判仍在——会绕过 playRandom / 不回卷语义",
             vm.contains("val targetIndex = if (nextIndex < queueValue.size) nextIndex else 0") ||

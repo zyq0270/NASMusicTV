@@ -3,8 +3,10 @@ package com.nasmusic.tv.backend.local
 import com.nasmusic.tv.data.model.Album
 import com.nasmusic.tv.data.model.Artist
 import com.nasmusic.tv.data.model.Song
+import com.nasmusic.tv.data.model.SongSourceIdentity
 import com.nasmusic.tv.util.ArtistSplitter
 import com.nasmusic.tv.util.PinyinUtils
+import com.nasmusic.tv.util.SongKeys
 
 /**
  * 本地音乐与 NAS 数据合并器
@@ -156,8 +158,19 @@ object MusicMerger {
      *
      * 封面优先级：专辑内第一首有 coverUrl 的歌曲 → null（留给上层异步解析）
      */
-    fun buildLocalAlbums(localSongs: List<Song>): List<Album> =
-        localSongs
+    fun buildLocalAlbums(
+        localSongs: List<Song>,
+        readModel: SongReadModel? = null,
+        sourceFor: ((Song) -> SongSourceIdentity?)? = null,
+        snapshot: SongReadSnapshot? = null,
+    ): List<Album> {
+        val displayed = if (sourceFor == null && snapshot == null) {
+            readModel?.applyAll(localSongs) ?: localSongs
+        } else {
+            readModel?.applyAll(localSongs, sourceFor ?: { SongKeys.bindSource(it) }, snapshot ?: readModel.snapshots.value)
+                ?: localSongs
+        }
+        return displayed
             .filter { it.album.isNotBlank() }
             // 先按专辑名归堆（G2-05）：⛔ 不能直接用曲目级 artist 分组 ——
             // 合辑/群星/`A feat. B` 的每首 track artist 都不同，会把同一张专辑
@@ -195,6 +208,7 @@ object MusicMerger {
                     )
                 }
             }
+    }
 
     /**
      * 从本地歌曲生成本地艺术家列表（按 artistName 去重分组）
@@ -202,10 +216,25 @@ object MusicMerger {
      * 合唱艺术家拆分：用 ArtistSplitter 将 "张三/李四" 拆为 "张三"、"李四"，
      * 合唱歌曲在每个拆分后的艺术家下都列出（songCount 累加）。
      */
-    fun buildLocalArtists(localSongs: List<Song>): List<Artist> =
-        // 本地艺术家无独立封面，用其名下第一首有封面的歌曲封面兜底
-        // （本地歌封面来自 LocalCoverExtractor 提取的侧车 cover.jpg / 内嵌 ID3 APIC）
-        buildArtistsFromSongs(localSongs, "local_artist_", useSongCover = true)
+    fun buildLocalArtists(
+        localSongs: List<Song>,
+        readModel: SongReadModel? = null,
+        sourceFor: ((Song) -> SongSourceIdentity?)? = null,
+        snapshot: SongReadSnapshot? = null,
+    ): List<Artist> {
+        val displayedSongs = if (sourceFor == null && snapshot == null) {
+            readModel?.applyAll(localSongs) ?: localSongs
+        } else {
+            readModel?.applyAll(localSongs, sourceFor ?: { SongKeys.bindSource(it) }, snapshot ?: readModel.snapshots.value)
+                ?: localSongs
+        }
+        // 本地艺术家无独立封面，用其名下第一首有封面的歌曲封面兜底。
+        return buildArtistsFromSongs(
+            songs = displayedSongs,
+            idPrefix = "local_artist_",
+            useSongCover = true,
+        )
+    }
 
     /**
      * 从百度网盘歌曲列表构建专辑列表
@@ -217,7 +246,18 @@ object MusicMerger {
      * - 过滤与 artist 同名的目录（如 `/周杰伦/周杰伦/...` 第二层"周杰伦"是 artist 不是专辑）
      * - 通过的目录才认为是专辑；否则该歌曲不归属任何专辑
      */
-    fun buildBaiduAlbums(baiduSongs: List<Song>): List<Album> {
+    fun buildBaiduAlbums(
+        baiduSongs: List<Song>,
+        readModel: SongReadModel? = null,
+        sourceFor: ((Song) -> SongSourceIdentity?)? = null,
+        snapshot: SongReadSnapshot? = null,
+    ): List<Album> {
+        val displayed = if (sourceFor == null && snapshot == null) {
+            readModel?.applyAll(baiduSongs) ?: baiduSongs
+        } else {
+            readModel?.applyAll(baiduSongs, sourceFor ?: { SongKeys.bindSource(it) }, snapshot ?: readModel.snapshots.value)
+                ?: baiduSongs
+        }
         // 泛化目录名黑名单（小写匹配）——这些词不太可能是专辑名
         val genericDirs = setOf(
             "音乐", "music", "歌曲", "songs", "audio", "音频",
@@ -226,7 +266,7 @@ object MusicMerger {
             "未分类", "misc", "other", "其他", "tmp", "temp"
         )
 
-        return baiduSongs
+        return displayed
             .mapNotNull { song ->
                 val segments = song.path?.trim('/')?.split("/") ?: return@mapNotNull null
                 // 至少要有 2 层：目录/文件名，否则无法推断专辑
@@ -263,10 +303,24 @@ object MusicMerger {
      * 合唱艺术家拆分：用 ArtistSplitter 将 "张三/李四" 拆为 "张三"、"李四"，
      * 合唱歌曲在每个拆分后的艺术家下都列出。
      */
-    fun buildBaiduArtists(baiduSongs: List<Song>): List<Artist> =
-        // 百度艺术家走在线补全（网易云→酷狗→iTunes→歌曲封面兜底，见 ArtistCoverResolver）。
-        // 不直接用歌曲封面兜底，保证能优先拿到歌手本人照片。
-        buildArtistsFromSongs(baiduSongs, "baidu_artist_", useSongCover = false)
+    fun buildBaiduArtists(
+        baiduSongs: List<Song>,
+        readModel: SongReadModel? = null,
+        sourceFor: ((Song) -> SongSourceIdentity?)? = null,
+        snapshot: SongReadSnapshot? = null,
+    ): List<Artist> {
+        val displayed = if (sourceFor == null && snapshot == null) {
+            readModel?.applyAll(baiduSongs) ?: baiduSongs
+        } else {
+            readModel?.applyAll(baiduSongs, sourceFor ?: { SongKeys.bindSource(it) }, snapshot ?: readModel.snapshots.value)
+                ?: baiduSongs
+        }
+        return buildArtistsFromSongs(
+            songs = displayed,
+            idPrefix = "baidu_artist_",
+            useSongCover = false,
+        )
+    }
 
     /**
      * 从任意歌曲列表构建艺术家列表（按拆分后的艺术家名去重分组）。
@@ -283,10 +337,16 @@ object MusicMerger {
      * @param useSongCover 为 true 时用该艺术家名下第一首有封面的歌曲封面作为 coverUrl
      *                     （本地艺术家用；百度艺术家留 null 走在线 iTunes/百度补全）
      */
-    fun buildArtistsFromSongs(songs: List<Song>, idPrefix: String, useSongCover: Boolean = false): List<Artist> {
+    fun buildArtistsFromSongs(
+        songs: List<Song>,
+        idPrefix: String,
+        useSongCover: Boolean = false,
+        readModel: SongReadModel? = null,
+    ): List<Artist> {
+        val displaySongs = readModel?.applyAll(songs) ?: songs
         // key = 归一化艺术家名，value = (展示名, 歌曲列表)
         val artistMap = linkedMapOf<String, Pair<String, MutableList<Song>>>()
-        for (song in songs) {
+        for (song in displaySongs) {
             if (song.artist.isBlank()) continue
             for (name in ArtistSplitter.split(song.artist)) {
                 val key = ArtistSplitter.normalizeKey(name)
@@ -317,11 +377,19 @@ object MusicMerger {
     fun mergeLibrarySongs(
         nasSongs: List<Song>,
         localSongs: List<Song>,
-        baiduSongs: List<Song> = emptyList()
+        baiduSongs: List<Song> = emptyList(),
+        readModel: SongReadModel? = null,
+        sourceFor: ((Song) -> SongSourceIdentity?)? = null,
+        snapshot: SongReadSnapshot? = null,
     ): List<Song> {
-        if (localSongs.isEmpty() && baiduSongs.isEmpty()) return nasSongs
+        // Hot path: NAS-only libraries are passed through without copying; the layout consumers
+        // treat the result as read-only.
+        if (readModel == null && localSongs.isEmpty() && baiduSongs.isEmpty()) return nasSongs
         val seen = HashSet<String>(nasSongs.size + localSongs.size + baiduSongs.size)
-        return (nasSongs + localSongs + baiduSongs).filter { seen.add(it.id) }
+        val merged = (nasSongs + localSongs + baiduSongs).filter { seen.add(it.id) }
+        if (sourceFor == null && snapshot == null) return readModel?.applyAll(merged) ?: merged
+        return readModel?.applyAll(merged, sourceFor ?: { SongKeys.bindSource(it) }, snapshot ?: readModel.snapshots.value)
+            ?: merged
     }
 
     /**

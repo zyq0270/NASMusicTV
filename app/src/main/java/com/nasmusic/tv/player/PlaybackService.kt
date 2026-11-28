@@ -40,7 +40,15 @@ import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.Futures
 import com.nasmusic.tv.NasMusicApp
 import com.nasmusic.tv.R
+import com.nasmusic.tv.data.model.PlayEnded
+import com.nasmusic.tv.data.model.PlayStarted
 import com.nasmusic.tv.data.model.Song
+import com.nasmusic.tv.backend.network.PrefetchStatus
+import com.nasmusic.tv.backend.search.SharedSearchService
+import com.nasmusic.tv.data.cache.effectiveSources
+import com.nasmusic.tv.data.model.MusicSourceType
+import com.nasmusic.tv.data.model.PlayMode
+import com.nasmusic.tv.data.model.SeamlessMode
 import com.nasmusic.tv.ui.MainActivity
 import com.nasmusic.tv.util.AppLog
 import com.nasmusic.tv.util.rethrowIfCancellation
@@ -55,6 +63,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 
 /**
  * 后台播放服务
@@ -78,6 +88,7 @@ class PlaybackService : MediaLibraryService() {
      *  定时启动/取消/逐分钟递减都会改变第三位，通知随之刷新。 */
     private var lastNotificationState: Triple<String?, Boolean, Int>? = null
     private lateinit var mediaLibraryTree: MediaLibraryTree
+    private lateinit var sharedSearchService: SharedSearchService
     /**
      * Android Auto 浏览节点缓存（mediaId → Song）。
      *
@@ -127,12 +138,33 @@ class PlaybackService : MediaLibraryService() {
     )
     /** F2-2：睡眠定时器运行中，通知剩余分钟刷新（分钟粒度 key 并入去重状态） */
     private var sleepMinuteTickJob: Job? = null
+    private var prefetchTickJob: Job? = null
+    private val prefetchAttempts = mutableMapOf<String, Int>()
+
+    private data class PlaybackPreferencesSnapshot(
+        val seamlessMode: SeamlessMode,
+        val replayGainEnabled: Boolean,
+        val crossfadeEnabled: Boolean,
+        val crossfadeDurationSec: Int,
+        val playMode: PlayMode,
+    )
+
+    private data class ActivePlay(
+        val songKey: String,
+        val song: Song,
+        val startedAtMs: Long,
+        var accumulatedMs: Long = 0L,
+        var resumedAtMs: Long? = null,
+    )
+
+    private var activePlay: ActivePlay? = null
 
     private val controlReceiver = object : android.content.BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             when (intent.action) {
                 ACTION_TOGGLE_PLAY_MODE -> handleTogglePlayMode()
                 ACTION_SLEEP_TIMER_CYCLE -> handleSleepTimerCycle()
+                ACTION_TOGGLE_FAVORITE -> handleToggleFavorite()
             }
         }
     }
@@ -140,15 +172,34 @@ class PlaybackService : MediaLibraryService() {
     /** F2-2b：切换播放模式（通知按钮 / 系统媒体卡片自定义按钮共用） */
     private fun handleTogglePlayMode() {
         AppLog.d("PlaybackService", "control: toggle play mode")
-        // L3：经 app 容器的事件流投递，由 UI 侧执行切换（playMode 真相在 PlayerViewModel）。
-        // 返回 false = 当前无 UI 订阅（Activity 已销毁 / 应用已退出），事件按设计丢弃——
-        // 与旧实现 handler == null 时静默无反应同义，不是故障。
-        if (!(application as NasMusicApp).requestPlayModeToggle()) {
-            AppLog.w("PlaybackService", "control: toggle play mode dropped (no UI subscriber)")
-        }
-        // 强制刷新（模式图标变化）
+        (application as NasMusicApp).externalPlaybackController.togglePlayMode()
         lastNotificationState = null
         updateNotification()
+    }
+
+    private fun handleToggleFavorite(): ListenableFuture<SessionResult> {
+        val song = (application as NasMusicApp).playerManager.playerState.value.currentSong
+            ?: return Futures.immediateFuture(SessionResult(SessionResult.RESULT_ERROR_BAD_VALUE))
+        val result = SettableFuture.create<SessionResult>()
+        serviceScope.launch {
+            try {
+                val favorite = (application as NasMusicApp).externalPlaybackController.toggleFavorite(song)
+                if (favorite == null) {
+                    AppLog.w("PlaybackService", "control: favorite update failed")
+                }
+                lastNotificationState = null
+                updateNotification()
+                refreshSessionCustomLayout()
+                result.set(SessionResult(
+                    if (favorite == null) SessionResult.RESULT_ERROR_UNKNOWN else SessionResult.RESULT_SUCCESS
+                ))
+            } catch (t: Throwable) {
+                t.rethrowIfCancellation()
+                AppLog.e("PlaybackService", "control: favorite update failed", t)
+                result.set(SessionResult(SessionResult.RESULT_ERROR_UNKNOWN))
+            }
+        }
+        return result
     }
 
     /** F2-2b：睡眠定时循环切换（未启动→首档位，运行中→取消） */
@@ -189,6 +240,11 @@ class PlaybackService : MediaLibraryService() {
                 .setDisplayName(sleepLabel)
                 .setSessionCommand(SessionCommand(ACTION_SLEEP_TIMER_CYCLE, Bundle.EMPTY))
                 .setIconResId(android.R.drawable.ic_lock_idle_alarm)
+                .build(),
+            CommandButton.Builder()
+                .setDisplayName(getString(R.string.mine_favorites))
+                .setSessionCommand(SessionCommand(ACTION_TOGGLE_FAVORITE, Bundle.EMPTY))
+                .setIconResId(android.R.drawable.btn_star_big_off)
                 .build()
         )
     }
@@ -205,22 +261,73 @@ class PlaybackService : MediaLibraryService() {
     private val playerListener = object : Player.Listener {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             if (isPlaying) {
+                beginActivePlay()
                 ensureMediaSessionActive()
+            } else {
+                pauseActivePlay()
+                cancelPrefetchJobs()
             }
             updateNotification()
         }
 
         override fun onPlaybackStateChanged(playbackState: Int) {
             if (playbackState == Player.STATE_ENDED) {
+                finishActivePlay()
                 (application as NasMusicApp).playerManager.onPlaybackEnded()
+            }
+            if (playbackState == Player.STATE_BUFFERING || playbackState == Player.STATE_ENDED) {
+                cancelPrefetchJobs()
             }
             updateNotification()
         }
 
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+            finishActivePlay()
+            cancelPrefetchJobs()
+            if (servicePlayer?.isPlaying == true) beginActivePlay()
             loadArtworkForCurrentItem()
             updateNotification()
         }
+
+        override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+            finishActivePlay()
+            cancelPrefetchJobs()
+            updateNotification()
+        }
+    }
+
+    private fun beginActivePlay() {
+        if (activePlay != null) return
+        val app = application as NasMusicApp
+        val index = servicePlayer?.currentMediaItemIndex ?: C.INDEX_UNSET
+        if (index == C.INDEX_UNSET) return
+        val song = app.playerManager.getQueueSnapshot().getOrNull(index) ?: return
+        val key = app.playerManager.stableKeyFor(song) ?: return
+        val now = System.currentTimeMillis()
+        activePlay = ActivePlay(key, song, now, resumedAtMs = SystemClock.elapsedRealtime())
+        app.yearlyStatsRecorder.recordStarted(PlayStarted(key, now), song)
+    }
+
+    private fun pauseActivePlay() {
+        val active = activePlay ?: return
+        active.resumedAtMs?.let { resumedAt ->
+            active.accumulatedMs += (SystemClock.elapsedRealtime() - resumedAt).coerceAtLeast(0L)
+        }
+        active.resumedAtMs = null
+    }
+
+    private fun finishActivePlay() {
+        val active = activePlay ?: return
+        pauseActivePlay()
+        activePlay = null
+        (application as NasMusicApp).yearlyStatsRecorder.recordEnded(
+            PlayEnded(
+                songKey = active.songKey,
+                startedAtMs = active.startedAtMs,
+                endedAtMs = System.currentTimeMillis(),
+                durationPlayedMs = active.accumulatedMs,
+            )
+        )
     }
 
     override fun onCreate() {
@@ -233,6 +340,7 @@ class PlaybackService : MediaLibraryService() {
             android.content.IntentFilter().apply {
                 addAction(ACTION_TOGGLE_PLAY_MODE)
                 addAction(ACTION_SLEEP_TIMER_CYCLE)
+                addAction(ACTION_TOGGLE_FAVORITE)
             },
             androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED
         )
@@ -242,6 +350,7 @@ class PlaybackService : MediaLibraryService() {
             stopSleepMinuteTick()
             updateNotification()
         }
+        (application as NasMusicApp).playerManager.onNetworkLost = ::cancelPrefetchJobs
 
         // S02-02：UI 侧（NowPlaying → PlayerViewModel.startSleepTimer/cancelSleepTimer）
         // 直接操作 SleepTimerController，绕过本服务的 handleSleepTimerCycle。订阅其 state，
@@ -331,6 +440,33 @@ class PlaybackService : MediaLibraryService() {
 
         // 初始化媒体库树（用于 Android Auto / Wear OS 浏览）
         mediaLibraryTree = MediaLibraryTree(this, browseCache)
+        val app = application as NasMusicApp
+        sharedSearchService = SharedSearchService(
+            searchAggregator = app.searchAggregator,
+            sourceVisibility = app.sourceVisibility,
+            nasLocalSongsProvider = { app.backendRegistry.getAdapter()?.getSongs().orEmpty() },
+            localDeviceSongsProvider = { app.localMusicRepository.loadAll() },
+            baiduLocalSongsProvider = { query -> app.baiduFileIndexCache.searchSongs(query, pinyinMatch = true) },
+            recordSearchHistory = { query -> app.appPreferences.history.recordSearch(query) },
+        )
+
+        serviceScope.launch {
+            combine(
+                app.roadmapPreferences.seamlessModeFlow(),
+                app.roadmapPreferences.replayGainEnabledFlow(),
+                app.appPreferences.crossfadeEnabled,
+                app.appPreferences.crossfadeDurationSec,
+                app.appPreferences.appSettings,
+            ) { mode, replayGain, crossfade, duration, settings ->
+                PlaybackPreferencesSnapshot(mode, replayGain, crossfade, duration, settings.defaultPlayMode)
+            }.collect { snapshot ->
+                app.playerManager.seamlessMode = snapshot.seamlessMode
+                app.playerManager.replayGainEnabled = snapshot.replayGainEnabled
+                app.playerManager.crossfadeEnabled = snapshot.crossfadeEnabled
+                app.playerManager.crossfadeDurationSec = snapshot.crossfadeDurationSec
+                app.externalPlaybackController.initializePlayMode(snapshot.playMode)
+            }
+        }
 
         // Store player reference in manager + inject vocal removal processor
         // 顺序关键：PCM 频谱通道必须先于 setPlayer 注入 —— setPlayer 内部会触发
@@ -439,11 +575,18 @@ class PlaybackService : MediaLibraryService() {
                     customCommand: SessionCommand,
                     args: Bundle
                 ): ListenableFuture<SessionResult> {
-                    when (customCommand.customAction) {
-                        ACTION_TOGGLE_PLAY_MODE -> handleTogglePlayMode()
-                        ACTION_SLEEP_TIMER_CYCLE -> handleSleepTimerCycle()
+                    return when (customCommand.customAction) {
+                        ACTION_TOGGLE_PLAY_MODE -> {
+                            handleTogglePlayMode()
+                            Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+                        }
+                        ACTION_SLEEP_TIMER_CYCLE -> {
+                            handleSleepTimerCycle()
+                            Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+                        }
+                        ACTION_TOGGLE_FAVORITE -> handleToggleFavorite()
+                        else -> Futures.immediateFuture(SessionResult(SessionResult.RESULT_ERROR_NOT_SUPPORTED))
                     }
-                    return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
                 }
 
                 /**
@@ -549,7 +692,7 @@ class PlaybackService : MediaLibraryService() {
                             future.set(LibraryResult.ofVoid(params))
                         } catch (e: Exception) {
                             e.rethrowIfCancellation()
-                            AppLog.w("PlaybackService", "onSearch('$query') failed", e)
+                            AppLog.w("PlaybackService", "onSearch failed", e)
                             future.set(
                                 LibraryResult.ofError(LibraryResult.RESULT_ERROR_UNKNOWN, params)
                             )
@@ -586,7 +729,7 @@ class PlaybackService : MediaLibraryService() {
                             future.set(LibraryResult.ofItemList(ImmutableList.copyOf(items), params))
                         } catch (e: Exception) {
                             e.rethrowIfCancellation()
-                            AppLog.w("PlaybackService", "onGetSearchResult('$query') failed", e)
+                            AppLog.w("PlaybackService", "onGetSearchResult failed", e)
                             future.set(LibraryResult.ofItemList(ImmutableList.of(), params))
                         }
                     }
@@ -721,7 +864,7 @@ class PlaybackService : MediaLibraryService() {
                 extras: Bundle
             ): Boolean {
                 return when (action) {
-                    ACTION_TOGGLE_PLAY_MODE, ACTION_SLEEP_TIMER_CYCLE -> true
+                    ACTION_TOGGLE_PLAY_MODE, ACTION_SLEEP_TIMER_CYCLE, ACTION_TOGGLE_FAVORITE -> true
                     else -> false
                 }
             }
@@ -730,6 +873,76 @@ class PlaybackService : MediaLibraryService() {
         // 进入前台模式 + 显示通知
         startForeground(NOTIFICATION_ID, buildNotification(null, false))
         isForeground = true
+        startPrefetchTick()
+    }
+
+    private fun cancelPrefetchJobs() {
+        prefetchJobs.values.forEach { it.cancel() }
+        prefetchJobs.clear()
+    }
+
+    private fun startPrefetchTick() {
+        prefetchTickJob?.cancel()
+        prefetchTickJob = serviceScope.launch {
+            while (isActive) {
+                kotlinx.coroutines.delay(PlayUrlPrefetchScheduler.TICK_MS)
+                val app = application as NasMusicApp
+                val playing = servicePlayer?.isPlaying == true
+                if (!PlayUrlPrefetchScheduler.shouldRun(playing, !app.playerManager.networkLost)) {
+                    cancelPrefetchJobs()
+                    continue
+                }
+                prefetchUpcoming()
+            }
+        }
+    }
+
+    private val prefetchJobs = mutableMapOf<String, Job>()
+    private val prefetchRetryAt = mutableMapOf<String, Long>()
+
+    private fun prefetchUpcoming() {
+        val app = application as NasMusicApp
+        val pm = app.playerManager
+        val queue = pm.getQueueSnapshot()
+        val index = pm.playerState.value.currentIndex
+        val targets = PlayUrlPrefetchScheduler.targets(queue.size, index)
+        for (targetIndex in targets) {
+            val song = queue.getOrNull(targetIndex) ?: continue
+            if (!song.isNetworkSong) continue
+            val key = pm.stableKeyFor(song) ?: continue
+            if ((prefetchAttempts[key] ?: 0) >= PlayUrlPrefetchScheduler.MAX_RETRY) continue
+            if ((prefetchRetryAt[key] ?: 0L) > System.currentTimeMillis()) continue
+            if (prefetchJobs.containsKey(key)) continue
+            prefetchJobs[key] = serviceScope.launch {
+                try {
+                    if (pm.getQueueSnapshot() != queue || pm.playerState.value.currentIndex != index) return@launch
+                    val result = app.networkMusicManager.prefetchPlayUrl(song)
+                    if (pm.getQueueSnapshot() != queue || pm.playerState.value.currentIndex != index) return@launch
+                    when (result.status) {
+                        PrefetchStatus.UPDATED, PrefetchStatus.ALREADY_FRESH -> {
+                            prefetchAttempts.remove(key)
+                            prefetchRetryAt.remove(key)
+                        }
+                        PrefetchStatus.FAILED_RETRYABLE_OFFLINE, PrefetchStatus.EXPIRED_URL -> {
+                            val failures = (prefetchAttempts[key] ?: 0) + 1
+                            prefetchAttempts[key] = failures
+                            if (failures >= PlayUrlPrefetchScheduler.MAX_RETRY) {
+                                pm.reportPrefetchFailure(song)
+                            } else {
+                                prefetchRetryAt[key] = System.currentTimeMillis() +
+                                    PlayUrlPrefetchScheduler.nextDelayMs(failures - 1)
+                            }
+                        }
+                        PrefetchStatus.NOT_NETWORK_SONG, PrefetchStatus.SERVICE_UNAVAILABLE -> Unit
+                    }
+                } catch (t: Throwable) {
+                    t.rethrowIfCancellation()
+                    AppLog.w("PlaybackService", "play URL prefetch failed", t)
+                } finally {
+                    prefetchJobs.remove(key)
+                }
+            }
+        }
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? {
@@ -830,16 +1043,16 @@ class PlaybackService : MediaLibraryService() {
                 resolveItemsSuspend(searchItemsCached(query))
             } catch (e: Exception) {
                 e.rethrowIfCancellation()
-                AppLog.w("PlaybackService", "resolveVoiceSearch('$query') failed", e)
+                AppLog.w("PlaybackService", "resolveVoiceSearch failed", e)
                 emptyList()
             }
 
             if (resolved.isEmpty()) {
                 // 搜不到 → 失败而非空列表，保住当前播放（见方法注释）
-                AppLog.i("PlaybackService", "resolveVoiceSearch('$query'): no playable result")
-                future.setException(IllegalStateException("no result for query: $query"))
+                AppLog.i("PlaybackService", "resolveVoiceSearch: no playable result")
+                future.setException(IllegalStateException("Search returned no playable result"))
             } else {
-                AppLog.i("PlaybackService", "resolveVoiceSearch('$query'): ${resolved.size} items")
+                AppLog.i("PlaybackService", "resolveVoiceSearch: ${resolved.size} items")
                 future.set(MediaSession.MediaItemsWithStartPosition(resolved, 0, 0L))
             }
         }
@@ -854,18 +1067,34 @@ class PlaybackService : MediaLibraryService() {
      * - `onSearch` / `onGetSearchResult` → 返回空列表（车机端显示"无结果"）
      * - `onSetMediaItems`（语音点歌）→ **让 future 失败**，避免清空播放队列（见该方法注释）
      */
-    private suspend fun searchItemsCached(query: String): List<MediaItem> {
-        val q = query.trim()
-        if (q.isEmpty()) return emptyList()
+    private suspend fun searchItemsCached(rawQuery: String): List<MediaItem> {
+        val query = sharedSearchService.normalize(rawQuery)
+        if (query.isBlank()) return emptyList()
 
+        val app = application as NasMusicApp
+        val enabled = MusicSourceType.DEFAULT_SEARCH_SOURCES.filterTo(linkedSetOf()) {
+            app.sourceVisibility.isVisible(it)
+        }
+        val policy = app.roadmapPreferences.offlinePolicyFlow().first()
+        val sources = effectiveSources(
+            policy,
+            enabled = MusicSourceType.LOCAL in enabled,
+            allSources = enabled,
+        )
+        val cacheKey = "$query|${sources.sortedBy { it.name }.joinToString { it.name }}"
         val now = SystemClock.elapsedRealtime()
-        searchCache[q]?.let { if (now - it.atMs < SEARCH_CACHE_TTL_MS) return it.items }
+        searchCache[cacheKey]?.let { if (now - it.atMs < SEARCH_CACHE_TTL_MS) return it.items }
 
-        val items = withTimeoutOrNull(SEARCH_TIMEOUT_MS) { mediaLibraryTree.search(q) }.orEmpty()
+        val result = withTimeoutOrNull(SEARCH_TIMEOUT_MS) {
+            sharedSearchService.searchNormalized(
+                query = query,
+                availableSources = sources,
+            )
+        }
+        val items = result?.songs.orEmpty().take(50).let(mediaLibraryTree::songItems)
 
-        // 顺手清理过期条目，避免缓存无界增长（与 NetworkMusicManager.playUrlCache 同做法）
         searchCache.entries.removeAll { now - it.value.atMs >= SEARCH_CACHE_TTL_MS }
-        searchCache[q] = SearchCacheEntry(now, items)
+        searchCache[cacheKey] = SearchCacheEntry(now, items)
         return items
     }
 
@@ -921,6 +1150,7 @@ class PlaybackService : MediaLibraryService() {
         val app = application as NasMusicApp
         val song = app.playerManager.getQueueSnapshot().getOrNull(index) ?: return false
         if (!song.streamUrl.isNullOrBlank()) return false
+        val expectedKey = app.playerManager.stableKeyFor(song) ?: return false
 
         uiResolveJob = serviceScope.launch {
             val url = withTimeoutOrNull(RESOLVE_TIMEOUT_MS) {
@@ -939,7 +1169,8 @@ class PlaybackService : MediaLibraryService() {
             // 2026-09-25 审查修复（#8 resolve→replay 竞态）：解析窗口内用户可能切歌/清空队列，
             // updateStreamUrl/replayAt 只按 index 定位，会把结果写到另一首歌上并强切播放。
             // 回写前校验目标位置仍是当初发起解析的歌曲，不一致则丢弃。
-            if (app.playerManager.getQueueSnapshot().getOrNull(index)?.id != song.id) {
+            val current = app.playerManager.getQueueSnapshot().getOrNull(index)
+            if (current == null || app.playerManager.stableKeyFor(current) != expectedKey) {
                 AppLog.d("PlaybackService", "resolveStreamUrlWithoutUi: queue changed during resolve, drop result for ${song.title}")
                 return@launch
             }
@@ -952,6 +1183,9 @@ class PlaybackService : MediaLibraryService() {
     override fun onDestroy() {
         AppLog.d("PlaybackService", "onDestroy: cleaning up")
         try { unregisterReceiver(controlReceiver) } catch (_: Exception) {}
+        finishActivePlay()
+        prefetchTickJob?.cancel()
+        cancelPrefetchJobs()
         stopSleepMinuteTick()
         serviceScope.cancel()
         browseCache.clear()
@@ -962,6 +1196,7 @@ class PlaybackService : MediaLibraryService() {
             // 两个回调都是**捕获本 Service 实例**的 lambda，而 PlayerManager 是 app 级单例
             // ⇒ 不清空的话已销毁的 Service（连带 Context）会被单例长期持有（C09）。
             pm.onSleepTimerExpired = null
+            pm.onNetworkLost = null
             pm.builtinStreamUrlResolver = null
         } catch (e: Exception) {
             AppLog.w("PlaybackService", "PlayerManager.release failed", e)
@@ -1265,6 +1500,7 @@ class PlaybackService : MediaLibraryService() {
         // 又做系统媒体卡片的 SessionCommand action）。此处只做别名，避免两处硬编码漂移。
         private const val ACTION_TOGGLE_PLAY_MODE = MediaSessionAccessPolicy.ACTION_TOGGLE_PLAY_MODE
         private const val ACTION_SLEEP_TIMER_CYCLE = MediaSessionAccessPolicy.ACTION_SLEEP_TIMER_CYCLE
+        private const val ACTION_TOGGLE_FAVORITE = MediaSessionAccessPolicy.ACTION_TOGGLE_FAVORITE
 
         // ── Android Auto ──
         /** 媒体树加载超时：NAS 不可达时避免车机端一直转圈 */

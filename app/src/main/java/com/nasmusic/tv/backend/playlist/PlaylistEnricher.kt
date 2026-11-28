@@ -3,6 +3,9 @@ package com.nasmusic.tv.backend.playlist
 import com.nasmusic.tv.backend.BackendRegistry
 import com.nasmusic.tv.backend.network.NetworkMusicManager
 import com.nasmusic.tv.data.model.Song
+import com.nasmusic.tv.data.model.PlaylistSongRef
+import com.nasmusic.tv.data.model.SongSourceIdentity
+import com.nasmusic.tv.data.model.SongSourceKind
 import com.nasmusic.tv.data.prefs.AppPreferences
 import com.nasmusic.tv.util.AppLog
 
@@ -37,12 +40,24 @@ class PlaylistEnricher(
         if (!stub.id.startsWith(PlaylistParsers.IMPORTED_ID_PREFIX)) return null
 
         // 1) 已连 NAS + searchSongs → 精确匹配（title+artist normalizeKey 相等）
-        runCatching {
-            backendRegistry.getAdapter()?.searchSongs("${stub.title} ${stub.artist}".trim())
-        }.getOrNull()?.firstOrNull { match ->
-            PlaylistParsers.normalizeKey(match.title, match.artist) ==
-                PlaylistParsers.normalizeKey(stub.title, stub.artist)
-        }?.let { return it }
+        val connection = backendRegistry.getActiveConnection()
+        val nasMatch = connection?.let { (adapter, config) ->
+            runCatching {
+                adapter.searchSongs("${stub.title} ${stub.artist}".trim())
+            }.getOrNull()?.firstOrNull { match ->
+                PlaylistParsers.normalizeKey(match.title, match.artist) ==
+                    PlaylistParsers.normalizeKey(stub.title, stub.artist)
+            }?.let { match ->
+                val source = SongSourceIdentity(
+                    kind = SongSourceKind.NAS,
+                    nativeId = match.id,
+                    serverId = config.id,
+                    backendType = adapter.backendType,
+                )
+                PlaylistSongRef.bindToSong(match, PlaylistSongRef.fromSong(match, source))
+            }
+        }
+        if (nasMatch != null) return nasMatch
 
         // 2) NetworkMusicManager.search（多源 fallback）
         val hits = runCatching { networkMusicManager.search(stub.title) }

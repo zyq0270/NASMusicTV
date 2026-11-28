@@ -26,6 +26,8 @@ import com.nasmusic.tv.backend.download.model.dedupeKey
 import com.nasmusic.tv.backend.export.ExportState
 import com.nasmusic.tv.backend.local.EmbeddedCoverExtractor
 import com.nasmusic.tv.backend.local.MusicMerger
+import com.nasmusic.tv.backend.local.SongReadModel
+import com.nasmusic.tv.backend.local.SongReadSnapshot
 import com.nasmusic.tv.backend.local.StorageMonitor
 import com.nasmusic.tv.backend.network.NetworkSongId
 import com.nasmusic.tv.backend.network.NetworkArtistDetailFetcher
@@ -56,11 +58,14 @@ import com.nasmusic.tv.data.model.PlayRecord
 import com.nasmusic.tv.data.model.PlayStatistics
 import com.nasmusic.tv.data.model.SearchHistoryItem
 import com.nasmusic.tv.data.model.Song
+import com.nasmusic.tv.data.model.SongSourceIdentity
+import com.nasmusic.tv.data.model.SongSourceKind
 import com.nasmusic.tv.data.model.ServerConfig
 import com.nasmusic.tv.data.model.Genre
 import com.nasmusic.tv.data.model.HomeDashboardData
 import com.nasmusic.tv.data.model.LocalPlaylist
 import com.nasmusic.tv.data.model.Playlist
+import com.nasmusic.tv.data.model.PlaylistSongRef
 import com.nasmusic.tv.data.model.EqualizerPreset
 import com.nasmusic.tv.data.model.MusicSource
 import com.nasmusic.tv.data.model.MusicSourceType
@@ -88,6 +93,7 @@ import com.nasmusic.tv.backend.playlist.UrlReachabilityChecker
 import com.nasmusic.tv.lyrics.LyricsManager
 import com.nasmusic.tv.lyrics.LrcParser
 import com.nasmusic.tv.player.PlayerManager
+import com.nasmusic.tv.player.PlayerState
 import com.nasmusic.tv.player.ModelDownloadManager
 import com.nasmusic.tv.util.AppLog
 import com.nasmusic.tv.util.LogSnapshot
@@ -95,6 +101,7 @@ import com.nasmusic.tv.util.LogStore
 import com.nasmusic.tv.util.PermissionHelper
 import com.nasmusic.tv.util.PinyinUtils
 import com.nasmusic.tv.util.SearchQuery
+import com.nasmusic.tv.util.SongKeys
 import com.nasmusic.tv.net.RemoteCallbacks
 import com.nasmusic.tv.net.RemoteControlServer
 import com.nasmusic.tv.net.RemoteSearchResult
@@ -180,8 +187,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
 
     private val nasMusicApp = app as NasMusicApp
     private val playerManager = nasMusicApp.playerManager
+    private val readModel: SongReadModel = nasMusicApp.localMusicRepository.readModel
+    /** 展示前的原曲只入内存，用于队列动作把展示对象还原成持久化原曲。 */
+    private val rawDisplaySongs = ConcurrentHashMap<String, Song>()
     private val mvSearchManager = nasMusicApp.mvSearchManager
     val prefs = nasMusicApp.appPreferences
+    private val roadmapPrefs = nasMusicApp.roadmapPreferences
     /** 搜索历史（最近输入 + 最多搜索） */
     val searchHistory = prefs.history.searchHistory
 
@@ -471,7 +482,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
 
     // --- 随心听：随机歌曲 ---
     private val _randomSongs = MutableStateFlow<List<Song>>(emptyList())
-    val randomSongs: StateFlow<List<Song>> = _randomSongs.asStateFlow()
+    val randomSongs: StateFlow<List<Song>> = displayList(_randomSongs)
     private var shuffleRefillJob: kotlinx.coroutines.Job? = null
 
     // --- 按需加载：艺术家列表（独立 API）---
@@ -481,9 +492,62 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
     // ArtistSplitter 拆分前的原始艺术家列表，用于 Navidrome 多 ID 查询合作歌曲
     private var _rawArtistList: List<Artist> = emptyList()
 
-    // --- 本地音乐（USB / 设备存储，独立数据源）---
+    // --- 本地音乐（USB / 设备存储，独立数据源；原始库存不应用隐藏规则）---
     private val _localSongs = MutableStateFlow<List<Song>>(emptyList())
-    val localSongs: StateFlow<List<Song>> = _localSongs.asStateFlow()
+    val localSongs: StateFlow<List<Song>> = combine(_localSongs, readModel.snapshots) { songs, snapshot ->
+        displaySongs(songs, snapshot)
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    /** 展示与播放稳定身份共用一个解析器；NAS 只能由活动服务器显式绑定。 */
+    private fun sourceFor(song: Song): SongSourceIdentity? {
+        PlaylistSongRef.decodeFromSong(song)?.source?.let { return it }
+        if (song.isLocalSong) {
+            val raw = _localSongs.value.firstOrNull { it.id == song.id }
+            return SongKeys.bindSource(raw ?: song)
+        }
+        if (song.networkSource == "weather") return null
+        val inferred = SongKeys.bindSource(song)
+        if (inferred != null) return inferred
+        if (song.sourceType != MusicSourceType.NAS || song.id.startsWith("imported_")) return null
+        val (adapter, config) = backendRegistry.getActiveConnection() ?: return null
+        val nativeId = when {
+            song.id.startsWith("nasf_") -> song.id.removePrefix("nasf_")
+            song.id.startsWith("nas_") -> song.id.removePrefix("nas_")
+            else -> song.id
+        }
+        return SongSourceIdentity(
+            kind = SongSourceKind.NAS,
+            nativeId = nativeId,
+            serverId = config.id,
+            backendType = adapter.backendType,
+        )
+    }
+
+    private fun displayKey(song: Song): String =
+        PlaylistSongRef.fromSong(song, sourceFor(song))?.stableKey?.takeIf { it.isNotBlank() }
+            ?: "legacy:${song.id}"
+
+    private fun displaySongs(
+        songs: List<Song>,
+        snapshot: SongReadSnapshot = readModel.snapshots.value,
+        includeHidden: Boolean = false,
+    ): List<Song> {
+        songs.forEach { rawDisplaySongs[displayKey(it)] = it }
+        return if (includeHidden) {
+            readModel.applyAllIncludingHidden(songs, ::sourceFor, snapshot)
+        } else {
+            readModel.applyAll(songs, ::sourceFor, snapshot)
+        }
+    }
+
+    private fun queueInputRaw(song: Song): Song {
+        val key = displayKey(song)
+        val raw = rawDisplaySongs[key]
+            ?: playerManager.playerState.value.queue.firstOrNull { displayKey(it) == key }
+            ?: song
+        val ref = PlaylistSongRef.fromSong(raw, sourceFor(raw))
+        return PlaylistSongRef.bindToSong(raw, ref)
+    }
 
     /**
      * 本地音乐总开关（settings.localMusicEnabled）的运行期镜像（§5.2）。
@@ -501,8 +565,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
      * ⛔ [_localSongs]（Room 全表）本身永不过滤、永不清空（D2）。
      */
     val visibleLocalSongs: StateFlow<List<Song>> =
-        combine(_localSongs, _localMusicEnabled) { songs, enabled ->
-            if (enabled) songs else songs.filter { it.storageType == "DOWNLOAD" }
+        combine(_localSongs, _localMusicEnabled, readModel.snapshots) { songs, enabled, snapshot ->
+            val displayed = displaySongs(songs, snapshot)
+            if (enabled) displayed else displayed.filter { it.storageType == "DOWNLOAD" }
         }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     /**
@@ -555,24 +620,32 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
             _songsPaging,
             visibleLocalSongs,
             _baiduIndexedSongs,
-            _sourceRevision
-        ) { paging, local, baidu, _ ->
+            _sourceRevision,
+            readModel.snapshots,
+        ) { paging, local, baidu, _, snapshot ->
             val nasVisible = sourceVisibility.isVisible(MusicSourceType.NAS)
             val baiduVisible = sourceVisibility.isVisible(MusicSourceType.BAIDU_PAN)
-            val nasSongs = if (nasVisible) paging.songs else emptyList()
+            val rawNasSongs = if (nasVisible) paging.songs else emptyList()
             // 本地段：visibleLocalSongs 已实现「关 = 只显示已下载」，
-            // 这里只做**归属兜底**（⛔ 不得把已下载歌曲滤掉，见 `SourceVisibility` 的 DOWNLOAD 分支）。
+            // 这里只做**归属兜底**（不得把已下载歌曲滤掉，见 SourceVisibility 的 DOWNLOAD 分支）。
             val localSongs = local.filter { sourceVisibility.isVisible(it) }
             val baiduSongs = if (baiduVisible) baidu else emptyList()
             val merged = MusicMerger.mergeLibrarySongs(
-                nasSongs = nasSongs,
+                nasSongs = rawNasSongs,
                 localSongs = localSongs,
-                baiduSongs = baiduSongs
+                baiduSongs = baiduSongs,
+                readModel = readModel,
+                sourceFor = ::sourceFor,
+                snapshot = snapshot,
             )
+            val rawNasCount = maxOf(paging.totalCount, rawNasSongs.size)
+            val hiddenNasCount = if (nasVisible && rawNasCount > 0) {
+                countHiddenNas(snapshot, rawNasSongs, rawNasCount)
+            } else 0
             paging.copy(
                 songs = merged,
-                totalCount = (if (nasVisible) paging.totalCount else 0) +
-                    localSongs.size + baiduSongs.size,
+                totalCount = (if (nasVisible) paging.totalCount else 0) -
+                    hiddenNasCount.coerceAtMost(paging.totalCount) + localSongs.size + baiduSongs.size,
                 // NAS 关时 NAS 段已置空，hasMore 不能再沿用 NAS 的旧值：
                 // 本地/百度是一次性全量载入（无分页），此时没有「下一页」可拉。
                 // 否则 SongsTab.shouldLoadMore 会在滚到底时空触发 loadSongsNextPage
@@ -580,6 +653,27 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
                 hasMore = nasVisible && paging.hasMore
             )
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), _songsPaging.value)
+
+    /** 已被隐藏（重复项合并或手动隐藏）的 NAS 曲目数；分页未加载全量时按源前缀统计。 */
+    private fun countHiddenNas(
+        snapshot: SongReadSnapshot,
+        rawNasSongs: List<Song>,
+        rawNasCount: Int,
+    ): Int {
+        val hidden = if (rawNasSongs.size >= rawNasCount) {
+            rawNasSongs.count { song ->
+                sourceFor(song)?.let { SongKeys.stableKey(song, it) in snapshot.hiddenKeys } == true
+            }
+        } else {
+            val config = backendRegistry.getConfig()
+            val backendType = backendRegistry.getAdapter()?.backendType
+            if (config != null && backendType != null) {
+                val prefix = SongKeys.nasSourcePrefix(config.id, backendType)
+                snapshot.hiddenKeys.count { it.startsWith(prefix) }
+            } else 0
+        }
+        return hidden.coerceAtMost(rawNasCount)
+    }
 
 
     // --- 本地音乐权限接线（§5.5，照抄照片墙模板）---
@@ -631,7 +725,27 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
 
     // --- 按需加载：最近播放歌曲（按需批量查询）---
     private val _recentSongs = MutableStateFlow<UiState<List<Song>>>(UiState.Success(emptyList()))
-    val recentSongs: StateFlow<UiState<List<Song>>> = _recentSongs.asStateFlow()
+    val recentSongs: StateFlow<UiState<List<Song>>> = displayUiState(_recentSongs)
+
+    private fun displayList(raw: StateFlow<List<Song>>, includeHidden: Boolean = false): StateFlow<List<Song>> =
+        combine(raw, readModel.snapshots) { songs, snapshot ->
+            displaySongs(songs, snapshot, includeHidden)
+        }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    private fun displayUiState(
+        raw: StateFlow<UiState<List<Song>>>,
+        includeHidden: Boolean = false,
+    ): StateFlow<UiState<List<Song>>> = combine(raw, readModel.snapshots) { state, snapshot ->
+        when (state) {
+            is UiState.Success -> UiState.Success(displaySongs(state.data, snapshot, includeHidden))
+            else -> state
+        }
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, raw.value)
+
+    private fun displaySongMap(raw: StateFlow<Map<String, List<Song>>>): StateFlow<Map<String, List<Song>>> =
+        combine(raw, readModel.snapshots) { cache, snapshot ->
+            cache.mapValues { (_, songs) -> displaySongs(songs, snapshot) }
+        }.stateIn(viewModelScope, SharingStarted.Eagerly, raw.value)
 
     // --- 搜索域（R-1：已迁至 SearchViewModel，仅保留跨导航暂存的状态镜像）---
 
@@ -716,8 +830,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
     //    - `_localMusicEnabled`：本地开关走独立观察者（不在 setSourceEnabled 内），单独挂上才能重算
     //      networkSource=="local" 的收藏项。
     val networkFavoriteSongs: StateFlow<List<Song>> =
-        combine(netVM.networkFavorites, _sourceRevision, _localMusicEnabled) { favorites, _, _ ->
-            favorites.mapNotNull { item ->
+        combine(netVM.networkFavorites, _sourceRevision, _localMusicEnabled, readModel.snapshots) { favorites, _, _, snapshot ->
+            val songs = favorites.mapNotNull { item ->
                 val isLocal = item.networkSource == "local"
                 val song = Song(
                     id = item.songId,
@@ -738,6 +852,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
                 )
                 song.takeIf { sourceVisibility.isVisible(it) }
             }
+            displaySongs(songs, snapshot)
         }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     // 网络收藏 ID 集合（用于快速判断是否已收藏）。
@@ -1004,7 +1119,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
      * | `_years` | `UiState<List<Int>>` | 置空 `UiState.Success(emptyList())` |
      * | `_playlists` | `UiState<List<Playlist>>` | 置空 `UiState.Success(emptyList())` |
      * | `_favoriteSongs` | `UiState<List<Song>>` | 置空 `UiState.Success(emptyList())` |
-     * | `_favoriteIds` | `Set<String>` | 置空（内容全部来自 NAS 收藏） |
+     * | `externalController.nasFavoriteIds` | `Set<String>` | 置空（内容全部来自 NAS 收藏） |
      * | `_randomSongs` | `List<Song>` | 按 `sourceType` 过滤（保留另一源的部分） |
      * | `_baiduIndexedSongs` | `List<Song>` | 置空 `emptyList()` |
      * | `_artistSongsMap` | `Map<String, List<Song>>` | 按 `sourceType` 过滤（`mapValues`） |
@@ -1018,9 +1133,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
                 _years.value = UiState.Success(emptyList())
                 _playlists.value = UiState.Success(emptyList())
                 _favoriteSongs.value = UiState.Success(emptyList())
-                // 心形 UI 态同步清理：_favoriteIds 的内容**全部**来自 NAS 收藏
+                // 心形 UI 态同步清理：NAS 收藏状态全部来自应用级外部控制器
                 // （网络/本地收藏走 networkFavoriteIds，不在这个流里）
-                _favoriteIds.value = emptySet()
+                nasMusicApp.externalPlaybackController.clearNasFavoriteIds()
                 // 混装流（NAS + Meting）：按 sourceType 过滤，**保留** Meting 段（⛔ 不要整条清空）
                 _randomSongs.value = _randomSongs.value.filter { it.sourceType != MusicSourceType.NAS }
                 // 艺术家 TAB 的曲目映射：由 NAS 歌增量构建 ⇒ 去掉 NAS 歌。
@@ -1415,7 +1530,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
     val selectedArtistName: StateFlow<String?> = _selectedArtistName.asStateFlow()
 
     private val _albumSongsCache = MutableStateFlow<Map<String, List<Song>>>(emptyMap())
-    val albumSongsCache: StateFlow<Map<String, List<Song>>> = _albumSongsCache.asStateFlow()
+    val albumSongsCache: StateFlow<Map<String, List<Song>>> = displaySongMap(_albumSongsCache)
 
     /** 正在加载曲目的专辑 id 集合（按 id 区分，快速切换专辑时互不串扰）。 */
     private val _albumDetailLoading = MutableStateFlow<Set<String>>(emptySet())
@@ -1428,28 +1543,47 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
     // --- 歌唱家拆分映射 ---
     // songId → 拆分后的歌唱家列表（不含去重中间状态，直接展开后的结果）
     private val _songArtistMap = MutableStateFlow<Map<String, List<String>>>(emptyMap())
-    val songArtistMap: StateFlow<Map<String, List<String>>> = _songArtistMap.asStateFlow()
     // 歌唱家 → 对应的歌曲列表
     private val _artistSongsMap = MutableStateFlow<Map<String, List<Song>>>(emptyMap())
-    val artistSongsMap: StateFlow<Map<String, List<Song>>> = _artistSongsMap.asStateFlow()
+
+    private fun displayArtistSongsMap(): StateFlow<Map<String, List<Song>>> =
+        combine(_artistSongsMap, readModel.snapshots) { rawMap, snapshot ->
+            rawMap.values.flatten().distinctBy { it.id }
+                .let { displaySongs(it, snapshot) }
+                .flatMap { song -> ArtistSplitter.split(song.artist).map { it to song } }
+                .groupBy({ ArtistSplitter.normalizeKey(it.first) }, { it.second })
+                .filterKeys { it.isNotBlank() }
+        }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
+
+    val artistSongsMap: StateFlow<Map<String, List<Song>>> = displayArtistSongsMap()
+
+    val songArtistMap: StateFlow<Map<String, List<String>>> = combine(
+        _songArtistMap, _artistSongsMap, _songsPaging, readModel.snapshots
+    ) { existing, artistSongs, paging, snapshot ->
+        val rawById = (artistSongs.values.flatten() + paging.songs).associateBy { it.id }
+        existing.mapValues { (songId, oldArtists) ->
+            val song = rawById[songId] ?: return@mapValues oldArtists
+            displaySongs(listOf(song), snapshot).flatMap { ArtistSplitter.split(it.artist) }
+        }
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
 
     // --- B-1 收藏（B-12: UiState）---
-    private val _favoriteIds = MutableStateFlow<Set<String>>(emptySet())
+    private val externalController = nasMusicApp.externalPlaybackController
     /**
      * 统一收藏 ID 集合（NAS + 网络/本地），UI 只读这一个，无需自行拼装。
-     * - NAS 收藏：由 adapter.getFavorites() 填充 _favoriteIds（服务端存储）
+     * - NAS 收藏：由 adapter.getFavorites() 填充 externalController.nasFavoriteIds（服务端存储）
      * - 网络/本地收藏：由 DataStore NetworkFavoriteItem 填充 networkFavoriteIds（本机存储）
      *
-     * _favoriteIds 仍保留私有，供 toggleNetworkFavorite 的 NAS 分支读取"当前是否已收藏"。
+     * UI、系统媒体卡片与桌面小组件共享同一 NAS 收藏状态源。
      */
     // 2026-11-22：id 命名空间隔离契约——网络歌 id 恒以 "ntwk_" 开头（NetworkSongId.forNetworkSong），
     // 本地歌以 "local_" 开头（LocalMusicRepository），NAS id 不带这两种前缀。
     // 故 nas + net 按裸 id 合并不会串味；toggleNetworkFavorite 另加类型守卫双重保险。
-    val favoriteIds: StateFlow<Set<String>> = combine(_favoriteIds, networkFavoriteIds) { nas, net ->
+    val favoriteIds: StateFlow<Set<String>> = combine(externalController.nasFavoriteIds, networkFavoriteIds) { nas, net ->
         nas + net
     }.stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
     private val _favoriteSongs = MutableStateFlow<UiState<List<Song>>>(UiState.Success(emptyList()))
-    val favoriteSongs: StateFlow<UiState<List<Song>>> = _favoriteSongs.asStateFlow()
+    val favoriteSongs: StateFlow<UiState<List<Song>>> = displayUiState(_favoriteSongs)
 
     // --- A-3 流派（B-12: UiState）---
     private val _genres = MutableStateFlow<UiState<List<Genre>>>(UiState.Success(emptyList()))
@@ -1467,6 +1601,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
         // 合并 ServerViewModel 的加载态到本地通道
         viewModelScope.launch {
             serverVM.isLoading.collect { _isLoading.value = it }
+        }
+        viewModelScope.launch {
+            externalController.favoriteChanges.collect { (song, favorite) ->
+                if (song.isNetworkSong || song.isLocalSong) return@collect
+                val current = _favoriteSongs.value.dataOrNull() ?: emptyList()
+                _favoriteSongs.value = UiState.Success(
+                    if (favorite) current.filterNot { it.id == song.id } + song
+                    else current.filterNot { it.id == song.id }
+                )
+            }
         }
         // 洛雪引擎可达性：`loadLibrary` 要读磁盘 + 重定位，⛔ 必须在后台线程求值。
         // 判据只用「真的 dlopen 成功了吗」，不按 SDK 版本硬卡（方案 §7.7 第 7 条）。
@@ -1545,6 +1689,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
     // --- B-13: 播放器状态（R-1 第四步：已迁至 PlayerViewModel，此处转发）---
     val playerVM = PlayerViewModel(app, playerManager)
 
+    /** 只影响 UI/遥控展示；PlayerManager 与队列持久化继续保存原曲。 */
+    val displayPlayerState: StateFlow<PlayerState> = combine(playerVM.playerState, readModel.snapshots) { raw, snapshot ->
+        raw.copy(
+            queue = readModel.applyAllIncludingHidden(raw.queue, ::sourceFor, snapshot),
+            currentSong = raw.currentSong?.let { song ->
+                readModel.applyIncludingHidden(song, sourceFor(song), snapshot)
+            },
+        )
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, playerVM.playerState.value)
+
     // B-13: playMode 由 PlayerViewModel 拥有（UI/设置状态，不归 PlayerManager）
 
     // --- 连接状态（R-1：已迁至 ServerViewModel，保留本地 connectMessage 通道供多域共用）---
@@ -1599,6 +1753,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
     }
 
     // --- 应用设置 ---
+    val cacheLimits: StateFlow<com.nasmusic.tv.data.cache.CacheLimitsSnapshot> =
+        roadmapPrefs.cacheLimitsFlow().stateIn(viewModelScope, SharingStarted.Eagerly, com.nasmusic.tv.data.cache.CacheLimits.current())
+    val offlinePolicy: StateFlow<com.nasmusic.tv.data.model.OfflinePolicy> =
+        roadmapPrefs.offlinePolicyFlow().stateIn(viewModelScope, SharingStarted.Eagerly, com.nasmusic.tv.data.model.OfflinePolicy.OFF)
+    val replayGainEnabled: StateFlow<Boolean> =
+        roadmapPrefs.replayGainEnabledFlow().stateIn(viewModelScope, SharingStarted.Eagerly, false)
+    val seamlessMode: StateFlow<com.nasmusic.tv.data.model.SeamlessMode> =
+        roadmapPrefs.seamlessModeFlow().stateIn(viewModelScope, SharingStarted.Eagerly, com.nasmusic.tv.data.model.SeamlessMode.OFF)
     val appSettings: StateFlow<AppSettings> = prefs.appSettings.stateIn(
         scope = viewModelScope,
         started = SharingStarted.Eagerly,
@@ -1671,6 +1833,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
             // 初始化播放模式（B-13: 从预设置恢复）——R-1 后由 PlayerViewModel 持有
             val settings = prefs.appSettings.first()
             playerVM.initPlayModeFromSettings(settings.defaultPlayMode)
+            playerManager.seamlessMode = roadmapPrefs.seamlessModeFlow().first()
+            playerManager.replayGainEnabled = roadmapPrefs.replayGainEnabledFlow().first()
 
             // 升降调/变速是 K 歌会话内的临时效果（退出 K 歌页复位）：冷启动强制原调原速，
             // 不从持久化恢复历史值，VM 初值本身也是 0 / 1.0。这里复位播放器，避免老版本
@@ -1762,7 +1926,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
                 .collect { completedCount ->
                     if (completedCount > lastCompletedCount) {
                         lastCompletedCount = completedCount
-                        _localSongs.value = nasMusicApp.localMusicRepository.loadFromCache()
+                        _localSongs.value = nasMusicApp.localMusicRepository.loadAllRaw()
                         updateMergedData()
                         // 刷新下载统计
                         downloadVM.refreshDownloadStats()
@@ -1835,7 +1999,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
         viewModelScope.launch {
             try {
                 // 1. 立即从缓存加载（毫秒级）
-                _localSongs.value = nasMusicApp.localMusicRepository.loadFromCache()
+                _localSongs.value = nasMusicApp.localMusicRepository.loadAllRaw()
                 updateMergedData()
                 AppLog.d("MainViewModel", "local music cache loaded: ${_localSongs.value.size} songs")
             } catch (e: Exception) {
@@ -1938,7 +2102,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
         try {
             val favorites = adapter.getFavorites().filter { sourceVisibility.isVisible(it) }
             _favoriteSongs.value = UiState.Success(favorites)
-            _favoriteIds.value = favorites.map { it.id }.toSet()
+            externalController.setNasFavoriteIds(favorites.map { it.id }.toSet())
             AppLog.d("NASMusic", "loadFavorites: ${favorites.size} favorites")
         } catch (e: Exception) {
             e.rethrowIfCancellation()
@@ -2145,6 +2309,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
             }
             try {
                 var offset = 0
+                val totalCount = adapter.getSongsTotalCount()
                 while (true) {
                     val batch = adapter.getSongs(pageSize, offset)
                     if (batch.isEmpty()) break
@@ -2156,6 +2321,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
                     val current = _songsPaging.value
                     val newState = SongsPagingState(
                         songs = current.songs + batch,
+                        totalCount = maxOf(totalCount, offset + batch.size),
                         isLoading = false,
                         hasMore = batch.size == pageSize,
                         currentPage = current.currentPage + 1
@@ -2453,7 +2619,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
 
     /** 浏览搜索结果 */
     private val _browseResults = MutableStateFlow<UiState<List<Song>>>(UiState.Success(emptyList()))
-    val browseResults: StateFlow<UiState<List<Song>>> = _browseResults.asStateFlow()
+    val browseResults: StateFlow<UiState<List<Song>>> = displayUiState(_browseResults)
 
     /** 当前是否正在搜索 */
     private val _isBrowseSearching = MutableStateFlow(false)
@@ -2707,7 +2873,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
             // 2026-11-22：加来源类型守卫。网络/本地歌曲的 id 有独占前缀（ntwk_/local_），
             // 绝不应按裸 id 去 NAS 收藏集合里判定"当前是否已收藏"——即便 NAS 后端未来返回
             // 同形 id 也不会误走 NAS 分支。非网络非本地才查 NAS 集合。
-            isNasFavorite = !normalized.isNetworkSong && !normalized.isLocalSong && normalized.id in _favoriteIds.value,
+            isNasFavorite = !normalized.isNetworkSong && !normalized.isLocalSong && normalized.id in externalController.nasFavoriteIds.value,
             onNasToggle = { nasSong, isFav -> toggleNasFavorite(nasSong, isFav) }
         )
     }
@@ -2725,24 +2891,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
     fun onSwitchOrResearch() = mvVM.onSwitchOrResearch(playerVM.playerState.value.currentSong)
     fun onSearchBilibili() = mvVM.onSearchBilibili(playerVM.playerState.value.currentSong)
 
-    /** NAS 收藏分支（留在 MainViewModel：依赖本类 _favoriteIds/_favoriteSongs 状态） */
+    /** NAS 收藏分支（留在 MainViewModel：依赖本类 _favoriteSongs 展示状态） */
     private fun toggleNasFavorite(song: Song, isCurrentlyFavorite: Boolean) {
         viewModelScope.launch {
             val adapter = backendRegistry.getAdapter() ?: return@launch
             try {
                 val success = adapter.toggleFavorite(song.id, isCurrentlyFavorite)
                 if (success) {
-                    val newIds = _favoriteIds.value.toMutableSet()
-                    if (isCurrentlyFavorite) {
-                        newIds.remove(song.id)
-                        val currentFavs = _favoriteSongs.value.dataOrNull() ?: emptyList()
-                        _favoriteSongs.value = UiState.Success(currentFavs.filter { it.id != song.id })
-                    } else {
-                        newIds.add(song.id)
-                        val currentFavs = _favoriteSongs.value.dataOrNull() ?: emptyList()
-                        _favoriteSongs.value = UiState.Success(currentFavs + song)
-                    }
-                    _favoriteIds.value = newIds
+                    externalController.updateNasFavorite(song, !isCurrentlyFavorite)
+                    val currentFavs = _favoriteSongs.value.dataOrNull() ?: emptyList()
+                    _favoriteSongs.value = UiState.Success(
+                        if (isCurrentlyFavorite) currentFavs.filter { it.id != song.id } else currentFavs + song
+                    )
                 }
             } catch (e: Exception) {
                 e.rethrowIfCancellation()
@@ -2838,13 +2998,15 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
             //
             // ⚠️ 过滤必须**在传入之前**做：⛔ 不能合并完再按 `sourceIds` 剔除 —— 那会把
             // 「NAS 与百度同名专辑」整条删掉，连同 NAS 那一份（方案 §5.4）。
+            val snapshot = readModel.snapshots.value
             val nasVisible = sourceVisibility.isVisible(MusicSourceType.NAS)
             val baiduVisible = sourceVisibility.isVisible(MusicSourceType.BAIDU_PAN)
             val nasAlbums = if (nasVisible) (_albums.value.dataOrNull() ?: emptyList()) else emptyList()
             val nasArtists = if (nasVisible) (_artists.value.dataOrNull() ?: emptyList()) else emptyList()
-            val localSongs = visibleLocalSongsNow()
+            val localSongs = _localSongs.value.let { if (_localMusicEnabled.value) it else it.filter { song -> song.storageType == "DOWNLOAD" } }
             // NAS 歌曲段（关 NAS 时为空）：供 updateArtistSongCounts 统计曲目数
-            val nasSongs = if (nasVisible) _songsPaging.value.songs else emptyList()
+            val rawNasSongs = if (nasVisible) _songsPaging.value.songs else emptyList()
+            val nasSongs = displaySongs(rawNasSongs, snapshot)
             // 百度段：关源时**不读索引**（省一次磁盘解析）+ 传空
             val baiduSongs = if (baiduVisible) baiduIndexCache.allSongs() else emptyList()
             // 歌曲 Tab 与专辑/艺术家共用这份索引结果，避免 UI 侧再触发一次磁盘解析
@@ -2853,8 +3015,8 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
 
             var mergedAlbums = MusicMerger.mergeAlbums(
                 nasAlbums = nasAlbums,
-                localAlbums = MusicMerger.buildLocalAlbums(localSongs),
-                baiduAlbums = MusicMerger.buildBaiduAlbums(baiduSongs)
+                localAlbums = MusicMerger.buildLocalAlbums(localSongs, readModel, ::sourceFor, snapshot),
+                baiduAlbums = MusicMerger.buildBaiduAlbums(baiduSongs, readModel, ::sourceFor, snapshot)
             )
             // 应用已解析的封面缓存，避免每次重建丢失 coverUrl
             if (resolvedAlbumCovers.isNotEmpty()) {
@@ -2867,8 +3029,8 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
 
             var mergedArtists = MusicMerger.mergeArtists(
                 nasArtists = nasArtists,
-                localArtists = MusicMerger.buildLocalArtists(localSongs),
-                baiduArtists = MusicMerger.buildBaiduArtists(baiduSongs)
+                localArtists = MusicMerger.buildLocalArtists(localSongs, readModel, ::sourceFor, snapshot),
+                baiduArtists = MusicMerger.buildBaiduArtists(baiduSongs, readModel, ::sourceFor, snapshot)
             )
             // 应用已解析的艺术家封面缓存
             if (resolvedArtistCovers.isNotEmpty()) {
@@ -2882,7 +3044,7 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
             // 用全量歌曲反向统计艺术家 songCount（复用已加载的 baiduSongs，避免再次 allSongs()）
             // ⚠️ NAS 段传**过滤后**的歌曲：关 NAS 后本地/百度艺术家卡片的曲目数不得虚高
             // （原先内部自读 `_songsPaging.value.songs` ⇒ 读到未过滤的原始库存）。
-            updateArtistSongCounts(nasSongs, baiduSongs)
+            updateArtistSongCounts(nasSongs, baiduSongs, snapshot)
 
             // 异步解析缺失封面（百度侧车/APIC → iTunes → 本地ID3 → 歌曲 coverUrl 兜底）
             resolveAlbumCoversAsync(baiduSongs)
@@ -2905,8 +3067,13 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
      *        ⇒ 将来任何新增的单参调用都会让关百度后的艺术家曲目数虚高（方案 §3.3 G1）。
      *        强制调用方显式传入**已按可见性过滤**的列表。
      */
-    private fun updateArtistSongCounts(nasSongs: List<Song>, baiduSongs: List<Song>) {
-        val allSongs = nasSongs + visibleLocalSongsNow() + baiduSongs
+    private fun updateArtistSongCounts(
+        nasSongs: List<Song>,
+        baiduSongs: List<Song>,
+        snapshot: SongReadSnapshot = readModel.snapshots.value,
+    ) {
+        val rawLocal = _localSongs.value.let { if (_localMusicEnabled.value) it else it.filter { song -> song.storageType == "DOWNLOAD" } }
+        val allSongs = nasSongs + displaySongs(rawLocal, snapshot) + displaySongs(baiduSongs, snapshot)
         // 按 ArtistSplitter 拆分后的艺术家名统计歌曲数
         val artistSongCounts = mutableMapOf<String, Int>()
         for (song in allSongs) {
@@ -3110,7 +3277,7 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
      * 它们在写入 _localSongs 后立即重算，等流传播（stateIn 调度）会读到旧值。
      */
     private fun visibleLocalSongsNow(): List<Song> {
-        val songs = _localSongs.value
+        val songs = displaySongs(_localSongs.value)
         return if (_localMusicEnabled.value) songs
         else songs.filter { it.storageType == "DOWNLOAD" }
     }
@@ -3131,7 +3298,7 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
                 try {
                     val result = nasMusicApp.localMusicRepository.incrementalScan()
                     if (result.hasChanges()) {
-                        _localSongs.value = nasMusicApp.localMusicRepository.loadFromCache()
+                        _localSongs.value = nasMusicApp.localMusicRepository.loadAllRaw()
                         updateMergedData()
                         AppLog.i("MainViewModel", "local scan: +${result.newSongs.size} new, -${result.deletedPaths.size} deleted")
                     }
@@ -3147,7 +3314,7 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
                     try {
                         val result = nasMusicApp.localMusicRepository.scanUsbDevice(device.path)
                         if (result.hasChanges()) {
-                            _localSongs.value = nasMusicApp.localMusicRepository.loadFromCache()
+                            _localSongs.value = nasMusicApp.localMusicRepository.loadAllRaw()
                             updateMergedData()
                             AppLog.i("MainViewModel", "USB mounted scan: ${result.newSongs.size} songs")
                         }
@@ -3251,7 +3418,8 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
     fun refreshLocalMusic() {
         viewModelScope.launch {
             try {
-                val scanned = nasMusicApp.localMusicRepository.fullScan()
+                nasMusicApp.localMusicRepository.fullScan()
+                val scanned = nasMusicApp.localMusicRepository.loadAllRaw()
                 _localSongs.value = scanned
                 updateMergedData()
                 showError(getApplication<Application>().getString(R.string.local_music_refreshed, scanned.size))
@@ -3495,7 +3663,7 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
     )
 
     private val _artistDetailSongsCache = MutableStateFlow<Map<String, List<Song>>>(emptyMap())
-    val artistDetailSongsCache: StateFlow<Map<String, List<Song>>> = _artistDetailSongsCache.asStateFlow()
+    val artistDetailSongsCache: StateFlow<Map<String, List<Song>>> = displaySongMap(_artistDetailSongsCache)
 
     /** 正在加载详情歌曲的艺术家名集合（按名字区分，支持快速切换）。 */
     private val _artistDetailLoading = MutableStateFlow<Set<String>>(emptySet())
@@ -3651,11 +3819,11 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
     // --- B-1 收藏控制 ---
     /**
      * 判断歌曲是否已收藏（同步，用于 UI 快速判断）。
-     * 同时查 NAS 收藏（_favoriteIds）与网络/本地收藏（networkFavoriteIds）。
+     * 同时查 NAS 收藏（externalController.nasFavoriteIds）与网络/本地收藏（networkFavoriteIds）。
      * 推荐优先用 [favoriteIds] StateFlow 订阅以获得即时刷新；本方法仅用于一次性查询。
      */
     fun isFavorite(songId: String): Boolean =
-        songId in _favoriteIds.value || songId in networkFavoriteIds.value
+        songId in externalController.nasFavoriteIds.value || songId in networkFavoriteIds.value
 
     // --- 本地歌单操作（R-1：已拆分至 PlaylistViewModel，此处为兼容转发）---
     val playlistVM = PlaylistViewModel(app)
@@ -3727,7 +3895,7 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
             }
             try {
                 val nasSongs = adapter.getSongsByGenre(genre)
-                onResult((nasSongs + localMatches).distinctBy { it.id })
+                onResult(displaySongs((nasSongs + localMatches).distinctBy { it.id }))
             } catch (e: Exception) {
                 e.rethrowIfCancellation()
                 AppLog.e("NASMusic", "getSongsByGenre failed", e)
@@ -3755,7 +3923,7 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
             }
             try {
                 val nasSongs = adapter.getSongsByYearRange(fromYear, toYear)
-                onResult((nasSongs + localMatches).distinctBy { it.id })
+                onResult(displaySongs((nasSongs + localMatches).distinctBy { it.id }))
             } catch (e: Exception) {
                 e.rethrowIfCancellation()
                 AppLog.e("NASMusic", "getSongsByYearRange failed", e)
@@ -3896,7 +4064,7 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
 
     /** F2-3 首页列表化：当前浏览批次（随心听式，空 = 未生成/隐藏区块） */
     private val _smartRadioBatch = kotlinx.coroutines.flow.MutableStateFlow<List<Song>>(emptyList())
-    val smartRadioBatch: kotlinx.coroutines.flow.StateFlow<List<Song>> = _smartRadioBatch
+    val smartRadioBatch: StateFlow<List<Song>> = displayList(_smartRadioBatch)
 
     /**
      * F2-3 首页列表化：生成/换一批（只生成不播放），结果写入 [smartRadioBatch]。
@@ -3952,7 +4120,7 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
         }
         downloadVM.onLocalSongsChanged = {
             viewModelScope.launch {
-                _localSongs.value = nasMusicApp.localMusicRepository.loadFromCache()
+                _localSongs.value = nasMusicApp.localMusicRepository.loadAllRaw()
                 updateMergedData()
             }
         }
@@ -3980,6 +4148,14 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
         viewModelScope.launch {
             localMusicNotice.collect { notice ->
                 showError(getApplication<Application>().getString(notice.messageRes))
+            }
+        }
+        viewModelScope.launch {
+            playerManager.prefetchFailures.collect { failure ->
+                showError(getApplication<Application>().getString(
+                    R.string.play_url_prefetch_failed,
+                    failure.title,
+                ))
             }
         }
         // 模型下载状态同步给人声分离域（模式切换门槛判断）
@@ -4055,22 +4231,28 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
         super.onCleared()
     }
 
-    override fun getQueue(): List<Song> = playerManager.playerState.value.queue
+    override fun getQueue(): List<Song> = displayPlayerState.value.queue
     override fun getCurrentIndex(): Int = playerManager.playerState.value.currentIndex
     override fun isPlaying(): Boolean = playerManager.isPlaying.value
     override fun getProgressMs(): Long = playerManager.progress.value
     override fun getDurationMs(): Long = playerManager.duration.value
 
-    override fun playAt(index: Int) {
-        mainHandler.post { playerManager.playAt(index) }
-    }
+    override fun playAt(index: Int): Boolean = runQueueCommandOnMain { playerManager.playAt(index) }
 
-    override fun moveQueueItem(from: Int, to: Int) {
-        mainHandler.post { playerManager.moveItem(from, to) }
-    }
+    override fun moveQueueItem(from: Int, to: Int): Boolean =
+        runQueueCommandOnMain { playerManager.moveItem(from, to) }
 
-    override fun addToQueue(song: Song) {
-        mainHandler.post { playerManager.addToQueue(song) }
+    override fun addToQueue(song: Song): Boolean = runQueueCommandOnMain { playerManager.addToQueue(song) }
+
+    override suspend fun searchShared(keyword: String): com.nasmusic.tv.backend.search.SharedSearchResult {
+        val result = searchVM.searchShared(keyword)
+        val displayed = result.results.mapNotNull { ranked ->
+            displaySongs(listOf(ranked.song)).firstOrNull()?.let { ranked.copy(song = it) }
+        }
+        return result.copy(
+            results = displayed,
+            sourceBreakdown = displayed.groupBy { it.source }.mapValues { it.value.size },
+        )
     }
 
     override suspend fun search(keyword: String): RemoteSearchResult = coroutineScope {
@@ -4095,11 +4277,30 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
                 emptyList()
             }
         }
-        RemoteSearchResult(nasDeferred.await(), netDeferred.await())
+        RemoteSearchResult(displaySongs(nasDeferred.await()), displaySongs(netDeferred.await()))
     }
 
-    override fun removeFromQueue(index: Int) {
-        mainHandler.post { playerManager.removeFromQueue(index) }
+    override fun removeFromQueue(index: Int): Boolean =
+        runQueueCommandOnMain { playerManager.removeFromQueue(index) }
+
+    private fun runQueueCommandOnMain(command: () -> Unit): Boolean {
+        if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
+            command()
+            return true
+        }
+        val latch = java.util.concurrent.CountDownLatch(1)
+        var completed = false
+        mainHandler.post {
+            try {
+                command()
+                completed = true
+            } finally {
+                latch.countDown()
+            }
+        }
+        return runCatching {
+            latch.await(2, java.util.concurrent.TimeUnit.SECONDS) && completed
+        }.getOrDefault(false)
     }
 
     // （addSongToQueue/addSongsToQueue/toggleQueueSong 已迁至 PlayerViewModel，见播放控制转发区）
@@ -4118,7 +4319,7 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
      * 不包含当前正在播放的歌曲，最多保留 5 首，
      * 按队列顺序排列（最近即将播放的在前）。
      */
-    val recentNetworkSongs: StateFlow<List<Song>> = playerVM.playerState.map { st ->
+    val recentNetworkSongs: StateFlow<List<Song>> = displayPlayerState.map { st ->
         st.queue.filterIndexed { i, s -> s.isNetworkSong && i != st.currentIndex }
             .take(5)
     }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
@@ -4126,7 +4327,7 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
     /**
      * 当前播放的网络歌曲（用于「继续听」区域的"正在播放"）
      */
-    val currentNetworkSong: StateFlow<Song?> = playerVM.playerState.map { st ->
+    val currentNetworkSong: StateFlow<Song?> = displayPlayerState.map { st ->
         st.currentSong?.takeIf { it.isNetworkSong }
     }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
@@ -4801,6 +5002,33 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
     val storageAvailableBytes: kotlinx.coroutines.flow.StateFlow<Long> =
         nasMusicApp.storageGuard.availableBytes
 
+    suspend fun setRoadmapCacheLimit(kind: com.nasmusic.tv.data.cache.CacheLimitKind, value: Int): Boolean {
+        val result = com.nasmusic.tv.data.cache.CacheLimits.set(roadmapPrefs, kind, value)
+        if (result.isSuccess) {
+            withContext(Dispatchers.IO) {
+                com.nasmusic.tv.lyrics.LyricsPersistentCache.get(getApplication()).maintain()
+                nasMusicApp.coverUrlPersistentCache.maintain()
+                nasMusicApp.networkMusicManager.maintainPlayUrlCache()
+            }
+        }
+        return result.isSuccess
+    }
+
+    fun setOfflinePolicy(policy: com.nasmusic.tv.data.model.OfflinePolicy) {
+        viewModelScope.launch { roadmapPrefs.setOfflinePolicy(policy) }
+    }
+
+    fun setReplayGainEnabled(enabled: Boolean) {
+        playerManager.replayGainEnabled = enabled
+    }
+
+    fun setSeamlessMode(mode: com.nasmusic.tv.data.model.SeamlessMode) {
+        viewModelScope.launch {
+            roadmapPrefs.setSeamlessMode(mode)
+            playerManager.seamlessMode = mode
+        }
+    }
+
     fun clearLyricsCache() {
         viewModelScope.launch {
             lyricsManager.clearCache()
@@ -4904,7 +5132,7 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
     val playlists: StateFlow<UiState<List<Playlist>>> = _playlists.asStateFlow()
 
     private val _selectedPlaylistSongs = MutableStateFlow<UiState<List<Song>>>(UiState.Success(emptyList()))
-    val selectedPlaylistSongs: StateFlow<UiState<List<Song>>> = _selectedPlaylistSongs.asStateFlow()
+    val selectedPlaylistSongs: StateFlow<UiState<List<Song>>> = displayUiState(_selectedPlaylistSongs, includeHidden = true)
 
     fun loadPlaylists() {
         // ⚠️ NAS 关 ⇒ 不拉 NAS 歌单（方案 §3.2.1 #6）。
@@ -5173,6 +5401,21 @@ showError(getApplication<Application>().getString(R.string.toggle_favorite_error
     // init 块之前），任何被引用字段在接线执行时都已初始化完毕。
     // =====================================================================
     init {
+        nasMusicApp.sourceIdentityProvider = ::sourceFor
+        playerManager.sourceIdentityProvider = ::sourceFor
+        playerManager.queueInputNormalizer = ::queueInputRaw
+        playerVM.queueInputNormalizer = ::queueInputRaw
+        playlistVM.songInputNormalizer = ::queueInputRaw
+        playlistVM.displayProjector = { songs, includeHidden ->
+            displaySongs(songs, includeHidden = includeHidden)
+        }
+        viewModelScope.launch {
+            readModel.snapshots.collect {
+                updateMergedData()
+                searchVM.clearSearch()
+            }
+        }
+
         // ---- ServerViewModel 接线 ----
         serverVM.onConnected = {
             loadLibrary()

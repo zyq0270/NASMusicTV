@@ -42,6 +42,16 @@ class M3uPlaylistParser : PlaylistParser, PlaylistNameProvider {
 
             if (line.startsWith("#")) {
                 if (line.startsWith("#EXTINF:")) {
+                    // 上一条没有 URI（例如导出器标记的 UNRESOLVED）也要保留显示信息。
+                    pendingExtinf?.let { (sec, label) ->
+                        val (artist, title) = splitExtinfLabel(label)
+                        entries += RawSongEntry(
+                            title = title,
+                            artist = artist,
+                            durationSec = sec,
+                            originalIndex = index++,
+                        )
+                    }
                     pendingExtinf = parseExtinf(line)
                 } else if (line.startsWith("#PLAYLIST:")) {
                     // §4.2 取名兜底：`#PLAYLIST:<name>` 头（部分导出工具写入）
@@ -53,6 +63,21 @@ class M3uPlaylistParser : PlaylistParser, PlaylistNameProvider {
             }
 
             // 非注释、非空行 = path hint（首个非注释行通常紧跟 EXTINF）
+            // 导出器写入的脱敏占位符不是可播放直链：保留 EXTINF 显示信息，但不落地 URL。
+            if (line.contains(M3uPlaylistSerializer.URL_PLACEHOLDER)) {
+                if (pendingExtinf != null) {
+                    val (sec, label) = pendingExtinf!!
+                    pendingExtinf = null
+                    val (artist, title) = splitExtinfLabel(label)
+                    entries += RawSongEntry(
+                        title = title.ifBlank { PlaylistParsers.displayNameFromUrl(line) },
+                        artist = artist,
+                        durationSec = sec,
+                        originalIndex = index++,
+                    )
+                }
+                return@forEach
+            }
             val urlType = PlaylistParsers.classifyUrl(line)
             val isPathLike = urlType != DirectUrlType.NONE
 
@@ -81,6 +106,15 @@ class M3uPlaylistParser : PlaylistParser, PlaylistNameProvider {
             }
             // 无 EXTINF 且非 URL 的裸文本行：非标准 m3u，忽略
         }
+        pendingExtinf?.let { (sec, label) ->
+            val (artist, title) = splitExtinfLabel(label)
+            entries += RawSongEntry(
+                title = title,
+                artist = artist,
+                durationSec = sec,
+                originalIndex = index,
+            )
+        }
         return entries
     }
 
@@ -100,11 +134,13 @@ class M3uPlaylistParser : PlaylistParser, PlaylistNameProvider {
      */
     private fun splitExtinfLabel(label: String?): Pair<String, String> {
         if (label.isNullOrBlank()) return "" to ""
-        val sep = label.indexOf(" - ")
+        val trimmed = label.trim()
+        val sep = trimmed.indexOf(" - ")
         return if (sep > 0) {
-            label.substring(0, sep).trim() to label.substring(sep + 3).trim()
+            trimmed.substring(0, sep).trim() to trimmed.substring(sep + 3).trim()
         } else {
-            "" to label.trim()
+            // 导出器对空 artist 仍写 " - <title>"；去掉仅剩的分隔符。
+            "" to trimmed.removePrefix("- ").trim()
         }
     }
 }

@@ -3,10 +3,14 @@ package com.nasmusic.tv.net
 import android.content.Context
 import com.google.gson.Gson
 import com.google.gson.JsonObject
+import com.nasmusic.tv.backend.search.SharedSearchResult
+import com.nasmusic.tv.data.model.MusicSourceType
+import com.nasmusic.tv.data.model.RankedSong
 import com.nasmusic.tv.data.model.Song
 import com.nasmusic.tv.util.AppLog
 import com.nasmusic.tv.util.NetworkUtils
 import fi.iki.elonen.NanoHTTPD
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.runBlocking
 
 /**
@@ -58,7 +62,7 @@ class RemoteControlServer(
             server = impl
             val ip = NetworkUtils.getLocalIpAddress()
             serverUrl = if (ip != null) "http://$ip:$port/?t=$authToken" else null
-            AppLog.i(TAG, "Started on port $port, url=$serverUrl")
+            AppLog.i(TAG, "Started on port $port (authenticated)")
             serverUrl
         } catch (e: Exception) {
             AppLog.e(TAG, "Failed to start on port $port", e)
@@ -91,6 +95,13 @@ class RemoteControlServer(
     ) : NanoHTTPD(port) {
 
         private val gson = Gson()
+        // NanoHTTPD 2.3.1 的状态行只用 getDescription() 拼装（"HTTP/1.1 " + description），
+        // 内置 Status 的描述自带状态码，自定义 IStatus 漏掉码会让客户端解析失败
+        // （HttpURLConnection: Invalid Http response）。
+        private val gatewayTimeout = object : Response.IStatus {
+            override fun getDescription(): String = "504 Gateway Timeout"
+            override fun getRequestStatus(): Int = 504
+        }
 
         /** P2-9：搜索并发闸门，超出直接 503 快速失败（不排队占住 worker） */
         private val searchSlots = java.util.concurrent.Semaphore(MAX_CONCURRENT_SEARCHES)
@@ -152,7 +163,9 @@ class RemoteControlServer(
             }
             val index = body.get("index")?.asInt ?: return jsonError(Response.Status.BAD_REQUEST, "missing index")
             if (!isValidQueueIndex(index)) return jsonError(Response.Status.BAD_REQUEST, "index out of range")
-            callbacks.playAt(index)
+            if (!callbacks.playAt(index)) {
+                return jsonError(Response.Status.CONFLICT, "play failed")
+            }
             return jsonOk()
         }
 
@@ -167,7 +180,9 @@ class RemoteControlServer(
             if (!isValidQueueIndex(from) || !isValidQueueIndex(to)) {
                 return jsonError(Response.Status.BAD_REQUEST, "index out of range")
             }
-            callbacks.moveQueueItem(from, to)
+            if (!callbacks.moveQueueItem(from, to)) {
+                return jsonError(Response.Status.CONFLICT, "move failed")
+            }
             return jsonOk()
         }
 
@@ -179,7 +194,9 @@ class RemoteControlServer(
             }
             val index = body.get("index")?.asInt ?: return jsonError(Response.Status.BAD_REQUEST, "missing index")
             if (!isValidQueueIndex(index)) return jsonError(Response.Status.BAD_REQUEST, "index out of range")
-            callbacks.removeFromQueue(index)
+            if (!callbacks.removeFromQueue(index)) {
+                return jsonError(Response.Status.CONFLICT, "remove failed")
+            }
             return jsonOk()
         }
 
@@ -207,7 +224,9 @@ class RemoteControlServer(
             ) {
                 return jsonError(Response.Status.BAD_REQUEST, "unsupported uri scheme")
             }
-            callbacks.addToQueue(song)
+            if (!callbacks.addToQueue(song)) {
+                return jsonError(Response.Status.CONFLICT, "add failed")
+            }
             return jsonOk()
         }
 
@@ -217,28 +236,40 @@ class RemoteControlServer(
             // ① 并发上限：拿不到槽位立刻 503（快速失败，避免请求在 worker 上排队堆积）；
             // ② 慢查询记录：把实测耗时打出来，作为后续调参依据。
             if (!searchSlots.tryAcquire()) {
-                AppLog.w(TAG, "search rejected: concurrent limit($MAX_CONCURRENT_SEARCHES) reached, q=${query.take(50)}")
+                AppLog.w(TAG, "search rejected: concurrent limit($MAX_CONCURRENT_SEARCHES) reached, qLength=${query.length}")
                 return jsonError(Response.Status.SERVICE_UNAVAILABLE, "search busy, retry later")
             }
             val startedAt = System.currentTimeMillis()
             return try {
                 // 修复（M-7）：跨源搜索限时 10s——原 runBlocking 无超时，
                 // 各搜索端点同时慢响应时会长时间占用 NanoHTTPD worker 线程
-                val result = runBlocking { kotlinx.coroutines.withTimeout(10_000) { callbacks.search(query) } }
+                val result = runBlocking { kotlinx.coroutines.withTimeout(10_000) { callbacks.searchShared(query) } }
                 val elapsed = System.currentTimeMillis() - startedAt
                 if (elapsed >= SLOW_SEARCH_MS) {
-                    AppLog.w(TAG, "slow search: ${elapsed}ms, q=${query.take(50)}")
+                    AppLog.w(TAG, "slow search: ${elapsed}ms, qLength=${query.length}")
                 } else {
-                    AppLog.d(TAG, "search: ${elapsed}ms, q=${query.take(50)}")
+                    AppLog.d(TAG, "search: ${elapsed}ms, qLength=${query.length}")
                 }
                 val json = JsonObject().apply {
-                    add("nasResults", gson.toJsonTree(result.nasResults.map { it.toLightMap() }))
-                    add("networkResults", gson.toJsonTree(result.networkResults.map { it.toLightMap() }))
+                    addProperty("normalizedQuery", result.normalizedQuery)
+                    add("results", gson.toJsonTree(result.results.map { ranked ->
+                        ranked.song.toLightMap(ranked.source)
+                    }))
+                    // 旧 H5 / 第三方调用继续可读；新 H5 优先使用 results 保留跨源排序。
+                    add("nasResults", gson.toJsonTree(result.results
+                        .filter { it.source == MusicSourceType.NAS }
+                        .map { it.song.toLightMap() }))
+                    add("networkResults", gson.toJsonTree(result.results
+                        .filter { it.source != MusicSourceType.NAS }
+                        .map { it.song.toLightMap() }))
                 }
                 jsonResponse(json.toString())
+            } catch (e: TimeoutCancellationException) {
+                AppLog.w(TAG, "Search timed out, qLength=${query.length}")
+                jsonError(gatewayTimeout, "search_timeout")
             } catch (e: Exception) {
                 AppLog.e(TAG, "Search failed", e)
-                jsonError(Response.Status.INTERNAL_ERROR, "search failed")
+                jsonError(Response.Status.INTERNAL_ERROR, "search_failed")
             } finally {
                 searchSlots.release()
             }
@@ -294,7 +325,7 @@ class RemoteControlServer(
 
         private fun jsonOk(): Response = jsonResponse("""{"ok":true}""")
 
-        private fun jsonError(status: Response.Status, msg: String): Response {
+        private fun jsonError(status: Response.IStatus, msg: String): Response {
             return newFixedLengthResponse(status, "application/json; charset=UTF-8", """{"ok":false,"error":"$msg"}""")
         }
 
@@ -309,6 +340,14 @@ class RemoteControlServer(
             "networkSource" to networkSource,
             "networkId" to networkId
         )
+
+        /** 统一结果额外携带来源键与本地化来源名，供 H5 展示。 */
+        private fun Song.toLightMap(source: MusicSourceType): Map<String, Any?> =
+            toLightMap() + mapOf(
+                "source" to source.name,
+                "sourceLabel" to runCatching { context.getString(source.displayNameRes) }
+                    .getOrDefault(source.displayName),
+            )
     }
 }
 
@@ -319,11 +358,29 @@ interface RemoteCallbacks {
     fun isPlaying(): Boolean
     fun getProgressMs(): Long
     fun getDurationMs(): Long
-    fun playAt(index: Int)
-    fun moveQueueItem(from: Int, to: Int)
-    fun removeFromQueue(index: Int)
-    fun addToQueue(song: Song)
+    fun playAt(index: Int): Boolean
+    fun moveQueueItem(from: Int, to: Int): Boolean
+    fun removeFromQueue(index: Int): Boolean
+    fun addToQueue(song: Song): Boolean
     suspend fun search(keyword: String): RemoteSearchResult
+
+    /**
+     * 共享搜索入口。主会话在 MainViewModel 覆写为 SharedSearchService.search；
+     * 默认桥接旧回调，避免未接线的测试 / 调用方立即失效。
+     */
+    suspend fun searchShared(keyword: String): SharedSearchResult {
+        val legacy = search(keyword)
+        val results = legacy.nasResults.map { song ->
+            RankedSong(song, MusicSourceType.NAS)
+        } + legacy.networkResults.map { song ->
+            RankedSong(song, MusicSourceType.NETWORK_MUSIC)
+        }
+        return SharedSearchResult(
+            normalizedQuery = keyword,
+            results = results,
+            sourceBreakdown = results.groupBy { it.source }.mapValues { it.value.size },
+        )
+    }
 }
 
 data class RemoteSearchResult(

@@ -14,8 +14,12 @@ import com.nasmusic.tv.R
 import com.nasmusic.tv.data.cache.CacheEntry
 import com.nasmusic.tv.data.cache.CacheGroup
 import com.nasmusic.tv.data.cache.CacheInventory
+import com.nasmusic.tv.data.cache.CacheLimitKind
+import com.nasmusic.tv.data.cache.CacheLimits
+import com.nasmusic.tv.data.cache.CacheLimitsSnapshot
 import com.nasmusic.tv.data.cache.CacheSize
 import com.nasmusic.tv.data.model.AppSettings
+import com.nasmusic.tv.data.model.OfflinePolicy
 import kotlinx.coroutines.delay
 
 /** 缓存分区状态 */
@@ -26,6 +30,8 @@ data class CacheSettingsState(
      * ⛔ 不要在分区里另起一个 `StatFs` —— 那会与下载队列看到的"可用空间"出现两个数。
      */
     val availableBytes: Long = 0L,
+    val cacheLimits: CacheLimitsSnapshot = CacheLimits.current(),
+    val offlinePolicy: OfflinePolicy = OfflinePolicy.OFF,
 )
 
 /** 缓存分区动作 */
@@ -41,7 +47,19 @@ data class CacheSettingsActions(
     val onClearCoverUrlCache: (() -> Unit)? = null,
     /** T8b：`cacheDir/cover_cache_*` + `cacheDir/album_covers/` */
     val onClearExtractedCoverCache: (() -> Unit)? = null,
+    /** 返回 false 表示非法输入未落盘；调用方负责保持弹窗并显示范围错误。 */
+    val onSetCacheLimit: (suspend (CacheLimitKind, Int) -> Boolean)? = null,
+    val onSetOfflinePolicy: ((OfflinePolicy) -> Unit)? = null,
 )
+
+/** 数量输入的纯校验：非整数/越界均失败，绝不 clamp 后悄悄保存。 */
+internal fun parseCacheLimitInput(kind: CacheLimitKind, text: String): Result<Int> {
+    val value = text.trim().toIntOrNull()
+        ?: return Result.failure(IllegalArgumentException("not an integer"))
+    val range = CacheLimits.RANGES.getValue(kind)
+    return if (value in range) Result.success(value)
+    else Result.failure(IllegalArgumentException("$value not in $range"))
+}
 
 /**
  * 缓存分区（三卡：缓存策略 / 占用与存储 / 缓存清理）。
@@ -84,6 +102,24 @@ internal fun CacheSettingsSection(
         SettingsGroupCard(title = stringResource(R.string.settings_group_cache_policy)) {
             SettingSwitch(label = stringResource(R.string.settings_cache_lyrics), description = stringResource(R.string.settings_cache_lyrics_desc), checked = state.settings.cacheLyrics, onClick = { actions.onToggleCacheLyrics(!state.settings.cacheLyrics) })
             SettingSwitch(label = stringResource(R.string.settings_cache_cover), description = stringResource(R.string.settings_cache_cover_desc), checked = state.settings.cacheCover, onClick = { actions.onToggleCacheCover(!state.settings.cacheCover) })
+            if (actions.onSetCacheLimit != null) {
+                SettingsHint(stringResource(R.string.settings_group_cache_limits))
+                CacheLimitInputRow(CacheLimitKind.LYRICS_ENTRIES, state.cacheLimits.lyricsMaxEntries, actions.onSetCacheLimit)
+                CacheLimitInputRow(CacheLimitKind.COVER_URL_ENTRIES, state.cacheLimits.coverUrlMaxEntries, actions.onSetCacheLimit)
+                CacheLimitInputRow(CacheLimitKind.PLAY_URL_ENTRIES, state.cacheLimits.playUrlMaxEntries, actions.onSetCacheLimit)
+            }
+            if (actions.onSetOfflinePolicy != null) {
+                SettingSwitch(
+                    label = stringResource(R.string.settings_search_offline_only),
+                    description = stringResource(R.string.settings_search_offline_only_desc),
+                    checked = state.offlinePolicy == OfflinePolicy.LOCAL_ONLY,
+                    onClick = {
+                        actions.onSetOfflinePolicy?.invoke(
+                            if (state.offlinePolicy == OfflinePolicy.LOCAL_ONLY) OfflinePolicy.OFF else OfflinePolicy.LOCAL_ONLY
+                        )
+                    }
+                )
+            }
         }
         // 卡② 占用与存储（只读：剩余空间 + 5 组 + 19 条）
         SettingsGroupCard(

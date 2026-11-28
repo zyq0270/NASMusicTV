@@ -7,6 +7,8 @@ import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
+import com.nasmusic.tv.data.model.PlayMode
+import com.nasmusic.tv.data.model.Song
 import com.nasmusic.tv.util.AppLog
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -38,10 +40,24 @@ class CrossfadeController(
     private val context: Context,
     private val mainPlayerProvider: () -> ExoPlayer?,
     private val appVolumeProvider: () -> Float,
-    private val onCrossfadeComplete: (Int) -> Unit
+    private val onCrossfadeComplete: (Int) -> Unit,
+    private val volumeWriter: ((player: ExoPlayer, appVolume: Float, songKey: String?, fadeFactor: Float) -> Unit)? = null,
+    private val currentSongKeyProvider: () -> String? = { null },
+    private val nextSongKeyProvider: (Int) -> String? = { null },
+    private val queueIdentityProvider: () -> Any = { Unit },
+    private val crossfadePlayerFactory: (() -> ExoPlayer)? = null,
 ) {
+    data class PlaybackIdentity(
+        val queue: List<Song>,
+        val currentIndex: Int,
+        val playMode: PlayMode,
+        val playWhenReady: Boolean,
+        val isPlaying: Boolean,
+    )
+
     sealed interface State {
         data object Off : State
+        data object Preparing : State
         /** 淡入淡出进行中（剩余毫秒） */
         data class Fading(val remainingMs: Long) : State
     }
@@ -52,10 +68,26 @@ class CrossfadeController(
     private var crossfadePlayer: ExoPlayer? = null
     private val handler = Handler(Looper.getMainLooper())
     private var fadeRunnable: Runnable? = null
+    private var readinessTimeout: Runnable? = null
     private var activeNextIndex: Int = -1
+    private var activeQueueIdentity: Any? = null
+
+    /** 兼容旧构造面的音量出口；正式注入时由 PlayerManager 按两曲 key 分发增益。 */
+    private val fallbackVolumeWriter by lazy { ReplayGainController() }
+    private val writePlayerVolume: (ExoPlayer, Float, String?, Float) -> Unit =
+        volumeWriter ?: { p, v, key, fade -> fallbackVolumeWriter.writeVolume(p, v, key, fade) }
+    private var fadingNextKey: String? = null
 
     /** 应用内音量缩放：f × appVolume（clamped 0–1），所有音量写入统一走这里 */
     private fun volume(f: Float) = f * appVolumeProvider().coerceIn(0f, 1f)
+
+    private fun writeMain(f: Float) {
+        mainPlayerProvider()?.let { writePlayerVolume(it, appVolumeProvider(), currentSongKeyProvider(), f) }
+    }
+
+    private fun writeNext(p: ExoPlayer, f: Float) {
+        writePlayerVolume(p, appVolumeProvider(), fadingNextKey, f)
+    }
 
     /**
      * 尝试启动 crossfade（进度轮询钩子调用）。
@@ -81,53 +113,55 @@ class CrossfadeController(
         if (!enabled || durationSec <= 0) return false
         if (suppressPlayback || repeatOne) return false
         if (queueSize <= 1) return false
-        if (_state.value is State.Fading) return false // 已在进行中
+        if (_state.value != State.Off) return false
         val nextIndex = currentIndex + 1
-        if (nextIndex >= queueSize) return false // 队尾顺序模式不 crossfade
-        if (activeNextIndex == nextIndex) return false // 防重复触发
+        if (nextIndex >= queueSize) return false
+        if (activeNextIndex == nextIndex) return false
 
         val main = mainPlayerProvider() ?: return false
-        val nextItem = nextMediaItemFactory(nextIndex) ?: return false // streamUrl 空 → 放弃
+        val nextItem = nextMediaItemFactory(nextIndex) ?: return false
         if (nextItem.localConfiguration?.uri.toString().isNullOrBlank()) return false
+        val identity = queueIdentityProvider()
+        val durationMs = durationSec * 1000L
 
         activeNextIndex = nextIndex
+        activeQueueIdentity = identity
+        fadingNextKey = nextSongKeyProvider(nextIndex)
+        _state.value = State.Preparing
         try {
-            val cfPlayer = createCrossfadePlayer()
+            val cfPlayer = (crossfadePlayerFactory ?: ::createCrossfadePlayer).invoke()
             crossfadePlayer = cfPlayer
+            cfPlayer.addListener(object : Player.Listener {
+                override fun onPlaybackStateChanged(playbackState: Int) {
+                    if (crossfadePlayer !== cfPlayer) return
+                    when (playbackState) {
+                        Player.STATE_READY -> beginFade(cfPlayer, durationMs)
+                        Player.STATE_IDLE, Player.STATE_ENDED -> abort()
+                    }
+                }
+
+                override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                    if (crossfadePlayer === cfPlayer) abort()
+                }
+            })
             cfPlayer.setMediaItem(nextItem)
-            cfPlayer.volume = 0f
+            writeNext(cfPlayer, 0f)
             cfPlayer.prepare()
             cfPlayer.play()
 
-            main.volume = volume(1f)
-            val totalSteps = (durationSec * 1000) / STEP_MS
-            val volumeStep = 1f / totalSteps
-            var step = 0
-
-            val runnable = object : Runnable {
-                override fun run() {
-                    step++
-                    val frac = (step * volumeStep).coerceAtMost(1f)
-                    try {
-                        // P1#3：等功率曲线（sin²+cos²=1），端点仍为 (1,0)→(0,1)，整体按 appVolume 缩放
-                        main.volume = volume(kotlin.math.cos(frac * HALF_PI))
-                        cfPlayer.volume = volume(kotlin.math.sin(frac * HALF_PI))
-                    } catch (e: Exception) {
-                        AppLog.w(TAG, "fade step failed: ${e.message}")
+            if (cfPlayer.playbackState == Player.STATE_READY) {
+                beginFade(cfPlayer, durationMs)
+            } else {
+                val timeout = Runnable {
+                    if (crossfadePlayer === cfPlayer && _state.value == State.Preparing) {
+                        AppLog.w(TAG, "crossfade next track not ready before timeout")
                         abort()
-                        return
-                    }
-                    _state.value = State.Fading((durationSec * 1000) - step * STEP_MS)
-                    if (step >= totalSteps) {
-                        complete()
-                    } else {
-                        handler.postDelayed(this, STEP_MS)
                     }
                 }
+                readinessTimeout = timeout
+                handler.postDelayed(timeout, READY_TIMEOUT_MS)
             }
-            fadeRunnable = runnable
-            handler.postDelayed(runnable, STEP_MS)
-            AppLog.d(TAG, "crossfade started: index=$currentIndex -> $nextIndex, ${durationSec}s")
+            AppLog.d(TAG, "crossfade preparing: index=$currentIndex -> $nextIndex, ${durationSec}s")
             return true
         } catch (e: Exception) {
             AppLog.e(TAG, "crossfade start failed", e)
@@ -136,17 +170,68 @@ class CrossfadeController(
         }
     }
 
+    private fun beginFade(cfPlayer: ExoPlayer, durationMs: Long) {
+        if (crossfadePlayer !== cfPlayer || _state.value != State.Preparing) return
+        if (!isCurrentIdentity()) {
+            abort()
+            return
+        }
+        readinessTimeout?.let { handler.removeCallbacks(it) }
+        readinessTimeout = null
+        writeMain(1f)
+        val totalSteps = (durationMs / STEP_MS).toInt().coerceAtLeast(1)
+        val volumeStep = 1f / totalSteps
+        var step = 0
+
+        val runnable = object : Runnable {
+            override fun run() {
+                if (!isCurrentIdentity() || crossfadePlayer !== cfPlayer) {
+                    abort()
+                    return
+                }
+                step++
+                val frac = (step * volumeStep).coerceAtMost(1f)
+                try {
+                    writeMain(kotlin.math.cos(frac * HALF_PI))
+                    writeNext(cfPlayer, kotlin.math.sin(frac * HALF_PI))
+                } catch (e: Exception) {
+                    AppLog.w(TAG, "fade step failed: ${e.message}")
+                    abort()
+                    return
+                }
+                _state.value = State.Fading((durationMs - step * STEP_MS).coerceAtLeast(0L))
+                if (step >= totalSteps) {
+                    complete()
+                } else {
+                    handler.postDelayed(this, STEP_MS)
+                }
+            }
+        }
+        fadeRunnable = runnable
+        handler.postDelayed(runnable, STEP_MS)
+        AppLog.d(TAG, "crossfade started: index=${activeNextIndex - 1} -> $activeNextIndex, ${durationMs}ms")
+    }
+
+    private fun isCurrentIdentity(): Boolean =
+        queueIdentityProvider() == activeQueueIdentity
+
     /** 窗口结束：主播放器切到新歌（transitionToIndex）并释放 crossfade 资源 */
     private fun complete() {
+        if (!isCurrentIdentity()) {
+            abort()
+            return
+        }
         val nextIndex = activeNextIndex
         cleanupPlayer(restoreMainVolume = false) // 主 player 音量由 transitionToIndex 后恢复
         _state.value = State.Off
         activeNextIndex = -1
+        activeQueueIdentity = null
+        fadingNextKey = null
         if (nextIndex >= 0) {
             onCrossfadeComplete(nextIndex)
         }
-        // 恢复主播放器音量（切歌完成后）
-        mainPlayerProvider()?.volume = volume(1f)
+        // 恢复主播放器音量（切歌完成后，按提交后的新 songKey）
+        writeMain(1f)
     }
 
     /** 立即中断（手动切歌/出错）：释放资源，不切歌 */
@@ -154,11 +239,15 @@ class CrossfadeController(
         cleanupPlayer(restoreMainVolume = true)
         _state.value = State.Off
         activeNextIndex = -1
+        activeQueueIdentity = null
+        fadingNextKey = null
     }
 
     private fun cleanupPlayer(restoreMainVolume: Boolean) {
         fadeRunnable?.let { handler.removeCallbacks(it) }
         fadeRunnable = null
+        readinessTimeout?.let { handler.removeCallbacks(it) }
+        readinessTimeout = null
         crossfadePlayer?.let { p ->
             try {
                 p.stop()
@@ -167,7 +256,7 @@ class CrossfadeController(
         }
         crossfadePlayer = null
         if (restoreMainVolume) {
-            try { mainPlayerProvider()?.volume = volume(1f) } catch (_: Exception) {}
+            try { writeMain(1f) } catch (_: Exception) {}
         }
     }
 
@@ -192,12 +281,13 @@ class CrossfadeController(
             .build()
     }
 
-    /** 是否正在 crossfade */
-    fun isFading(): Boolean = _state.value is State.Fading
+    /** 是否正在准备或淡化 crossfade */
+    fun isFading(): Boolean = _state.value != State.Off
 
     companion object {
         private const val TAG = "Crossfade"
         const val STEP_MS = 50L
+        private const val READY_TIMEOUT_MS = 5_000L
 
         /** P1#3：等功率曲线的半周期（π/2），供 sin/cos 增益计算复用 */
         private val HALF_PI = (Math.PI / 2.0).toFloat()

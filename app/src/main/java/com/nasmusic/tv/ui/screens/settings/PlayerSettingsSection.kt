@@ -19,6 +19,7 @@ import com.nasmusic.tv.R
 import com.nasmusic.tv.backend.network.QualityTiers
 import com.nasmusic.tv.data.model.AppSettings
 import com.nasmusic.tv.data.model.PlayMode
+import com.nasmusic.tv.data.model.SeamlessMode
 import com.nasmusic.tv.ui.theme.FontSize
 import com.nasmusic.tv.ui.theme.NasMusicColors
 import kotlin.math.roundToInt
@@ -35,6 +36,9 @@ data class PlayerSettingsState(
     /** F2-5：crossfade 开关/时长 */
     val crossfadeEnabled: Boolean = false,
     val crossfadeDurationSec: Int = 4,
+    /** P0-1：三态单一真相源；OFF = 跟随 legacy crossfadeEnabled。 */
+    val seamlessMode: SeamlessMode = SeamlessMode.OFF,
+    val replayGainEnabled: Boolean = false,
     /** F2-7：应用内音量（应用级增益 0.0–1.0，独立于系统音量） */
     val appVolume: Float = 1f,
     /** F2-6：音质档位（AUTO=0/999/320/128） */
@@ -51,6 +55,8 @@ data class PlayerSettingsActions(
     /** F2-5：crossfade 开关/时长 */
     val onToggleCrossfade: (Boolean) -> Unit = {},
     val onChangeCrossfadeDuration: (Int) -> Unit = {},
+    val onChangeSeamlessMode: (SeamlessMode) -> Unit = {},
+    val onToggleReplayGain: (Boolean) -> Unit = {},
     /** F2-7：应用内音量（应用级增益 0.0–1.0，独立于系统音量） */
     val onChangeAppVolume: (Float) -> Unit = {},
     /** F2-6：音质档位 */
@@ -86,12 +92,47 @@ internal fun PlayerSettingsSection(
         // 卡② 过渡与音量（crossfade + 时长档位 + 应用内音量）
         SettingsGroupCard(title = stringResource(R.string.settings_group_transition_volume)) {
             SettingSwitch(
-                label = stringResource(R.string.settings_crossfade),
-                description = stringResource(R.string.settings_crossfade_desc),
-                checked = state.crossfadeEnabled,
-                onClick = { actions.onToggleCrossfade(!state.crossfadeEnabled) }
+                label = stringResource(R.string.settings_replay_gain),
+                description = stringResource(R.string.settings_replay_gain_desc),
+                checked = state.replayGainEnabled,
+                onClick = { actions.onToggleReplayGain(!state.replayGainEnabled) }
             )
-            if (state.crossfadeEnabled) {
+            Text(
+                text = stringResource(R.string.settings_seamless_mode),
+                color = NasMusicColors.TextPrimary,
+                fontSize = FontSize.button(),
+                modifier = Modifier.padding(start = 4.dp)
+            )
+            SettingsHint(stringResource(R.string.settings_seamless_mode_desc))
+            SettingsChipRow(
+                items = listOf(
+                    SeamlessMode.OFF to stringResource(R.string.settings_seamless_off),
+                    SeamlessMode.GAPLESS to stringResource(R.string.settings_seamless_gapless),
+                    SeamlessMode.CROSSFADE to stringResource(R.string.settings_seamless_crossfade),
+                ),
+                tv = 3,
+                phonePortrait = 1,
+                modifier = Modifier.padding(start = 16.dp, top = 4.dp),
+            ) { mode ->
+                SettingsChip(
+                    label = mode.second,
+                    selected = state.seamlessMode == mode.first,
+                    onClick = { actions.onChangeSeamlessMode(mode.first) },
+                )
+            }
+            // OFF is the explicit legacy migration state. CROSSFADE owns the old switch;
+            // GAPLESS hides it so there is no visible dual truth source.
+            if (state.seamlessMode == SeamlessMode.OFF) {
+                SettingSwitch(
+                    label = stringResource(R.string.settings_crossfade),
+                    description = stringResource(R.string.settings_crossfade_desc),
+                    checked = state.crossfadeEnabled,
+                    onClick = { actions.onToggleCrossfade(!state.crossfadeEnabled) }
+                )
+            }
+            if (state.seamlessMode == SeamlessMode.OFF && state.crossfadeEnabled ||
+                state.seamlessMode == SeamlessMode.CROSSFADE
+            ) {
                 // 时长档位 2/4/6/8/12 秒（TV 遥控适配的离散选择，比滑条更易 D-Pad 操作）。
                 // v2.39.0 T13：原来是 `Row + forEach + SettingActionButton`，五枚全走默认
                 // `fillMaxWidth()` ⇒ Row 给 wrap 子项的 maxWidth 是「行内剩余宽度」，

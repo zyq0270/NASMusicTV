@@ -89,6 +89,9 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.nasmusic.tv.ui.screens.library.MetadataCleanupScreen
+import com.nasmusic.tv.ui.viewmodel.MetadataCleanupViewModel
 
 @OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
@@ -126,10 +129,10 @@ fun AppRoot(
     // currentIndex，都会驱动整棵 UI 树（导航栏 + 各 Screen 分支）重组。三元组本身仍保持
     // 「同帧原子发布」（见 PlayerState 的 KDoc），这里只是在消费端做投影 + 去重。
     val currentSong by remember(viewModel) {
-        viewModel.playerVM.playerState
+        viewModel.displayPlayerState
             .map { it.currentSong }
             .distinctUntilChanged()
-    }.collectAsState(initial = viewModel.playerVM.playerState.value.currentSong)
+    }.collectAsState(initial = viewModel.displayPlayerState.value.currentSong)
     // v2.35.0 多码率：当前生效档位 = 单曲覆盖 ?: 全局默认（方案 §2.3 两级模型）
     val globalQualityTier by viewModel.prefs.player.qualityTier.collectAsState(initial = 0)
     val qualityTier = remember(currentSong, globalQualityTier) {
@@ -235,6 +238,7 @@ fun AppRoot(
             // WeatherRadio 入口在首页，由 else 回首页覆盖，无需专门分支
             currentScreen == Screen.Netdisk -> navigateMine
             currentScreen == Screen.PlaylistManagement -> navigateMine
+            currentScreen == Screen.MetadataCleanup -> navigateMine
             else -> navigateHome
         }
         navBackHandler.value = handler
@@ -351,6 +355,15 @@ fun AppRoot(
                 Screen.Mine -> MineBranch(
                     viewModel = viewModel,
                 )
+                Screen.MetadataCleanup -> {
+                    val cleanupVM: MetadataCleanupViewModel = viewModel()
+                    val cleanupState by cleanupVM.uiState.collectAsState()
+                    MetadataCleanupScreen(
+                        state = cleanupState,
+                        viewModel = cleanupVM,
+                        onClose = { viewModel.navVM.navigateTo(Screen.Mine) },
+                    )
+                }
                 Screen.Queue -> QueueBranch(
                     viewModel = viewModel,
                     currentSong = currentSong,

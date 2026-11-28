@@ -154,12 +154,12 @@ class NowPlayingFlowFixGateTest {
         )
         assertTrue(
             "isNasFavorite 须加来源类型守卫",
-            body.contains("!normalized.isNetworkSong && !normalized.isLocalSong && normalized.id in _favoriteIds.value")
+            body.contains("!normalized.isNetworkSong && !normalized.isLocalSong && normalized.id in externalController.nasFavoriteIds.value")
         )
         assertFalse(
             "T7 负自检：抹掉类型守卫后不得仍判正",
             body.replace("!normalized.isNetworkSong && !normalized.isLocalSong && ", "")
-                .contains("!normalized.isNetworkSong && !normalized.isLocalSong && normalized.id in _favoriteIds.value")
+                .contains("!normalized.isNetworkSong && !normalized.isLocalSong && normalized.id in externalController.nasFavoriteIds.value")
         )
     }
 

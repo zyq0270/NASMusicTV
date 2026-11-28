@@ -8,6 +8,7 @@ import com.nasmusic.tv.backend.local.db.LocalSongEntity
 import com.nasmusic.tv.data.model.ScanResult
 import com.nasmusic.tv.data.model.Song
 import com.nasmusic.tv.data.model.StorageType
+import com.nasmusic.tv.data.prefs.RoadmapPreferences
 import com.nasmusic.tv.util.AppLog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -32,7 +33,11 @@ class LocalMusicRepository(
     // §10.411：可能同时存在内置 + CUSTOM 两个下载根；切换目录不搬迁旧文件，两个都要扫。
     @Volatile private var downloadRootsProvider: () -> List<java.io.File> = {
         listOf(com.nasmusic.tv.backend.download.DownloadRootResolver.internalRoot(context))
-    }
+    },
+    val readModel: SongReadModel = SongReadModel(
+        RoadmapPreferences.getInstance(context).metadataOverridesFlow(),
+        RoadmapPreferences.getInstance(context).duplicateResolutionsFlow(),
+    ),
 ) {
     companion object { private const val TAG = "LocalMusicRepo" }
 
@@ -47,7 +52,8 @@ class LocalMusicRepository(
 
     /** 启动时：从缓存加载（毫秒级） */
     suspend fun loadFromCache(): List<Song> = withContext(Dispatchers.IO) {
-        dao.getAllSongs().map { it.toSong() }
+        readModel.awaitLoaded()
+        dao.getAllSongs().map { it.toSong() }.display()
     }
 
     /** 启动时：后台增量扫描更新索引 */
@@ -93,8 +99,9 @@ class LocalMusicRepository(
         }
 
         AppLog.i(TAG, "incremental: +${newSongs.size} new, -${deletedPaths.size} deleted, scanned=${scanned.size}")
+        readModel.awaitLoaded()
         ScanResult(
-            newSongs = newSongs.map { it.toSong() },
+            newSongs = newSongs.map { it.toSong() }.display(),
             deletedPaths = deletedPaths,
             updatedSongs = emptyList()
         )
@@ -167,7 +174,26 @@ class LocalMusicRepository(
     /** 搜索：只查询索引，不扫描文件 */
     suspend fun search(query: String): List<Song> = withContext(Dispatchers.IO) {
         if (query.isBlank()) return@withContext emptyList()
-        dao.search(escapeLike(query.trim())).map { it.toSong() }
+        readModel.awaitLoaded()
+        val trimmed = query.trim()
+        // override 后的标题/艺术家/专辑可能不再包含原始 SQL 关键词，因此在存在覆盖时
+        // 安全扩大为全量候选，再按展示字段过滤，避免“搜得到原标签、搜不到新标签”。
+        val broadenCandidates = readModel.hasOverrides
+        val candidates = if (broadenCandidates) {
+            dao.getAllSongs()
+        } else {
+            dao.search(escapeLike(trimmed))
+        }
+        val songs = candidates.map { it.toSong() }.display()
+        if (broadenCandidates) {
+            songs.filter { song ->
+                song.title.contains(trimmed, ignoreCase = true) ||
+                    song.artist.contains(trimmed, ignoreCase = true) ||
+                    song.album.contains(trimmed, ignoreCase = true)
+            }
+        } else {
+            songs
+        }
     }
 
     /**
@@ -202,7 +228,8 @@ class LocalMusicRepository(
             dao.deleteAll()
             dao.insertAll(scanned.map { it.toEntity() })
         }
-        scanned.map { it.toSong() }
+        readModel.awaitLoaded()
+        scanned.map { it.toSong() }.display()
     }
 
     /**
@@ -255,8 +282,9 @@ class LocalMusicRepository(
         }
 
         AppLog.i(TAG, "USB scan $devicePath: ${scanned.size} songs")
+        readModel.awaitLoaded()
         ScanResult(
-            newSongs = scanned.map { it.toSong() },
+            newSongs = scanned.map { it.toSong() }.display(),
             deletedPaths = deletedPaths,
             updatedSongs = emptyList()
         )
@@ -279,8 +307,19 @@ class LocalMusicRepository(
 
     /** 全量加载本地曲库（清除/删除后刷新用） */
     suspend fun loadAll(): List<Song> = withContext(Dispatchers.IO) {
+        readModel.awaitLoaded()
+        dao.getAllSongs().map { it.toSong() }.display()
+    }
+
+    /**
+     * 仅供“元数据整理”读取原始索引：这里刻意不应用 override/隐藏，
+     * 否则用户无法编辑被覆盖的字段，也无法恢复已隐藏的重复项。
+     */
+    suspend fun loadAllRaw(): List<Song> = withContext(Dispatchers.IO) {
         dao.getAllSongs().map { it.toSong() }
     }
+
+    private fun List<Song>.display(): List<Song> = readModel.applyAll(this)
 
     // ── 转换函数 ──
 

@@ -1,22 +1,39 @@
 package com.nasmusic.tv.ui.components.branches
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.tv.material3.ExperimentalTvMaterial3Api
+import androidx.tv.material3.Text
+import com.nasmusic.tv.R
 import com.nasmusic.tv.data.model.Screen
 import com.nasmusic.tv.data.model.Song
 import com.nasmusic.tv.data.model.ServerConfig
 import com.nasmusic.tv.ui.viewmodel.MainViewModel
 import com.nasmusic.tv.data.model.*
+import com.nasmusic.tv.ui.components.FocusableSurface
+import com.nasmusic.tv.ui.components.LocalFocusableContentColor
 import com.nasmusic.tv.ui.screens.*
 import com.nasmusic.tv.ui.screens.library.*
 import com.nasmusic.tv.ui.screens.settings.*
 import com.nasmusic.tv.ui.screens.netdisk.*
 import com.nasmusic.tv.ui.screens.stats.*
+import com.nasmusic.tv.ui.theme.FontSize
+import com.nasmusic.tv.ui.theme.NasMusicColors
 import com.nasmusic.tv.ui.viewmodel.*
 
 /**
@@ -28,11 +45,24 @@ import com.nasmusic.tv.ui.viewmodel.*
 internal fun MineBranch(
     viewModel: MainViewModel
 ) {
-                    // M7 修复：下载进度流下沉到分支内收集（原 AppRoot 顶层收集下传）
+    var showPlaylistPush by remember { mutableStateOf(false) }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val app = context.applicationContext as com.nasmusic.tv.NasMusicApp
+    val playlistSyncVM: PlaylistSyncViewModel = viewModel(
+        factory = PlaylistSyncViewModel.factory(context)
+    )
+    val playlistSyncState by playlistSyncVM.state.collectAsState()
+    val localPlaylists by viewModel.playlistVM.localPlaylists.collectAsState(initial = emptyList())
+    val activeConnection = app.backendRegistry.getActiveConnection()
+    val capabilities = activeConnection?.first?.capabilities
+    val canPushPlaylists = capabilities?.playlistCreate == true && capabilities.playlistAdd
+    val pushUnavailableReason = if (activeConnection != null && !canPushPlaylists) {
+        stringResource(R.string.playlist_sync_push_unsupported)
+    } else null
+    Box(modifier = Modifier.fillMaxSize()) {
                     val songDownloadStates by viewModel.songDownloadStates.collectAsState(initial = emptyMap())
                     val favoriteSongsState by viewModel.favoriteSongs.collectAsState(initial = UiState.Success(emptyList()))
                     val networkFavoriteSongs by viewModel.networkFavoriteSongs.collectAsState(initial = emptyList())
-                    val localPlaylists by viewModel.playlistVM.localPlaylists.collectAsState(initial = emptyList())
                     val queueSongIds by viewModel.queueSongIds.collectAsState(initial = emptySet())
                     // 歌单导入（阶段5）：URL 失效标记 / 补全进度（「我的」页徽标与按钮数据源）
                     val songReachability by viewModel.playlistImportVM.songReachability.collectAsState(initial = emptyMap())
@@ -83,6 +113,13 @@ internal fun MineBranch(
                         onOpenQueue = { viewModel.navVM.navigateTo(Screen.Queue) },
                         onOpenNetdisk = { viewModel.navVM.navigateTo(Screen.Netdisk) },
                         onOpenSettings = { viewModel.navVM.navigateTo(Screen.Settings) },
+                        onPushLocalPlaylists = if (canPushPlaylists) ({
+                            if (!playlistSyncState.busy) {
+                                playlistSyncVM.prepare()
+                                showPlaylistPush = true
+                            }
+                        }) else null,
+                        pushUnavailableReason = pushUnavailableReason,
                         // 歌曲下载状态
                         downloadStates = songDownloadStates,
                         onDownloadSong = { song -> viewModel.downloadVM.downloadSong(song) },
@@ -92,4 +129,42 @@ internal fun MineBranch(
                         enrichProgress = enrichProgress,
                         onEnrichPlaylist = { playlistId -> viewModel.playlistImportVM.enrichPlaylist(playlistId) }
                     )
+        FocusableSurface(
+            onClick = { viewModel.navVM.navigateTo(Screen.MetadataCleanup) },
+            modifier = Modifier.align(Alignment.TopEnd).padding(top = 72.dp, end = 24.dp),
+            shape = RoundedCornerShape(10.dp),
+            focusedScale = 1.05f,
+            containerColor = NasMusicColors.Surface,
+            contentColor = NasMusicColors.TextPrimary,
+            focusedContainerColor = NasMusicColors.Primary.copy(alpha = 0.2f),
+            focusedContentColor = NasMusicColors.Primary,
+        ) {
+            Text(
+                text = stringResource(R.string.metadata_cleanup_title),
+                color = LocalFocusableContentColor.current,
+                fontSize = FontSize.button(),
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+            )
+        }
+    }
+
+    if (showPlaylistPush) {
+        PlaylistSyncDialog(
+            mode = PlaylistSyncDialogMode.PUSH,
+            state = playlistSyncState,
+            localPlaylists = localPlaylists,
+            onExport = { _, _ -> },
+            onPull = {},
+            onPush = playlistSyncVM::push,
+            onResume = playlistSyncVM::resumePush,
+            onRefreshRemote = {},
+            onDismiss = {
+                if (!playlistSyncState.busy) {
+                    showPlaylistPush = false
+                    playlistSyncVM.consumeTerminalEvent()
+                }
+            },
+        )
+    }
+
 }

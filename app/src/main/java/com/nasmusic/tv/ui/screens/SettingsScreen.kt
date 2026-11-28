@@ -145,6 +145,10 @@ internal fun SettingsScreen(
     onClearExtractedCoverCache: (() -> Unit)? = null,
     /** T8b：剩余空间（StorageGuard.availableBytes，⛔ 不要再起一个 StatFs） */
     storageAvailableBytes: Long = 0L,
+    cacheLimits: com.nasmusic.tv.data.cache.CacheLimitsSnapshot = com.nasmusic.tv.data.cache.CacheLimits.current(),
+    offlinePolicy: com.nasmusic.tv.data.model.OfflinePolicy = com.nasmusic.tv.data.model.OfflinePolicy.OFF,
+    onSetCacheLimit: (suspend (com.nasmusic.tv.data.cache.CacheLimitKind, Int) -> Boolean)? = null,
+    onSetOfflinePolicy: ((com.nasmusic.tv.data.model.OfflinePolicy) -> Unit)? = null,
     onOpenEqualizer: (() -> Unit)? = null,
     onOpenPlayStats: (() -> Unit)? = null,
     // 快捷选择按类别统计（Quick Dial）
@@ -156,6 +160,10 @@ internal fun SettingsScreen(
     crossfadeDurationSec: Int = 4,
     onToggleCrossfade: (Boolean) -> Unit = {},
     onChangeCrossfadeDuration: (Int) -> Unit = {},
+    seamlessMode: com.nasmusic.tv.data.model.SeamlessMode = com.nasmusic.tv.data.model.SeamlessMode.OFF,
+    onChangeSeamlessMode: (com.nasmusic.tv.data.model.SeamlessMode) -> Unit = {},
+    replayGainEnabled: Boolean = false,
+    onToggleReplayGain: (Boolean) -> Unit = {},
     // F2-7：应用内音量（应用级增益 0.0–1.0，独立于系统音量）
     appVolume: Float = 1f,
     onChangeAppVolume: (Float) -> Unit = {},
@@ -272,6 +280,10 @@ internal fun SettingsScreen(
     onImportPlaylistFile: (() -> Unit)? = null,
     /** 从本地文件导入歌单（SAF 选择器） */
     onImportPlaylistLocalFile: (() -> Unit)? = null,
+    onExportPlaylist: (() -> Unit)? = null,
+    onPullPlaylist: (() -> Unit)? = null,
+    playlistPullEnabled: Boolean = true,
+    playlistPullUnavailableReason: String? = null,
     onOpenImportedPlaylist: ((String) -> Unit)? = null,
     onConsumePlaylistImportMessage: (() -> Unit)? = null,
     // 服务器连接设置
@@ -626,6 +638,8 @@ var activeSection by remember { mutableStateOf(SettingsSection.GENERAL) }
                             // F2-5：crossfade
                             crossfadeEnabled = crossfadeEnabled,
                             crossfadeDurationSec = crossfadeDurationSec,
+                            seamlessMode = seamlessMode,
+                            replayGainEnabled = replayGainEnabled,
                             // F2-7：应用内音量
                             appVolume = appVolume,
                             // F2-6：音质档位
@@ -638,6 +652,8 @@ var activeSection by remember { mutableStateOf(SettingsSection.GENERAL) }
                             onOpenEqualizer = onOpenEqualizer,
                             onToggleCrossfade = onToggleCrossfade,
                             onChangeCrossfadeDuration = onChangeCrossfadeDuration,
+                            onChangeSeamlessMode = onChangeSeamlessMode,
+                            onToggleReplayGain = onToggleReplayGain,
                             onChangeAppVolume = onChangeAppVolume,
                             onChangeQualityTier = onChangeQualityTier,
                             onClearQualityOverrides = onClearQualityOverrides,
@@ -898,7 +914,9 @@ var activeSection by remember { mutableStateOf(SettingsSection.GENERAL) }
                     CacheSettingsSection(
                         state = CacheSettingsState(
                             settings = settings,
-                            availableBytes = storageAvailableBytes
+                            availableBytes = storageAvailableBytes,
+                            cacheLimits = cacheLimits,
+                            offlinePolicy = offlinePolicy,
                         ),
                         actions = CacheSettingsActions(
                             onToggleCacheLyrics = onToggleCacheLyrics,
@@ -909,6 +927,8 @@ var activeSection by remember { mutableStateOf(SettingsSection.GENERAL) }
                             onClearSeparationArtifacts = onClearSeparationArtifacts,
                             onClearCoverUrlCache = onClearCoverUrlCache,
                             onClearExtractedCoverCache = onClearExtractedCoverCache,
+                            onSetCacheLimit = onSetCacheLimit,
+                            onSetOfflinePolicy = onSetOfflinePolicy,
                         )
                     )
                 }
@@ -1061,6 +1081,10 @@ var activeSection by remember { mutableStateOf(SettingsSection.GENERAL) }
                             onOpenPlayStats = onOpenPlayStats,
                             onImportPlaylistFile = onImportPlaylistFile,
                             onImportPlaylistLocalFile = onImportPlaylistLocalFile,
+                            onExportPlaylist = onExportPlaylist,
+                            onPullPlaylist = onPullPlaylist,
+                            playlistPullEnabled = playlistPullEnabled,
+                            playlistPullUnavailableReason = playlistPullUnavailableReason,
                             onOpenImportedPlaylist = onOpenImportedPlaylist,
                             onConsumePlaylistImportMessage = onConsumePlaylistImportMessage,
                             onOpenQuickPickStats = onOpenQuickPickStats,

@@ -29180,3 +29180,64 @@ Jellyfin 按名查询只发一次请求、fields 补齐并分页；Navidrome/Sub
 **涉及文件**：`scripts/{gitee_release.py,sync_gitee_mirror.ps1,sync_private_overlay.py}`、`scripts/tests/`、`app/build.gradle.kts`、`backend/download/`、`lyrics/`、`net/`、`player/`、`ui/components/picker/`、`ui/components/branches/`、`ui/screens/`、`ui/viewmodel/`、`visualizer/VisualizerRendererFactory.kt`、对应 `app/src/test/` 门禁与回归测试、`docs/conventions-adaptive-ui.md`、`CHANGELOG.md`。
 
 **版本号**：v2.39.28（versionCode 213）；不修改已打 tag 的 v2.39.27 历史 section。
+
+
+### 10.424 功能路线图七项落地（v2.39.29 - 2026-11-28）
+
+**背景**：按 `docs/archive/feature-roadmap-dev-plan-2026-11-27.md`（v2.3 已实施）落地七项功能：P0 响度归一/无缝播放、歌单双向同步与导出、外部控制补齐；P1 语音点歌与共享搜索；P2 元数据整理与重复项处理、年度听歌报告、弱网预刷与缓存上限。R1–R6 按各项「推荐 / 未裁定默认」实施（R7、R8 已裁定），默认值以所有者验收为准。公共底座先冻结：`SongSourceIdentity`、`SongKeys`（版本化稳定键）、`PlaylistSongRef`、`PlaybackEvents`、`CacheLimits`、`OfflinePolicy`、`RoadmapPreferences`，以及后端 capability/error model（`BackendCapabilities`）。
+
+**P0-1 响度归一与无缝播放**：
+
+1. `ReplayGainTagReader` 解析 ID3v2.3/2.4 `TXXX:REPLAYGAIN_*`、FLAC Vorbis comment 与 Ogg Vorbis comment，支持 track/album gain+peak；R128 增益按 Q7.8 定点换算到 ReplayGain 口径。读取失败一律返回未知，不猜测默认增益。
+2. `ReplayGainController` 是**唯一** `player.volume` 出口：`PlayerManager`、`CrossfadeController`、`PlaybackService` 的赋值与恢复全部收敛；增益按播放器实例与加载代次分离，旧代次的迟到结果不会覆盖新曲目；正增益保持 0 dB（只衰减不放大），负增益按峰值做削波保护。ReplayGain 默认关闭。
+3. `GaplessProbe`/`GaplessProber` 用有界 `AudioHeaderSource` 读取容器头：MP3 取 Xing/LAME 的 encoder delay + padding，FLAC/Ogg 取容器级样本边界，读不到即判定不可无缝；`SeamlessPolicy` 决定走 gapless 还是毫秒级 `ShortFadeIn`，不把整数秒 crossfade 当回落。无缝模式默认关闭。
+
+**P0-2 歌单双向同步与导出**：
+
+1. JSON 歌单升级为 v3，条目改为 `PlaylistSongRef`（后端类型 + 服务器 id + 原生曲目 id + 标题/艺术家等展示字段），导入时按来源身份去重，跨后端不匹配的条目保留为「未解析」而不是丢弃；旧 v1/v2 文件仍可导入。
+2. 新增可移植 M3U 序列化（`M3uPlaylistSerializer`），只承诺展示信息与 URI，不承诺跨后端无损；`PlaylistExporter` 与导入器共享同一套解析/映射门禁。
+3. `BackendPlaylistSync` 实现逐条推送、部分失败可续传：`PersistentPlaylistPushCheckpointStore` 持久化检查点，重试从断点继续；后端写能力由 `BackendCapabilities` 判定，Subsonic 写 API 未实现前显式禁用推送并给出可读错误。
+
+**P0-3 外部控制补齐**：
+
+1. `ExternalPlaybackController` 成为 Service/Application 级控制状态源：播放模式与 NAS 收藏 id 都由它持有，遥控、小组件、媒体会话读取同一份状态；收藏切换返回真实异步结果，不再在 Service 里直接改状态并伪报成功。
+2. `MediaSessionAccessPolicy` 只**增加**自定义命令，继续禁止在 `onConnect` 拒绝系统控制器（蓝牙/车机/SystemUI）。
+3. 新增 4×2 桌面小组件（`appwidget/` + `res/layout/` + `res/xml/remote_playback_widget_info.xml`），播放/暂停/上一首/下一首/收藏走 `ExternalPlaybackController`；`WidgetUpdateThrottle` 以 800 ms 合并刷新，避免播放进度导致高频 `RemoteViews` 更新。PendingIntent 在 API 22 使用 `FLAG_UPDATE_CURRENT`，API 23+ 追加 `FLAG_IMMUTABLE`。
+
+**P1 语音点歌与共享搜索**：
+
+1. `VoiceQueryNormalizer` 统一处理唤醒词、口头填充词、全半角、标点与多余空白；界面搜索、遥控 `/api/search` 与语音入口都经 `SharedSearchService` 规范化一次后聚合，避免三套规则漂移。
+2. 拼音匹配只在查询「像拼音」时启用，且求值放到 `Dispatchers.Default`，不再阻塞主线程；`SearchViewModel` 与遥控共用同一服务与同一 `effectiveSources` 口径。
+3. 修复内嵌 HTTP 服务在解析失败路径缺少状态行原因短语（`504` 一行）导致客户端解析失败的问题。
+
+**P2-1 元数据整理与重复项处理**：
+
+1. 新增 `MetadataOverride` / `DuplicateResolution` 持久化模型（带 schema 版本，坏 JSON 回退为空并保留原文件），整理页 `MetadataCleanupScreen` + `MetadataCleanupViewModel` 编辑标题/艺术家/专辑与重复项合并。
+2. `SongReadModel` 提供统一展示读取：隐藏键、覆盖字段与别名解析在快照层一次计算，覆盖曲库、搜索、收藏、历史、歌单、队列与遥控；未接入读模型的展示点由 `SongReadModelCoverageTest` 判红。
+3. `DuplicateDetector` 生成候选，`StatsAliasResolver` 用并查集把 keep/hide 组合并为 canonical（环取字典序最小 key），聚合计数在 alias 前后守恒；canonical 元数据缺失时回退到可见条目。
+
+**P2-2 年度听歌报告**：
+
+1. 播放统计改为唯一播放事件模型（`PlaybackEvents` 的开始/结束事件），`YearlyStatsRecorder` 记录、`YearlyStatsWriter` 汇总、`YearlyStatsBackfill` 对历史数据做低保真回填。
+2. 年度计数**完整存储**，前 20 只在展示时截取，写入不再截断；历史缺失字段保持「未知」，不显示为 0；不完整年份带标记仍可展示。
+3. 新增 `YearlyReportScreen` + `YearlyReportViewModel`，年份可选，只做数据页，不生成 PNG。
+
+**P2-3 弱网预刷与缓存上限**：
+
+1. `PlayUrlPrefetchScheduler` 只用无播放副作用的纯解析 API 预刷下一首，尊重离线策略与源开关；解析失败保持可重试状态，不自动跳过或伪造 URL。
+2. `CacheLimits` 三项数量上限：歌词 100–20000（默认 2000）、封面 URL 100–50000（默认 10000）、播放链接 50–5000（默认 500）；配置立即更新内存快照，已有条目在后续写入/加载/维护时收敛，淘汰路径零 IO。
+3. 设置页新增三项数字输入与「搜索离线优先」开关，复用 `SettingActionButton` + `TextInputDialog`；用户可见文案进中英 `strings.xml`。
+
+**配套修复与门禁调整**：
+
+1. `QualityOverrides` 改为按文件绝对路径共享同一 `DataStore`（进程级 map），修复 `NasMusicApp` 与测试各自创建实例导致的 `multiple DataStores active for the same file`。
+2. Ogg 多段 lacing 的页头解析修正为按 continuation flag 合并分段，避免大 comment 包被截断后误判无 ReplayGain。
+3. `CacheLimitInputRow` 从 `CacheSettingsSection.kt` 拆到同名新文件：`SettingsGroupCoverageTest` 只扫描 `*Section.kt`，控件留在其中会被误判为「卡片外按钮」。
+4. 源码门禁随实现归属更新：收藏改读 `externalController.nasFavoriteIds`、播放模式改读 `playMode`、收藏流改为四路 `combine`、拼音匹配改到 `SharedSearchService`、曲库合并参数名改 `rawNasSongs`；`SourceGatingGateTest` 的可见性过滤字面量与 `visibleSongsPaging.totalCount` 字面量保留，读模型应用移到过滤之后、隐藏数统计抽成 `countHiddenNas()`。
+5. 单测 JVM 堆提升到 4g：全量 Robolectric 在 512m / 2g 下 OOM（`readBoundedBytes` 与 `UncaughtExceptionHandler` 反复 OOM），4g 下全量稳定。
+
+**验证结果（2026-11-28）**：执行 `testDebugUnitTest --rerun-tasks --no-daemon -Pkotlin.compiler.execution.strategy=in-process`，JUnit XML 合计 **3510 例，0 失败、0 错误、1 跳过**（392 个结果文件）；`lintDebug` **0 Error / 272 Warning**（基线 255，新增来源于新代码的常规告警）；`python scripts/kotlin_comment_balance.py`、`git diff --check`、`python scripts/check_doc_parity.py`、`python scripts/sync_private_overlay.py --check` 均通过。本地 release 出包结果见提交说明；电视上的画面、遥控与听感验收由所有者执行。
+
+**涉及文件**：`data/model/{SongSourceIdentity,PlaylistSongRef,ReplayGainInfo,SeamlessMode,MetadataOverride,PlaybackEvents,YearlyStats,OfflinePolicy}.kt`、`util/{SongKeys,VoiceQueryNormalizer}.kt`、`data/prefs/RoadmapPreferences.kt`、`data/cache/`、`data/stats/`、`backend/local/{ReplayGainTagReader,GaplessProbe,AudioHeaderSource,SongReadModel,DuplicateDetector}.kt`、`backend/playlist/`、`backend/search/`、`backend/BackendCapabilities.kt`、`player/{ReplayGainController,GaplessProber,SeamlessPolicy,ShortFadeIn,ExternalPlaybackController,PlayUrlPrefetchScheduler}.kt`、`appwidget/`、`ui/screens/{PlaylistSyncDialog,library/MetadataCleanupScreen,stats/YearlyReportScreen,settings/CacheLimitInputRow}.kt`、`ui/viewmodel/`、`res/{layout,xml}/`、中英 `strings.xml`、对应 `app/src/test/` 门禁与回归测试、`docs/archive/feature-roadmap-dev-plan-2026-11-27.md`、`docs/archive/README.md`、`CHANGELOG.md`。
+
+**版本号**：v2.39.29（versionCode 214）。

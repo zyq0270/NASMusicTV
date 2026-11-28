@@ -20,6 +20,18 @@ fun buildControlPageHtml(context: Context): String {
         "searching" to context.getString(R.string.html_remote_searching),
         "noResults" to context.getString(R.string.html_remote_no_results),
         "searchFailed" to context.getString(R.string.html_remote_search_failed),
+        "searchBusy" to context.getString(R.string.html_remote_search_busy),
+        "searchTimeout" to context.getString(R.string.html_remote_search_timeout),
+        "searchEmptyQuery" to context.getString(R.string.html_remote_search_empty_query),
+        "allResults" to context.getString(R.string.html_remote_all_results),
+        "voiceSearch" to context.getString(R.string.html_remote_voice_search),
+        "voiceListening" to context.getString(R.string.html_remote_voice_listening),
+        "voicePrivacy" to context.getString(R.string.html_remote_voice_privacy),
+        "voiceUnsupported" to context.getString(R.string.html_remote_voice_unsupported),
+        "voicePermissionDenied" to context.getString(R.string.html_remote_voice_permission_denied),
+        "voiceNoSpeech" to context.getString(R.string.html_remote_voice_no_speech),
+        "voiceNetworkError" to context.getString(R.string.html_remote_voice_network_error),
+        "voiceFailed" to context.getString(R.string.html_remote_voice_failed),
         "nasLibrary" to context.getString(R.string.html_remote_nas_library),
         "networkSearch" to context.getString(R.string.html_remote_network_search),
         "networkLabel" to context.getString(R.string.html_remote_network_label),
@@ -68,6 +80,12 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;b
 .search-bar input:focus{border-color:#2DD4BF}
 .search-bar button{padding:14px 24px;font-size:16px;background:#2DD4BF;color:#000;border:none;border-radius:10px;font-weight:600;cursor:pointer;transition:.15s}
 .search-bar button:active{transform:scale(.96)}
+.search-bar button.voice-btn{display:none;padding:12px 14px;font-size:18px;line-height:1}
+.search-bar button.voice-btn.listening{background:#e94560;color:#fff}
+.voice-note{display:none;margin:-8px 0 14px;font-size:12px;color:#888;line-height:1.5}
+.voice-note.visible{display:block}
+.voice-note.error{color:#e94560}
+.source-badge{display:inline-block;margin-left:6px;padding:1px 5px;border-radius:3px;background:#1e2d42;color:#2DD4BF;font-size:10px;font-weight:500;vertical-align:middle}
 .result-group{margin-bottom:20px}
 .result-group h3{font-size:14px;color:#888;margin-bottom:10px;display:flex;align-items:center;gap:6px}
 .result-group h3 .count{font-size:12px;color:#555}
@@ -105,8 +123,10 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;b
 <div id="tab-search" class="tab-content">
   <div class="search-bar">
     <input type="text" id="search-input" placeholder="${context.getString(R.string.html_remote_search_placeholder)}" onkeydown="if(event.key==='Enter')doSearch()">
-    <button onclick="doSearch()">${context.getString(R.string.html_remote_search_btn)}</button>
+    <button type="button" class="voice-btn" id="voice-search-btn" style="display:none" aria-label="${context.getString(R.string.html_remote_voice_search)}" onclick="startVoiceSearch()">🎤</button>
+    <button type="button" onclick="doSearch()">${context.getString(R.string.html_remote_search_btn)}</button>
   </div>
+  <div id="voice-note" class="voice-note"></div>
   <div id="search-results"></div>
 </div>
 
@@ -116,6 +136,9 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;b
 const BASE = location.origin;
 var STR = $strJson;
 var queueData = null;
+var voiceRecognition = null;
+var activeSearchController = null;
+var searchRequestSeq = 0;
 
 // Tab 切换
 function showTab(name) {
@@ -230,45 +253,172 @@ function moveItem(from, to) {
   });
 }
 
+// 语音搜索：仅 HTTPS / localhost 安全上下文且浏览器支持 Web Speech API 时开放。
+// HTTP 下保持输入框与搜索按钮可用，只隐藏麦克风。
+function showVoiceMessage(message, isError) {
+  var note = document.getElementById('voice-note');
+  note.textContent = message;
+  note.classList.add('visible');
+  note.classList.toggle('error', !!isError);
+}
+
+function initVoiceSearch() {
+  var button = document.getElementById('voice-search-btn');
+  if (!window.isSecureContext) {
+    showVoiceMessage(STR.voiceUnsupported, false);
+    return;
+  }
+  var Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!Recognition) {
+    showVoiceMessage(STR.voiceUnsupported, false);
+    return;
+  }
+  button.style.display = 'block';
+  showVoiceMessage(STR.voicePrivacy, false);
+}
+
+function startVoiceSearch() {
+  var button = document.getElementById('voice-search-btn');
+  if (voiceRecognition) {
+    voiceRecognition.abort();
+    return;
+  }
+  var Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!window.isSecureContext || !Recognition) {
+    showVoiceMessage(STR.voiceUnsupported, false);
+    return;
+  }
+
+  var recognition = new Recognition();
+  recognition.lang = 'zh-CN';
+  recognition.interimResults = false;
+  recognition.maxAlternatives = 1;
+  recognition.onstart = function() {
+    button.classList.add('listening');
+    showVoiceMessage(STR.voiceListening, false);
+  };
+  recognition.onresult = function(event) {
+    var text = event.results && event.results[0] && event.results[0][0]
+      ? event.results[0][0].transcript : '';
+    document.getElementById('search-input').value = text;
+    if (text.trim()) doSearch();
+  };
+  recognition.onerror = function(event) {
+    var message = STR.voiceFailed;
+    if (event.error === 'not-allowed' || event.error === 'service-not-allowed' || event.error === 'audio-capture') {
+      message = STR.voicePermissionDenied;
+    } else if (event.error === 'no-speech') {
+      message = STR.voiceNoSpeech;
+    } else if (event.error === 'network') {
+      message = STR.voiceNetworkError;
+    }
+    showVoiceMessage(message, true);
+  };
+  recognition.onend = function() {
+    voiceRecognition = null;
+    button.classList.remove('listening');
+  };
+
+  voiceRecognition = recognition;
+  try {
+    recognition.start();
+  } catch (e) {
+    voiceRecognition = null;
+    button.classList.remove('listening');
+    showVoiceMessage(STR.voiceFailed, true);
+  }
+}
+
 // 搜索
 function doSearch() {
   var q = document.getElementById('search-input').value.trim();
-  if (!q) return;
   var results = document.getElementById('search-results');
+  if (!q) {
+    if (activeSearchController) activeSearchController.abort();
+    activeSearchController = null;
+    searchRequestSeq++;
+    results.innerHTML = '<div class="empty">' + STR.searchEmptyQuery + '</div>';
+    return;
+  }
+  if (activeSearchController) activeSearchController.abort();
+  var controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  activeSearchController = controller;
+  var requestId = ++searchRequestSeq;
+  var timeoutId = setTimeout(function() {
+    if (requestId !== searchRequestSeq) return;
+    results.innerHTML = '<div class="empty">' + STR.searchTimeout + '</div>';
+    searchRequestSeq++;
+    if (controller) controller.abort();
+    if (activeSearchController === controller) activeSearchController = null;
+  }, 12000);
+
   results.innerHTML = '<div class="loading">' + STR.searching + '</div>';
-  fetch(BASE + '/api/search?q=' + encodeURIComponent(q))
-    .then(r => r.json())
-    .then(data => {
-      var html = '';
-      // NAS 结果
-      if (data.nasResults && data.nasResults.length > 0) {
-        html += '<div class="result-group"><h3>' + STR.nasLibrary + ' <span class="count">(' + data.nasResults.length + ')</span></h3>';
-        data.nasResults.forEach(function(song) {
-          html += renderSearchItem(song);
-        });
-        html += '</div>';
-      }
-      // 网络结果
-      if (data.networkResults && data.networkResults.length > 0) {
-        html += '<div class="result-group"><h3>' + STR.networkSearch + ' <span class="count">(' + data.networkResults.length + ')</span></h3>';
-        data.networkResults.forEach(function(song) {
-          html += renderSearchItem(song);
-        });
-        html += '</div>';
-      }
-      if (!html) html = '<div class="empty">' + STR.noResults + '</div>';
-      results.innerHTML = html;
+  var options = {signal: controller ? controller.signal : undefined};
+  fetch(BASE + '/api/search?q=' + encodeURIComponent(q), options)
+    .then(function(r) {
+      return r.json().catch(function() { return {}; }).then(function(data) {
+        if (!r.ok) throw {status: r.status, code: data && data.error};
+        return data;
+      });
     })
-    .catch(() => { results.innerHTML = '<div class="empty">' + STR.searchFailed + '</div>'; });
+    .then(function(data) {
+      if (requestId !== searchRequestSeq) return;
+      renderSearchResults(data);
+    })
+    .catch(function(error) {
+      if (requestId !== searchRequestSeq) return;
+      var message = STR.searchFailed;
+      if (error && error.name === 'AbortError') {
+        message = STR.searchTimeout;
+      } else if (error && error.status === 503) {
+        message = STR.searchBusy;
+      } else if (error && (error.status === 504 || error.code === 'search_timeout')) {
+        message = STR.searchTimeout;
+      }
+      results.innerHTML = '<div class="empty">' + esc(message) + '</div>';
+    })
+    .then(function() {
+      clearTimeout(timeoutId);
+      if (requestId === searchRequestSeq && activeSearchController === controller) {
+        activeSearchController = null;
+      }
+    });
+}
+
+function renderSearchResults(data) {
+  var results = document.getElementById('search-results');
+  var html = '';
+  if (Array.isArray(data.results)) {
+    if (data.results.length > 0) {
+      html += '<div class="result-group"><h3>' + STR.allResults + ' <span class="count">(' + data.results.length + ')</span></h3>';
+      data.results.forEach(function(song) { html += renderSearchItem(song); });
+      html += '</div>';
+    }
+  } else {
+    // 兼容旧服务端：nasResults / networkResults 分组结构。
+    if (data.nasResults && data.nasResults.length > 0) {
+      html += '<div class="result-group"><h3>' + STR.nasLibrary + ' <span class="count">(' + data.nasResults.length + ')</span></h3>';
+      data.nasResults.forEach(function(song) { html += renderSearchItem(song); });
+      html += '</div>';
+    }
+    if (data.networkResults && data.networkResults.length > 0) {
+      html += '<div class="result-group"><h3>' + STR.networkSearch + ' <span class="count">(' + data.networkResults.length + ')</span></h3>';
+      data.networkResults.forEach(function(song) { html += renderSearchItem(song); });
+      html += '</div>';
+    }
+  }
+  results.innerHTML = html || '<div class="empty">' + STR.noResults + '</div>';
 }
 
 function renderSearchItem(song) {
   var netBadge = song.isNetworkSong ? '<span class="net-badge">NET</span>' : '';
+  var sourceBadge = (song.sourceLabel || song.source)
+    ? '<span class="source-badge">' + esc(song.sourceLabel || song.source) + '</span>' : '';
   var album = song.album ? '<div class="album">' + esc(song.album) + '</div>' : '';
   var dur = fmtDuration(song.durationMs);
   var songJson = escAttr(JSON.stringify(song));
   return '<div class="search-item">' +
-    '<div class="info"><div class="title">' + esc(song.title) + netBadge + '</div>' +
+    '<div class="info"><div class="title">' + esc(song.title) + netBadge + sourceBadge + '</div>' +
     '<div class="artist">' + esc(song.artist) + (dur ? ' · ' + dur : '') + '</div>' +
     album + '</div>' +
     '<button onclick=\'addToQueue(' + songJson + ')\'>' + STR.addToQueue + '</button>' +
@@ -354,7 +504,8 @@ document.addEventListener('touchmove', onTouchMove, { passive: false });
 document.addEventListener('touchend', onTouchEnd);
 document.addEventListener('touchcancel', onTouchEnd);
 
-// 启动轮询
+// 启动语音能力探测与队列轮询
+initVoiceSearch();
 fetchQueue();
 setInterval(fetchQueue, 5000);
 </script>

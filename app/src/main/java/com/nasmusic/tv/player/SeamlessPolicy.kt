@@ -1,0 +1,27 @@
+package com.nasmusic.tv.player
+
+import com.nasmusic.tv.data.model.SeamlessMode
+
+/** Pure policy/migration rules; no Android dependencies and exactly one transition engine. */
+object SeamlessPolicy {
+    fun migrate(seamlessMode: SeamlessMode?, legacyCrossfadeEnabled: Boolean): SeamlessMode =
+        seamlessMode ?: if (legacyCrossfadeEnabled) SeamlessMode.CROSSFADE else SeamlessMode.OFF
+
+    fun crossfadeEnabled(mode: SeamlessMode, legacyCrossfadeEnabled: Boolean, durationSec: Int): Boolean =
+        when (mode) {
+            SeamlessMode.OFF -> legacyCrossfadeEnabled && durationSec > 0
+            SeamlessMode.CROSSFADE -> durationSec > 0
+            SeamlessMode.GAPLESS -> false
+        }
+
+    fun shouldProbeGapless(mode: SeamlessMode): Boolean = mode == SeamlessMode.GAPLESS
+
+    fun shortFadeNeeded(mode: SeamlessMode, probeSupported: Boolean): Boolean =
+        mode == SeamlessMode.GAPLESS && !probeSupported
+
+    /** Next item must be decoded/buffered before trusting a native transition. */
+    fun nativeGaplessReady(mode: SeamlessMode, supported: Boolean, nextBuffered: Boolean): Boolean =
+        mode == SeamlessMode.GAPLESS && supported && nextBuffered
+
+    const val SHORT_FADE_MS = 200L
+}

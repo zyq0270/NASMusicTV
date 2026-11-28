@@ -3,7 +3,11 @@ package com.nasmusic.tv.data.prefs
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import com.nasmusic.tv.data.model.PlaylistImportHistoryItem
+import com.nasmusic.tv.data.model.PlaylistSongRef
 import com.nasmusic.tv.data.model.Song
+import com.nasmusic.tv.data.model.SongSourceIdentity
+import com.nasmusic.tv.data.model.SongSourceKind
+import com.nasmusic.tv.util.SongKeys
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -13,6 +17,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -195,6 +200,32 @@ class AppPreferencesPlaylistTest {
         assertEquals(1, updated.songs.size)
         assertEquals("ntwk_meting_123", updated.songs.first().id)
         assertEquals("真实歌手", updated.songs.first().artist)
+    }
+
+    @Test
+    fun `stable source identity separates servers and deduplicates repeats`() = runBlocking {
+        val playlist = prefs.createLocalPlaylist("稳定身份")
+        settle()
+        fun bound(server: String): Song {
+            val song = Song(id = "same-native-id", title = "同一首歌")
+            val source = SongSourceIdentity(SongSourceKind.NAS, song.id, "jellyfin", server)
+            val ref = PlaylistSongRef(SongKeys.stableKey(song, source), source)
+            return PlaylistSongRef.bindToSong(song, ref)
+        }
+        val first = bound("server-a")
+        assertTrue(prefs.addSongToPlaylist(playlist.id, first))
+        settle()
+        assertFalse(prefs.addSongToPlaylist(playlist.id, bound("server-a")))
+        settle()
+        assertTrue(prefs.addSongToPlaylist(playlist.id, bound("server-b")))
+        settle()
+
+        val songs = prefs.getLocalPlaylists().first { it.id == playlist.id }.songs
+        assertEquals(2, songs.size)
+        assertEquals(
+            setOf("server-a", "server-b"),
+            songs.map { PlaylistSongRef.decodeFromSong(it)!!.source.serverId }.toSet(),
+        )
     }
 
     @Test

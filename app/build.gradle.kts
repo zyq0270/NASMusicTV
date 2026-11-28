@@ -260,9 +260,9 @@ android {
         applicationId = "com.nasmusic.tv"
         minSdk = 22
         targetSdk = 34
-        // versionCode 口径：= 185 + 次版本号（... / 2.39.26→211 / 2.39.27→212 / 2.39.28→213）。
-        versionCode = 213
-        versionName = "2.39.28"
+        // versionCode 口径：= 185 + 次版本号（... / 2.39.27→212 / 2.39.28→213 / 2.39.29→214）。
+        versionCode = 214
+        versionName = "2.39.29"
 
         // 洛雪宿主的引擎测试依赖 native 库，只能在设备上跑（见文件末尾 androidTestImplementation 注释）
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -337,8 +337,13 @@ android {
     }
 
     testOptions {
+        // Robolectric 资源装载（小组件 RemoteViews 等需要真实 res 表）
+        unitTests.isIncludeAndroidResources = true
         // 纯 JVM 单测允许 android.* API 返回默认值（E25 催眠渲染器构造含 Paint）
         unitTests.isReturnDefaultValues = true
+        // 全量 Robolectric + 真实 res 表在默认 512m / 2g 下仍会 OOM（2026-11-28 实测）。
+        // 测试 worker 独占 4g：本机 16GB，Gradle 主进程不占大堆。
+        unitTests.all { it.maxHeapSize = "4g" }
     }
 
     compileOptions {

@@ -92,9 +92,9 @@ class PlayStatsRepository(private val prefs: AppPreferences) {
             }
             val monthMap = map.getOrPut(month) { mutableMapOf() }
             monthMap[songId] = (monthMap[songId] ?: 0) + 1
-            // 滚动清理：只保留最近 MAX_MONTHS 个月
+            // 滚动清理：最近 MAX_MONTHS 个月，但当前月即使因时钟回拨排在最旧也必须保留。
             if (map.size > MAX_MONTHS) {
-                val keep = map.keys.sortedDescending().take(MAX_MONTHS)
+                val keep = (map.keys.sortedDescending().take(MAX_MONTHS - 1) + month).toSet()
                 map.keys.retainAll(keep)
             }
             prefsMutable[keyPlayStatsMonthly] = prefs.gson().toJson(map)
@@ -136,9 +136,9 @@ class PlayStatsRepository(private val prefs: AppPreferences) {
             val day = currentDay(nowMs)
             val map = parseDaily(prefsMutable[keyPlayStatsDaily]).toMutableMap()
             map[day] = (map[day] ?: 0) + 1
-            // 滚动清理：保留最近 MAX_DAYS 天（键为 yyyy-MM-dd，字典序即时间序）
+            // 滚动清理：最近 MAX_DAYS 天；当前日不受时钟回拨影响，必须保留。
             if (map.size > MAX_DAYS) {
-                val keep = map.keys.sortedDescending().take(MAX_DAYS)
+                val keep = (map.keys.sortedDescending().take(MAX_DAYS - 1) + day).toSet()
                 map.keys.retainAll(keep)
             }
             prefsMutable[keyPlayStatsDaily] = prefs.gson().toJson(map)

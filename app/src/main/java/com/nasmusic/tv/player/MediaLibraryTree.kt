@@ -374,9 +374,13 @@ class MediaLibraryTree(
         // 合并规则见 [mergeSearchResults]（纯函数，有单测覆盖）
         val result = mergeSearchResults(networkSongs, nasSongs, MAX_SEARCH_RESULTS)
             .map { songToItem(it) }
-        AppLog.d(TAG, "search('$q'): ${result.size} results")
+        AppLog.d(TAG, "search: ${result.size} results")
         result
     }
+
+    /** 将共享搜索已排序、去重的歌曲转换为可播放叶子节点，并同步写入播放入口缓存。 */
+    fun songItems(songs: List<Song>): List<MediaItem> =
+        songs.take(MAX_SEARCH_RESULTS).map { songToItem(it) }
 
     // ────────────────────────────────────────────────────────────
     // MediaItem 构造

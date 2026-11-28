@@ -5,6 +5,12 @@ import com.google.gson.JsonArray
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import com.nasmusic.tv.backend.BackendAdapter
+import com.nasmusic.tv.backend.BackendCapabilities
+import com.nasmusic.tv.backend.BackendError
+import com.nasmusic.tv.backend.BackendResult
+import com.nasmusic.tv.backend.backendErrorFromHttpStatus
+import com.nasmusic.tv.backend.backendErrorFromThrowable
+import com.nasmusic.tv.backend.getOrNull
 import com.nasmusic.tv.data.model.Album
 import com.nasmusic.tv.data.model.Artist
 import com.nasmusic.tv.data.model.Genre
@@ -40,6 +46,13 @@ import java.util.concurrent.TimeUnit
 class JellyfinAdapter : BackendAdapter {
 
     override val backendType: String = "jellyfin"
+    override val capabilities = BackendCapabilities(
+        playlistRead = true,
+        playlistCreate = true,
+        playlistDelete = true,
+        playlistAdd = true,
+        playlistRemove = true,
+    )
     override var apiVersion: String = "Unknown"
 
     private var baseUrl: String = ""
@@ -83,7 +96,7 @@ class JellyfinAdapter : BackendAdapter {
     private var tokenGeneration: Int = 0
 
     /** S4：单次请求的「状态码 + body」，供 401 判定与重试复用 */
-    private data class HttpResult(val code: Int, val body: JsonObject?)
+    private data class HttpResult(val code: Int, val body: JsonObject?, val error: BackendError? = null)
 
     private val gson = Gson()
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
@@ -769,83 +782,87 @@ class JellyfinAdapter : BackendAdapter {
     // ========== F-1 扩展接口 ==========
 
     // --- 播放列表 ---
-    override suspend fun getPlaylists(): List<Playlist> = withContext(Dispatchers.IO) {
-        try {
-            // Jellyfin API: GET /Items?IncludeItemTypes=Playlist 获取播放列表（全量）
-            val url = "$baseUrl/Items?IncludeItemTypes=Playlist&Recursive=true&" +
-                    "Fields=SortName&UserId=$userId&SortBy=SortName&SortOrder=Ascending&" +
-                    "StartIndex=0&Limit=10000"
-            val json = executeJsonRequest(url) ?: return@withContext emptyList<Playlist>()
-            val items = json.getAsJsonArray("Items") ?: return@withContext emptyList<Playlist>()
-            items.mapNotNull { item ->
-                val obj = item.asJsonObject
-                val id = obj.get("Id")?.asString ?: return@mapNotNull null
-                Playlist(
-                    id = id,
-                    name = EncodingUtils.fixEncoding(obj.get("Name")?.asString) ?: "Unknown",
-                    songCount = obj.get("ChildCount")?.asInt ?: 0,
-                    owner = EncodingUtils.fixEncoding(obj.get("AlbumArtist")?.asString) ?: ""
-                )
+    override suspend fun getPlaylists(): List<Playlist> = getPlaylistsResult().getOrNull().orEmpty()
+
+    override suspend fun getPlaylistsResult(): BackendResult<List<Playlist>> = withContext(Dispatchers.IO) {
+        val url = "$baseUrl/Items?IncludeItemTypes=Playlist&Recursive=true&" +
+            "Fields=SortName&UserId=$userId&SortBy=SortName&SortOrder=Ascending&" +
+            "StartIndex=0&Limit=10000"
+        when (val result = executeJsonRequestResult(url)) {
+            is BackendResult.Failure -> result
+            is BackendResult.Success -> {
+                val items = result.value?.getAsJsonArray("Items")
+                if (items == null) {
+                    BackendResult.Failure(BackendError.PROTOCOL)
+                } else {
+                    BackendResult.Success(items.mapNotNull { item ->
+                        val obj = item.asJsonObject
+                        val id = obj.get("Id")?.asString ?: return@mapNotNull null
+                        Playlist(
+                            id = id,
+                            name = EncodingUtils.fixEncoding(obj.get("Name")?.asString) ?: "Unknown",
+                            songCount = obj.get("ChildCount")?.asInt ?: 0,
+                            owner = EncodingUtils.fixEncoding(obj.get("AlbumArtist")?.asString) ?: "",
+                        )
+                    })
+                }
             }
-        } catch (e: Exception) {
-            AppLog.e("JellyfinAdapter", "getPlaylists failed", e)
-            emptyList()
         }
     }
 
-    override suspend fun getPlaylistSongs(playlistId: String): List<Song> = withContext(Dispatchers.IO) {
-        try {
-            // Jellyfin API: GET /Playlists/{playlistId}/Items 获取播放列表中的歌曲
+    override suspend fun getPlaylistSongs(playlistId: String): List<Song> =
+        getPlaylistSongsResult(playlistId).getOrNull().orEmpty()
+
+    override suspend fun getPlaylistSongsResult(playlistId: String): BackendResult<List<Song>> =
+        withContext(Dispatchers.IO) {
             val url = "$baseUrl/Playlists/$playlistId/Items?UserId=$userId"
-            val json = executeJsonRequest(url) ?: return@withContext emptyList<Song>()
-            val items = json.getAsJsonArray("Items") ?: return@withContext emptyList<Song>()
-            items.mapNotNull { jsonObjectToSong(it.asJsonObject, playlistId) }
-        } catch (e: Exception) {
-            AppLog.e("JellyfinAdapter", "getPlaylistSongs failed", e)
-            emptyList()
-        }
-    }
-
-    override suspend fun createPlaylist(name: String): Playlist? = withContext(Dispatchers.IO) {
-        try {
-            val body = JsonObject().apply {
-                addProperty("Name", name)
-                addProperty("UserId", userId)
-            }.toString()
-            val request = Request.Builder()
-                .url("$baseUrl/Playlists")
-                .header("X-Emby-Authorization", buildAuthHeader())
-                .post(body.toRequestBody(jsonMediaType))
-                .build()
-            client.newCall(request).execute().use { response ->
-                if (response.isSuccessful) {
-                    val json = response.utf8Body()?.let { gson.fromJson(it, JsonObject::class.java) }
-                    val id = json?.get("Id")?.asString
-                    if (id != null) Playlist(id = id, name = name) else null
-                } else null
+            when (val result = executeJsonRequestResult(url)) {
+                is BackendResult.Failure -> result
+                is BackendResult.Success -> {
+                    val items = result.value?.getAsJsonArray("Items")
+                    if (items == null) {
+                        BackendResult.Failure(BackendError.PROTOCOL)
+                    } else {
+                        BackendResult.Success(items.mapNotNull { jsonObjectToSong(it.asJsonObject, playlistId) })
+                    }
+                }
             }
-        } catch (e: Exception) {
-            AppLog.e("JellyfinAdapter", "createPlaylist failed", e)
-            null
+        }
+
+    override suspend fun createPlaylist(name: String): Playlist? = createPlaylistResult(name).getOrNull()
+
+    override suspend fun createPlaylistResult(name: String): BackendResult<Playlist> = withContext(Dispatchers.IO) {
+        val body = JsonObject().apply {
+            addProperty("Name", name)
+            addProperty("UserId", userId)
+        }.toString()
+        val request = Request.Builder()
+            .url("$baseUrl/Playlists")
+            .header("X-Emby-Authorization", buildAuthHeader())
+            .post(body.toRequestBody(jsonMediaType))
+            .build()
+        executePlaylistMutation(request) { json ->
+            val id = json?.get("Id")?.asString
+            if (id != null) Playlist(id = id, name = name) else null
         }
     }
 
     override suspend fun deletePlaylist(playlistId: String): Boolean = withContext(Dispatchers.IO) {
-        try {
+        runCatching {
             val request = Request.Builder()
                 .url("$baseUrl/Playlists/$playlistId")
                 .header("X-Emby-Authorization", buildAuthHeader())
                 .delete()
                 .build()
             client.newCall(request).execute().use { it.isSuccessful }
-        } catch (e: Exception) {
-            AppLog.e("JellyfinAdapter", "deletePlaylist failed", e)
-            false
-        }
+        }.getOrDefault(false)
     }
 
-    override suspend fun addToPlaylist(playlistId: String, songId: String): Boolean = withContext(Dispatchers.IO) {
-        try {
+    override suspend fun addToPlaylist(playlistId: String, songId: String): Boolean =
+        addToPlaylistResult(playlistId, songId) is BackendResult.Success
+
+    override suspend fun addToPlaylistResult(playlistId: String, songId: String): BackendResult<Unit> =
+        withContext(Dispatchers.IO) {
             val body = JsonObject().apply {
                 add("Ids", gson.toJsonTree(listOf(songId)))
             }.toString()
@@ -854,12 +871,8 @@ class JellyfinAdapter : BackendAdapter {
                 .header("X-Emby-Authorization", buildAuthHeader())
                 .post(body.toRequestBody(jsonMediaType))
                 .build()
-            client.newCall(request).execute().use { it.isSuccessful }
-        } catch (e: Exception) {
-            AppLog.e("JellyfinAdapter", "addToPlaylist failed", e)
-            false
+            executePlaylistMutation(request) { Unit }
         }
-    }
 
     override suspend fun removeFromPlaylist(playlistId: String, songId: String): Boolean = withContext(Dispatchers.IO) {
         try {
@@ -1222,20 +1235,51 @@ class JellyfinAdapter : BackendAdapter {
      *    「重认证本身 401 → 又触发重认证」的自激路径；
      * 4. 无凭据（token-only 会话）时直接放弃，不做无意义的登录尝试。
      */
-    private suspend fun executeJsonRequest(url: String): JsonObject? = withContext(Dispatchers.IO) {
+    private suspend fun executeJsonRequest(url: String): JsonObject? = executeJsonRequestResult(url).getOrNull()
+
+    /** 结构化读路径：保留 401 自愈，并如实返回最终 HTTP 错误。 */
+    private suspend fun executeJsonRequestResult(url: String): BackendResult<JsonObject?> = withContext(Dispatchers.IO) {
         val genAtStart = tokenGeneration
         val first = rawJsonRequest(url)
         if (first.code != HttpURLConnection.HTTP_UNAUTHORIZED) {
-            return@withContext first.body
+            return@withContext httpJsonResult(first)
+        }
+        if (reauthenticateIfNeeded(genAtStart) == null) {
+            return@withContext BackendResult.Failure(BackendError.UNAUTHORIZED)
+        }
+        httpJsonResult(rawJsonRequest(url))
+    }
+
+    private fun httpJsonResult(result: HttpResult): BackendResult<JsonObject?> =
+        when {
+            result.error != null -> BackendResult.Failure(result.error)
+            result.code in 200..299 -> BackendResult.Success(result.body)
+            else -> BackendResult.Failure(
+                if (result.code == -1) BackendError.NETWORK else backendErrorFromHttpStatus(result.code)
+            )
         }
 
-        if (reauthenticateIfNeeded(genAtStart) == null) {
-            AppLog.w("JellyfinAdapter", "executeJsonRequest: 401 且重认证不可用/失败，放弃 ${UrlSanitizer.sanitize(url)}")
-            return@withContext null
+    private suspend fun <T> executePlaylistMutation(
+        request: Request,
+        parse: (JsonObject?) -> T?,
+    ): BackendResult<T> = withContext(Dispatchers.IO) {
+        try {
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    return@withContext BackendResult.Failure(backendErrorFromHttpStatus(response.code))
+                }
+                val body = response.utf8Body()
+                val json = body?.takeIf { it.isNotBlank() }?.let {
+                    gson.fromJson(it, JsonObject::class.java)
+                }
+                val value = parse(json)
+                if (value == null) BackendResult.Failure(BackendError.PROTOCOL)
+                else BackendResult.Success(value)
+            }
+        } catch (e: Exception) {
+            e.rethrowIfCancellation()
+            BackendResult.Failure(backendErrorFromThrowable(e))
         }
-        AppLog.i("JellyfinAdapter", "executeJsonRequest: 401 → 重认证成功，重试一次 ${UrlSanitizer.sanitize(url)}")
-        // 第二次尝试：结果照单全收，不再判定 401（防循环，见上方设计说明）
-        rawJsonRequest(url).body
     }
 
     /**
@@ -1269,8 +1313,9 @@ class JellyfinAdapter : BackendAdapter {
                 }
             }
         } catch (e: Exception) {
+            e.rethrowIfCancellation()
             AppLog.e("JellyfinAdapter", "executeJsonRequest failed for ${UrlSanitizer.sanitize(url)}", e)
-            HttpResult(-1, null)
+            HttpResult(-1, null, backendErrorFromThrowable(e))
         }
     }
 

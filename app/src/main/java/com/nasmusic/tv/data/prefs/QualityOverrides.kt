@@ -1,7 +1,9 @@
 package com.nasmusic.tv.data.prefs
 
 import android.content.Context
+import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
+import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import com.google.gson.Gson
@@ -14,6 +16,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import java.io.File
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * 单曲音质覆盖（多码率方案 §2.3.1 / D3 两级模型）。
@@ -42,14 +45,25 @@ class QualityOverrides(context: Context) {
         private const val DATASTORE_NAME = "quality_overrides"
 
         private val KEY_OVERRIDES = stringPreferencesKey("song_quality_overrides")
+
+        /**
+         * DataStore 要求「同一文件只有一个活跃实例」（多实例会抛
+         * `There are multiple DataStores active for the same file`）。
+         * 应用内是单例，但单测里 Application 与测试各建一个 ⇒ 按文件路径共享。
+         */
+        private val dataStores = ConcurrentHashMap<String, DataStore<Preferences>>()
     }
 
     private val gson = Gson()
 
-    private val dataStore = PreferenceDataStoreFactory.create(
-        scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
-    ) {
-        File(context.filesDir, "datastore/$DATASTORE_NAME.preferences_pb")
+    private val storeFile = File(context.filesDir, "datastore/$DATASTORE_NAME.preferences_pb")
+
+    private val dataStore: DataStore<Preferences> = dataStores.getOrPut(storeFile.absolutePath) {
+        PreferenceDataStoreFactory.create(
+            scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+        ) {
+            storeFile
+        }
     }
 
     /** 内存镜像：键 → 覆盖值。@Volatile 保证跨线程可见性。 */

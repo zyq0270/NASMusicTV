@@ -182,7 +182,7 @@ class MineFavoritesFlowGateTest {
         val src = flatten(source("ui/viewmodel/MainViewModel.kt"))
         assertTrue(
             "T8（重算信号）：未 combine _sourceRevision / _localMusicEnabled ⇒ 开关翻转后派生流不重算。",
-            src.contains("combine(netVM.networkFavorites, _sourceRevision, _localMusicEnabled)")
+            src.contains("combine(netVM.networkFavorites, _sourceRevision, _localMusicEnabled")
         )
         assertTrue(
             "T8（可见性过滤）：未用 sourceVisibility.isVisible 过滤收藏项 ⇒ 关源后收藏仍在「我的」页。",

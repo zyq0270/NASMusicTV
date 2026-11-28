@@ -52,9 +52,10 @@ class LibrarySongsSourceWiringGateTest {
         val vm = flatten(mainSourceFile(mainViewModelPath))
         val lib = flatten(mainSourceFile(libraryBranchPath))
         assertTrue("G2 空转自证：读到的确实是 LibraryBranch", lib.contains("fun LibraryBranch("))
+        val currentProblems = wiringProblems(vm, lib)
         assertTrue(
-            "G2/G3 结构自证：判据必须能判负",
-            wiringProblems("", "").isNotEmpty() && wiringProblems(vm, lib).isEmpty()
+            "G2/G3 结构自证：判据必须能判负（当前问题：$currentProblems）",
+            wiringProblems("", "").isNotEmpty() && currentProblems.isEmpty()
         )
 
         // 负自检 1：把百度实参退回空列表，判据必须判负
@@ -103,7 +104,7 @@ class LibrarySongsSourceWiringGateTest {
         if (mergeCall.isEmpty()) {
             add("缺少 `MusicMerger.mergeLibrarySongs(` 调用")
         } else {
-            for (arg in listOf("nasSongs = nasSongs", "localSongs = localSongs", "baiduSongs = baiduSongs")) {
+            for (arg in listOf("nasSongs = rawNasSongs", "localSongs = localSongs", "baiduSongs = baiduSongs")) {
                 if (!mergeCall.contains(arg)) add("`mergeLibrarySongs` 缺少实参 `$arg`")
             }
         }

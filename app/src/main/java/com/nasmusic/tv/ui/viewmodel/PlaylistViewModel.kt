@@ -6,12 +6,17 @@ import androidx.lifecycle.viewModelScope
 import com.nasmusic.tv.NasMusicApp
 import com.nasmusic.tv.R
 import com.nasmusic.tv.data.model.LocalPlaylist
+import com.nasmusic.tv.data.model.PlaylistSongRef
 import com.nasmusic.tv.data.model.Song
 import com.nasmusic.tv.util.AppLog
+import com.nasmusic.tv.util.SongKeys
 import com.nasmusic.tv.util.rethrowIfCancellation
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 /**
@@ -26,7 +31,26 @@ class PlaylistViewModel(app: Application) : AndroidViewModel(app) {
     private val prefs = nasMusicApp.appPreferences
 
     private val _localPlaylists = MutableStateFlow<List<LocalPlaylist>>(emptyList())
-    val localPlaylists: StateFlow<List<LocalPlaylist>> = _localPlaylists.asStateFlow()
+    private val readModel = nasMusicApp.localMusicRepository.readModel
+
+    /** MainViewModel 注入：保留隐藏曲目，只覆盖展示字段。 */
+    var displayProjector: ((List<Song>, Boolean) -> List<Song>)? = null
+    /** 添加到持久化歌单前还原原曲。 */
+    var songInputNormalizer: ((Song) -> Song)? = null
+
+    val localPlaylists: StateFlow<List<LocalPlaylist>> = combine(
+        _localPlaylists, readModel.snapshots
+    ) { playlists, snapshot ->
+        playlists.map { playlist ->
+            val projected = displayProjector?.invoke(playlist.songs, true)
+                ?: readModel.applyAllIncludingHidden(
+                    playlist.songs,
+                    sourceFor = { SongKeys.bindSource(it) },
+                    snapshot = snapshot,
+                )
+            playlist.copy(songs = projected)
+        }
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     init {
         // 监听本地歌单变化（DataStore 持久化，响应式更新）
@@ -90,7 +114,15 @@ class PlaylistViewModel(app: Application) : AndroidViewModel(app) {
     fun addSongToPlaylist(playlistId: String, song: Song) {
         viewModelScope.launch {
             try {
-                val added = prefs.playlist.addSongToPlaylist(playlistId, song)
+                val rawSong = songInputNormalizer?.invoke(song) ?: song
+                val ref = PlaylistSongRef.fromSong(
+                    song = rawSong,
+                    source = nasMusicApp.sourceIdentityProvider(rawSong),
+                )
+                val added = prefs.playlist.addSongToPlaylist(
+                    playlistId,
+                    PlaylistSongRef.bindToSong(rawSong, ref),
+                )
                 if (!added) {
                     showError(getApplication<Application>().getString(R.string.song_already_in_playlist, ""))
                 }

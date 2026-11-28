@@ -1,12 +1,30 @@
 package com.nasmusic.tv.backend.network
 
+import com.nasmusic.tv.data.cache.CacheLimits
 import com.nasmusic.tv.data.model.Song
+import com.nasmusic.tv.player.PlayUrlPrefetchScheduler
 import com.nasmusic.tv.util.AppLog
 import com.nasmusic.tv.util.ArtistSplitter
 import com.nasmusic.tv.util.rethrowIfCancellation
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.util.concurrent.ConcurrentHashMap
+
+/** 纯预刷结果；失败时 [url] 可能仍保留未过期旧值，绝不表示已切换播放。 */
+data class PrefetchResult(
+    val status: PrefetchStatus,
+    val url: String? = null,
+)
+
+enum class PrefetchStatus {
+    UPDATED,
+    ALREADY_FRESH,
+    FAILED_RETRYABLE_OFFLINE,
+    EXPIRED_URL,
+    NOT_NETWORK_SONG,
+    SERVICE_UNAVAILABLE,
+}
 
 /**
  * 网络音乐管理器
@@ -33,15 +51,15 @@ class NetworkMusicManager(
      * 返回 null 表示该曲无覆盖、回退全局默认。由 NasMusicApp 注入，
      * 避免 backend/network 反向依赖 data/prefs（见方案 §6.3）。
      */
-    private val songQualityOverrideProvider: ((String, String) -> Int?)? = null
+    private val songQualityOverrideProvider: ((String, String) -> Int?)? = null,
+    /** 可注入时钟用于 TTL 与旧 URL 保留测试；生产默认墙钟。 */
+    private val nowMs: () -> Long = System::currentTimeMillis,
 ) {
 
     companion object {
         private const val TAG = "NetworkMusicManager"
         /** 播放链接缓存过期时间（毫秒），5 分钟 */
         private const val PLAY_URL_CACHE_TTL_MS = 5 * 60 * 1000L
-        /** 播放链接缓存容量上限（超出按时间淘汰最旧，防止超长会话内存只增不减） */
-        private const val PLAY_URL_CACHE_MAX = 500
         // 艺人全量方案 §3.8 第 1 步：确认过的"假 302"负面判定，与直链缓存同 TTL（避免同一首反复探测）
         private const val DEAD_PROBE_TTL_MS = PLAY_URL_CACHE_TTL_MS
 
@@ -87,6 +105,9 @@ class NetworkMusicManager(
      */
     private val deadProbeCache = ConcurrentHashMap<String, Long>()
 
+    /** 每 cacheKey 一个在途标记；等待者复用同一次请求，tick 不会重叠。 */
+    private val prefetchInFlight = ConcurrentHashMap<String, CompletableDeferred<PrefetchResult>>()
+
     /**
      * 播放直链缓存 key：`networkSource:networkPlatform:networkId:quality`。
      *
@@ -124,6 +145,26 @@ class NetworkMusicManager(
         playUrlCache.clear()
         deadProbeCache.clear()
         if (size > 0 || deadSize > 0) AppLog.d(TAG, "clearPlayUrlCache: cleared $size url + $deadSize dead entries")
+    }
+
+    /** 设置变更/显式维护时收敛；播放 URL 与负面探测共享同一数量预算。 */
+    fun maintainPlayUrlCache() {
+        maintainPlayUrlCache(nowMs())
+    }
+
+    private fun maintainPlayUrlCache(now: Long) {
+        playUrlCache.entries.removeAll { (_, v) -> now - v.timestamp >= PLAY_URL_CACHE_TTL_MS }
+        deadProbeCache.entries.removeAll { (_, ts) -> now - ts >= DEAD_PROBE_TTL_MS }
+        val maxEntries = CacheLimits.current().playUrlMaxEntries
+        val overflow = playUrlCache.size + deadProbeCache.size - maxEntries
+        if (overflow <= 0) return
+        val oldest = playUrlCache.entries.map { Triple(it.key, it.value.timestamp, 0) } +
+            deadProbeCache.entries.map { Triple(it.key, it.value, 1) }
+        oldest.sortedWith(compareBy<Triple<String, Long, Int>> { it.second }.thenBy { it.first }.thenBy { it.third })
+            .take(overflow)
+            .forEach { (key, _, kind) ->
+                if (kind == 0) playUrlCache.remove(key) else deadProbeCache.remove(key)
+            }
     }
 
     /**
@@ -234,78 +275,121 @@ class NetworkMusicManager(
             AppLog.e(TAG, "resolvePlayUrl: networkSource 为 null（song id=${song.id} title=${song.title}），无法路由")
             return ResolveResult.failure(quality)
         }
-        val svc = services[src] ?: run {
+        if (!services.containsKey(src)) {
             AppLog.w(TAG, "resolvePlayUrl: 未注册源 source=$src（song id=${song.id}）；已注册源=${services.keys}")
             return ResolveResult.failure(quality)
         }
-        val cacheKey = playUrlKey(song, quality)
         AppLog.d(TAG, "resolvePlayUrl: 路由到 source=$src (song id=${song.id} networkId=${song.networkId}) quality=$quality forceRefresh=$forceRefresh")
 
-        // 清理过期缓存条目
-        val now = System.currentTimeMillis()
-        playUrlCache.entries.removeAll { (_, v) -> now - v.timestamp >= PLAY_URL_CACHE_TTL_MS }
-        deadProbeCache.entries.removeAll { (_, ts) -> now - ts >= DEAD_PROBE_TTL_MS }
-        // 容量上限：超出后按时间淘汰最旧条目（近似 LRU，避免缓存无界增长）
-        if (playUrlCache.size > PLAY_URL_CACHE_MAX) {
-            playUrlCache.entries
-                .sortedBy { it.value.timestamp }
-                .take(playUrlCache.size - PLAY_URL_CACHE_MAX)
-                .forEach { playUrlCache.remove(it.key) }
-        }
-        if (deadProbeCache.size > PLAY_URL_CACHE_MAX) {
-            deadProbeCache.entries
-                .sortedBy { it.value }
-                .take(deadProbeCache.size - PLAY_URL_CACHE_MAX)
-                .forEach { deadProbeCache.remove(it.key) }
-        }
+        return resolvePlayUrlInternal(song, quality, forceRefresh, preserveOldUrl = false)
+    }
 
-        // 检查缓存（forceRefresh 时跳过——重试路径绝不命中旧缓存）
+    /**
+     * 纯预刷：只解析并更新 URL 缓存，不修改 Song、队列、播放器或播放状态。
+     *
+     * 与 [forceRefresh] 播放重试不同，这里在请求完成前不删除旧值；失败且旧值未过期
+     * 时返回旧值供现有播放入口继续使用。每个 key 的真实网络请求 single-flight。
+     */
+    suspend fun prefetchPlayUrl(song: Song): PrefetchResult {
+        if (!song.isNetworkSong) return PrefetchResult(PrefetchStatus.NOT_NETWORK_SONG, song.streamUrl)
+        val src = song.networkSource
+            ?: return PrefetchResult(PrefetchStatus.SERVICE_UNAVAILABLE)
+        if (!services.containsKey(src)) return PrefetchResult(PrefetchStatus.SERVICE_UNAVAILABLE)
+        val quality = effectiveQuality(song)
+        val cacheKey = playUrlKey(song, quality)
+
+        while (true) {
+            var created = false
+            val gate = synchronized(prefetchInFlight) {
+                prefetchInFlight[cacheKey] ?: CompletableDeferred<PrefetchResult>().also {
+                    prefetchInFlight[cacheKey] = it
+                    created = true
+                }
+            }
+            if (!created) return gate.await()
+
+            var outcome = PrefetchResult(PrefetchStatus.FAILED_RETRYABLE_OFFLINE)
+            return try {
+                val before = playUrlCache[cacheKey]
+                val now = nowMs()
+                if (before != null && !PlayUrlPrefetchScheduler.shouldRefresh(before.timestamp, now)) {
+                    PrefetchResult(PrefetchStatus.ALREADY_FRESH, before.url)
+                } else {
+                    val result = resolvePlayUrlInternal(song, quality, forceRefresh = true, preserveOldUrl = true)
+                    val after = playUrlCache[cacheKey]
+                    val refreshed = result.isSuccess && after != null && after.timestamp != before?.timestamp
+                    val completedAt = nowMs()
+                    when {
+                        refreshed -> PrefetchResult(PrefetchStatus.UPDATED, result.url)
+                        before != null && completedAt - before.timestamp < PLAY_URL_CACHE_TTL_MS ->
+                            PrefetchResult(PrefetchStatus.FAILED_RETRYABLE_OFFLINE, before.url)
+                        before != null -> PrefetchResult(PrefetchStatus.EXPIRED_URL)
+                        else -> PrefetchResult(PrefetchStatus.FAILED_RETRYABLE_OFFLINE)
+                    }
+                }.also { outcome = it }
+            } finally {
+                gate.complete(outcome)
+                synchronized(prefetchInFlight) { prefetchInFlight.remove(cacheKey) }
+            }
+        }
+    }
+
+    private suspend fun resolvePlayUrlInternal(
+        song: Song,
+        quality: Int,
+        forceRefresh: Boolean,
+        preserveOldUrl: Boolean,
+    ): ResolveResult {
+        val src = song.networkSource ?: return ResolveResult.failure(quality)
+        val svc = services[src] ?: return ResolveResult.failure(quality)
+        val cacheKey = playUrlKey(song, quality)
+        val cached = playUrlCache[cacheKey]
+        val now = nowMs()
+        maintainPlayUrlCache(now)
+
         if (!forceRefresh) {
-            val cached = playUrlCache[cacheKey]
-            if (cached != null) {
-                AppLog.d(TAG, "resolvePlayUrl: cache hit for key=$cacheKey")
+            if (cached != null && now - cached.timestamp < PLAY_URL_CACHE_TTL_MS) {
                 return ResolveResult(cached.url, cached.actualQuality)
             }
-            // §3.8 第 1 步：已确认的假 302 在 TTL 内不再重复跟链探测（一次点播 = 最多一次探测）
             if (deadProbeCache.containsKey(cacheKey)) {
-                AppLog.d(TAG, "resolvePlayUrl: dead-probe cache hit for key=$cacheKey")
                 return ResolveResult.failure(quality, probedDead = true)
             }
-        } else {
-            // 强制刷新：清除旧的直链缓存**与负面判定**，确保下面走完整降级链
-            //（重试路径必须能重探——Task 6/7 的候选校验就是靠这条拿到新结论）
+        } else if (!preserveOldUrl) {
+            // 播放重试保持原语义：先删旧值与负面判定，确保完整重探。
             playUrlCache.remove(cacheKey)
             deadProbeCache.remove(cacheKey)
         }
 
         return try {
             val result = svc.resolvePlayUrlDetailed(song, quality)
-            // 解析期间用户可能关掉了这个源（unregisterService 已清过缓存）。
-            // 若仍把结果写回去，重新开源的 5 分钟内会命中「上一个开关周期」的旧直链。
+            val completedAt = nowMs()
             val stillRegistered = services[src] === svc
             if (result.isSuccess) {
                 if (stillRegistered) {
-                    // 写入缓存（含实际档位，降级结果也缓存，避免重复降级探测）
-                    playUrlCache[cacheKey] = CachedPlayUrl(result.url!!, now, result.actualQuality)
+                    playUrlCache[cacheKey] = CachedPlayUrl(result.url!!, completedAt, result.actualQuality)
+                    maintainPlayUrlCache(completedAt)
                     AppLog.d(TAG, "resolvePlayUrl: cached new url for key=$cacheKey actual=${result.actualQuality}")
-                } else {
-                    AppLog.d(TAG, "resolvePlayUrl: skip cache write — source=$src 在解析期间被注销")
                 }
+            } else if (preserveOldUrl && cached != null && completedAt - cached.timestamp < PLAY_URL_CACHE_TTL_MS) {
+                // 纯预刷失败不得销毁仍可播放的旧 URL。
+                return ResolveResult(cached.url, cached.actualQuality)
             } else {
-                // 解析失败：移除缓存条目，避免下次又命中过期项
                 playUrlCache.remove(cacheKey)
-                // ⚠️ 只有**探测确认的 DEAD** 才进负面缓存；普通失败（端点没给链接）不钉 5 分钟
                 if (result.probedDead && stillRegistered) {
-                    deadProbeCache[cacheKey] = now
-                    AppLog.d(TAG, "resolvePlayUrl: cached DEAD verdict for key=$cacheKey")
+                    deadProbeCache[cacheKey] = completedAt
+                    maintainPlayUrlCache(completedAt)
                 }
             }
             result
         } catch (e: Exception) {
             e.rethrowIfCancellation()
             AppLog.w(TAG, "resolvePlayUrl error: ${e.message}", e)
-            playUrlCache.remove(cacheKey)
-            ResolveResult.failure(quality)
+            if (preserveOldUrl && cached != null && nowMs() - cached.timestamp < PLAY_URL_CACHE_TTL_MS) {
+                ResolveResult(cached.url, cached.actualQuality)
+            } else {
+                playUrlCache.remove(cacheKey)
+                ResolveResult.failure(quality)
+            }
         }
     }
 

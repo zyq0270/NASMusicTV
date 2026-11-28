@@ -1,5 +1,14 @@
 package com.nasmusic.tv.ui.components.branches
 
+import android.content.ActivityNotFoundException
+import android.content.Intent
+import android.speech.RecognizerIntent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -7,10 +16,20 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
+import androidx.tv.material3.Button
 import androidx.tv.material3.ExperimentalTvMaterial3Api
+import androidx.tv.material3.Text
+import com.nasmusic.tv.R
 import com.nasmusic.tv.data.model.Screen
 import com.nasmusic.tv.data.model.Song
 import com.nasmusic.tv.data.model.ServerConfig
+import com.nasmusic.tv.ui.components.isTVDevice
 import com.nasmusic.tv.ui.viewmodel.MainViewModel
 import com.nasmusic.tv.data.model.*
 import com.nasmusic.tv.ui.screens.*
@@ -147,6 +166,39 @@ val discoverCurrentDimensionValues = remember(browseSelections) {
                             dimIdx to selectedIdx.coerceIn(0, dim.options.lastIndex)
                         }.toMap()
                     }
+                    val context = LocalContext.current
+                    val tvDevice = isTVDevice()
+                    var voiceMessageRes by remember { mutableStateOf<Int?>(null) }
+                    val speechIntent = remember {
+                        Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                            addCategory(Intent.CATEGORY_DEFAULT)
+                        }
+                    }
+                    val recognizerAvailable = remember(context, speechIntent) {
+                        runCatching {
+                            context.packageManager.resolveActivity(speechIntent, 0) != null
+                        }.getOrDefault(false)
+                    }
+                    val voiceSearchLauncher = rememberLauncherForActivityResult(
+                        ActivityResultContracts.StartActivityForResult()
+                    ) { result ->
+                        if (result.resultCode != android.app.Activity.RESULT_OK) return@rememberLauncherForActivityResult
+                        val raw = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
+                            ?.firstOrNull()
+                            .orEmpty()
+                        val query = raw
+                        if (query.isBlank()) {
+                            voiceMessageRes = R.string.library_voice_empty_result
+                        } else {
+                            voiceMessageRes = null
+                            viewModel.selectLibraryTab(LibraryTab.SEARCH)
+                            viewModel.setLibrarySearchKeyword(query)
+                            viewModel.searchSongsOnServer(query)
+                        }
+                    }
+                    val showVoiceEntry = tvDevice && libraryActiveTab == LibraryTab.SEARCH
+
+                    Box(modifier = Modifier.fillMaxSize()) {
                     LibraryScreen(
                         albums = mergedAlbumList,
                         songs = songList,
@@ -285,4 +337,58 @@ onDiscoverDimensionChanged = { dimIdx, optIdx ->
                         onDownloadSong = { song -> viewModel.downloadVM.downloadSong(song) },
                         onDeleteDownloadSong = { song -> viewModel.downloadVM.deleteDownload(song) }
                     )
+
+                    if (showVoiceEntry) {
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .padding(16.dp)
+                        ) {
+                            if (recognizerAvailable) {
+                                Button(
+                                    onClick = {
+                                        voiceMessageRes = null
+                                        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                                            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                                            putExtra(RecognizerIntent.EXTRA_LANGUAGE, "zh-CN")
+                                            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+                                        }
+                                        try {
+                                            voiceSearchLauncher.launch(intent)
+                                        } catch (e: ActivityNotFoundException) {
+                                            voiceMessageRes = R.string.library_voice_unavailable
+                                        } catch (e: Exception) {
+                                            voiceMessageRes = R.string.library_voice_failed
+                                        }
+                                    }
+                                ) {
+                                    Text(stringResource(R.string.library_voice_search))
+                                }
+                            } else {
+                                Text(
+                                    text = stringResource(R.string.library_voice_unavailable),
+                                    color = Color.White,
+                                    modifier = Modifier
+                                        .background(Color.Black.copy(alpha = 0.75f))
+                                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                                )
+                            }
+                        }
+                    }
+                    voiceMessageRes?.let { messageRes ->
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.TopCenter)
+                                .padding(top = 72.dp)
+                        ) {
+                            Text(
+                                text = stringResource(messageRes),
+                                color = Color.White,
+                                modifier = Modifier
+                                    .background(Color.Black.copy(alpha = 0.85f))
+                                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                            )
+                        }
+                    }
+                    }
 }

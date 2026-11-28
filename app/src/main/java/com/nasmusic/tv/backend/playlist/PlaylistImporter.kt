@@ -4,12 +4,15 @@ import android.app.Application
 import android.net.Uri
 import android.provider.OpenableColumns
 import com.nasmusic.tv.data.model.PlaylistImportHistoryItem
+import com.nasmusic.tv.data.model.PlaylistSongRef
 import com.nasmusic.tv.data.model.Song
 import com.nasmusic.tv.data.prefs.AppPreferences
+import com.nasmusic.tv.util.AppLog
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.UUID
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -29,6 +32,7 @@ class PlaylistImporter(
     private val app: Application,
     private val prefs: AppPreferences,
     @Suppress("unused") private val scope: CoroutineScope,
+    private val localStore: LocalPlaylistStore = AppPreferencesLocalPlaylistStore(prefs),
 ) {
     data class ImportSummary(
         val playlistId: String,
@@ -36,6 +40,7 @@ class PlaylistImporter(
         val imported: Int,         // 实际入库条目数
         val skipped: Int,          // 文件内重复/无效条目/不支持路径
         val unrecognizedFormat: Boolean = false,
+        val parseError: Boolean = false,
     )
 
     private val parsers: List<PlaylistParser> = listOf(
@@ -72,9 +77,8 @@ class PlaylistImporter(
     /**
      * 核心：字节 → 解析 → 入库。独立暴露便于单测（绕过 Uri）。
      *
-     * ⚠️ C17：整段必须跑在 [Dispatchers.IO] 上 —— 里面是「解码 → 嗅探 → 逐条入库」，
-     * 其中 `prefs.addSongToPlaylist` 是**每首一次 DataStore edit（整份 JSON 重序列化）**，
-     * 大歌单（几百首）累计是 O(n²) 的写放大；留在 Main 上会持续卡在挂起/恢复之间。
+     * ⚠️ C17：整段必须跑在 [Dispatchers.IO] 上 —— 解码与 DataStore 写入都是阻塞 IO。
+     * 歌曲经完整校验后在一次 DataStore edit 内创建，避免逐首重写整份 JSON 的写放大。
      * 进度回调因此在 IO 线程触发，调用方只应写 StateFlow（线程安全）。
      */
     suspend fun importBytes(
@@ -93,50 +97,71 @@ class PlaylistImporter(
         val parser = parsers.firstOrNull { it.canParse(head, fileName) }
             ?: return@withContext ImportSummary("", "", 0, 0, unrecognizedFormat = true)
 
-        val entries = parser.parse(text, fileName)
+        val entries = try {
+            parser.parse(text, fileName)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            AppLog.w("PlaylistImporter", "parse failed for $fileName", e)
+            return@withContext ImportSummary("", "", 0, 0, parseError = true)
+        }
+        if (parser is JsonPlaylistParser && parser.lastParseError) {
+            return@withContext ImportSummary("", "", 0, 0, parseError = true)
+        }
         val innerName = (parser as? PlaylistNameProvider)?.innerName
 
-        val name = resolvePlaylistName(fileName, innerName, userConfirmedName)
-        val playlist = prefs.createLocalPlaylist(name)
+        val name = uniqueLocalPlaylistName(resolvePlaylistName(fileName, innerName, userConfirmedName))
 
-        // 文件内去重 + RELATIVE_PATH 不支持映射计 skipped（§4.1.8 (1)）
+        // 先完整解析、校验、去重，再一次性创建；任何条目异常都不会产生半成品歌单。
         val seen = HashSet<String>()
-        var imported = 0
+        val songs = mutableListOf<Song>()
         var skipped = 0
-        var lastReported = -1
-        val total = maxOf(entries.size, 1)
-        entries.forEach { raw ->
-            if (raw.directUrlType == DirectUrlType.RELATIVE_PATH) {
+        entries.forEachIndexed { entryIndex, raw ->
+            val pct = ((entryIndex + 1) * 75 / maxOf(entries.size, 1))
+            if (pct >= 25 && pct % 25 == 0) onProgress(pct)
+            if (raw.directUrlType == DirectUrlType.RELATIVE_PATH || raw.title.isBlank()) {
                 skipped++
-            } else {
-                val key = PlaylistParsers.normalizeKey(raw.title, raw.artist)
-                if (!seen.add(key)) {
-                    skipped++
-                } else if (prefs.addSongToPlaylist(playlist.id, toBareSong(raw))) {
-                    // stripVolatileStreamUrl 在 addSongToPlaylist 内触发，URL 直链安全持久化
-                    imported++
-                } else {
-                    skipped++   // 歌单不存在/异常 → 计无效
-                }
+                return@forEachIndexed
             }
-            // 进度：每跨过 25% 步进回调一次（0/25/50/75/100）
-            val pct = ((imported + skipped) * 100 / total).coerceIn(0, 100) / 25 * 25
-            if (pct != lastReported) {
-                lastReported = pct
-                onProgress(pct)
+            val song = raw.song ?: toBareSong(raw)
+            val boundSong = if (raw.songRef != null) {
+                PlaylistSongRef.bindToSong(song, raw.songRef)
+            } else song
+            val stableKey = PlaylistSongRef.fromSong(boundSong, raw.songRef?.source)?.stableKey
+                ?.takeIf { it.isNotBlank() }
+            // Bare stubs carry a random UUID, so file-internal duplicates must be detected
+            // on the source identity (ref / URL / normalized title+artist) instead of Song.id.
+            val dedupKey = when {
+                stableKey != null -> "key:$stableKey"
+                raw.songRef != null -> "id:${song.id}"
+                raw.directUrl != null -> "url:${raw.directUrl}"
+                else -> "meta:" + PlaylistParsers.normalizeKey(raw.title, raw.artist)
             }
+            if (song.id.isBlank() || !seen.add(dedupKey)) {
+                skipped++
+                return@forEachIndexed
+            }
+            songs += boundSong
         }
-        if (lastReported != 100) onProgress(100)
+        val playlist = localStore.createWithSongs(name, songs)
+        val imported = songs.size
+        onProgress(100)
 
-        // 记录导入历史（§4.7.2；重导入同歌单替换旧记录）
-        prefs.recordPlaylistImport(
-            PlaylistImportHistoryItem(
-                playlistId = playlist.id,
-                playlistName = playlist.name,
-                importedAt = System.currentTimeMillis(),
-                importedCount = imported,
+        // 歌单已原子落盘；历史只是旁路索引，写失败不能把成功导入误报成失败。
+        try {
+            prefs.recordPlaylistImport(
+                PlaylistImportHistoryItem(
+                    playlistId = playlist.id,
+                    playlistName = playlist.name,
+                    importedAt = System.currentTimeMillis(),
+                    importedCount = imported,
+                )
             )
-        )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            AppLog.e("PlaylistImporter", "recordPlaylistImport failed after playlist creation", e)
+        }
         return@withContext ImportSummary(
             playlistId = playlist.id,
             playlistName = playlist.name,
@@ -166,6 +191,18 @@ class PlaylistImporter(
             if (take < n) break
         }
         return out.toByteArray()
+    }
+
+    /** 同名导入不覆盖：原名可用时沿用，冲突则追加导入日期，仍冲突则追加序号。 */
+    private suspend fun uniqueLocalPlaylistName(base: String): String {
+        val date = SimpleDateFormat("yyyyMMdd", Locale.US).format(Date())
+        val existing = prefs.getLocalPlaylists().map { it.name.lowercase(Locale.ROOT) }.toSet()
+        if (base.lowercase(Locale.ROOT) !in existing) return base
+        val first = "$base (导入 $date)"
+        if (first.lowercase(Locale.ROOT) !in existing) return first
+        var suffix = 2
+        while ("$first $suffix".lowercase(Locale.ROOT) in existing) suffix++
+        return "$first $suffix"
     }
 
     /**

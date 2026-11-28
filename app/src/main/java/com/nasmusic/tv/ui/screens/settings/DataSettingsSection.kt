@@ -43,6 +43,13 @@ data class DataSettingsActions(
     val onImportPlaylistFile: (() -> Unit)? = null,
     /** 从本地文件导入歌单（SAF 选择器，与备份同一条「不做能力探测、一律显示」口径） */
     val onImportPlaylistLocalFile: (() -> Unit)? = null,
+    /** 歌单同步：导出本地歌单到 SAF（JSON/M3U 由调用方选择） */
+    val onExportPlaylist: (() -> Unit)? = null,
+    /** 歌单同步：把当前 NAS 歌单显式拉取到本地 */
+    val onPullPlaylist: (() -> Unit)? = null,
+    /** 当前后端无读取能力时置灰，并显示具体原因。 */
+    val playlistPullEnabled: Boolean = true,
+    val playlistPullUnavailableReason: String? = null,
     /** 打开最近导入的歌单（跳「我的」页） */
     val onOpenImportedPlaylist: ((String) -> Unit)? = null,
     /** 消费导入结果消息（4s 自动） */
@@ -161,6 +168,24 @@ internal fun DataSettingsSection(
                     label = stringResource(R.string.settings_import_playlist_local),
                     description = stringResource(R.string.settings_import_playlist_local_desc),
                     onClick = { actions.onImportPlaylistLocalFile?.invoke() },
+                    trailing = Trail.Arrow,
+                )
+            }
+            if (actions.onExportPlaylist != null) {
+                SettingActionButton(
+                    label = stringResource(R.string.settings_export_playlist),
+                    description = stringResource(R.string.settings_export_playlist_desc),
+                    onClick = { actions.onExportPlaylist?.invoke() },
+                    trailing = Trail.Arrow,
+                )
+            }
+            if (actions.onPullPlaylist != null) {
+                SettingActionButton(
+                    label = stringResource(R.string.settings_pull_playlist),
+                    description = actions.playlistPullUnavailableReason
+                        ?: stringResource(R.string.settings_pull_playlist_desc),
+                    onClick = { actions.onPullPlaylist?.invoke() },
+                    enabled = actions.playlistPullEnabled,
                     trailing = Trail.Arrow,
                 )
             }
