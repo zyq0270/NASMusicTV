@@ -6,7 +6,7 @@
 
 [![Gitee Release](https://img.shields.io/badge/Gitee-Release-blue)](https://gitee.com/hxzhang2000/NASMusicTV/releases)
 
-产品主页：https://zd7gxll02-nasmusictv-10j3m3sd.maozi.io/
+产品主页：https://nasmusictv-10j3m3sd.maozi.io/
 
 > ⚠️ **百度网盘目录限制**：根据百度开放平台 2026 年沙盒策略，第三方应用只能访问 `/apps/NASMusicTV` 目录及其子目录，**无法读取该目录之外的任何文件**。请将音乐文件放入百度网盘的 `/apps/NASMusicTV/` 目录下（例如 `/apps/NASMusicTV/音乐/`），应用内首次使用时会自动创建该目录。放在 `/apps/NASMusicTV/` 之外的文件将无法被本应用访问。
 
