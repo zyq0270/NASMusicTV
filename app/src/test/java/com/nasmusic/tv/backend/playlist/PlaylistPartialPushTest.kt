@@ -13,6 +13,7 @@ import com.nasmusic.tv.data.model.SongSourceKind
 import com.nasmusic.tv.data.model.ServerConfig
 import com.nasmusic.tv.data.prefs.AppPreferences
 import com.nasmusic.tv.util.SongKeys
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -129,6 +130,104 @@ class PlaylistPartialPushTest {
         assertEquals(1, result.value.addedCount)
         assertEquals(BackendPlaylistSync.SkipReason.DUPLICATE, result.value.skipped.single().reason)
         verify(adapter).addToPlaylistResult("remote-1", "a")
+        Unit
+    }
+
+    @Test
+    fun `all skipped refs do not create an empty remote playlist`() = runBlocking {
+        val adapter = mock(BackendAdapter::class.java)
+        `when`(adapter.backendType).thenReturn("jellyfin")
+        `when`(adapter.capabilities).thenReturn(
+            BackendCapabilities(playlistRead = true, playlistCreate = true, playlistAdd = true),
+        )
+        val sync = BackendPlaylistSync(mock(AppPreferences::class.java), { adapter }, { config })
+        val network = PlaylistSongRef(
+            "v1:net:meting:n1",
+            SongSourceIdentity(SongSourceKind.NETWORK, "n1", platform = "meting"),
+        )
+        val local = PlaylistSongRef(
+            "v1:local:USB:file%3A%2F%2Fmusic",
+            SongSourceIdentity(SongSourceKind.LOCAL, "l1", canonicalUri = "file://music"),
+        )
+
+        val result = sync.push("全跳过", listOf(network, null, local)) as BackendPlaylistSync.Result.Success
+        assertEquals(0, result.value.addedCount)
+        assertEquals(3, result.value.skipped.size)
+        assertTrue(result.value.itemResults.all { it.status == BackendPlaylistSync.PushItemStatus.SKIPPED })
+        assertEquals("", result.value.remotePlaylistId)
+        verify(adapter, org.mockito.Mockito.never()).getPlaylistsResult()
+        verify(adapter, org.mockito.Mockito.never()).createPlaylistResult("全跳过")
+        verify(adapter, org.mockito.Mockito.never()).addToPlaylistResult(org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString())
+        Unit
+    }
+
+    @Test
+    fun `empty refs do not create an empty remote playlist`() = runBlocking {
+        val adapter = mock(BackendAdapter::class.java)
+        `when`(adapter.backendType).thenReturn("jellyfin")
+        `when`(adapter.capabilities).thenReturn(
+            BackendCapabilities(playlistCreate = true, playlistAdd = true),
+        )
+        val sync = BackendPlaylistSync(mock(AppPreferences::class.java), { adapter }, { config })
+
+        val result = sync.push("空歌单", emptyList()) as BackendPlaylistSync.Result.Success
+        assertEquals(0, result.value.addedCount)
+        assertTrue(result.value.itemResults.isEmpty())
+        verify(adapter, org.mockito.Mockito.never()).createPlaylistResult("空歌单")
+        Unit
+    }
+
+    @Test
+    fun `checkpoint cleanup failure does not turn a completed push into a failure`() = runBlocking {
+        val adapter = mock(BackendAdapter::class.java)
+        `when`(adapter.backendType).thenReturn("jellyfin")
+        `when`(adapter.capabilities).thenReturn(
+            BackendCapabilities(playlistCreate = true, playlistAdd = true),
+        )
+        `when`(adapter.createPlaylistResult("清理失败")).thenReturn(BackendResult.Success(Playlist("remote-1", "清理失败")))
+        `when`(adapter.getPlaylistsResult()).thenReturn(BackendResult.Success(emptyList()))
+        `when`(adapter.addToPlaylistResult("remote-1", "a")).thenReturn(BackendResult.Success(Unit))
+        val failingStore = object : PlaylistPushCheckpointStore {
+            override suspend fun load(key: String): PlaylistPushCheckpoint? = null
+            override suspend fun save(key: String, checkpoint: PlaylistPushCheckpoint) = Unit
+            override suspend fun clear(key: String) = throw IllegalStateException("disk full")
+        }
+        val sync = BackendPlaylistSync(
+            mock(AppPreferences::class.java),
+            { adapter },
+            { config },
+            checkpointStore = failingStore,
+        )
+
+        val result = sync.push("清理失败", listOf(nasRef("a"))) as BackendPlaylistSync.Result.Success
+        assertEquals(1, result.value.addedCount)
+        verify(adapter).addToPlaylistResult("remote-1", "a")
+        Unit
+    }
+
+    @Test(expected = CancellationException::class)
+    fun `checkpoint cleanup cancellation still propagates`() = runBlocking {
+        val adapter = mock(BackendAdapter::class.java)
+        `when`(adapter.backendType).thenReturn("jellyfin")
+        `when`(adapter.capabilities).thenReturn(
+            BackendCapabilities(playlistCreate = true, playlistAdd = true),
+        )
+        `when`(adapter.createPlaylistResult("取消清理")).thenReturn(BackendResult.Success(Playlist("remote-1", "取消清理")))
+        `when`(adapter.getPlaylistsResult()).thenReturn(BackendResult.Success(emptyList()))
+        `when`(adapter.addToPlaylistResult("remote-1", "a")).thenReturn(BackendResult.Success(Unit))
+        val cancelledStore = object : PlaylistPushCheckpointStore {
+            override suspend fun load(key: String): PlaylistPushCheckpoint? = null
+            override suspend fun save(key: String, checkpoint: PlaylistPushCheckpoint) = Unit
+            override suspend fun clear(key: String) = throw CancellationException("cancelled")
+        }
+        val sync = BackendPlaylistSync(
+            mock(AppPreferences::class.java),
+            { adapter },
+            { config },
+            checkpointStore = cancelledStore,
+        )
+
+        sync.push("取消清理", listOf(nasRef("a")))
         Unit
     }
 

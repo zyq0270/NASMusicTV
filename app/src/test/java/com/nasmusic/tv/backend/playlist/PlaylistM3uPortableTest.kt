@@ -43,6 +43,48 @@ class PlaylistM3uPortableTest {
     }
 
     @Test
+    fun `fragment placeholder keeps playable url in chinese round trip`() {
+        val song = Song(
+            id = "fragment",
+            title = "中文歌名",
+            artist = "中文歌手",
+            streamUrl = "https://example.com/音乐/歌.mp3#seg",
+        )
+        val serialized = M3uPlaylistSerializer().serialize("中文歌单", listOf(song))
+        assertTrue(serialized.text.contains("#__REDACTED__"))
+
+        val parsed = M3uPlaylistParser().parse(serialized.text, "roundtrip.m3u").single()
+        assertEquals("中文歌名", parsed.title)
+        assertEquals("中文歌手", parsed.artist)
+        // fragment 脱敏不影响媒体请求，URL 必须保留而不是被静默丢弃。
+        assertEquals("https://example.com/音乐/歌.mp3#__REDACTED__", parsed.directUrl)
+        assertEquals(DirectUrlType.HTTP, parsed.directUrlType)
+    }
+
+    @Test
+    fun `credential placeholder still drops url after round trip`() {
+        val song = Song(id = "credential", title = "凭据", streamUrl = "https://example.com/a.mp3?token=secret")
+        val serialized = M3uPlaylistSerializer().serialize("凭据", listOf(song))
+
+        val parsed = M3uPlaylistParser().parse(serialized.text, "credential.m3u").single()
+        assertEquals("凭据", parsed.title)
+        assertEquals(null, parsed.directUrl)
+    }
+
+    @Test
+    fun `placeholder substring in path is not treated as redacted`() {
+        val text = """
+            #EXTM3U
+            #PLAYLIST:子串
+            #EXTINF:12,歌手 - 标题
+            #NASMUSIC:PORTABILITY=VOLATILE_URL
+            https://example.com/__REDACTED__.mp3
+        """.trimIndent()
+        val parsed = M3uPlaylistParser().parse(text, "substring.m3u").single()
+        assertEquals("https://example.com/__REDACTED__.mp3", parsed.directUrl)
+    }
+
+    @Test
     fun `empty and unresolved playlists remain parseable`() {
         val serializer = M3uPlaylistSerializer()
         val empty = serializer.serialize("空", emptyList())

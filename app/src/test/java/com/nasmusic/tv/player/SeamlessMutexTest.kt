@@ -21,12 +21,10 @@ class SeamlessMutexTest {
         assertFalse(SeamlessPolicy.crossfadeEnabled(SeamlessMode.CROSSFADE, false, 0))
     }
 
-    @Test fun `unsupported gapless only requests 200ms short fade`() {
-        assertTrue(SeamlessPolicy.shortFadeNeeded(SeamlessMode.GAPLESS, false))
-        assertFalse(SeamlessPolicy.shortFadeNeeded(SeamlessMode.GAPLESS, true))
-        assertFalse(SeamlessPolicy.shortFadeNeeded(SeamlessMode.CROSSFADE, false))
+    @Test fun `gapless probe gate stays mode based`() {
+        assertTrue(SeamlessPolicy.shouldProbeGapless(SeamlessMode.GAPLESS))
+        assertFalse(SeamlessPolicy.shouldProbeGapless(SeamlessMode.CROSSFADE))
+        assertFalse(SeamlessPolicy.shouldProbeGapless(SeamlessMode.OFF))
         assertEquals(200L, SeamlessPolicy.SHORT_FADE_MS)
-        assertTrue(SeamlessPolicy.nativeGaplessReady(SeamlessMode.GAPLESS, true, true))
-        assertFalse(SeamlessPolicy.nativeGaplessReady(SeamlessMode.GAPLESS, true, false))
     }
 }

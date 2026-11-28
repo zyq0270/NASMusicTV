@@ -124,41 +124,47 @@ class ExternalPlaybackController(
         song.id in _nasFavoriteIds.value
     }
 
-    suspend fun toggleFavorite(song: Song): Boolean? = favoriteMutex.withLock {
-        try {
-            if (song.isNetworkSong || song.isLocalSong) {
-                val favorite = app.appPreferences.toggleNetworkFavorite(NetworkFavoriteItem(
-                    songId = song.id,
-                    title = song.title,
-                    artist = song.artist,
-                    album = song.album,
-                    coverUrl = song.coverUrl,
-                    networkSource = song.networkSource ?: "local",
-                    networkId = song.networkId ?: song.id,
-                    networkPlatform = song.networkPlatform,
-                    storageType = song.storageType,
-                    addedAtMs = System.currentTimeMillis(),
-                ))
-                favorite?.also { requestWidgetUpdate() }
-            } else {
-                val adapter = app.backendRegistry.getAdapter() ?: return@withLock null
-                val current = if (nasFavoritesLoaded) {
-                    _nasFavoriteIds.value.contains(song.id)
+    suspend fun toggleFavorite(song: Song): Boolean? {
+        val favorite = favoriteMutex.withLock {
+            try {
+                if (song.isNetworkSong || song.isLocalSong) {
+                    app.appPreferences.toggleNetworkFavorite(NetworkFavoriteItem(
+                        songId = song.id,
+                        title = song.title,
+                        artist = song.artist,
+                        album = song.album,
+                        coverUrl = song.coverUrl,
+                        networkSource = song.networkSource ?: "local",
+                        networkId = song.networkId ?: song.id,
+                        networkPlatform = song.networkPlatform,
+                        storageType = song.storageType,
+                        addedAtMs = System.currentTimeMillis(),
+                    ))
                 } else {
-                    adapter.getFavorites().any { it.id == song.id }.also { found ->
-                        if (found) _nasFavoriteIds.value = _nasFavoriteIds.value + song.id
-                        nasFavoritesLoaded = true
+                    val adapter = app.backendRegistry.getAdapter() ?: return@withLock null
+                    val current = if (nasFavoritesLoaded) {
+                        _nasFavoriteIds.value.contains(song.id)
+                    } else {
+                        adapter.getFavorites().any { it.id == song.id }.also { found ->
+                            if (found) _nasFavoriteIds.value = _nasFavoriteIds.value + song.id
+                            nasFavoritesLoaded = true
+                        }
                     }
+                    if (!adapter.toggleFavorite(song.id, current)) return@withLock null
+                    updateNasFavorite(song, !current)
+                    !current
                 }
-                if (!adapter.toggleFavorite(song.id, current)) return@withLock null
-                updateNasFavorite(song, !current)
-                !current
-            }.also { requestWidgetUpdate() }
-        } catch (e: Exception) {
-            if (e is kotlinx.coroutines.CancellationException) throw e
-            AppLog.e("ExternalControl", "toggleFavorite failed", e)
-            null
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                AppLog.e("ExternalControl", "toggleFavorite failed", e)
+                null
+            }
         }
+        // 单一真源：widget / 通知栏 / 系统媒体卡片三条入口都经这里广播，
+        // 否则「我的收藏」列表只在 widget 路径下同步。
+        if (favorite != null) _favoriteChanges.emit(song to favorite)
+        requestWidgetUpdate()
+        return favorite
     }
 
     fun handleExternalAction(action: String) {
@@ -170,10 +176,7 @@ class ExternalPlaybackController(
             com.nasmusic.tv.appwidget.RemotePlaybackWidget.ACTION_CYCLE_SLEEP_TIMER -> cycleSleepTimer()
             com.nasmusic.tv.appwidget.RemotePlaybackWidget.ACTION_TOGGLE_FAVORITE -> {
                 val song = app.playerManager.playerState.value.currentSong ?: return
-                scope.launch {
-                    val favorite = toggleFavorite(song)
-                    if (favorite != null) _favoriteChanges.emit(song to favorite)
-                }
+                scope.launch { toggleFavorite(song) }
             }
         }
     }

@@ -16,6 +16,7 @@ import com.nasmusic.tv.backend.playlist.PersistentPlaylistPushCheckpointStore
 import com.nasmusic.tv.data.model.Playlist
 import com.nasmusic.tv.data.model.PlaylistSongRef
 import com.nasmusic.tv.data.model.Song
+import com.nasmusic.tv.data.model.SongSourceIdentity
 import com.nasmusic.tv.util.AppLog
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -43,6 +44,8 @@ data class PlaylistSyncUiState(
     val unresolvedCount: Int = 0,
     val containsUrlPlaceholder: Boolean = false,
     val canResume: Boolean = false,
+    /** 当前歌单名的检查点查询已完成（即使无检查点），供 UI 决定弹续传二选一还是改名。 */
+    val resumeCheckDoneFor: String? = null,
     val remotePlaylistId: String? = null,
     val playlistName: String? = null,
     val remotePlaylists: List<Playlist> = emptyList(),
@@ -53,12 +56,16 @@ data class PlaylistSyncUiState(
 class PlaylistSyncViewModel(
     private val exporter: PlaylistExporter,
     private val sync: BackendPlaylistSync,
+    private val sourceIdentityProvider: (Song) -> SongSourceIdentity? = { null },
 ) : ViewModel() {
     enum class Operation { EXPORT_JSON, EXPORT_M3U, PULL, PUSH }
 
     private val _state = MutableStateFlow(PlaylistSyncUiState())
     val state: StateFlow<PlaylistSyncUiState> = _state.asStateFlow()
     private val operationMutex = Mutex()
+
+    /** 最近一次推送使用的歌单名；prepare() 只按这个名字回填检查点，避免误恢复无关终态。 */
+    private var pendingCheckpointName: String? = null
 
     fun exportJson(uri: Uri, name: String, songs: List<Song>, sourceResolver: (Song) -> PlaylistSongRef?) {
         launchOperation(Operation.EXPORT_JSON) { exporter.exportJson(uri, name, songs, sourceResolver) }
@@ -76,13 +83,19 @@ class PlaylistSyncViewModel(
         }
     }
 
+    /** 存量 NAS 条目推送时按当前连接补绑来源身份，避免降级为 NO_STABLE_ID / 裸 ID 去重。 */
+    fun refForSong(song: Song): PlaylistSongRef? =
+        PlaylistSongRef.fromSong(song, sourceIdentityProvider(song))
+
     fun push(name: String, refs: List<PlaylistSongRef?>) {
+        pendingCheckpointName = name
         launchOperation(Operation.PUSH) {
             sync.push(name, refs) { progress -> _state.value = _state.value.copy(progress = progress) }
         }
     }
 
     fun resumePush(name: String, refs: List<PlaylistSongRef?>) {
+        pendingCheckpointName = name
         launchOperation(Operation.PUSH) {
             sync.resumePush(name, refs) { progress -> _state.value = _state.value.copy(progress = progress) }
         }
@@ -105,9 +118,44 @@ class PlaylistSyncViewModel(
         }
     }
 
-    /** 打开新选择器时清理上一次终态，但保留已加载的远端列表。 */
+    /**
+     * 打开新选择器时清理上一次终态，但保留已加载的远端列表。
+     * 若上次推送留下了检查点，只按该歌单名回填续传态（关闭重开对话框后仍可续）；
+     * 没有推送历史时不接触 canResume，避免把无关终态错误恢复成可续。
+     */
     fun prepare() {
         if (_state.value.busy) return
+        val pendingName = pendingCheckpointName
+        if (pendingName.isNullOrBlank()) {
+            resetForNewSelection()
+        } else {
+            prepareForPush(pendingName)
+        }
+    }
+
+    /** 选中歌单/准备推送时按名称与当前连接回填可续状态；不恢复任何终态错误。 */
+    fun prepareForPush(name: String) {
+        if (_state.value.busy) return
+        pendingCheckpointName = name
+        resetForNewSelection()
+        viewModelScope.launch {
+            val checkpoint = runCatching { sync.checkpointFor(name) }.getOrNull()
+            if (_state.value.busy || pendingCheckpointName != name) return@launch
+            // 即使没有检查点也要标记查询完成，UI 才能从「等待」切到「改名重建」。
+            _state.value = if (checkpoint == null) {
+                _state.value.copy(canResume = false, resumeCheckDoneFor = name)
+            } else {
+                _state.value.copy(
+                    canResume = true,
+                    resumeCheckDoneFor = name,
+                    remotePlaylistId = checkpoint.remotePlaylistId,
+                    playlistName = name,
+                )
+            }
+        }
+    }
+
+    private fun resetForNewSelection() {
         _state.value = _state.value.copy(
             operation = null,
             progress = 0,
@@ -125,6 +173,7 @@ class PlaylistSyncViewModel(
             unresolvedCount = 0,
             containsUrlPlaceholder = false,
             canResume = false,
+            resumeCheckDoneFor = null,
             remotePlaylistId = null,
             playlistName = null,
             remoteError = null,
@@ -210,7 +259,19 @@ class PlaylistSyncViewModel(
                     else -> _state.value = _state.value.copy(busy = false, completed = true, progress = 100)
                 }
             } catch (e: CancellationException) {
-                _state.value = _state.value.copy(busy = false)
+                // 取消不等于推送完成：若检查点已落盘，保留可续状态供下次打开对话框使用。
+                val name = pendingCheckpointName
+                val checkpoint = if (operation == Operation.PUSH && !name.isNullOrBlank()) {
+                    runCatching { sync.checkpointFor(name) }.getOrNull()
+                } else {
+                    null
+                }
+                _state.value = _state.value.copy(
+                    busy = false,
+                    canResume = checkpoint != null,
+                    remotePlaylistId = checkpoint?.remotePlaylistId ?: _state.value.remotePlaylistId,
+                    playlistName = checkpoint?.let { name } ?: _state.value.playlistName,
+                )
                 throw e
             } catch (e: Exception) {
                 AppLog.e("PlaylistSyncViewModel", "playlist operation failed", e)
@@ -240,6 +301,7 @@ class PlaylistSyncViewModel(
                             connectionProvider = app.backendRegistry::getActiveConnection,
                             checkpointStore = PersistentPlaylistPushCheckpointStore(app.roadmapPreferences),
                         ),
+                        sourceIdentityProvider = app.sourceIdentityProvider,
                     )
                 }
             }

@@ -22,14 +22,26 @@ class WidgetUpdateThrottle(
     private val intervalMs: Long = 800L,
     private val updater: () -> Unit = { context?.let { RemotePlaybackWidget.updateAll(it) } },
 ) {
+    // F-E3：IO 协程与 onReceive 主线程都会请求更新，check-then-set 必须原子化，
+    // 否则两个线程都看到 pendingJob == null 而各自 launch 一次。
+    @Volatile
     private var pendingJob: Job? = null
 
+    @Synchronized
     fun requestUpdate() {
         if (pendingJob?.isActive == true) return
-        pendingJob = scope.launch {
+        // 调度与写入都留在调用方 scope（生产为应用级 scope），这里只保证「最多一个在飞」。
+        val job = scope.launch {
             delay(intervalMs)
             updater()
         }
+        pendingJob = job
+        job.invokeOnCompletion { clearPending(job) }
+    }
+
+    @Synchronized
+    private fun clearPending(job: Job) {
+        if (pendingJob === job) pendingJob = null
     }
 }
 

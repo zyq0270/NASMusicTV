@@ -35,6 +35,17 @@ class WidgetSecurityGateTest {
     }
 
     @Test
+    fun `provider uses the shared widget throttle for action updates`() {
+        val source = File("app/src/main/java/com/nasmusic/tv/appwidget/RemotePlaybackWidgetProvider.kt").let {
+            if (it.isFile) it else File("../app/src/main/java/com/nasmusic/tv/appwidget/RemotePlaybackWidgetProvider.kt")
+        }.readText()
+        val onReceive = source.substringAfter("override fun onReceive")
+
+        assertTrue("app.externalPlaybackController.requestWidgetUpdate()" in onReceive)
+        assertFalse("RemotePlaybackWidget.updateAll(context)" in onReceive)
+    }
+
+    @Test
     fun `layout excludes editable and web views`() {
         val layout = File("app/src/main/res/layout/widget_remote_4x2.xml").let {
             if (it.isFile) it else File("../app/src/main/res/layout/widget_remote_4x2.xml")

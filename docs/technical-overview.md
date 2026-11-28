@@ -29243,3 +29243,44 @@ Jellyfin 按名查询只发一次请求、fields 补齐并分页；Navidrome/Sub
 **涉及文件**：`data/model/{SongSourceIdentity,PlaylistSongRef,ReplayGainInfo,SeamlessMode,MetadataOverride,PlaybackEvents,YearlyStats,OfflinePolicy}.kt`、`util/{SongKeys,VoiceQueryNormalizer}.kt`、`data/prefs/RoadmapPreferences.kt`、`data/cache/`、`data/stats/`、`backend/local/{ReplayGainTagReader,GaplessProbe,AudioHeaderSource,SongReadModel,DuplicateDetector}.kt`、`backend/playlist/`、`backend/search/`、`backend/BackendCapabilities.kt`、`player/{ReplayGainController,GaplessProber,SeamlessPolicy,ShortFadeIn,ExternalPlaybackController,PlayUrlPrefetchScheduler}.kt`、`appwidget/`、`ui/screens/{PlaylistSyncDialog,library/MetadataCleanupScreen,stats/YearlyReportScreen,settings/CacheLimitInputRow}.kt`、`ui/viewmodel/`、`res/{layout,xml}/`、中英 `strings.xml`、对应 `app/src/test/` 门禁与回归测试、`docs/archive/feature-roadmap-dev-plan-2026-11-27.md`、`docs/archive/README.md`、`CHANGELOG.md`。
 
 **版本号**：v2.39.29（versionCode 214）。
+
+### 10.425 v2.39.29 增量审阅缺陷修复（v2.39.30 - 2026-11-28）
+
+**背景**：对 v2.39.29（`d30324b..dc80a32`，151 文件 / +14,488 / −741）做增量代码审阅，5 个子系统并行深审 + 5 组独立怀疑式复核，初稿 25 条 → 剔除 5 条误报、5 条降级，终稿 **20 条（P1 2 / P2 7 / P3 11）**。报告与工作底稿在 `logs_temp/review_2026-11-28/`（`drafts/` 深审、`verdicts/` 复核、`v2-39-29-代码审查报告.html`）。本节只记录修复口径，不重复缺陷推导。
+
+**P1 修复**：
+
+1. `ReplayGainTagReader` 的 Ogg 分支按 codec 剥离评论包签名后再解析：Opus 跳 `OpusTags` 8 B、Vorbis 跳 `\x03vorbis` 7 B，FLAC 分支传入的已是纯载荷保持不变。测试改用带真实签名的评论包，不再用无签名合成包（虚假绿灯）。
+2. `VoiceQueryNormalizer.COMMAND_PREFIX` 的裸「听」/裸「play」加词边界（`听(?=\s)`、`play(?=\s)`）：`听海/听说/player/听/play` 按原词搜索，`听 稻香 / play 稻香` 的命令语义与 `播放稻香 / 我想听晴天` 的既有多词前缀不变。UI 文本搜索与搜索历史共用同一规范化入口，故一处修复覆盖三条路径。
+
+**P2 修复**：
+
+1. `ExternalPlaybackController.toggleFavorite()` 成为收藏变更的唯一发射点（成功才 `_favoriteChanges.emit`），widget 分支移除重复发射；通知栏、系统媒体卡片与小组件三条入口都经它，`MainViewModel` 的收藏流不再只在 widget 路径下同步。
+2. `BackendPlaylistSync.pushInternal` 在 `pushable` 为空时短路返回 `PushReport(addedCount = 0, itemResults = 全 SKIPPED)`，不再调用 `createPlaylistResult`，避免重复操作累积孤儿空歌单。
+3. 断点续传跨对话框可达：新增 `BackendPlaylistSync.checkpointFor(playlistName)`（按歌单名 + 当前连接 + `remotePlaylistId` 非空校验），`PlaylistSyncViewModel` 增加 `prepareForPush(name)` 与 `resumeCheckDoneFor` 状态，对话框选中歌单即查询、无检查点才走「改名重建」；取消分支保留可续状态。
+4. 存量歌单条目补全来源身份：`PlaylistSyncViewModel.refForSong(song)` 用 `NasMusicApp.sourceIdentityProvider` 按当前连接补全（`PlaylistSongRef.fromSong(song, source)`），对话框的推送/续传入口全部改走它，升级前的裸 ID 条目重新得到版本化稳定键。⛔ 不给 `AppPreferences.playlistSongKey` 注入同一 provider：本地歌单存的 `Song` 不带来源身份，按当前连接重算会让已存条目在切服后改键（既掩盖跨服同 ID，也可能误判重复），本轮已回退该思路。
+5. `CoverUrlPersistentCache` 落盘版本化：`put/maintain` 在 `saveLock` 内递增 `mutationVersion` 并重排 job；保存时快照版本，只有版本未变且 job 仍是自己时才清 `dirty`，保存期间到达的写入会另排一轮。
+6. 重复项合并：`MetadataCleanupViewModel` 用 `Mutex` 串行化所有隐藏边写入，`DuplicateResolutionGuard` 先算整张目标表并做写前环检测（有环则解除相关隐藏边）；`SongReadModel` 构造 `hiddenKeys` 时排除任何 keepKey，即使持久化数据出现 A↔B 环也不会两首同时消失。
+7. `MainViewModel` 本地曲来源绑定改为 `LocalSongRawIndex`：按 `_localSongs` 列表实例缓存 id→raw，重建 O(n)、查找 O(1)，重复 id 取首个与旧 `firstOrNull` 语义一致，队列 raw 还原不变。
+
+**P3 修复**：
+
+1. `GaplessProbe` 的 LAME 解析抽成 `parseLameGaplessInfo`，按 12+12 位标准解码（`delay = b21<<4 | b22>>4`、`padding = (b22 & 0x0F)<<8 | b23`），旧实现漏掩码且 padding 公式错误。
+2. 删除 `SeamlessPolicy.shortFadeNeeded/nativeGaplessReady` 两个零调用点死代码，保留 `shouldProbeGapless`；`SeamlessMutexTest` 改为断言模式判定与 `SHORT_FADE_MS` 常量。
+3. `PlayerManager.onNetworkRestored()` 清除 `reason == "probe_failed"` 的 gapless 结果，`unconfirmed_source` 等确定性结论继续缓存，避免对网络歌曲反复无效请求。
+4. `checkpointStore.clear` 失败不再中断推送：`clearCheckpoint` 对齐 `saveCheckpoint`，`CancellationException` 重抛、其余记日志；`RoadmapPreferences.removePlaylistPushCheckpoint` 改用容错解析。
+5. JSON 导出说明补「不保留直链，需保留直链请选 M3U」，不改解析器、不加便携直链字段。
+6. `M3uPlaylistParser` 的脱敏判定收窄：只在 `#NASMUSIC:PORTABILITY=` 下一行且「query 值整体等于占位符」或「userinfo 等于占位符」时丢弃 URI；fragment 的 `#__REDACTED__` 与路径中的同名子串都保留可播地址。顺带修 `M3uPlaylistSerializer.sanitizeUri` 在无 query 时把 fragment 留在 base 里、导致输出 `#seg#__REDACTED__` 的重复拼接。
+7. `WidgetUpdateThrottle.requestUpdate()` 加 `@Synchronized` + `invokeOnCompletion` 清位，保证任意线程并发请求最多一个在飞；`RemotePlaybackWidgetProvider.onReceive` 不再直接 `updateAll`，统一走节流器。
+8. `WidgetState.snapshot` 的副标题全空时转 null，`RemotePlaybackWidget` 的 Elvis 占位文案恢复生效。
+9. `widget_description` 新增专用字符串（中英）替换误用的 `widget_no_song`；遥控结果分组标题新增 `html_remote_all_results_group`（「全部结果 / All results」），不再复用「查看全部结果」按钮文案。
+10. ID3 `synchsafe` 长度为负时直接返回 `NONE`，不再落到 `copyOfRange(10, 9)` 抛异常。
+11. 归档路线图 R5 的实施口径按代码事实更正为「A 的 TV 子集」（TV 系统语音搜索入口，App 零 `RECORD_AUDIO` 权限），并同步 `docs/archive/README.md`。
+
+**新增/调整测试**：`ReplayGainTagReaderTest`（真实 OpusTags/vorbis 签名、synchsafe 高位）、`VoiceQueryNormalizerTest`（golden 反例 + 命令语义）、`ExternalPlaybackControllerTest`（收藏变更只发一次、widget 入口同一发源）、`PlaylistPartialPushTest`（空 pushable 短路、清理失败/取消）、`PlaylistSyncViewModelResumeTest`（新建：跨对话框续传 + 存量条目身份补全）、`PlaylistM3uPortableTest`（fragment/凭据/子串）、`CoverUrlPersistentCacheRaceTest`（新建）、`DuplicateResolutionGuardTest`（新建）、`LocalSongRawIndexTest`（新建）、`GaplessPolicyTest`（LAME 数值断言）、`GaplessRetryTest`（新建）、`WidgetUpdateThrottleTest`（并发只调度一次）、`WidgetStateTest`（双空副标题）、`WidgetSecurityGateTest`（provider 不再直接 updateAll）、`SeamlessMutexTest`、`RemoteHttpErrorTest`（分组标题与描述文案）。
+
+**验证结果（2026-11-28）**：`testDebugUnitTest --no-daemon -Pkotlin.compiler.execution.strategy=in-process` 全量 **3541 例，0 失败、0 错误、1 跳过**（397 个结果文件，较 v2.39.29 的 3510 例新增 31 例）；`assembleRelease -Plofi.city=true --no-daemon` 构建成功，产物 `output/apk/v2-39-30/NASMusicTV-release-v2-39-30.apk`，**44,889,529 字节**，SHA-256 前 12 位 `c5e3faaf77fc`；`aapt2` 校验 `versionCode=215` / `versionName=2.39.30` / `minSdkVersion=22`，`apksigner` 校验证书 CN=NASMusicTV；`python scripts/kotlin_comment_balance.py`（0 处不配对）与 `git diff --check` 通过。含 E51「像素城市」的包仅限本机使用，⛔ 不 push / tag / release；电视与手机上的听感验收由所有者执行。
+
+**涉及文件**：`backend/local/{ReplayGainTagReader,GaplessProbe,SongReadModel,CoverUrlPersistentCache}.kt`、`backend/playlist/{BackendPlaylistSync,M3uPlaylistParser,M3uPlaylistSerializer}.kt`、`data/prefs/RoadmapPreferences.kt`、`player/{ExternalPlaybackController,PlayerManager,SeamlessPolicy}.kt`、`appwidget/{RemotePlaybackWidget,RemotePlaybackWidgetProvider,WidgetState}.kt`、`net/RemoteControlHtml.kt`、`ui/screens/PlaylistSyncDialog.kt`、`ui/viewmodel/{MainViewModel,MetadataCleanupViewModel,PlaylistSyncViewModel}.kt`、`ui/components/branches/{MineBranch,SettingsBranch}.kt`、`util/VoiceQueryNormalizer.kt`、中英 `strings.xml`、`res/xml/remote_playback_widget_info.xml`、对应 `app/src/test/`、`docs/archive/{README.md,feature-roadmap-dev-plan-2026-11-27.md}`、`CHANGELOG.md`。
+
+**版本号**：v2.39.30（versionCode 215）。

@@ -13,6 +13,21 @@ data class GaplessProbeResult(
     val reason: String? = null,
 )
 
+/** LAME 标签中的 12 位 delay 与 12 位 padding，供测试直接断言解析数值。 */
+internal data class LameGaplessInfo(val delay: Int, val padding: Int)
+
+/** 从 LAME 标识起点解析 delay/padding；布局为 8+4 位 delay、4+8 位 padding。 */
+internal fun parseLameGaplessInfo(bytes: ByteArray, lameOffset: Int): LameGaplessInfo? {
+    if (lameOffset < 0 || lameOffset + 23 >= bytes.size) return null
+    val b21 = bytes[lameOffset + 21].toInt() and 0xFF
+    val b22 = bytes[lameOffset + 22].toInt() and 0xFF
+    val b23 = bytes[lameOffset + 23].toInt() and 0xFF
+    return LameGaplessInfo(
+        delay = (b21 shl 4) or (b22 shr 4),
+        padding = ((b22 and 0x0F) shl 8) or b23,
+    )
+}
+
 /** Probes container gapless metadata only; never decodes audio. Unknown means fallback. */
 object GaplessProbe {
     const val MAX_HEADER_BYTES = 64 * 1024
@@ -82,11 +97,14 @@ object GaplessProbe {
             if (flags and 4 != 0) cursor += 100
             if (flags and 8 != 0) cursor += 4
             if (cursor > a.size) return GaplessProbeResult(false, GaplessAudioFormat.MP3, "truncated_xing")
-            val lame = indexOf(a, "LAME", cursor, minOf(a.size, cursor + 80))
-            if (lame < 0 || lame + 21 > a.size) return GaplessProbeResult(false, GaplessAudioFormat.MP3, "no_lame_delay")
-            val delay = (a[lame + 21].toInt() and 0xff shl 4) or (a[lame + 22].toInt() and 0xff shr 4)
-            val padding = ((a[lame + 22].toInt() and 0xff) shl 4) or (a[lame + 23].toInt() and 0xff shr 4)
-            val valid = delay in 1..2304 && padding <= 2304 && (delay + padding) <= samples * 2
+            val lameOffset = indexOf(a, "LAME", cursor, minOf(a.size, cursor + 80))
+            if (lameOffset < 0) return GaplessProbeResult(false, GaplessAudioFormat.MP3, "no_lame_delay")
+            val lameInfo = parseLameGaplessInfo(a, lameOffset)
+                ?: return GaplessProbeResult(false, GaplessAudioFormat.MP3, "no_lame_delay")
+            // F-P02：delay = b21<<4 | b22>>4；padding = (b22 & 0x0F)<<8 | b23。
+            // 旧实现漏掉 0x0F 掩码且把 padding 当成 <<4|>>4，系统性偏小。
+            val valid = lameInfo.delay in 1..2304 && lameInfo.padding <= 2304 &&
+                (lameInfo.delay + lameInfo.padding) <= samples * 2
             return GaplessProbeResult(valid, GaplessAudioFormat.MP3, if (valid) null else "invalid_lame_delay")
         }
         return GaplessProbeResult(false, GaplessAudioFormat.MP3, "invalid_frame")

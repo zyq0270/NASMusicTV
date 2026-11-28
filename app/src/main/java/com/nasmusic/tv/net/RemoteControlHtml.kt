@@ -23,7 +23,7 @@ fun buildControlPageHtml(context: Context): String {
         "searchBusy" to context.getString(R.string.html_remote_search_busy),
         "searchTimeout" to context.getString(R.string.html_remote_search_timeout),
         "searchEmptyQuery" to context.getString(R.string.html_remote_search_empty_query),
-        "allResults" to context.getString(R.string.html_remote_all_results),
+        "allResultsGroup" to context.getString(R.string.html_remote_all_results_group),
         "voiceSearch" to context.getString(R.string.html_remote_voice_search),
         "voiceListening" to context.getString(R.string.html_remote_voice_listening),
         "voicePrivacy" to context.getString(R.string.html_remote_voice_privacy),
@@ -390,7 +390,7 @@ function renderSearchResults(data) {
   var html = '';
   if (Array.isArray(data.results)) {
     if (data.results.length > 0) {
-      html += '<div class="result-group"><h3>' + STR.allResults + ' <span class="count">(' + data.results.length + ')</span></h3>';
+      html += '<div class="result-group"><h3>' + STR.allResultsGroup + ' <span class="count">(' + data.results.length + ')</span></h3>';
       data.results.forEach(function(song) { html += renderSearchItem(song); });
       html += '</div>';
     }

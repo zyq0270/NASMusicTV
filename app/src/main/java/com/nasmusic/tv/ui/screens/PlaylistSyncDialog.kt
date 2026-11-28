@@ -19,6 +19,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -40,6 +41,7 @@ import com.nasmusic.tv.backend.playlist.BackendPlaylistSync
 import com.nasmusic.tv.data.model.LocalPlaylist
 import com.nasmusic.tv.data.model.Playlist
 import com.nasmusic.tv.data.model.PlaylistSongRef
+import com.nasmusic.tv.data.model.Song
 import com.nasmusic.tv.ui.components.FocusableSurface
 import com.nasmusic.tv.ui.components.LocalFocusableContentColor
 import com.nasmusic.tv.ui.components.responsiveDialogSize
@@ -61,6 +63,8 @@ fun PlaylistSyncDialog(
     onPull: (Playlist) -> Unit,
     onPush: (String, List<PlaylistSongRef?>) -> Unit,
     onResume: (String, List<PlaylistSongRef?>) -> Unit,
+    onPrepareForPush: (String) -> Unit,
+    refForSong: (Song) -> PlaylistSongRef?,
     onRefreshRemote: () -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -70,7 +74,18 @@ fun PlaylistSyncDialog(
     var pushTarget by remember(mode) { mutableStateOf<LocalPlaylist?>(null) }
     var pushName by remember(mode) { mutableStateOf("") }
     var showRemoteName by remember(mode) { mutableStateOf(false) }
+    var showResumeChoice by remember(mode) { mutableStateOf(false) }
+    var resumeChoiceHandledFor by remember(mode) { mutableStateOf<String?>(null) }
     val listState = rememberLazyListState()
+
+    // 检查点查询是异步的：查询完成后再决定弹「续传 / 改名」还是仅「改名」。
+    LaunchedEffect(state.resumeCheckDoneFor, pushTarget?.name) {
+        val name = pushTarget?.name ?: return@LaunchedEffect
+        if (state.resumeCheckDoneFor != name || resumeChoiceHandledFor == name) return@LaunchedEffect
+        resumeChoiceHandledFor = name
+        showResumeChoice = state.canResume
+        if (!state.canResume) showRemoteName = true
+    }
 
     Dialog(
         onDismissRequest = {},
@@ -80,7 +95,7 @@ fun PlaylistSyncDialog(
             usePlatformDefaultWidth = false,
         ),
     ) {
-        BackHandler(enabled = !state.busy && !showRemoteName) { onDismiss() }
+        BackHandler(enabled = !state.busy && !showRemoteName && !showResumeChoice) { onDismiss() }
         Box(
             modifier = Modifier.fillMaxSize().background(Color(0xB3000000)),
             contentAlignment = Alignment.Center,
@@ -128,7 +143,7 @@ fun PlaylistSyncDialog(
                                     label = stringResource(R.string.playlist_sync_resume),
                                     onClick = {
                                         val target = pushTarget ?: return@SyncDialogButton
-                                        onResume(pushName, target.songs.map { PlaylistSongRef.fromSong(it) })
+                                        onResume(pushName, target.songs.map { refForSong(it) })
                                     },
                                 )
                             }
@@ -139,7 +154,7 @@ fun PlaylistSyncDialog(
                                         when (mode) {
                                             PlaylistSyncDialogMode.PULL -> selectedRemote?.let(onPull)
                                             PlaylistSyncDialogMode.PUSH -> pushTarget?.let {
-                                                onPush(pushName, it.songs.map { song -> PlaylistSongRef.fromSong(song) })
+                                                onPush(pushName, it.songs.map { song -> refForSong(song) })
                                             }
                                             PlaylistSyncDialogMode.EXPORT -> Unit
                                         }
@@ -287,7 +302,10 @@ fun PlaylistSyncDialog(
                                             selectedLocal = item
                                             pushTarget = item
                                             pushName = item.name
-                                            showRemoteName = true
+                                            showRemoteName = false
+                                            showResumeChoice = false
+                                            // 关闭重开后也从持久化检查点回填；异步结果由 LaunchedEffect 消费。
+                                            onPrepareForPush(item.name)
                                         },
                                     )
                                 }
@@ -306,6 +324,53 @@ fun PlaylistSyncDialog(
     }
 
     val target = pushTarget
+    if (showResumeChoice && target != null && !state.busy && state.canResume) {
+        Dialog(
+            onDismissRequest = { showResumeChoice = false },
+            properties = DialogProperties(
+                dismissOnBackPress = false,
+                dismissOnClickOutside = false,
+                usePlatformDefaultWidth = false,
+            ),
+        ) {
+            BackHandler { showResumeChoice = false }
+            Box(
+                modifier = Modifier.fillMaxSize().background(Color(0xB3000000)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Column(
+                    modifier = Modifier
+                        .then(responsiveDialogSize(420.dp))
+                        .background(NasMusicColors.Surface, RoundedCornerShape(16.dp))
+                        .padding(20.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Text(
+                        text = stringResource(R.string.playlist_sync_partial_push_kept),
+                        color = NasMusicColors.TextSecondary,
+                        fontSize = FontSize.body(),
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    SyncDialogButton(
+                        label = stringResource(R.string.playlist_sync_resume),
+                        onClick = {
+                            onResume(pushName, target.songs.map { refForSong(it) })
+                            showResumeChoice = false
+                        },
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    SyncDialogButton(
+                        label = stringResource(R.string.playlist_sync_rename_remote),
+                        onClick = {
+                            showResumeChoice = false
+                            showRemoteName = true
+                        },
+                        secondary = true,
+                    )
+                }
+            }
+        }
+    }
     if (showRemoteName && target != null) {
         TextInputDialog(
             title = stringResource(R.string.playlist_sync_rename_remote),
@@ -315,7 +380,7 @@ fun PlaylistSyncDialog(
             onConfirm = { name ->
                 if (name.isNotBlank()) {
                     pushName = name.trim()
-                    onPush(pushName, target.songs.map { PlaylistSongRef.fromSong(it) })
+                    onPush(pushName, target.songs.map { refForSong(it) })
                     showRemoteName = false
                 }
             },

@@ -16,12 +16,5 @@ object SeamlessPolicy {
 
     fun shouldProbeGapless(mode: SeamlessMode): Boolean = mode == SeamlessMode.GAPLESS
 
-    fun shortFadeNeeded(mode: SeamlessMode, probeSupported: Boolean): Boolean =
-        mode == SeamlessMode.GAPLESS && !probeSupported
-
-    /** Next item must be decoded/buffered before trusting a native transition. */
-    fun nativeGaplessReady(mode: SeamlessMode, supported: Boolean, nextBuffered: Boolean): Boolean =
-        mode == SeamlessMode.GAPLESS && supported && nextBuffered
-
     const val SHORT_FADE_MS = 200L
 }

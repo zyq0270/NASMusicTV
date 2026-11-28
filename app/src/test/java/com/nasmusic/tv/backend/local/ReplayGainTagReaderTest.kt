@@ -23,6 +23,13 @@ class ReplayGainTagReaderTest {
         assertEquals(ReplayGainInfo.NONE, ReplayGainTagReader.detectAndParse(id3(txxx("REPLAYGAIN_TRACK_GAIN", "NaN"))))
     }
 
+    @Test fun `ID3 synchsafe high bit set returns none instead of throwing`() {
+        // synchsafe 遇 0x80 高位返回 -1；旧逻辑会落到 copyOfRange(10, 9) 抛异常。
+        val broken = byteArrayOf(0x49, 0x44, 0x33, 4, 0, 0, 0x80.toByte(), 0, 0, 0) +
+            txxx("REPLAYGAIN_TRACK_GAIN", "-6 dB")
+        assertEquals(ReplayGainInfo.NONE, ReplayGainTagReader.detectAndParse(broken))
+    }
+
     @Test fun `FLAC Vorbis comment album gain is supported`() {
         val comment = vorbisComment("REPLAYGAIN_ALBUM_GAIN=-9.5 dB")
         val bytes = byteArrayOf(0x66, 0x4c, 0x61, 0x43, 0x84.toByte()) + be24(comment.size) + comment
@@ -37,6 +44,21 @@ class ReplayGainTagReaderTest {
         for (id in listOf(opusId, vorbisId)) {
             val ogg = oggPage(listOf(id, vorbisComment("REPLAYGAIN_TRACK_GAIN=-3 dB")))
             val parsed = ReplayGainTagReader.detectAndParse(ogg)
+            assertEquals(-3f, parsed.dB, 0.001f)
+            assertEquals(com.nasmusic.tv.data.model.ReplayGainSource.TAG_OGG, parsed.source)
+        }
+    }
+
+    @Test fun `real OpusTags and vorbis signatures are stripped before comment parsing`() {
+        val gain = vorbisComment("REPLAYGAIN_TRACK_GAIN=-3 dB")
+        val opusPacket = "OpusTags".toByteArray(Charsets.ISO_8859_1) + gain
+        val vorbisPacket = byteArrayOf(0x03) + "vorbis".toByteArray(Charsets.ISO_8859_1) + gain
+        val cases = listOf(
+            ByteArray(19).also { "OpusHead".toByteArray().copyInto(it) } to opusPacket,
+            ByteArray(30).also { "\u0001vorbis".toByteArray().copyInto(it) } to vorbisPacket,
+        )
+        cases.forEach { (id, comments) ->
+            val parsed = ReplayGainTagReader.detectAndParse(oggPage(listOf(id, comments)))
             assertEquals(-3f, parsed.dB, 0.001f)
             assertEquals(com.nasmusic.tv.data.model.ReplayGainSource.TAG_OGG, parsed.source)
         }

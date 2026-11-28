@@ -22,11 +22,13 @@ object VoiceQueryNormalizer {
     /**
      * 中文命令前缀。故意只匹配一次：`播放播放稻香` 只去掉第一个 `播放`，
      * `请播放 我想听 晴天` 只去掉 `请播放`，避免把用户真正想搜的词也吞掉。
+     * 裸「听」/「play」必须后跟空白才算命令，避免「听海」「player」被误截断；
+     * 「听 稻香」「play 稻香」的命令语义保持不变。
      */
     private val COMMAND_PREFIX = Regex(
         "^(" +
-            "请播放|播放一下|来一首|放一首|我想听|听一下|播放|听|" +
-            "please\\s+play|i\\s+want\\s+to\\s+listen\\s+to|let\\s+me\\s+hear|listen\\s+to|play" +
+            "请播放|播放一下|来一首|放一首|我想听|听一下|播放|听(?=\\s)|" +
+            "please\\s+play|i\\s+want\\s+to\\s+listen\\s+to|let\\s+me\\s+hear|listen\\s+to|play(?=\\s)" +
             ")\\s*",
         RegexOption.IGNORE_CASE,
     )

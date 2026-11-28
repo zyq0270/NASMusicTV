@@ -35,6 +35,25 @@ class WidgetStateTest {
     }
 
     @Test
+    fun `blank artist and album produce null subtitle for Elvis fallback`() {
+        val song = Song(id = "1", title = "Song", artist = "", album = "   ")
+
+        val snapshot = WidgetState.snapshot(song, false, false, PlayMode.SEQUENTIAL, true)
+
+        assertEquals("Song", snapshot.title)
+        assertNull(snapshot.subtitle)
+    }
+
+    @Test
+    fun `only nonblank metadata appears in subtitle`() {
+        val song = Song(id = "1", title = "Song", artist = "Artist", album = "  ")
+
+        val snapshot = WidgetState.snapshot(song, true, false, PlayMode.SEQUENTIAL, true)
+
+        assertEquals("Artist", snapshot.subtitle)
+    }
+
+    @Test
     fun `playing and favorite combinations remain independent`() {
         val song = Song(id = "1", title = "Song", artist = "Artist")
         for (playing in listOf(false, true)) {

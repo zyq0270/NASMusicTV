@@ -6,6 +6,7 @@ import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Test
+import java.util.concurrent.atomic.AtomicInteger
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class WidgetUpdateThrottleTest {
@@ -37,5 +38,22 @@ class WidgetUpdateThrottleTest {
         advanceTimeBy(1L)
         runCurrent()
         assertEquals(2, updates)
+    }
+
+    @Test
+    fun concurrentRequestsScheduleOnlyOneUpdate() = runTest {
+        val updates = AtomicInteger(0)
+        val throttle = WidgetUpdateThrottle(null, backgroundScope, intervalMs = 800L) {
+            updates.incrementAndGet()
+        }
+        val threads = (1..8).map {
+            Thread { repeat(25) { throttle.requestUpdate() } }
+        }
+        threads.forEach { it.start() }
+        threads.forEach { it.join() }
+
+        advanceTimeBy(800L)
+        runCurrent()
+        assertEquals(1, updates.get())
     }
 }

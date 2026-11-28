@@ -51,7 +51,7 @@ object ReplayGainTagReader {
             val version = bytes[3].toInt() and 0xff
             if (version !in 2..4) return ReplayGainInfo.NONE
             val size = synchsafe(bytes, 6)
-            if (size > MAX_ID3_TAG) return ReplayGainInfo.NONE
+            if (size < 0 || size > MAX_ID3_TAG) return ReplayGainInfo.NONE
             val end = 10 + size
             if (end > bytes.size) return ReplayGainInfo.NONE
             val body = bytes.copyOfRange(10, end)
@@ -78,9 +78,15 @@ object ReplayGainTagReader {
             val opus = packets.firstOrNull()?.startsWithAt("OpusHead") == true
             val vorbis = packets.firstOrNull()?.startsWithAt("\u0001vorbis") == true
             if (!opus && !vorbis) return ReplayGainInfo.NONE
-            val comments = packets.getOrNull(1)
-            return if (comments == null) ReplayGainInfo.NONE
-            else select(parseVorbisComments(comments), ReplayGainSource.TAG_OGG)
+            val comments = packets.getOrNull(1) ?: return ReplayGainInfo.NONE
+            // 真实 Ogg 评论包带 codec 签名，须剥离后才是 Vorbis comment 载荷；
+            // FLAC 分支传入的已是纯载荷，不受影响。
+            val payload = when {
+                opus && comments.size >= 8 && comments.startsWithAt("OpusTags") -> comments.copyOfRange(8, comments.size)
+                vorbis && comments.size >= 7 && comments.startsWithAt("\u0003vorbis") -> comments.copyOfRange(7, comments.size)
+                else -> comments
+            }
+            return select(parseVorbisComments(payload), ReplayGainSource.TAG_OGG)
         }
         return ReplayGainInfo.NONE
     }

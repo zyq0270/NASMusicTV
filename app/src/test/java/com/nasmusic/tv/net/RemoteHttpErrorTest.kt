@@ -3,6 +3,7 @@ package com.nasmusic.tv.net
 import android.app.Application
 import androidx.test.core.app.ApplicationProvider
 import com.google.gson.JsonParser
+import com.nasmusic.tv.R
 import com.nasmusic.tv.backend.search.SharedSearchResult
 import com.nasmusic.tv.data.model.MusicSourceType
 import com.nasmusic.tv.data.model.RankedSong
@@ -26,6 +27,15 @@ import java.util.concurrent.TimeUnit
 class RemoteHttpErrorTest {
 
     private val app: Application = ApplicationProvider.getApplicationContext()
+
+    @Test
+    fun `control page uses result group heading and dedicated widget description`() {
+        val html = buildControlPageHtml(app)
+        assertTrue(html.contains("STR.allResultsGroup"))
+        assertTrue(html.contains(app.getString(R.string.html_remote_all_results_group)))
+        org.junit.Assert.assertFalse(html.contains("\"allResults\""))
+        assertTrue(app.getString(R.string.widget_description).isNotBlank())
+    }
 
     @Test
     fun `shared search success returns ordered unified and legacy groups`() {

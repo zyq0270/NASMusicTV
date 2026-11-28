@@ -670,6 +670,8 @@ internal fun SettingsBranch(
                             onPull = { remote -> playlistSyncVM.pull(remote.id, remote.name) },
                             onPush = { _, _ -> },
                             onResume = { _, _ -> },
+                            onPrepareForPush = playlistSyncVM::prepareForPush,
+                            refForSong = playlistSyncVM::refForSong,
                             onRefreshRemote = { playlistSyncVM.loadRemotePlaylists() },
                             onDismiss = {
                                 if (!playlistSyncState.busy) {

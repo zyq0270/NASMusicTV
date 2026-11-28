@@ -39,6 +39,34 @@ class VoiceQueryNormalizerTest {
     }
 
     @Test
+    fun `bare ting and play are kept in search queries while spaced commands still work`() {
+        val golden = listOf(
+            "听海" to "听海",
+            "听说" to "听说",
+            "听" to "听",
+            "play" to "play",
+            "player" to "player",
+            "听我说谢谢你" to "听我说谢谢你",
+        )
+        golden.forEach { (raw, expected) ->
+            assertEquals("raw=$raw", expected, VoiceQueryNormalizer.normalize(raw))
+        }
+        assertNull(VoiceQueryNormalizer.normalizeDetailed("听海").matchedPrefix)
+        assertNull(VoiceQueryNormalizer.normalizeDetailed("player").matchedPrefix)
+
+        // 裸前缀后跟空白的命令语义保留
+        listOf(
+            "听 稻香" to "稻香",
+            "听一下 七里香" to "七里香",
+            "我想听晴天" to "晴天",
+            "play 稻香" to "稻香",
+            "播放稻香" to "稻香",
+        ).forEach { (raw, expected) ->
+            assertEquals("raw=$raw", expected, VoiceQueryNormalizer.normalize(raw))
+        }
+    }
+
+    @Test
     fun `detailed result preserves raw input and reports only first matched prefix`() {
         val result = VoiceQueryNormalizer.normalizeDetailed("播放播放稻香")
         assertEquals("播放稻香", result.query)

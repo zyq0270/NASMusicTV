@@ -14,6 +14,10 @@ package com.nasmusic.tv.backend.playlist
  */
 class M3uPlaylistParser : PlaylistParser, PlaylistNameProvider {
 
+    private companion object {
+        const val PORTABILITY_PREFIX = "#NASMUSIC:PORTABILITY="
+    }
+
     /** 最近一次 parse 提取的歌单名 hint（`#PLAYLIST:` 头，§4.2 取名兜底链）。 */
     override var innerName: String? = null
         private set
@@ -34,11 +38,19 @@ class M3uPlaylistParser : PlaylistParser, PlaylistNameProvider {
         val entries = mutableListOf<RawSongEntry>()
         var pendingExtinf: Pair<Int?, String?>? = null // (durationSec, displayLabel)
         var index = 0
+        // 导出器把 #NASMUSIC:PORTABILITY= 写在 URI 上一行；只有该形态才可能是脱敏占位符。
+        var previousWasPortabilityMarker = false
 
         text.lineSequence().forEach { rawLine ->
             if (rawLine.length > PlaylistParsers.MAX_LINE_LENGTH) return@forEach
             val line = rawLine.trim()
-            if (line.isEmpty()) return@forEach
+            if (line.isEmpty()) {
+                previousWasPortabilityMarker = false
+                return@forEach
+            }
+            val isPortabilityMarker = line.startsWith(PORTABILITY_PREFIX)
+            val isRedactedUri = previousWasPortabilityMarker && !isPortabilityMarker && isRedactedCredentialUri(line)
+            previousWasPortabilityMarker = isPortabilityMarker
 
             if (line.startsWith("#")) {
                 if (line.startsWith("#EXTINF:")) {
@@ -63,8 +75,8 @@ class M3uPlaylistParser : PlaylistParser, PlaylistNameProvider {
             }
 
             // 非注释、非空行 = path hint（首个非注释行通常紧跟 EXTINF）
-            // 导出器写入的脱敏占位符不是可播放直链：保留 EXTINF 显示信息，但不落地 URL。
-            if (line.contains(M3uPlaylistSerializer.URL_PLACEHOLDER)) {
+            // 仅导出器确切写出的凭据脱敏 URI 不落地；fragment 占位符不影响请求，URL 仍可播。
+            if (isRedactedUri) {
                 if (pendingExtinf != null) {
                     val (sec, label) = pendingExtinf!!
                     pendingExtinf = null
@@ -116,6 +128,31 @@ class M3uPlaylistParser : PlaylistParser, PlaylistNameProvider {
             )
         }
         return entries
+    }
+
+    /**
+     * 只识别导出器确切形态：查询参数值整体为占位符（敏感凭据），或 userinfo 被替换为占位符。
+     * fragment 的 `#__REDACTED__` 是 sanitizeUri 对任意 fragment 的无差别替换，不影响媒体
+     * 请求，不能据此丢弃整条可播 URL；路径中自然出现的占位符子串同样不误伤。
+     */
+    private fun isRedactedCredentialUri(line: String): Boolean {
+        val placeholder = M3uPlaylistSerializer.URL_PLACEHOLDER
+        if (!line.contains(placeholder)) return false
+
+        val queryIndex = line.indexOf('?')
+        if (queryIndex >= 0) {
+            val fragmentIndex = line.indexOf('#', queryIndex + 1)
+            val queryEnd = if (fragmentIndex >= 0) fragmentIndex else line.length
+            val hasRedactedQueryValue = line.substring(queryIndex + 1, queryEnd)
+                .split('&')
+                .any { pair -> pair.substringAfter('=', "").trim() == placeholder }
+            if (hasRedactedQueryValue) return true
+        }
+
+        val scheme = line.indexOf("://")
+        if (scheme < 0) return false
+        val authorityEnd = line.indexOf('/', scheme + 3).let { if (it < 0) line.length else it }
+        return line.substring(scheme + 3, authorityEnd).startsWith("$placeholder@")
     }
 
     /** 解析 `#EXTINF:<sec>,<剩余>`；label 可空（缺失逗号时）。 */

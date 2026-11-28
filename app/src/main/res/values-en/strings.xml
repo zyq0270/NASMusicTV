@@ -1758,6 +1758,7 @@
     <string name="qp_clear_confirm_message">Clear all quick-pick records for \"%1$s\"? This cannot be undone.</string>
     <string name="qp_back">Back</string>
     <string name="widget_no_song">No music playing</string>
+    <string name="widget_description">Remote playback widget: view the current track and queue with quick controls</string>
     <string name="widget_idle">Widget ready</string>
     <string name="settings_group_cache_limits">Cache entry limits</string>
     <string name="settings_cache_limit_lyrics">Lyrics cache entries</string>
@@ -1793,6 +1794,7 @@
     <string name="html_remote_search_busy">Searching. Please wait</string>
     <string name="html_remote_search_timeout">Search timed out. Please try again</string>
     <string name="html_remote_all_results">View all results</string>
+    <string name="html_remote_all_results_group">All results</string>
     <!-- Roadmap 2026-11-27: metadata cleanup -->
     <string name="metadata_cleanup_title">Metadata cleanup</string>
     <string name="metadata_cleanup_close">Close</string>
@@ -1822,7 +1824,7 @@
     <string name="playlist_sync_no_local">No local playlists</string>
     <string name="playlist_sync_format">Export format</string>
     <string name="playlist_sync_format_json">JSON (full identity)</string>
-    <string name="playlist_sync_format_json_desc">Keeps server, backend and stable song identity for re-import</string>
+    <string name="playlist_sync_format_json_desc">Keeps server, backend and stable song identity for re-import; does not keep direct URLs — choose M3U if you need them</string>
     <string name="playlist_sync_format_m3u">M3U (portable)</string>
     <string name="playlist_sync_format_m3u_desc">Keeps display metadata and sanitized portable addresses only</string>
     <string name="playlist_sync_choose_save_location">Choose save location</string>

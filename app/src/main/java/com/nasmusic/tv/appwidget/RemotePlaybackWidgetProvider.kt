@@ -18,7 +18,9 @@ class RemotePlaybackWidgetProvider : AppWidgetProvider() {
         when (action) {
             ACTION_TOGGLE_PLAY, ACTION_PREVIOUS, ACTION_NEXT, ACTION_TOGGLE_MODE, ACTION_CYCLE_SLEEP_TIMER, ACTION_TOGGLE_FAVORITE -> {
                 app.externalPlaybackController.handleExternalAction(action)
-                RemotePlaybackWidget.updateAll(context)
+                // F-E3：不再直接 updateAll —— 与 IO 协程的收藏/切歌更新共用同一节流器，
+                // 避免主线程与后台各写一次 widget。
+                app.externalPlaybackController.requestWidgetUpdate()
             }
         }
     }

@@ -49,6 +49,14 @@ class CoverUrlPersistentCache(
 
     @Volatile private var dirty = false
     @Volatile private var generation = 0L
+    /** saveLock 保护的写入版本：put/maintain 每次递增，保存时快照，清 dirty 时做 CAS。 */
+    private var mutationVersion = 0L
+    /** 防抖时长；仅测试可缩短，生产保持 2 秒。 */
+    internal var debounceMs: Long = 2_000L
+    /** 仅测试注入：保存完成后、清 dirty 前触发，用于构造并发写入窗口。 */
+    @Volatile internal var afterSaveHook: (() -> Unit)? = null
+    /** 仅测试：是否仍有未落盘的写入（F-D01 的回归断言点）。 */
+    internal val hasPendingWrites: Boolean get() = dirty
     private val saveScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var saveJob: Job? = null
     private val saveLock = Any()
@@ -77,22 +85,32 @@ class CoverUrlPersistentCache(
 
     private fun put(key: String, url: String) {
         if (url.isBlank()) return
-        cache[key] = url
-        writtenAt[key] = nowMs()
-        if (cache.size > CacheLimits.current().coverUrlMaxEntries) evictOldest()
-        dirty = true
-        scheduleSave()
+        synchronized(saveLock) {
+            cache[key] = url
+            writtenAt[key] = nowMs()
+            if (cache.size > CacheLimits.current().coverUrlMaxEntries) evictOldest()
+            // F-D01：dirty 置位、版本递增与重排 job 必须在同一把锁内，否则并发 put
+            // 会落在旧 job 的 saveLocked() 与清位之间，被无条件 dirty=false 吞掉。
+            mutationVersion++
+            dirty = true
+            scheduleSaveLocked()
+        }
     }
 
-    /** 延迟落盘（2秒 debounce），避免频繁 put 时每次都写文件 */
-    private fun scheduleSave() {
+    /** 延迟落盘（默认 2 秒 debounce），避免频繁 put 时每次都写文件 */
+    private fun scheduleSaveLocked() {
         saveJob?.cancel()
         val expectedGeneration = generation
         saveJob = saveScope.launch {
-            delay(2000) // 2秒 debounce
+            delay(debounceMs)
             synchronized(saveLock) {
-                if (generation == expectedGeneration && dirty) {
-                    saveLocked()
+                if (generation != expectedGeneration || !dirty) return@synchronized
+                // 快照版本后落盘；保存期间到达的 put 会递增版本并另排 job，
+                // 此时不得清 dirty，否则新一轮 job 看到 dirty=false 会跳过写盘。
+                val savedVersion = mutationVersion
+                saveLocked()
+                afterSaveHook?.invoke()
+                if (mutationVersion == savedVersion && saveJob === coroutineContext[Job]) {
                     dirty = false
                 }
             }
@@ -154,10 +172,13 @@ class CoverUrlPersistentCache(
 
     /** 显式维护入口：仅按 FIFO-by-write 收敛，不因读取改变顺序。 */
     fun maintain() {
-        if (cache.size > CacheLimits.current().coverUrlMaxEntries) {
-            evictOldest()
-            dirty = true
-            scheduleSave()
+        synchronized(saveLock) {
+            if (cache.size > CacheLimits.current().coverUrlMaxEntries) {
+                evictOldest()
+                mutationVersion++
+                dirty = true
+                scheduleSaveLocked()
+            }
         }
     }
 

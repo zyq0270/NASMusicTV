@@ -63,7 +63,13 @@ class M3uPlaylistSerializer {
         val value = raw.trim()
         val queryIndex = value.indexOf('?')
         val fragmentIndex = value.indexOf('#', queryIndex + 1)
-        val base = if (queryIndex >= 0) value.substring(0, queryIndex) else value
+        // 无 query 时也必须把 fragment 从 base 里切掉，否则 safeFragment 会与原始 fragment 叠加成
+        // `#seg#__REDACTED__`（F-L06 修复过程中发现的重复拼接）。
+        val base = when {
+            queryIndex >= 0 -> value.substring(0, queryIndex)
+            fragmentIndex >= 0 -> value.substring(0, fragmentIndex)
+            else -> value
+        }
         val query = if (queryIndex >= 0) {
             value.substring(queryIndex + 1, if (fragmentIndex >= 0) fragmentIndex else value.length)
         } else ""

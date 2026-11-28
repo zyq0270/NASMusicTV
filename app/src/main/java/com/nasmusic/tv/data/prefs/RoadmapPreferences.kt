@@ -186,7 +186,8 @@ class RoadmapPreferences internal constructor(private val context: Context) {
 
     suspend fun removePlaylistPushCheckpoint(key: String) {
         dataStore.edit { prefs ->
-            val current = parseMapStrict(
+            // 清理走容错解析：损坏的 JSON 不应让已成功的推送回滚成失败（F-L03）。
+            val current = parseMap(
                 prefs[KEY_PLAYLIST_PUSH_CHECKPOINTS],
                 PlaylistPushCheckpoint::class.java,
             ).toMutableMap()

@@ -157,6 +157,8 @@ internal fun MineBranch(
             onPull = {},
             onPush = playlistSyncVM::push,
             onResume = playlistSyncVM::resumePush,
+            onPrepareForPush = playlistSyncVM::prepareForPush,
+            refForSong = playlistSyncVM::refForSong,
             onRefreshRemote = {},
             onDismiss = {
                 if (!playlistSyncState.busy) {

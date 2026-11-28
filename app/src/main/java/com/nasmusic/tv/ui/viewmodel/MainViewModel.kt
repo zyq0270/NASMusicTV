@@ -180,6 +180,30 @@ private const val SOURCE_MIRROR_AWAIT_POLL_MS = 25L
 private const val RADIO_PINYIN_SCAN_LIMIT = 300
 
 /**
+ * `_localSongs` 的 id→raw 索引（F-U1）。
+ *
+ * displaySongs 对每首歌调用 sourceFor；原实现逐首 `firstOrNull` 扫全表，数千首本地曲
+ * 一次重算即 O(n²) 且在主线程。按 List 实例缓存索引：列表每次赋值只重建一次 O(n)，
+ * 查找 O(1)；重复 id 保留首个，与 `firstOrNull` 语义一致，不改变队列 raw 还原。
+ */
+internal class LocalSongRawIndex(private val songs: () -> List<Song>) {
+    private var cachedList: List<Song>? = null
+    private var byId: Map<String, Song> = emptyMap()
+
+    @Synchronized
+    fun rawFor(id: String): Song? {
+        val current = songs()
+        if (current !== cachedList) {
+            val rebuilt = HashMap<String, Song>()
+            current.forEach { rebuilt.putIfAbsent(it.id, it) }
+            byId = rebuilt
+            cachedList = current
+        }
+        return byId[id]
+    }
+}
+
+/**
  * 应用主 ViewModel
  * 管理播放器、歌曲队列、曲库数据、设置等
  */
@@ -494,6 +518,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
 
     // --- 本地音乐（USB / 设备存储，独立数据源；原始库存不应用隐藏规则）---
     private val _localSongs = MutableStateFlow<List<Song>>(emptyList())
+    private val localRawIndex = LocalSongRawIndex { _localSongs.value }
     val localSongs: StateFlow<List<Song>> = combine(_localSongs, readModel.snapshots) { songs, snapshot ->
         displaySongs(songs, snapshot)
     }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
@@ -502,7 +527,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app), RemoteCallbacks {
     private fun sourceFor(song: Song): SongSourceIdentity? {
         PlaylistSongRef.decodeFromSong(song)?.source?.let { return it }
         if (song.isLocalSong) {
-            val raw = _localSongs.value.firstOrNull { it.id == song.id }
+            // F-U1：O(1) 索引代替逐首线性扫描；raw 还原语义（含重复 id 取首个）不变。
+            val raw = localRawIndex.rawFor(song.id)
             return SongKeys.bindSource(raw ?: song)
         }
         if (song.networkSource == "weather") return null

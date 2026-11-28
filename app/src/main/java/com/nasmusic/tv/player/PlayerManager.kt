@@ -785,6 +785,9 @@ class PlayerManager(private val applicationContext: Context) {
      */
     fun onNetworkRestored(): ResumePoint? {
         networkLost = false
+        // F-P06：probe_failed 只是弱网瞬时失败，恢复后允许重新探测；
+        // unconfirmed_source 等确定性结论继续缓存，避免对网络歌曲反复无效请求。
+        gaplessResults.entries.removeAll { it.value.reason == "probe_failed" }
         val rp = pendingResume
         pendingResume = null
         _buffering.value = false

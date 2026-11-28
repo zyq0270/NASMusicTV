@@ -139,7 +139,33 @@ class BackendPlaylistSync(
 
     private suspend fun clearCheckpoint(key: String) {
         memoryCheckpoints.remove(key)
-        checkpointStore.clear(key)
+        // 与 saveCheckpoint 对齐：歌曲已全部落库，清理持久化失败不能把成功误报为失败。
+        try {
+            checkpointStore.clear(key)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            com.nasmusic.tv.util.AppLog.w(
+                "BackendPlaylistSync",
+                "checkpoint cleanup failed; push already succeeded",
+                e,
+            )
+        }
+    }
+
+    /**
+     * 按歌单名 + 当前连接读取可续检查点。供推送入口跨对话框/跨入口回填续传态；
+     * 不恢复任何终态错误，也无法通过名称以外的条件匹配到别的歌单检查点。
+     */
+    suspend fun checkpointFor(playlistName: String): PlaylistPushCheckpoint? {
+        if (playlistName.isBlank()) return null
+        val (adapter, config) = connectionProvider() ?: return null
+        if (!adapter.capabilities.playlistCreate || !adapter.capabilities.playlistAdd) return null
+        val checkpoint = loadCheckpoint(checkpointKey(playlistName, adapter, config)) ?: return null
+        return checkpoint.takeIf {
+            it.playlistName == playlistName && it.serverId == config.id &&
+                it.backendType == adapter.backendType && it.remotePlaylistId.isNotBlank()
+        }
     }
 
     suspend fun loadRemotePlaylists(): BackendResult<List<com.nasmusic.tv.data.model.Playlist>> {
@@ -299,6 +325,29 @@ class BackendPlaylistSync(
                     FailureReason.CHECKPOINT_MISMATCH,
                     checkpoint,
                     outcomes.filterNotNull(),
+                )
+            }
+            // 没有任何可推送条目时不创建远端歌单，避免重复操作累积孤儿空歌单。
+            if (pushable.isEmpty()) {
+                onProgress(100)
+                val itemResults = outcomes.map { checkNotNull(it) }
+                return Result.Success(
+                    PushReport(
+                        remotePlaylistId = checkpoint?.remotePlaylistId.orEmpty(),
+                        addedCount = 0,
+                        skipped = itemResults.mapNotNull { item ->
+                            item.skipReason?.let { Skipped(item.index, it) }
+                        },
+                        checkpoint = checkpoint ?: PlaylistPushCheckpoint(
+                            remotePlaylistId = "",
+                            nextIndex = 0,
+                            playlistName = playlistName,
+                            serverId = config.id,
+                            backendType = adapter.backendType,
+                            sourceFingerprint = fingerprint,
+                        ),
+                        itemResults = itemResults,
+                    ),
                 )
             }
             if (checkpoint == null) {

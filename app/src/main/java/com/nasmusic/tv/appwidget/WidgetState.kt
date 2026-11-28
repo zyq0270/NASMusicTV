@@ -21,7 +21,8 @@ object WidgetState {
         hasQueue: Boolean,
     ): WidgetSnapshot = WidgetSnapshot(
         title = song?.title,
-        subtitle = song?.let { listOfNotNull(it.artist, it.album).filter(String::isNotBlank).joinToString(" · ") },
+        subtitle = song?.let { listOfNotNull(it.artist, it.album).filter(String::isNotBlank).joinToString(" · ") }
+            .takeIf { !it.isNullOrBlank() },
         isPlaying = isPlaying,
         isFavorite = isFavorite,
         playMode = playMode,

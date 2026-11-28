@@ -1769,6 +1769,7 @@
     <string name="qp_clear_confirm_message">确定清除「%1$s」的全部快捷选择记录吗？此操作不可撤销。</string>
     <string name="qp_back">返回</string>
     <string name="widget_no_song">未播放音乐</string>
+    <string name="widget_description">远程播放小组件：查看当前播放歌曲与队列，支持快捷操作</string>
     <string name="widget_idle">小组件已就绪</string>
     <string name="settings_group_cache_limits">缓存数量上限</string>
     <string name="settings_cache_limit_lyrics">歌词缓存条数</string>
@@ -1804,6 +1805,7 @@
     <string name="html_remote_search_busy">正在搜索，请稍候</string>
     <string name="html_remote_search_timeout">搜索超时，请重试</string>
     <string name="html_remote_all_results">查看全部结果</string>
+    <string name="html_remote_all_results_group">全部结果</string>
     <!-- 路线图 2026-11-27：元数据整理 -->
     <string name="metadata_cleanup_title">元数据整理</string>
     <string name="metadata_cleanup_close">关闭</string>
@@ -1833,7 +1835,7 @@
     <string name="playlist_sync_no_local">暂无本地歌单</string>
     <string name="playlist_sync_format">导出格式</string>
     <string name="playlist_sync_format_json">JSON（完整身份）</string>
-    <string name="playlist_sync_format_json_desc">保留服务器、后端与稳定歌曲身份，适合再次导入</string>
+    <string name="playlist_sync_format_json_desc">保留服务器、后端与稳定歌曲身份，适合再次导入；不保留直链，需保留直链请选 M3U</string>
     <string name="playlist_sync_format_m3u">M3U（便携）</string>
     <string name="playlist_sync_format_m3u_desc">仅保留显示信息与脱敏后的可移植地址</string>
     <string name="playlist_sync_choose_save_location">选择保存位置</string>

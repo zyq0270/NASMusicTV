@@ -18,6 +18,23 @@ class GaplessPolicyTest {
         assertEquals(GaplessAudioFormat.MP3, result.format)
     }
 
+    @Test fun `LAME delay and padding decode as 12 plus 12 bits`() {
+        val bytes = mp3()
+        val info = requireNotNull(parseLameGaplessInfo(bytes, 60))
+        assertEquals(576, info.delay)
+        assertEquals(1105, info.padding)
+
+        val boundary = mp3(delay = 2304, padding = 0)
+        val edgeInfo = requireNotNull(parseLameGaplessInfo(boundary, 60))
+        assertEquals(2304, edgeInfo.delay)
+        assertEquals(0, edgeInfo.padding)
+        assertTrue(GaplessProbe.probeBytes(boundary).supported)
+
+        val overLimit = mp3(delay = 2304, padding = 1)
+        assertEquals(1, requireNotNull(parseLameGaplessInfo(overLimit, 60)).padding)
+        assertFalse(GaplessProbe.probeBytes(overLimit).supported)
+    }
+
     @Test fun `MP3 without Xing falls back`() {
         val bytes = mp3().also { "Xing".toByteArray().copyInto(it, 36); it.fill(0, 36, 60) }
         assertFalse(GaplessProbe.probeBytes(bytes).supported)
@@ -45,7 +62,7 @@ class GaplessPolicyTest {
         assertTrue(GaplessProbe.supportsProbe(SongSourceKind.NAS))
     }
 
-    private fun mp3(lame: Boolean = true): ByteArray {
+    private fun mp3(lame: Boolean = true, delay: Int = 576, padding: Int = 1105): ByteArray {
         val b = ByteArray(300)
         b[0] = 0xff.toByte(); b[1] = 0xfb.toByte(); b[2] = 0x90.toByte(); b[3] = 0x64
         "Xing".toByteArray().copyInto(b, 36)
@@ -53,7 +70,10 @@ class GaplessPolicyTest {
         b[44] = 0; b[45] = 0; b[46] = 0x0e; b[47] = 0x10.toByte() // 3600 frames
         if (lame) {
             "LAME3.99a".toByteArray().copyInto(b, 60)
-            b[81] = 0x05; b[82] = 0x50; b[83] = 0x01 // delay 576 / padding 1105
+            // LAME 起点 60：b21/b22 高半字节 = 12 位 delay，b22 低半字节/b23 = 12 位 padding。
+            b[81] = (delay shr 4).toByte()
+            b[82] = (((delay and 0x0F) shl 4) or ((padding shr 8) and 0x0F)).toByte()
+            b[83] = (padding and 0xFF).toByte()
         }
         return b
     }

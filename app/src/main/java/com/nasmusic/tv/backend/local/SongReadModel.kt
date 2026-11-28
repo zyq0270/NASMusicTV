@@ -37,13 +37,21 @@ class SongReadModel(
 ) {
     /** 可被曲库 Flow 收集：override/resolution 任一变化都会发布新快照。 */
     val snapshots: StateFlow<SongReadSnapshot> = combine(overrides, resolutions) { overrideMap, resolutionMap ->
+        // F-D02：即使持久化数据里出现 A↔B 隐藏环，也绝不把任何 keepKey 隐藏掉，
+        // 否则两首歌会同时从曲库消失（统计层的 StatsAliasResolver 救不回来）。
+        val keepKeys = resolutionMap.values.asSequence()
+            .map { it.keepKey }
+            .filter { it.isNotBlank() }
+            .toSet()
         SongReadSnapshot(
             loaded = true,
             overrides = overrideMap.toSortedMap(),
             hiddenKeys = resolutionMap.values
                 .asSequence()
                 .flatMap { resolution -> resolution.hideKeys.asSequence().map { it to resolution.keepKey } }
-                .filter { (hiddenKey, keepKey) -> hiddenKey.isNotBlank() && hiddenKey != keepKey }
+                .filter { (hiddenKey, keepKey) ->
+                    hiddenKey.isNotBlank() && hiddenKey != keepKey && hiddenKey !in keepKeys
+                }
                 .map { (hiddenKey, _) -> hiddenKey }
                 .toSet(),
         )

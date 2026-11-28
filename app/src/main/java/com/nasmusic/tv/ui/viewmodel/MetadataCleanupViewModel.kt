@@ -22,6 +22,8 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 data class MetadataCleanupEntry(
@@ -38,6 +40,69 @@ data class MetadataCleanupUiState(
     val resolutions: Map<String, DuplicateResolution> = emptyMap(),
 )
 
+/**
+ * 重复项隐藏边的纯状态变换。RoadmapPreferences 只提供单条 put/remove，
+ * 因此先在这里算出「整张目标表」，再串行写出，避免半写状态形成隐藏环。
+ */
+internal object DuplicateResolutionGuard {
+    /** 计算 keep 隐藏 hide 后的目标表；任何指向 keepKey 的旧边都会先被清掉。 */
+    fun withKeep(
+        current: Map<String, DuplicateResolution>,
+        keep: String,
+        hide: String,
+    ): Map<String, DuplicateResolution>? {
+        if (keep.isBlank() || hide.isBlank() || keep == hide) return null
+        val next = current.toMutableMap()
+        current.forEach { (existingKeep, resolution) ->
+            val hidden = resolution.hideKeys - keep
+            if (existingKeep == keep) {
+                next[existingKeep] = resolution.copy(hideKeys = hidden + hide)
+            } else if (hidden.isEmpty()) {
+                next.remove(existingKeep)
+            } else {
+                next[existingKeep] = resolution.copy(hideKeys = hidden)
+            }
+        }
+        if (keep !in next) {
+            next[keep] = DuplicateResolution(keepKey = keep, hideKeys = setOf(hide))
+        }
+        return removeHiddenKeeps(next)
+    }
+
+    /** 撤销 keepKey 对应的边，并顺带解除它对其他条目的隐藏。 */
+    fun withRestore(
+        current: Map<String, DuplicateResolution>,
+        keepKey: String,
+    ): Map<String, DuplicateResolution>? {
+        val next = current.toMutableMap()
+        next.remove(keepKey)
+        current.forEach { (existingKeep, resolution) ->
+            if (keepKey in resolution.hideKeys) {
+                val hidden = resolution.hideKeys - keepKey
+                if (hidden.isEmpty()) next.remove(existingKeep)
+                else next[existingKeep] = resolution.copy(hideKeys = hidden)
+            }
+        }
+        return removeHiddenKeeps(next)
+    }
+
+    /** 写前环检测：若存在「被隐藏的 keepKey」，删除所有这类隐藏边后再写。 */
+    fun hasHiddenKeep(map: Map<String, DuplicateResolution>): Boolean {
+        val keeps = map.values.asSequence().map { it.keepKey }.toSet()
+        val hidden = map.values.asSequence().flatMap { it.hideKeys.asSequence() }.toSet()
+        return keeps.any { it in hidden }
+    }
+
+    private fun removeHiddenKeeps(map: Map<String, DuplicateResolution>): Map<String, DuplicateResolution>? {
+        if (!hasHiddenKeep(map)) return map
+        val keeps = map.values.asSequence().map { it.keepKey }.toSet()
+        val cleaned = map.mapValues { (_, resolution) ->
+            resolution.copy(hideKeys = resolution.hideKeys - keeps)
+        }.filterValues { it.hideKeys.isNotEmpty() }
+        return cleaned.takeUnless { hasHiddenKeep(it) }
+    }
+}
+
 /** 元数据整理页状态源；只写 DataStore 覆盖层，不写 Room、MediaStore 或 NAS。 */
 class MetadataCleanupViewModel(app: Application) : AndroidViewModel(app) {
     private val nasMusicApp = app as NasMusicApp
@@ -47,6 +112,8 @@ class MetadataCleanupViewModel(app: Application) : AndroidViewModel(app) {
     private val loading = MutableStateFlow(true)
     private var loadJob: kotlinx.coroutines.Job? = null
     private var loadGeneration = 0L
+    /** 重复项边的所有写操作共用一把锁；put/remove 各自 edit，不能交错。 */
+    private val resolutionMutex = Mutex()
 
     private val overrides = prefs.metadataOverridesFlow()
     private val resolutions = prefs.duplicateResolutionsFlow()
@@ -171,33 +238,37 @@ class MetadataCleanupViewModel(app: Application) : AndroidViewModel(app) {
         val keep = if (keepFirst) match.first.stableKey else match.second.stableKey
         val hide = if (keepFirst) match.second.stableKey else match.first.stableKey
         viewModelScope.launch {
-            val current = resolutions.first()
-            // 先移除所有“把新 keep 藏起来”的旧边，避免用户反转选择后形成环。
-            current.forEach { (existingKeep, resolution) ->
-                val hidden = resolution.hideKeys.toMutableSet()
-                hidden.remove(keep)
-                // existingKeep == keep 的边在下方按最新 hideKeys 一次写回，
-                // 不在循环里先写，避免随后又用 current 中的旧集合覆盖它。
-                if (hidden != resolution.hideKeys) {
-                    if (hidden.isEmpty()) {
-                        prefs.removeDuplicateResolution(existingKeep)
-                    } else {
-                        prefs.putDuplicateResolution(resolution.copy(hideKeys = hidden))
-                    }
-                }
-            }
-            val existing = current[keep]
-            if (existing != null) {
-                prefs.putDuplicateResolution(
-                    existing.copy(hideKeys = existing.hideKeys - keep + hide)
-                )
-            } else {
-                prefs.putDuplicateResolution(DuplicateResolution(keepKey = keep, hideKeys = setOf(hide)))
+            resolutionMutex.withLock {
+                val current = resolutions.first()
+                val next = DuplicateResolutionGuard.withKeep(current, keep, hide) ?: return@withLock
+                writeResolutionDiff(current, next)
             }
         }
     }
 
     fun restoreDuplicate(keepKey: String) {
-        viewModelScope.launch { prefs.removeDuplicateResolution(keepKey) }
+        viewModelScope.launch {
+            resolutionMutex.withLock {
+                val current = resolutions.first()
+                val next = DuplicateResolutionGuard.withRestore(current, keepKey) ?: return@withLock
+                writeResolutionDiff(current, next)
+            }
+        }
+    }
+
+    /** 在持有 [resolutionMutex] 时调用：逐条把 current 变更到 next。 */
+    private suspend fun writeResolutionDiff(
+        current: Map<String, DuplicateResolution>,
+        next: Map<String, DuplicateResolution>,
+    ) {
+        (current.keys + next.keys).toSet().forEach { key ->
+            val before = current[key]
+            val after = next[key]
+            when {
+                before == null && after != null -> prefs.putDuplicateResolution(after)
+                before != null && after == null -> prefs.removeDuplicateResolution(key)
+                before != null && after != null && after != before -> prefs.putDuplicateResolution(after)
+            }
+        }
     }
 }
